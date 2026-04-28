@@ -17,9 +17,7 @@
 //! only `#[cfg(test)]` and is not a public path.
 
 use super::*;
-use crate::feature::{
-    AnalysisFeature, AnalysisQuery, FeatureSet, ImageGeometry, RawAnalysis,
-};
+use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet, ImageGeometry, RawAnalysis};
 use core::ops::Deref;
 
 /// Test-only wrapper: dense feature record + flat geometry fields.
@@ -2160,11 +2158,13 @@ fn run_dispatch(want_pal: bool, want_t2: bool, want_t3: bool, want_alpha: bool) 
     // Use RGBA8 as the source so alpha exists when requested.
     let rgba = fill_solid_rgba8(64, 64, [10, 20, 30, 200]);
     let s = PixelSlice::new(&rgba, 64, 64, 64 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let r = crate::analyze_features(s, &AnalysisQuery::new(fs))
-        .expect("dispatch arm runs");
+    let r = crate::analyze_features(s, &AnalysisQuery::new(fs)).expect("dispatch arm runs");
 
     assert!(r.get(AnalysisFeature::Variance).is_some());
-    assert_eq!(r.get(AnalysisFeature::DistinctColorBins).is_some(), want_pal);
+    assert_eq!(
+        r.get(AnalysisFeature::DistinctColorBins).is_some(),
+        want_pal
+    );
     assert_eq!(r.get(AnalysisFeature::CbHorizSharpness).is_some(), want_t2);
     assert_eq!(
         r.get(AnalysisFeature::HighFreqEnergyRatio).is_some(),
@@ -2359,8 +2359,8 @@ fn row_stream_convert_path_produces_rgb8_for_rgba8_input() {
     let w: u32 = 4;
     let h: u32 = 4;
     let rgba = fill_solid_rgba8(w, h, [10, 20, 30, 255]);
-    let slice = PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB)
-        .unwrap();
+    let slice =
+        PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB).unwrap();
     let mut stream = crate::row_stream::RowStream::new(slice).unwrap();
     let row = stream.borrow_row(0);
     assert_eq!(row.len(), (w * 3) as usize);
@@ -2402,7 +2402,8 @@ fn analysis_feature_name_full_coverage() {
             assert!(!n.is_empty(), "feature {id} has empty name");
             // snake_case sanity.
             assert!(
-                n.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
+                n.chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
                 "feature {id} name {n:?} is not snake_case"
             );
         }
@@ -2514,9 +2515,18 @@ fn wide_gamut_u8_to_u16_promotion_is_bit_identical() {
     cmp_f32(AnalysisFeature::EdgeDensity, "edge_density");
     cmp_f32(AnalysisFeature::ChromaComplexity, "chroma_complexity");
     cmp_f32(AnalysisFeature::Uniformity, "uniformity");
-    cmp_f32(AnalysisFeature::FlatColorBlockRatio, "flat_color_block_ratio");
-    cmp_f32(AnalysisFeature::HighFreqEnergyRatio, "high_freq_energy_ratio");
-    cmp_f32(AnalysisFeature::LumaHistogramEntropy, "luma_histogram_entropy");
+    cmp_f32(
+        AnalysisFeature::FlatColorBlockRatio,
+        "flat_color_block_ratio",
+    );
+    cmp_f32(
+        AnalysisFeature::HighFreqEnergyRatio,
+        "high_freq_energy_ratio",
+    );
+    cmp_f32(
+        AnalysisFeature::LumaHistogramEntropy,
+        "luma_histogram_entropy",
+    );
     assert_eq!(
         r8.get(AnalysisFeature::DistinctColorBins)
             .and_then(|v| v.as_u32()),
@@ -2554,8 +2564,14 @@ fn wide_gamut_rgba16_promoted_from_rgba8_is_bit_identical() {
     );
 
     let s8 = PixelSlice::new(&rgba8, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB).unwrap();
-    let s16 =
-        PixelSlice::new(&rgba16, w, h, (w * 8) as usize, PixelDescriptor::RGBA16_SRGB).unwrap();
+    let s16 = PixelSlice::new(
+        &rgba16,
+        w,
+        h,
+        (w * 8) as usize,
+        PixelDescriptor::RGBA16_SRGB,
+    )
+    .unwrap();
 
     let r8 = crate::analyze_features(s8, &query).unwrap();
     let r16 = crate::analyze_features(s16, &query).unwrap();
@@ -2591,8 +2607,7 @@ fn wide_gamut_displayp3_8bit_runs_without_error() {
     let w: u32 = 32;
     let h: u32 = 32;
     let rgb = synth_rgb(w, h, 0xC1AB_BABE);
-    let desc =
-        PixelDescriptor::RGB8_SRGB.with_primaries(zenpixels::ColorPrimaries::DisplayP3);
+    let desc = PixelDescriptor::RGB8_SRGB.with_primaries(zenpixels::ColorPrimaries::DisplayP3);
     let s = PixelSlice::new(&rgb, w, h, (w * 3) as usize, desc).unwrap();
     let q = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance));
     let r = crate::analyze_features(s, &q).expect("Display P3 must be accepted");
@@ -2670,8 +2685,7 @@ fn hdr_signal_survives_via_tier_depth_when_rowstream_would_clip() {
         px[4..8].copy_from_slice(&signal);
         px[8..12].copy_from_slice(&signal);
     }
-    let desc =
-        PixelDescriptor::RGBF32_LINEAR.with_transfer(zenpixels::TransferFunction::Pq);
+    let desc = PixelDescriptor::RGBF32_LINEAR.with_transfer(zenpixels::TransferFunction::Pq);
     let s = PixelSlice::new(&buf, w, h, (w * 12) as usize, desc).unwrap();
 
     // Request both an SDR-calibrated feature and the depth-tier
@@ -2696,11 +2710,17 @@ fn hdr_signal_survives_via_tier_depth_when_rowstream_would_clip() {
         .get(AnalysisFeature::HdrPresent)
         .and_then(|v| v.as_bool())
         .unwrap();
-    assert!(hdr_present, "HdrPresent must be true on PQ ~1000-nit content");
+    assert!(
+        hdr_present,
+        "HdrPresent must be true on PQ ~1000-nit content"
+    );
     let headroom = r.get_f32(AnalysisFeature::HdrHeadroomStops).unwrap();
     assert!(headroom > 3.0, "expected >3 stops headroom, got {headroom}");
     let frac = r.get_f32(AnalysisFeature::HdrPixelFraction).unwrap();
-    assert!(frac > 0.99, "all-bright PQ source ⇒ ~1.0 fraction, got {frac}");
+    assert!(
+        frac > 0.99,
+        "all-bright PQ source ⇒ ~1.0 fraction, got {frac}"
+    );
 }
 
 #[cfg(feature = "experimental")]
@@ -2720,8 +2740,7 @@ fn sdr_srgb_does_not_trip_hdr_present() {
     );
     let r = crate::analyze_features(s, &q).unwrap();
     assert_eq!(
-        r.get(AnalysisFeature::HdrPresent)
-            .and_then(|v| v.as_bool()),
+        r.get(AnalysisFeature::HdrPresent).and_then(|v| v.as_bool()),
         Some(false),
         "sRGB-only source must not be flagged HDR regardless of brightness"
     );
@@ -2767,8 +2786,8 @@ fn perf_strip_alpha_vs_convert() {
 
     let mut rgba8_us = Vec::with_capacity(5);
     for _ in 0..5 {
-        let s = PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB)
-            .unwrap();
+        let s =
+            PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB).unwrap();
         let t0 = Instant::now();
         let _ = crate::analyze_features(s, &q).unwrap();
         rgba8_us.push(t0.elapsed().as_micros() as u64);
@@ -2811,9 +2830,7 @@ fn perf_full_feature_set() {
         samples.sort_unstable();
         let median_us = samples[samples.len() / 2];
         let per_mp_us = median_us as f64 / mp;
-        eprintln!(
-            "{w}x{h} ({mp:.1} MP): median {median_us:>5} µs (~{per_mp_us:.0} µs/MP)"
-        );
+        eprintln!("{w}x{h} ({mp:.1} MP): median {median_us:>5} µs (~{per_mp_us:.0} µs/MP)");
     }
 }
 
@@ -3145,10 +3162,7 @@ fn edge_slope_stdev_low_for_uniform_high_for_varied_edges() {
     let s = PixelSlice::new(&uniform, 64, 64, 64 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
     let r = crate::analyze_features(s, &q).unwrap();
     let e = r.get_f32(AnalysisFeature::EdgeSlopeStdev).unwrap();
-    assert!(
-        e < 5.0,
-        "uniform bands should have low stddev, got {e}"
-    );
+    assert!(e < 5.0, "uniform bands should have low stddev, got {e}");
 
     // Mixed-amplitude vertical bands: alternating step heights produce
     // a bimodal gradient distribution ⇒ higher stddev.
@@ -3406,8 +3420,7 @@ fn wide_gamut_luma_histogram_lands_in_different_bin_than_srgb() {
     use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 
     let q = AnalysisQuery::new(
-        FeatureSet::just(AnalysisFeature::Variance)
-            .with(AnalysisFeature::LumaHistogramEntropy),
+        FeatureSet::just(AnalysisFeature::Variance).with(AnalysisFeature::LumaHistogramEntropy),
     );
     let mut buf = vec![0u8; 64 * 64 * 3];
     for px in buf.chunks_exact_mut(3) {
@@ -3445,9 +3458,7 @@ fn wide_gamut_luma_histogram_lands_in_different_bin_than_srgb() {
 #[cfg(feature = "experimental")]
 mod sanity_matrix {
     use super::*;
-    use crate::feature::{
-        AnalysisFeature, AnalysisQuery, FeatureSet,
-    };
+    use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
     use zenpixels::{ChannelType, ColorPrimaries, TransferFunction};
 
     /// Encode a single sample of each channel type. `value` is the
@@ -3487,13 +3498,7 @@ mod sanity_matrix {
     /// Build a buffer of `w * h` pixels, each holding the supplied
     /// signal-domain channel values. Caller picks whether to add
     /// alpha; alpha is always 1.0 (fully opaque).
-    fn build_image(
-        ch: ChannelType,
-        with_alpha: bool,
-        w: u32,
-        h: u32,
-        rgb: [f32; 3],
-    ) -> Vec<u8> {
+    fn build_image(ch: ChannelType, with_alpha: bool, w: u32, h: u32, rgb: [f32; 3]) -> Vec<u8> {
         let channels = if with_alpha { 4 } else { 3 };
         let cap = (w * h) as usize * channels * ch.byte_size();
         let mut buf = Vec::with_capacity(cap);
@@ -3553,12 +3558,10 @@ mod sanity_matrix {
                 [0.5, 0.5, 0.5],
             );
             let stride = (w as usize) * desc.layout().channels() * desc.channel_type().byte_size();
-            let slice = PixelSlice::new(&buf, w, h, stride, desc).unwrap_or_else(|e| {
-                panic!("PixelSlice::new failed for {desc:?}: {e:?}")
-            });
-            let r = crate::analyze_features(slice, &q).unwrap_or_else(|e| {
-                panic!("analyze_features failed for {desc:?}: {e:?}")
-            });
+            let slice = PixelSlice::new(&buf, w, h, stride, desc)
+                .unwrap_or_else(|e| panic!("PixelSlice::new failed for {desc:?}: {e:?}"));
+            let r = crate::analyze_features(slice, &q)
+                .unwrap_or_else(|e| panic!("analyze_features failed for {desc:?}: {e:?}"));
             assert_eq!(r.geometry().width(), w);
             assert_eq!(r.geometry().height(), h);
             // source_descriptor round-trip — codecs depend on this.
@@ -3594,14 +3597,25 @@ mod sanity_matrix {
         // transfers (Srgb, Bt709, Gamma22), even full-signal must NOT
         // trip it. Locks the depth-tier's hdr_capable_tf gate.
         let q = AnalysisQuery::new(
-            FeatureSet::just(AnalysisFeature::HdrPresent)
-                .with(AnalysisFeature::PeakLuminanceNits),
+            FeatureSet::just(AnalysisFeature::HdrPresent).with(AnalysisFeature::PeakLuminanceNits),
         );
 
         let cases: &[(TransferFunction, bool, &str)] = &[
-            (TransferFunction::Srgb, false, "Srgb full = SDR display peak"),
-            (TransferFunction::Bt709, false, "Bt709 full = SDR display peak"),
-            (TransferFunction::Gamma22, false, "Gamma22 full = SDR display peak"),
+            (
+                TransferFunction::Srgb,
+                false,
+                "Srgb full = SDR display peak",
+            ),
+            (
+                TransferFunction::Bt709,
+                false,
+                "Bt709 full = SDR display peak",
+            ),
+            (
+                TransferFunction::Gamma22,
+                false,
+                "Gamma22 full = SDR display peak",
+            ),
             (TransferFunction::Linear, true, "Linear above 80 nits = HDR"),
             (TransferFunction::Pq, true, "PQ saturated = HDR"),
             (TransferFunction::Hlg, true, "HLG saturated = HDR"),
@@ -3689,9 +3703,7 @@ mod sanity_matrix {
             let buf = build_image(ChannelType::F32, false, 16, 16, [0.7, 0.5, 0.3]);
             let slice = PixelSlice::new(&buf, 16, 16, 16 * 12, desc).unwrap();
             let r = crate::analyze_features(slice, &q).unwrap();
-            let frac = r
-                .get_f32(AnalysisFeature::WideGamutFraction)
-                .unwrap();
+            let frac = r.get_f32(AnalysisFeature::WideGamutFraction).unwrap();
             assert_eq!(
                 frac, 0.0,
                 "in-gamut content should not trigger wide-gamut fraction; got {frac} for {cp:?}"
@@ -3769,7 +3781,10 @@ mod sanity_matrix {
                     .get(AnalysisFeature::EffectiveBitDepth)
                     .and_then(|v| v.as_u32())
                     .unwrap();
-                assert_eq!(d, 8, "u8-promoted u16 with {tf:?}/{cp:?} ⇒ depth=8, got {d}");
+                assert_eq!(
+                    d, 8,
+                    "u8-promoted u16 with {tf:?}/{cp:?} ⇒ depth=8, got {d}"
+                );
             }
         }
     }

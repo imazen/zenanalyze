@@ -15,9 +15,13 @@ fn make_random(n: usize) -> Vec<u8> {
 }
 
 fn bench(label: &str, iters: usize, mut f: impl FnMut()) {
-    for _ in 0..3 { f(); }
+    for _ in 0..3 {
+        f();
+    }
     let t0 = Instant::now();
-    for _ in 0..iters { f(); }
+    for _ in 0..iters {
+        f();
+    }
     let dt = t0.elapsed();
     let per = dt.as_secs_f64() * 1e3 / iters as f64;
     println!("  {:55} mean = {:7.3} ms / iter", label, per);

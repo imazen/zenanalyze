@@ -604,28 +604,76 @@ fn accumulate_row_dispatch(
     let is_bt601 = weights.is_bt601_baseline();
     let row_stats = match (is_bt601, full, skin) {
         (true, true, true) => incant!(accumulate_row_simd::<true, true, true>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (true, true, false) => incant!(accumulate_row_simd::<true, true, false>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (true, false, true) => incant!(accumulate_row_simd::<true, false, true>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (true, false, false) => incant!(accumulate_row_simd::<true, false, false>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (false, true, true) => incant!(accumulate_row_simd::<false, true, true>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (false, true, false) => incant!(accumulate_row_simd::<false, true, false>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (false, false, true) => incant!(accumulate_row_simd::<false, false, true>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
         (false, false, false) => incant!(accumulate_row_simd::<false, false, false>(
-            rgb, row_off, next_row_off, width, kr, kg, kb
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb
         )),
     };
     stats.merge(&row_stats);
@@ -927,10 +975,8 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         // because all accumulators were live; peeling SKIN off FULL
         // shrinks the AVX2 register pressure for both halves.
         if SKIN {
-            let cb_u8 =
-                r.mul_add(cb_kr_v, g.mul_add(cb_kg_v, b.mul_add(cb_kb_v, off_128_v)));
-            let cr_u8 =
-                r.mul_add(cr_kr_v, g.mul_add(cr_kg_v, b.mul_add(cr_kb_v, off_128_v)));
+            let cb_u8 = r.mul_add(cb_kr_v, g.mul_add(cb_kg_v, b.mul_add(cb_kb_v, off_128_v)));
+            let cr_u8 = r.mul_add(cr_kr_v, g.mul_add(cr_kg_v, b.mul_add(cr_kb_v, off_128_v)));
             let m_y_lo = l.simd_ge(y_lo_v);
             let m_y_hi = l.simd_le(y_hi_v);
             let m_cb_lo = cb_u8.simd_ge(cb_lo_v);

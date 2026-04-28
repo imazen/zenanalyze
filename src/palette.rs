@@ -266,9 +266,8 @@ fn scan_and_count_gray(stream: &mut RowStream<'_>, flags: &mut [u8; 32_768]) -> 
                 let r = chunk[i * 3];
                 let g = chunk[i * 3 + 1];
                 let b = chunk[i * 3 + 2];
-                let idx = (((r >> 3) as usize) << 10)
-                    | (((g >> 3) as usize) << 5)
-                    | ((b >> 3) as usize);
+                let idx =
+                    (((r >> 3) as usize) << 10) | (((g >> 3) as usize) << 5) | ((b >> 3) as usize);
                 flags[idx] = 1;
                 let mx = r.max(g).max(b);
                 let mn = r.min(g).min(b);
@@ -281,9 +280,8 @@ fn scan_and_count_gray(stream: &mut RowStream<'_>, flags: &mut [u8; 32_768]) -> 
             let r = px[0];
             let g = px[1];
             let b = px[2];
-            let idx = (((r >> 3) as usize) << 10)
-                | (((g >> 3) as usize) << 5)
-                | ((b >> 3) as usize);
+            let idx =
+                (((r >> 3) as usize) << 10) | (((g >> 3) as usize) << 5) | ((b >> 3) as usize);
             flags[idx] = 1;
             let mx = r.max(g).max(b);
             let mn = r.min(g).min(b);

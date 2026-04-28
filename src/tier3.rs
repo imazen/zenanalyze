@@ -787,8 +787,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // per-block scalar `f64::ln()` (was ~50 cycles each × N blocks)
     // with one `ln_lowp` call per 8 blocks at low precision (well
     // above the noise floor for an aq_map_std on the 0–7 log scale).
-    let (aq_log_sum, aq_log_sq_sum) =
-        log10_sum_and_sq_sum_dispatch(&block_acs);
+    let (aq_log_sum, aq_log_sq_sum) = log10_sum_and_sq_sum_dispatch(&block_acs);
     let (aq_map_mean, aq_map_std) = if blocks_sampled > 0 {
         let n = blocks_sampled as f64;
         let mean = aq_log_sum / n;

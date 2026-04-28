@@ -204,11 +204,7 @@ const M_BT2020_TO_DISPLAYP3: [[f32; 3]; 3] = [
 ];
 
 /// Identity 3×3.
-const M_IDENTITY: [[f32; 3]; 3] = [
-    [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
-    [0.0, 0.0, 1.0],
-];
+const M_IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 /// Multiply 3×3 matrix `m` by 3-vector `(r, g, b)`.
 #[inline]
@@ -355,14 +351,19 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
         // the detection. Codecs needing the downcast signal must
         // request a query that disables the fast path
         // (e.g., include any HDR-tier feature that forces the walk).
-        let trivial_srgb_cover =
-            if matches!(desc.primaries, ColorPrimaries::Bt709) { 1.0 } else { 0.0 };
-        let trivial_p3_cover =
-            if matches!(desc.primaries, ColorPrimaries::Bt709 | ColorPrimaries::DisplayP3) {
-                1.0
-            } else {
-                0.0
-            };
+        let trivial_srgb_cover = if matches!(desc.primaries, ColorPrimaries::Bt709) {
+            1.0
+        } else {
+            0.0
+        };
+        let trivial_p3_cover = if matches!(
+            desc.primaries,
+            ColorPrimaries::Bt709 | ColorPrimaries::DisplayP3
+        ) {
+            1.0
+        } else {
+            0.0
+        };
         return DepthStats {
             peak_nits: PEAK_SRGB_NITS,
             p99_nits: PEAK_SRGB_NITS,
@@ -488,8 +489,7 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
                 if in_gamut(sr_r, sr_g, sr_b) {
                     srgb_in += 1;
                 }
-                let (p3_r, p3_g, p3_b) =
-                    mat3_mul(m_to_p3, linears[0], linears[1], linears[2]);
+                let (p3_r, p3_g, p3_b) = mat3_mul(m_to_p3, linears[0], linears[1], linears[2]);
                 if in_gamut(p3_r, p3_g, p3_b) {
                     p3_in += 1;
                 }
@@ -541,7 +541,11 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             // (sample-quantization grid analysis) is deferred — the
             // storage depth is the more useful per-codec signal
             // (drives jxl modular bit width and avif encode_depth).
-            if matches!(ch, ChannelType::F32) { 32 } else { 16 }
+            if matches!(ch, ChannelType::F32) {
+                32
+            } else {
+                16
+            }
         }
         ChannelType::U16 => effective_depth_from_low_byte(low_byte_distinct, total),
         // Defensive: ChannelType is non_exhaustive.
@@ -554,9 +558,8 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     // outlier.
     let hdr_pixel_fraction = hdr_pixels as f32 / total_f;
     let wide_gamut_fraction = wide_gamut_pixels as f32 / total_f;
-    let hdr_present = hdr_capable
-        && peak_nits > 1.5 * SDR_THRESHOLD_NITS
-        && hdr_pixel_fraction > 0.001;
+    let hdr_present =
+        hdr_capable && peak_nits > 1.5 * SDR_THRESHOLD_NITS && hdr_pixel_fraction > 0.001;
     let gamut_coverage_srgb = srgb_in as f32 / total_f;
     let gamut_coverage_p3 = p3_in as f32 / total_f;
 

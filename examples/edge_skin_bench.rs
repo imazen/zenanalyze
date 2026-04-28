@@ -45,8 +45,7 @@ fn main() {
     {
         let buf = make_random((w as usize) * (h as usize) * 3);
         let stride = (w as usize) * 3;
-        let mk =
-            || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+        let mk = || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap();
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         bench("RGB8_SRGB → Native row fetch", || {
             let _ = zenanalyze::analyze_features(mk(), &q).unwrap();
@@ -57,8 +56,7 @@ fn main() {
     {
         let buf = make_random((w as usize) * (h as usize) * 4);
         let stride = (w as usize) * 4;
-        let mk =
-            || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGBA8_SRGB).unwrap();
+        let mk = || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGBA8_SRGB).unwrap();
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         bench("RGBA8_SRGB → StripAlpha8", || {
             let _ = zenanalyze::analyze_features(mk(), &q).unwrap();
@@ -69,22 +67,18 @@ fn main() {
     {
         let buf = make_random((w as usize) * (h as usize) * 4);
         let stride = (w as usize) * 4;
-        let mk =
-            || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::BGRA8_SRGB).unwrap();
+        let mk = || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::BGRA8_SRGB).unwrap();
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         bench("BGRA8_SRGB → StripAlpha8", || {
             let _ = zenanalyze::analyze_features(mk(), &q).unwrap();
         });
     }
 
-    println!(
-        "\n## RGB16 input (RowStream::Convert — zenpixels-convert RowConverter)\n"
-    );
+    println!("\n## RGB16 input (RowStream::Convert — zenpixels-convert RowConverter)\n");
     {
         let buf = make_random((w as usize) * (h as usize) * 6);
         let stride = (w as usize) * 6;
-        let mk =
-            || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGB16_SRGB).unwrap();
+        let mk = || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGB16_SRGB).unwrap();
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         bench("RGB16_SRGB → Convert (zenpixels-convert)", || {
             let _ = zenanalyze::analyze_features(mk(), &q).unwrap();
@@ -97,8 +91,7 @@ fn main() {
     {
         let buf = make_random((w as usize) * (h as usize) * 8);
         let stride = (w as usize) * 8;
-        let mk =
-            || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGBA16_SRGB).unwrap();
+        let mk = || PixelSlice::new(&buf, w, h, stride, PixelDescriptor::RGBA16_SRGB).unwrap();
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         bench("RGBA16_SRGB → Convert", || {
             let _ = zenanalyze::analyze_features(mk(), &q).unwrap();

@@ -231,7 +231,10 @@ fn main() {
     println!("{}", header);
 
     for r in &all_rows {
-        let mut line = format!("{},{},{},{},{}", r.corpus, r.file, r.width, r.height, r.elapsed_us);
+        let mut line = format!(
+            "{},{},{},{},{}",
+            r.corpus, r.file, r.width, r.height, r.elapsed_us
+        );
         for v in &r.values {
             line.push(',');
             if v.is_nan() {
@@ -262,14 +265,26 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
     let cc = corpus_root();
     // (corpus -> [search dirs relative to corpus_root])
     let resolve_dirs: &[(&str, &[&str])] = &[
-        ("cid22-train", &["CID22/CID22-512/training", "CID22/CID22-512"]),
-        ("cid22-val", &["CID22/CID22-512/validation", "CID22/CID22-512"]),
-        ("clic2025-1024", &["clic2025-1024", "clic2025/final-test", "clic2025/training"]),
+        (
+            "cid22-train",
+            &["CID22/CID22-512/training", "CID22/CID22-512"],
+        ),
+        (
+            "cid22-val",
+            &["CID22/CID22-512/validation", "CID22/CID22-512"],
+        ),
+        (
+            "clic2025-1024",
+            &["clic2025-1024", "clic2025/final-test", "clic2025/training"],
+        ),
         ("gb82", &["gb82"]),
         ("gb82-sc", &["gb82-sc"]),
         ("imageflow", &["imageflow/test_inputs", "imageflow"]),
         ("kadid10k", &["kadid10k"]),
-        ("qoi-benchmark", &["qoi-benchmark/screenshot_web", "qoi-benchmark"]),
+        (
+            "qoi-benchmark",
+            &["qoi-benchmark/screenshot_web", "qoi-benchmark"],
+        ),
         ("corpus", &[""]),
     ];
 
@@ -286,7 +301,9 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
     let idx_text = cols.iter().position(|s| *s == "has_text").unwrap();
 
     // emit header
-    let mut out_h = String::from("corpus,file,width,height,elapsed_us,primary_category,is_synthetic,palette_size,dominant_chroma,has_text");
+    let mut out_h = String::from(
+        "corpus,file,width,height,elapsed_us,primary_category,is_synthetic,palette_size,dominant_chroma,has_text",
+    );
     for &f in features {
         out_h.push(',');
         out_h.push_str(f.name());
@@ -297,7 +314,9 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
     let mut missing = 0usize;
     for line in lines {
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() <= idx_text { continue; }
+        if f.len() <= idx_text {
+            continue;
+        }
         let corpus = f[idx_corpus];
         let img = f[idx_image];
         let cat = f[idx_cat];
@@ -307,7 +326,11 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
         let text = f[idx_text];
 
         // resolve path
-        let dirs = resolve_dirs.iter().find(|(c, _)| *c == corpus).map(|(_, d)| *d).unwrap_or(&[]);
+        let dirs = resolve_dirs
+            .iter()
+            .find(|(c, _)| *c == corpus)
+            .map(|(_, d)| *d)
+            .unwrap_or(&[]);
         let mut path: Option<PathBuf> = None;
         for sub in dirs {
             let dir = if sub.is_empty() {
@@ -315,12 +338,21 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
             } else {
                 cc.join(sub)
             };
-            if !dir.is_dir() { continue; }
+            if !dir.is_dir() {
+                continue;
+            }
             let mut found_path: Option<PathBuf> = None;
             walk_find(&dir, img, &mut found_path);
-            if let Some(p) = found_path { path = Some(p); break; }
+            if let Some(p) = found_path {
+                path = Some(p);
+                break;
+            }
         }
-        let Some(p) = path else { missing += 1; eprintln!("MISSING: {}/{}", corpus, img); continue };
+        let Some(p) = path else {
+            missing += 1;
+            eprintln!("MISSING: {}/{}", corpus, img);
+            continue;
+        };
 
         let Some(row) = analyze_path(&p, corpus, query, features) else {
             eprintln!("ANALYZE_FAIL: {}", p.display());
@@ -329,24 +361,42 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
         found += 1;
         let mut line = format!(
             "{},{},{},{},{},{},{},{},{},{}",
-            row.corpus, row.file, row.width, row.height, row.elapsed_us,
-            cat, synth, palette, chroma, text,
+            row.corpus,
+            row.file,
+            row.width,
+            row.height,
+            row.elapsed_us,
+            cat,
+            synth,
+            palette,
+            chroma,
+            text,
         );
         for v in &row.values {
             line.push(',');
-            if v.is_nan() { line.push_str("NA"); } else { line.push_str(&format!("{}", v)); }
+            if v.is_nan() {
+                line.push_str("NA");
+            } else {
+                line.push_str(&format!("{}", v));
+            }
         }
         println!("{}", line);
-        if found % 25 == 0 { eprintln!("  {} rows", found); }
+        if found % 25 == 0 {
+            eprintln!("  {} rows", found);
+        }
     }
     eprintln!("done — {} found, {} missing", found, missing);
 }
 
 fn walk_find(dir: &Path, name: &str, out: &mut Option<PathBuf>) {
-    if out.is_some() { return; }
+    if out.is_some() {
+        return;
+    }
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
-        if out.is_some() { return; }
+        if out.is_some() {
+            return;
+        }
         let p = e.path();
         if p.is_dir() {
             walk_find(&p, name, out);

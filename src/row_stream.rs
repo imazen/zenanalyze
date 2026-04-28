@@ -187,7 +187,12 @@ impl<'a> RowStream<'a> {
         match &mut self.inner {
             Inner::Native(slice) => &slice.row(y)[..len],
             Inner::StripAlpha8 { slice, rgb_idx } => {
-                strip_alpha_row(slice.row(y), self.width as usize, *rgb_idx, &mut self.scratch[..len]);
+                strip_alpha_row(
+                    slice.row(y),
+                    self.width as usize,
+                    *rgb_idx,
+                    &mut self.scratch[..len],
+                );
                 &self.scratch[..len]
             }
             Inner::Convert { slice, converter } => {
@@ -300,8 +305,8 @@ mod strip_tests {
             let v = (i & 0xFF) as u8;
             rgba.extend_from_slice(&[v, v.wrapping_add(1), v.wrapping_add(2), 0xFF]);
         }
-        let s = PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB)
-            .unwrap();
+        let s =
+            PixelSlice::new(&rgba, w, h, (w * 4) as usize, PixelDescriptor::RGBA8_SRGB).unwrap();
         let mut stream = RowStream::new(s).unwrap();
         let row = stream.borrow_row(0);
         assert_eq!(row.len(), (w * 3) as usize);
@@ -318,9 +323,11 @@ mod strip_tests {
         // become RGB8 [R, G, B] in the output.
         let w: u32 = 4;
         let h: u32 = 1;
-        let bgra: Vec<u8> = vec![10, 20, 30, 0xFF, 11, 21, 31, 0xFF, 12, 22, 32, 0xFF, 13, 23, 33, 0xFF];
-        let s = PixelSlice::new(&bgra, w, h, (w * 4) as usize, PixelDescriptor::BGRA8_SRGB)
-            .unwrap();
+        let bgra: Vec<u8> = vec![
+            10, 20, 30, 0xFF, 11, 21, 31, 0xFF, 12, 22, 32, 0xFF, 13, 23, 33, 0xFF,
+        ];
+        let s =
+            PixelSlice::new(&bgra, w, h, (w * 4) as usize, PixelDescriptor::BGRA8_SRGB).unwrap();
         let mut stream = RowStream::new(s).unwrap();
         let row = stream.borrow_row(0);
         assert_eq!(row, &[30, 20, 10, 31, 21, 11, 32, 22, 12, 33, 23, 13]);
