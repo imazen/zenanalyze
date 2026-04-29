@@ -73,6 +73,21 @@ all = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+# zenanalyze has many helper kernels that take 8-10 parameters
+# (slice ptrs, strides, dims, accumulators, scratch buffers); the
+# 7-arg lint is noise for SIMD-shaped APIs.
+too_many_arguments = "allow"
+# `for k in 0..N { tab[k] }` is the clearest form when reading
+# adjacent entries from RASTER_TO_ZIGZAG / dequant tables; the
+# enumerate() suggestion adds noise without clarity.
+needless_range_loop = "allow"
+# `idx % stride != 0` is more readable than `!idx.is_multiple_of(stride)`
+# in tight inner loops where the manual form has been there for years.
+manual_is_multiple_of = "allow"
+# Quant-table constants and matrix coefficients carry the precision
+# they were derived at; the lint flags trailing zeroes that aren't
+# actually noise.
+excessive_precision = "allow"
 
 [profile.release]
 lto = "thin"
