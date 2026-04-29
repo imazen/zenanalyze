@@ -16,9 +16,10 @@ pub enum PickerError {
         want: usize,
         have: usize,
     },
-    /// `weight_dtype` was f16 but the `f16` cargo feature is off.
-    F16Disabled,
-    /// `weight_dtype` byte was not 0 (f32) or 1 (f16).
+    /// `weight_dtype` was f16. Reserved in the format but not
+    /// implemented in v0.1; bake with `--dtype f32`.
+    F16NotSupported,
+    /// `weight_dtype` byte was not 0 (f32) or 1 (f16, reserved).
     UnknownWeightDtype { byte: u8 },
     /// `activation` byte was not a recognized variant.
     UnknownActivation { byte: u8 },
@@ -61,9 +62,9 @@ impl fmt::Display for PickerError {
                 f,
                 "zenpicker: truncated at offset {offset}, wanted {want} bytes, have {have}"
             ),
-            Self::F16Disabled => write!(
+            Self::F16NotSupported => write!(
                 f,
-                "zenpicker: model uses f16 weights but `f16` feature is disabled"
+                "zenpicker: model uses f16 weights, which is reserved but not yet supported in v0.1; rebake with --dtype f32"
             ),
             Self::UnknownWeightDtype { byte } => {
                 write!(f, "zenpicker: unknown weight dtype byte {byte:#x}")

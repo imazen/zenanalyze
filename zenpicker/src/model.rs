@@ -100,11 +100,15 @@ pub struct LayerView<'a> {
     pub biases: &'a [f32],
 }
 
+/// Weight storage view. `F16` carries raw IEEE-754 half-precision
+/// bit patterns as `u16`; conversion to `f32` happens per-element in
+/// the inference inner loop. We don't depend on the `half` crate —
+/// the conversion is ~15 lines of bit math (see `f16_bits_to_f32`),
+/// and the `core::f16` type will subsume both once it stabilizes.
 #[derive(Debug)]
 pub enum WeightStorage<'a> {
     F32(&'a [f32]),
-    #[cfg(feature = "f16")]
-    F16(&'a [half::f16]),
+    F16(&'a [u16]),
 }
 
 impl<'a> Model<'a> {
@@ -197,17 +201,16 @@ impl<'a> Model<'a> {
 
             let weights = match weight_dtype {
                 WeightDtype::F32 => WeightStorage::F32(cur.take_f32_slice(n_weights)?),
-                WeightDtype::F16 => {
-                    #[cfg(feature = "f16")]
-                    {
-                        WeightStorage::F16(cur.take_f16_slice(n_weights)?)
-                    }
-                    #[cfg(not(feature = "f16"))]
-                    {
-                        return Err(PickerError::F16Disabled);
-                    }
-                }
+                WeightDtype::F16 => WeightStorage::F16(cur.take_u16_slice(n_weights)?),
             };
+            // Pad to keep the f32 biases 4-aligned. f32 weights end at a
+            // 4-aligned boundary by construction (their byte length is a
+            // multiple of 4). f16 weights end at a 2-aligned boundary
+            // when `n_weights` is odd; bake emits a 2-byte pad in that
+            // case to restore 4-alignment for the bias section.
+            if matches!(weight_dtype, WeightDtype::F16) && n_weights % 2 == 1 {
+                cur.skip(2)?;
+            }
             let biases = cur.take_f32_slice(out_dim)?;
 
             layers.push(LayerView {
@@ -379,8 +382,9 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    #[cfg(feature = "f16")]
-    fn take_f16_slice(&mut self, n: usize) -> Result<&'a [half::f16], PickerError> {
+    /// Take a slice of `n` little-endian u16s (raw f16 bit patterns).
+    /// 2-byte aligned. Same zero-copy contract as `take_f32_slice`.
+    fn take_u16_slice(&mut self, n: usize) -> Result<&'a [u16], PickerError> {
         let byte_len = n.checked_mul(2).ok_or(PickerError::Truncated {
             offset: self.pos,
             want: usize::MAX,
@@ -406,14 +410,14 @@ impl<'a> Cursor<'a> {
         if n == 0 {
             return Ok(&[]);
         }
-        if !(raw.as_ptr() as usize).is_multiple_of(core::mem::align_of::<half::f16>()) {
+        if !(raw.as_ptr() as usize).is_multiple_of(core::mem::align_of::<u16>()) {
             return Err(PickerError::Truncated {
                 offset: self.pos - byte_len,
                 want: byte_len,
                 have: 0,
             });
         }
-        bytemuck_cast_f16_slice(raw).ok_or(PickerError::Truncated {
+        bytemuck::try_cast_slice(raw).map_err(|_| PickerError::Truncated {
             offset: self.pos - byte_len,
             want: byte_len,
             have: 0,
@@ -427,12 +431,6 @@ impl<'a> Cursor<'a> {
 /// Implemented via `bytemuck` in a wrapper module so the rest of
 /// `zenpicker` can stay `unsafe = "forbid"`.
 fn bytemuck_cast_f32_slice(bytes: &[u8]) -> Option<&[f32]> {
-    use bytemuck::try_cast_slice;
-    try_cast_slice(bytes).ok()
-}
-
-#[cfg(feature = "f16")]
-fn bytemuck_cast_f16_slice(bytes: &[u8]) -> Option<&[half::f16]> {
     use bytemuck::try_cast_slice;
     try_cast_slice(bytes).ok()
 }

@@ -92,9 +92,9 @@ const SCHEMA_HASH: u64 = compute_hash(SCHEMA); // const-fn FxHash or similar
 
 ## Roadmap
 
-- **v0.1** (now): scalar inference, f32 + f16 storage, parse + validate v1 format.
-- **v0.2**: `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). f16 → f32 SIMD conversion via F16C / FCVT through magetypes.
-- **v0.3**: i8 quantized weights option (per-row scale) for the case where 50 KB still isn't small enough.
+- **v0.1** (now): scalar inference, f32 + f16 storage built in (no feature gate, no `half` dep — the conversion is ~15 lines of bit math), parse + validate v1 format.
+- **v0.2**: `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT through magetypes.
+- **v0.3**: i8 quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough. Hybrid heads (categorical + continuous outputs) for codecs with scalar control axes (effort, chroma_quality, lambda).
 
 The format header has reserved fields for future expansion. New `weight_dtype` values, new activations, and new layer types are additive.
 

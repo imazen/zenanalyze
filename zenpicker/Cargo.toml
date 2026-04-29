@@ -16,29 +16,19 @@ name = "zenpicker"
 
 [features]
 default = ["std"]
-# Pulls in `std` for `std::error::Error` impls and any std-only test helpers.
-# The crate itself is `no_std + alloc` capable; most consumers will keep `std`.
+# Pulls in `std` for `std::error::Error` impls and any std-only test
+# helpers. The crate itself is `no_std + alloc` capable; most
+# consumers will keep `std`.
 std = []
-# Enable f16 storage support (loads `weight_dtype = 1` layers). When off,
-# the loader rejects f16 models. f16 storage halves model size for ~no
-# accuracy loss; conversion to f32 happens at inference time. Requires
-# the `half` crate.
-f16 = ["dep:half"]
 
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.23", default-features = false }
-# `archmage` + `magetypes` are the future SIMD path (v0.2). The
-# scalar inner loops autovectorize well enough at the model sizes
-# we ship today (15K weights → ~15 µs forward pass), so they aren't
-# pulled in yet to keep the dep graph tight. Adding them later
-# doesn't move the public API.
-# Half-precision storage support. Optional — only pulled in when the
-# `f16` feature is on. Stable today; `core::f16` will replace it once
-# fully stabilized in std. The crate's `bytemuck` feature gives us
-# zero-copy `Pod` impls for `f16`.
-half = { version = "2.6", default-features = false, features = ["bytemuck"], optional = true }
+# Mandatory SIMD dispatch for the inference matmul (v0.2 work). Free
+# in the workspace — zenanalyze already pulls these in.
+archmage = { version = "0.9.23", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.23", features = ["avx512"] }
 
 [dev-dependencies]
 # Reproducibility for synthetic model tests.

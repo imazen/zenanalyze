@@ -76,7 +76,6 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) {
 
     match &layer.weights {
         WeightStorage::F32(w) => saxpy_matmul_f32(src, w, dst, in_dim, out_dim),
-        #[cfg(feature = "f16")]
         WeightStorage::F16(w) => saxpy_matmul_f16(src, w, dst, in_dim, out_dim),
     }
 
@@ -124,8 +123,14 @@ fn saxpy_matmul_f32(src: &[f32], w: &[f32], dst: &mut [f32], in_dim: usize, out_
     }
 }
 
-#[cfg(feature = "f16")]
-fn saxpy_matmul_f16(src: &[f32], w: &[half::f16], dst: &mut [f32], in_dim: usize, out_dim: usize) {
+/// Same shape as the f32 path, but every weight is stored as a raw
+/// IEEE-754 half-precision bit pattern in a `u16` and converted to
+/// `f32` per element via [`f16_bits_to_f32`]. The conversion is a
+/// handful of bit ops (no FP path); LLVM unrolls the inner 8-wide
+/// chunk and on F16C-capable x86 the autovec usually picks
+/// `_mm256_cvtph_ps`. Magetypes-dispatched f16↔f32 conversion is the
+/// v0.2 work; for now scalar is fast enough at our model sizes.
+fn saxpy_matmul_f16(src: &[f32], w: &[u16], dst: &mut [f32], in_dim: usize, out_dim: usize) {
     debug_assert_eq!(w.len(), in_dim * out_dim);
     let chunks = out_dim / 8;
     let tail = out_dim % 8;
@@ -141,17 +146,127 @@ fn saxpy_matmul_f16(src: &[f32], w: &[half::f16], dst: &mut [f32], in_dim: usize
             let base = c * 8;
             let acc_chunk: &mut [f32; 8] = (&mut dst[base..base + 8]).try_into().unwrap();
             for k in 0..8 {
-                let wf = row[base + k].to_f32();
+                let wf = f16_bits_to_f32(row[base + k]);
                 acc_chunk[k] = s.mul_add(wf, acc_chunk[k]);
             }
         }
         if tail > 0 {
             let tail_start = chunks * 8;
             for k in 0..tail {
-                let wf = row[tail_start + k].to_f32();
+                let wf = f16_bits_to_f32(row[tail_start + k]);
                 dst[tail_start + k] = s.mul_add(wf, dst[tail_start + k]);
             }
         }
+    }
+}
+
+/// IEEE-754 half-precision (binary16) → single-precision (binary32)
+/// converter. Handles all classes (zero, subnormal, normal, inf, NaN)
+/// without relying on any FP intrinsic. Pure integer bit-twiddling so
+/// it works in `no_std` and at compile time (when const-fn is
+/// stabilized for u32::leading_zeros, which it already is).
+///
+/// This is what `_mm256_cvtph_ps` does in hardware on F16C — same
+/// answer, just one element at a time. Magetypes-dispatched 8-wide
+/// version is the v0.2 path.
+#[inline]
+pub(crate) fn f16_bits_to_f32(h: u16) -> f32 {
+    let h = h as u32;
+    let sign = (h & 0x8000) << 16;
+    let exp = (h & 0x7c00) >> 10;
+    let mant = h & 0x03ff;
+    let bits = if exp == 0 {
+        if mant == 0 {
+            // ±0.
+            0
+        } else {
+            // Subnormal — promote to f32 normal.
+            let k = 31 - mant.leading_zeros(); // 0..=9 (position of MSB)
+            let shift = 10 - k; // 1..=10
+            let normalized_mant = (mant << shift) & 0x3ff;
+            let f32_exp = k + 103; // (-24 + 127) at k=0, increments with k
+            (f32_exp << 23) | (normalized_mant << 13)
+        }
+    } else if exp == 0x1f {
+        // Inf or NaN — propagate. f32 exp=0xff, mantissa shifted left
+        // by 13 to fill the wider field. NaN payload preserved (top
+        // bits); the quiet bit stays where it was.
+        0x7f80_0000 | (mant << 13)
+    } else {
+        // Normal — rebias exponent, shift mantissa.
+        ((exp + (127 - 15)) << 23) | (mant << 13)
+    };
+    f32::from_bits(sign | bits)
+}
+
+#[cfg(test)]
+mod f16_tests {
+    use super::f16_bits_to_f32;
+
+    fn check(bits: u16, expected: f32, what: &str) {
+        let got = f16_bits_to_f32(bits);
+        if expected.is_nan() {
+            assert!(
+                got.is_nan(),
+                "{what}: bits=0x{bits:04x} expected NaN, got {got}"
+            );
+        } else {
+            assert_eq!(
+                got.to_bits(),
+                expected.to_bits(),
+                "{what}: bits=0x{bits:04x} got {got} ({:08x}), expected {expected} ({:08x})",
+                got.to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn zeros_and_signs() {
+        check(0x0000, 0.0, "+0");
+        check(0x8000, -0.0, "-0");
+    }
+
+    #[test]
+    fn ones() {
+        check(0x3c00, 1.0, "+1.0");
+        check(0xbc00, -1.0, "-1.0");
+        check(0x4000, 2.0, "+2.0");
+        check(0xc000, -2.0, "-2.0");
+    }
+
+    #[test]
+    fn fractions() {
+        // 0.5 = exp=14 (bias-15 → -1), mant=0
+        check(0x3800, 0.5, "0.5");
+        // 1/3 representable: 0x3555 = 0.333251953125
+        check(0x3555, 0.333_251_95, "approx 1/3");
+    }
+
+    #[test]
+    fn subnormals() {
+        // Smallest positive subnormal: 0x0001 = 2^-24 ≈ 5.96e-8
+        check(0x0001, 5.960_464_5e-8, "smallest +subnormal");
+        // Largest subnormal: 0x03ff
+        check(0x03ff, 6.097_555e-5, "largest +subnormal");
+        // Negative smallest subnormal
+        check(0x8001, -5.960_464_5e-8, "smallest -subnormal");
+    }
+
+    #[test]
+    fn extremes() {
+        // Smallest positive normal: 0x0400 = 2^-14 ≈ 6.10e-5
+        check(0x0400, 6.103_515_6e-5, "smallest +normal");
+        // Largest normal: 0x7bff = 65504.0
+        check(0x7bff, 65504.0, "largest +normal");
+    }
+
+    #[test]
+    fn inf_nan() {
+        check(0x7c00, f32::INFINITY, "+inf");
+        check(0xfc00, f32::NEG_INFINITY, "-inf");
+        let nan = f16_bits_to_f32(0x7e00);
+        assert!(nan.is_nan(), "0x7e00 should be NaN");
     }
 }
 

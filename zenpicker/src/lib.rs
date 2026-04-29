@@ -29,6 +29,14 @@
 //! existing header (header.header_size advertises the actual size,
 //! so old loaders can skip over future extensions).
 //!
+//! ## Storage
+//!
+//! Weights are stored as f32 or f16. f16 is built in (no feature
+//! gate, no `half` dep) — the conversion is ~15 lines of integer bit
+//! math, see `inference::f16_bits_to_f32`. f16 halves the model size
+//! at ~no accuracy cost; SIMD f16→f32 (F16C / FCVT) is the v0.2
+//! work, scalar today.
+//!
 //! ## no_std
 //!
 //! `default-features = false` keeps the crate `no_std + alloc`. The
