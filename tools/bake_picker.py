@@ -193,7 +193,7 @@ def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | Non
     # Manifest — re-emit the per-output config metadata that the codec
     # crate consumes to build its compile-time CONFIGS table. Only
     # written when the input model carries a `config_names` field
-    # (the distill / shared-MLP scripts do).
+    # (the distill / shared-MLP / hybrid scripts all do).
     if "config_names" in model:
         manifest_out = manifest_path or out_path.with_suffix(".manifest.json")
         cfg_names = model["config_names"]
@@ -206,6 +206,13 @@ def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | Non
             "n_outputs": n_outputs,
             "configs": {str(k): v for k, v in cfg_names.items()},
         }
+        # Hybrid-heads (v0.2) manifest passthrough — describes the
+        # categorical-vs-scalar layout of the n_outputs vector. Codec
+        # crate's compile-time CONFIGS table uses this to slice
+        # `predict()` output into bytes_log / chroma_scale / lambda /
+        # … sub-ranges. Optional: pure-categorical models omit it.
+        if "hybrid_heads_manifest" in model:
+            manifest["hybrid_heads"] = model["hybrid_heads_manifest"]
         manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         sys.stderr.write(f"wrote manifest {manifest_out}\n")
 
