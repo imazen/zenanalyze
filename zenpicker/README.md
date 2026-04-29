@@ -472,6 +472,8 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 | ✅ v0.1 | **`zensim_strict` profile**: pinball-loss training (`train_hybrid.py --objective zensim_strict`) + per-`target_zq` reach-rate gate in the manifest. Pairs with `size_optimal` so codecs ship both bakes side by side |
 | ✅ v0.1 | **Top-K argmin** (`Picker::argmin_masked_top_k::<K>` / `argmin_masked_top_k_in_range`) for cached second-best picks — backbone of the codec-side rescue path |
 | ✅ v0.1 | **Rescue plumbing** (`zenpicker::rescue::{should_rescue, RescuePolicy, RescueStrategy, RescueDecision}`) — codec-agnostic decision logic; codec injects `verify` + `rescue_pick`. See [SAFETY_PLANE.md](SAFETY_PLANE.md) |
+| ✅ v0.1 | **Reach-gate as parameter** (`zenpicker::reach_gate_mask`) — codec / caller picks the threshold per request. Strict 0.99 = SLA mode, 0.95 = high-q, 0.0 = max-quality (relies on rescue) |
+| 🔜 v0.1 | **v2.1 retrain with new tier3 features** (`patch_fraction_fast`, `quant_survival_y/uv`) — needs re-running the zenjpeg pareto sweep harness against the new analyzer features TSV. Tracked in [imazen/zenanalyze#22](https://github.com/imazen/zenanalyze/issues/22) |
 | ⏳ v0.2 | `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT |
 | ⏳ v0.3 | i8-quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough |
 | ⏳ v0.3 | Generational re-encode picker (round-trip JPEG-source case): see [imazen/zenanalyze#13](https://github.com/imazen/zenanalyze/issues/13) |
