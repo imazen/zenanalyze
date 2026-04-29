@@ -51,10 +51,12 @@ mod error;
 mod inference;
 mod mask;
 mod model;
+pub mod rescue;
 
 pub use error::PickerError;
 pub use mask::{AllowedMask, argmin_masked, argmin_masked_top_k};
 pub use model::{Activation, LayerView, Model, WeightDtype};
+pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
 
 /// Caller-supplied additive cost adjustments applied to the model's
 /// raw byte predictions before argmin.
