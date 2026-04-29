@@ -7,17 +7,150 @@
 //!
 //! ## Architecture dispatch
 //!
-//! | Context               | Path                                    | Key instructions             |
-//! |-----------------------|-----------------------------------------|------------------------------|
-//! | x86_64 + AVX2+SSSE3   | `rgb24_to_planes_avx2`                  | `vpshufb` × 6 + `vpmovzxbd` × 3 + `vcvtdq2ps` × 3 |
-//! | aarch64 (NEON)        | `rgb24_to_planes_neon`                  | `vld3.8` + widen + `ucvtf`   |
-//! | everything else       | `rgb24_to_planes_scalar`                | scalar byte-to-float scatter |
+//! Uses the archmage `#[arcane]` / `incant!` pattern — zero `unsafe` blocks.
 //!
-//! The NEON path is taken unconditionally on `aarch64` because NEON is the
-//! ABI baseline.  The AVX2 path is gated by a one-time cached runtime check
-//! (`is_x86_feature_detected!`); when called from within a
-//! `#[target_feature(enable = "avx2")]` monomorphization the branch is
-//! always-taken and the branch predictor keeps it free.
+//! | Context             | Path               | Key instructions                          |
+//! |---------------------|--------------------|-------------------------------------------|
+//! | x86_64 + AVX2+SSSE3 | `_v3`              | `vpshufb`×6 + `vpmovzxbd`×3 + `vcvtdq2ps`×3 |
+//! | aarch64 (NEON)      | `_neon`            | scalar loop compiled with NEON features; LLVM autovectorizes |
+//! | wasm32 (simd128)    | `_wasm128`         | scalar loop compiled with simd128 features |
+//! | everything else     | `_scalar`          | scalar byte-to-float scatter              |
+//!
+//! The `#[arcane]` wrappers for NEON and wasm128 compile the scalar loop
+//! under the respective `#[target_feature]` context, letting LLVM
+//! autovectorize without explicit structure-load intrinsics.  This matches
+//! garb's approach: explicit `vld3q`/`vst3q` structure loads were found to
+//! be slower than autovectorized scalar on Ampere, Apple Silicon, and
+//! Snapdragon.
+
+use archmage::prelude::*;
+
+// ============================================================================
+// x86_64 AVX2+SSSE3
+// ============================================================================
+
+/// AVX2+SSSE3 deinterleave via `vpshufb`.
+///
+/// Loads two overlapping 16-byte windows covering all 24 source bytes,
+/// applies `vpshufb` masks to scatter each channel's bytes into lanes 0–7
+/// of an XMM register, then uses `vpmovzxbd` + `vcvtdq2ps` to widen and
+/// convert.
+///
+/// `X64V3Token::TARGET_FEATURES` includes `ssse3`, so `_mm_shuffle_epi8`
+/// is available in this function's feature context.  Value-based intrinsics
+/// are safe inside `#[target_feature]` functions since Rust 1.87+.
+/// Memory intrinsics use the `safe_unaligned_simd` reference-based wrappers
+/// brought in via `archmage::prelude::*`.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn rgb24_to_planes_v3(_token: X64V3Token, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+    let z: i8 = -128; // vpshufb: bit-7 set → zero the output lane
+
+    // Shuffle masks: collect R/G/B bytes from the lo (bytes 0–15) and hi
+    // (bytes 8–23) 16-byte windows into output lanes 0–7.
+    //
+    // Position layout (lo window bytes 0-based):
+    //   lo = R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 R4 G4 B4 R5
+    //   hi = B2 R3 G3 B3 R4 G4 B4 R5 G5 B5 R6 G6 B6 R7 G7 B7
+    //         (hi[0..16] = chunk[8..24])
+    //
+    //   R from lo: positions 0,3,6,9,12,15  → R0..R5
+    //   R from hi: positions 10,13          → R6,R7
+    //   G from lo: positions 1,4,7,10,13    → G0..G4
+    //   G from hi: positions 8,11,14        → G5..G7
+    //   B from lo: positions 2,5,8,11,14    → B0..B4
+    //   B from hi: positions 9,12,15        → B5..B7
+    let shuf_r_lo = _mm_setr_epi8(0, 3, 6, 9, 12, 15, z, z, z, z, z, z, z, z, z, z);
+    let shuf_r_hi = _mm_setr_epi8(z, z, z, z, z, z, 10, 13, z, z, z, z, z, z, z, z);
+    let shuf_g_lo = _mm_setr_epi8(1, 4, 7, 10, 13, z, z, z, z, z, z, z, z, z, z, z);
+    let shuf_g_hi = _mm_setr_epi8(z, z, z, z, z, 8, 11, 14, z, z, z, z, z, z, z, z);
+    let shuf_b_lo = _mm_setr_epi8(2, 5, 8, 11, 14, z, z, z, z, z, z, z, z, z, z, z);
+    let shuf_b_hi = _mm_setr_epi8(z, z, z, z, z, 9, 12, 15, z, z, z, z, z, z, z, z);
+
+    // Two overlapping unaligned 16-byte loads — safe via archmage::prelude::*
+    // which shadows core::arch::x86_64::_mm_loadu_si128 with a reference-based
+    // wrapper (safe_unaligned_simd).
+    let lo_arr: &[u8; 16] = chunk[..16].try_into().unwrap();
+    let hi_arr: &[u8; 16] = chunk[8..].try_into().unwrap();
+    let lo = _mm_loadu_si128(lo_arr);
+    let hi = _mm_loadu_si128(hi_arr);
+
+    // Each vpshufb+vpor places the 8 channel bytes in XMM lanes 0..7.
+    let r_xmm = _mm_or_si128(_mm_shuffle_epi8(lo, shuf_r_lo), _mm_shuffle_epi8(hi, shuf_r_hi));
+    let g_xmm = _mm_or_si128(_mm_shuffle_epi8(lo, shuf_g_lo), _mm_shuffle_epi8(hi, shuf_g_hi));
+    let b_xmm = _mm_or_si128(_mm_shuffle_epi8(lo, shuf_b_lo), _mm_shuffle_epi8(hi, shuf_b_hi));
+
+    // vpmovzxbd: zero-extend 8 × u8 → 8 × i32 (YMM).
+    // vcvtdq2ps: 8 × i32 → 8 × f32 (YMM).
+    let r_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(r_xmm));
+    let g_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(g_xmm));
+    let b_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b_xmm));
+
+    // archmage::prelude::* _mm256_storeu_ps takes &mut [f32; 8] (not *mut f32).
+    let mut r = [0.0f32; 8];
+    let mut g = [0.0f32; 8];
+    let mut b = [0.0f32; 8];
+    _mm256_storeu_ps(&mut r, r_f32);
+    _mm256_storeu_ps(&mut g, g_f32);
+    _mm256_storeu_ps(&mut b, b_f32);
+
+    (r, g, b)
+}
+
+// ============================================================================
+// NEON — scalar body, compiled with NEON target_feature
+// ============================================================================
+
+/// NEON path.
+///
+/// The `#[arcane]` wrapper compiles the scalar loop under
+/// `#[target_feature(enable = "neon")]`, which lets LLVM autovectorize it
+/// without explicit `vld3`/`vst3` structure-load intrinsics.  This is the
+/// same strategy garb uses for 3-channel operations on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[arcane]
+fn rgb24_to_planes_neon(_token: NeonToken, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+    deinterleave_scalar(chunk)
+}
+
+// ============================================================================
+// wasm128 — scalar body, compiled with simd128 target_feature
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn rgb24_to_planes_wasm128(
+    _token: Wasm128Token,
+    chunk: &[u8; 24],
+) -> ([f32; 8], [f32; 8], [f32; 8]) {
+    deinterleave_scalar(chunk)
+}
+
+// ============================================================================
+// Scalar
+// ============================================================================
+
+fn rgb24_to_planes_scalar(_token: ScalarToken, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+    deinterleave_scalar(chunk)
+}
+
+/// Inner scalar implementation shared by every non-AVX2 tier.
+#[inline(always)]
+fn deinterleave_scalar(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+    let mut r = [0.0f32; 8];
+    let mut g = [0.0f32; 8];
+    let mut b = [0.0f32; 8];
+    for i in 0..8 {
+        r[i] = chunk[i * 3] as f32;
+        g[i] = chunk[i * 3 + 1] as f32;
+        b[i] = chunk[i * 3 + 2] as f32;
+    }
+    (r, g, b)
+}
+
+// ============================================================================
+// Public dispatch
+// ============================================================================
 
 /// Deinterleave 8 packed RGB pixels (24 bytes) into three planar `[f32; 8]`
 /// arrays.
@@ -25,8 +158,11 @@
 /// Returns `(r, g, b)` where each array holds 8 channel values in the
 /// original pixel order, as raw `f32` values in `[0.0, 255.0]`.  No gamma
 /// or transfer-function adjustment is applied — this is a pure
-/// byte-to-float widening operation suitable for zenanalyze's sRGB-encoded
-/// hotpath.
+/// byte-to-float widening operation.
+///
+/// Dispatch: x86_64+AVX2 → `vpshufb` shuffle path; aarch64/wasm32 → scalar
+/// body compiled with the arch's target_feature (LLVM autovectorizes); all
+/// others → plain scalar.
 ///
 /// # Example
 ///
@@ -39,178 +175,16 @@
 /// ```
 #[inline(always)]
 pub(crate) fn rgb24_to_planes(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
-    // x86_64: prefer AVX2+SSSE3 shuffle path.
-    // `is_x86_feature_detected!` uses a cached atomic — one cheap load per
-    // call. When inlined into an AVX2 #[target_feature] monomorphization the
-    // branch is perfectly predicted (always taken on any modern host).
-    #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
-        // SAFETY: the runtime check above guarantees AVX2 (which implies
-        // SSSE3) is available on this CPU.
-        return unsafe { rgb24_to_planes_avx2(chunk) };
-    }
-
-    // aarch64: NEON is the ABI baseline — always available.
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is always present on aarch64.
-        return unsafe { rgb24_to_planes_neon(chunk) };
-    }
-
-    // Scalar fallback for all other targets (or x86_64 without AVX2).
-    rgb24_to_planes_scalar(chunk)
+    incant!(rgb24_to_planes(chunk), [v3, neon, wasm128, scalar])
 }
 
-// ---------------------------------------------------------------------------
-// Scalar fallback
-// ---------------------------------------------------------------------------
-
-#[inline(always)]
-fn rgb24_to_planes_scalar(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
-    let mut r = [0.0f32; 8];
-    let mut g = [0.0f32; 8];
-    let mut b = [0.0f32; 8];
-    for i in 0..8 {
-        r[i] = chunk[i * 3] as f32;
-        g[i] = chunk[i * 3 + 1] as f32;
-        b[i] = chunk[i * 3 + 2] as f32;
-    }
-    (r, g, b)
-}
-
-// ---------------------------------------------------------------------------
-// x86_64 AVX2 path
-// ---------------------------------------------------------------------------
-
-/// AVX2+SSSE3 deinterleave.
-///
-/// Strategy: load two overlapping 16-byte SSE registers covering the full
-/// 24-byte pixel run, apply `vpshufb` masks to extract each channel into the
-/// low 8 bytes, OR the halves together, then use `vpmovzxbd` + `vcvtdq2ps`
-/// to widen and convert in one AVX2 step.
-///
-/// Mask derivation (hi = chunk[8..24], lo = chunk[0..16]):
-///
-/// ```text
-/// lo[0..16] = R0 G0 B0 | R1 G1 B1 | R2 G2 B2 | R3 G3 B3 | R4 G4 B4 | R5
-/// hi[0..16] = B2 R3 G3 | B3 R4 G4 | B4 R5 G5 | B5 R6 G6 | B6 R7 G7 | B7
-///
-/// R from lo: positions 0,3,6,9,12,15  → R0..R5
-/// R from hi: positions 10,13          → R6,R7
-/// G from lo: positions 1,4,7,10,13    → G0..G4
-/// G from hi: positions 8,11,14        → G5..G7
-/// B from lo: positions 2,5,8,11,14    → B0..B4
-/// B from hi: positions 9,12,15        → B5..B7
-/// ```
-///
-/// Mask byte = -128 (bit 7 set) ⇒ `vpshufb` zeroes that output lane.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,ssse3")]
-unsafe fn rgb24_to_planes_avx2(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
-    use core::arch::x86_64::*;
-
-    // -128_i8 = 0x80 → vpshufb zeroes that output lane.
-    let z: i8 = -128;
-
-    // R channel: lo positions 0,3,6,9,12,15 → R0..R5; hi positions 10,13 → R6,R7
-    let shuf_r_lo = _mm_setr_epi8(0, 3, 6, 9, 12, 15, z, z, z, z, z, z, z, z, z, z);
-    let shuf_r_hi = _mm_setr_epi8(z, z, z, z, z, z, 10, 13, z, z, z, z, z, z, z, z);
-
-    // G channel: lo positions 1,4,7,10,13 → G0..G4; hi positions 8,11,14 → G5..G7
-    let shuf_g_lo = _mm_setr_epi8(1, 4, 7, 10, 13, z, z, z, z, z, z, z, z, z, z, z);
-    let shuf_g_hi = _mm_setr_epi8(z, z, z, z, z, 8, 11, 14, z, z, z, z, z, z, z, z);
-
-    // B channel: lo positions 2,5,8,11,14 → B0..B4; hi positions 9,12,15 → B5..B7
-    let shuf_b_lo = _mm_setr_epi8(2, 5, 8, 11, 14, z, z, z, z, z, z, z, z, z, z, z);
-    let shuf_b_hi = _mm_setr_epi8(z, z, z, z, z, 9, 12, 15, z, z, z, z, z, z, z, z);
-
-    // Two overlapping 16-byte loads covering all 24 bytes, and the channel
-    // shuffle + OR, zero-extend, and float convert — all inside a single
-    // `unsafe {}` block.
-    unsafe {
-        // Two overlapping 16-byte loads covering all 24 bytes.
-        let lo = _mm_loadu_si128(chunk.as_ptr() as *const __m128i); // bytes  0..16
-        let hi = _mm_loadu_si128(chunk.as_ptr().add(8) as *const __m128i); // bytes  8..24
-
-        // Each shuffle + OR places the 8 channel bytes in lanes 0..7 of the XMM register.
-        let r_xmm =
-            _mm_or_si128(_mm_shuffle_epi8(lo, shuf_r_lo), _mm_shuffle_epi8(hi, shuf_r_hi));
-        let g_xmm =
-            _mm_or_si128(_mm_shuffle_epi8(lo, shuf_g_lo), _mm_shuffle_epi8(hi, shuf_g_hi));
-        let b_xmm =
-            _mm_or_si128(_mm_shuffle_epi8(lo, shuf_b_lo), _mm_shuffle_epi8(hi, shuf_b_hi));
-
-        // vpmovzxbd: zero-extend first 8 u8 lanes → 8 × i32 (YMM).
-        // vcvtdq2ps: convert 8 × i32 → 8 × f32 (YMM).
-        let r_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(r_xmm));
-        let g_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(g_xmm));
-        let b_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b_xmm));
-
-        let mut r = [0.0f32; 8];
-        let mut g = [0.0f32; 8];
-        let mut b = [0.0f32; 8];
-        _mm256_storeu_ps(r.as_mut_ptr(), r_f32);
-        _mm256_storeu_ps(g.as_mut_ptr(), g_f32);
-        _mm256_storeu_ps(b.as_mut_ptr(), b_f32);
-
-        (r, g, b)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// aarch64 NEON path
-// ---------------------------------------------------------------------------
-
-/// NEON deinterleave using the hardware structure-load `vld3.8`.
-///
-/// `vld3_u8` (8-element) loads 24 bytes and deinterleaves them into three
-/// `uint8x8_t` lanes in a single instruction.  Two widening steps then
-/// produce `float32x4_t` pairs per channel, avoiding the scalar scatter
-/// loop entirely.
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
-unsafe fn rgb24_to_planes_neon(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
-    use core::arch::aarch64::*;
-
-    // u8×8 → u16×8 → u32×4 (lo/hi) → f32×4 (lo/hi) per channel.
-    unsafe {
-        // vld3.8 {d0,d1,d2}, [ptr] — 1 instruction, 3 deinterleaved u8x8 lanes.
-        let rgb = vld3_u8(chunk.as_ptr());
-        // rgb.0 = [R0,R1,R2,R3,R4,R5,R6,R7]
-        // rgb.1 = [G0,G1,G2,G3,G4,G5,G6,G7]
-        // rgb.2 = [B0,B1,B2,B3,B4,B5,B6,B7]
-
-        let (r_arr, g_arr, b_arr) = (rgb.0, rgb.1, rgb.2);
-
-        let mut r = [0.0f32; 8];
-        let mut g = [0.0f32; 8];
-        let mut b = [0.0f32; 8];
-
-        for (arr, out) in [(r_arr, &mut r), (g_arr, &mut g), (b_arr, &mut b)] {
-            let u16v = vmovl_u8(arr);
-            let lo_f32 = vcvtq_f32_u32(vmovl_u16(vget_low_u16(u16v)));
-            let hi_f32 = vcvtq_f32_u32(vmovl_u16(vget_high_u16(u16v)));
-            vst1q_f32(out.as_mut_ptr(), lo_f32);
-            vst1q_f32(out.as_mut_ptr().add(4), hi_f32);
-        }
-
-        (r, g, b)
-    }
-}
-
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Tests
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Reference implementation: scalar deinterleave, used to validate the
-    /// platform-specific paths.
-    fn reference(chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
-        rgb24_to_planes_scalar(chunk)
-    }
 
     fn make_chunk(pixels: &[[u8; 3]; 8]) -> [u8; 24] {
         let mut out = [0u8; 24];
@@ -235,7 +209,8 @@ mod tests {
             [220, 230, 240],
         ];
         let chunk = make_chunk(&pixels);
-        let (r, g, b) = rgb24_to_planes_scalar(&chunk);
+        let token = ScalarToken::summon().unwrap();
+        let (r, g, b) = rgb24_to_planes_scalar(token, &chunk);
         for (i, px) in pixels.iter().enumerate() {
             assert_eq!(r[i], px[0] as f32, "R[{i}]");
             assert_eq!(g[i], px[1] as f32, "G[{i}]");
@@ -255,7 +230,8 @@ mod tests {
             [253, 254, 255],
             [127, 128, 129],
         ]);
-        let (ref_r, ref_g, ref_b) = reference(&chunk);
+        let token = ScalarToken::summon().unwrap();
+        let (ref_r, ref_g, ref_b) = rgb24_to_planes_scalar(token, &chunk);
         let (r, g, b) = rgb24_to_planes(&chunk);
         assert_eq!(r, ref_r);
         assert_eq!(g, ref_g);
@@ -266,6 +242,7 @@ mod tests {
     fn dispatched_matches_scalar() {
         // Verify that the dispatched path (AVX2 on x86_64, NEON on aarch64,
         // scalar elsewhere) produces bit-identical results to the reference.
+        let token = ScalarToken::summon().unwrap();
         for seed in 0u8..=255 {
             let mut pixels = [[0u8; 3]; 8];
             for (i, px) in pixels.iter_mut().enumerate() {
@@ -274,7 +251,7 @@ mod tests {
                 px[2] = seed.wrapping_add(i as u8 * 3 + 2);
             }
             let chunk = make_chunk(&pixels);
-            let (ref_r, ref_g, ref_b) = reference(&chunk);
+            let (ref_r, ref_g, ref_b) = rgb24_to_planes_scalar(token, &chunk);
             let (r, g, b) = rgb24_to_planes(&chunk);
             assert_eq!(r, ref_r, "R mismatch at seed={seed}");
             assert_eq!(g, ref_g, "G mismatch at seed={seed}");
@@ -285,9 +262,10 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn avx2_matches_scalar() {
-        if !std::is_x86_feature_detected!("avx2") {
-            return; // skip on machines without AVX2
-        }
+        let Some(token_v3) = X64V3Token::summon() else {
+            return; // skip on CPUs without AVX2
+        };
+        let token_sc = ScalarToken::summon().unwrap();
         for seed in 0u8..=255 {
             let mut pixels = [[0u8; 3]; 8];
             for (i, px) in pixels.iter_mut().enumerate() {
@@ -296,9 +274,9 @@ mod tests {
                 px[2] = seed.wrapping_add(i as u8 * 7 + 2);
             }
             let chunk = make_chunk(&pixels);
-            let (ref_r, ref_g, ref_b) = reference(&chunk);
-            // SAFETY: guarded by is_x86_feature_detected above.
-            let (r, g, b) = unsafe { rgb24_to_planes_avx2(&chunk) };
+            let (ref_r, ref_g, ref_b) = rgb24_to_planes_scalar(token_sc, &chunk);
+            // rgb24_to_planes_v3 is the safe #[arcane] wrapper — no unsafe needed.
+            let (r, g, b) = rgb24_to_planes_v3(token_v3, &chunk);
             assert_eq!(r, ref_r, "AVX2 R mismatch at seed={seed}");
             assert_eq!(g, ref_g, "AVX2 G mismatch at seed={seed}");
             assert_eq!(b, ref_b, "AVX2 B mismatch at seed={seed}");
@@ -308,6 +286,10 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn neon_matches_scalar() {
+        let Some(token_neon) = NeonToken::summon() else {
+            return;
+        };
+        let token_sc = ScalarToken::summon().unwrap();
         for seed in 0u8..=255 {
             let mut pixels = [[0u8; 3]; 8];
             for (i, px) in pixels.iter_mut().enumerate() {
@@ -316,9 +298,9 @@ mod tests {
                 px[2] = seed.wrapping_add(i as u8 * 7 + 2);
             }
             let chunk = make_chunk(&pixels);
-            let (ref_r, ref_g, ref_b) = reference(&chunk);
-            // SAFETY: NEON is always present on aarch64.
-            let (r, g, b) = unsafe { rgb24_to_planes_neon(&chunk) };
+            let (ref_r, ref_g, ref_b) = rgb24_to_planes_scalar(token_sc, &chunk);
+            // rgb24_to_planes_neon is the safe #[arcane] wrapper — no unsafe needed.
+            let (r, g, b) = rgb24_to_planes_neon(token_neon, &chunk);
             assert_eq!(r, ref_r, "NEON R mismatch at seed={seed}");
             assert_eq!(g, ref_g, "NEON G mismatch at seed={seed}");
             assert_eq!(b, ref_b, "NEON B mismatch at seed={seed}");
