@@ -1,0 +1,55 @@
+[package]
+name = "zenpicker"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+repository = "https://github.com/imazen/zenanalyze"
+description = "Codec-agnostic picker runtime: loads a packed MLP from bytes, runs SIMD inference, returns argmin under caller-supplied constraints. Used to choose codec configurations from image features at sub-microsecond cost."
+keywords = ["image", "codec", "picker", "mlp", "inference"]
+categories = ["multimedia::images", "no-std"]
+authors = ["Lilith River <lilith@imazen.io>"]
+rust-version = "1.93"
+readme = "README.md"
+
+[lib]
+name = "zenpicker"
+
+[features]
+default = ["std"]
+# Pulls in `std` for `std::error::Error` impls and any std-only test helpers.
+# The crate itself is `no_std + alloc` capable; most consumers will keep `std`.
+std = []
+# Enable f16 storage support (loads `weight_dtype = 1` layers). When off,
+# the loader rejects f16 models. f16 storage halves model size for ~no
+# accuracy loss; conversion to f32 happens at inference time. Requires
+# the `half` crate.
+f16 = ["dep:half"]
+
+[dependencies]
+# Zero-copy byte → typed slice reinterpret without `unsafe` in our
+# tree. Tiny, no_std, well-audited.
+bytemuck = { version = "1.23", default-features = false }
+# `archmage` + `magetypes` are the future SIMD path (v0.2). The
+# scalar inner loops autovectorize well enough at the model sizes
+# we ship today (15K weights → ~15 µs forward pass), so they aren't
+# pulled in yet to keep the dep graph tight. Adding them later
+# doesn't move the public API.
+# Half-precision storage support. Optional — only pulled in when the
+# `f16` feature is on. Stable today; `core::f16` will replace it once
+# fully stabilized in std. The crate's `bytemuck` feature gives us
+# zero-copy `Pod` impls for `f16`.
+half = { version = "2.6", default-features = false, features = ["bytemuck"], optional = true }
+
+[dev-dependencies]
+# Reproducibility for synthetic model tests.
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "small_rng"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+
