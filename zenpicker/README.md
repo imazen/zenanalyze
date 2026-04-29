@@ -4,6 +4,19 @@ Codec-agnostic picker runtime. Loads a packed MLP from bytes, runs SIMD inferenc
 
 `#![forbid(unsafe_code)]`. `no_std + alloc`. AGPL-3.0-only / Commercial dual license.
 
+## Documentation map
+
+| Doc | Use it for |
+|---|---|
+| **[README.md](README.md)** (this file) | API reference, end-to-end workflow, output layout, constraints, binary format, perf |
+| **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | 30-min tutorial: adopt zenpicker from a new codec start to finish |
+| **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Two-shot rescue design for catastrophic-zensim failures (codec-side) |
+| **[STATUS.md](STATUS.md)** | Current state of the picker work, shipped models, pending follow-ups |
+| **[examples/hybrid_heads_codec_sketch.rs](examples/hybrid_heads_codec_sketch.rs)** | Runnable codec-side reference: `CONFIGS` table, constraints, scalar clamp |
+| **[examples/load_baked_model.rs](examples/load_baked_model.rs)** | Smoke test for the loader on a bake artifact |
+| **[../tools/bake_picker.py](../tools/bake_picker.py)** | sklearn JSON → v1 binary + manifest |
+| **[../tools/bake_roundtrip_check.py](../tools/bake_roundtrip_check.py)** | Verify Rust loader matches numpy reference forward pass |
+
 ---
 
 ## Why a separate crate
@@ -235,7 +248,7 @@ impl ZqConstraints {
 
 Same shape for **jxl** (effort 1–9), **webp** (effort 0–9, method 0–6), **avif** (speed 0–10): effort/speed is a field in the `ConfigSpec`. `Constraints::max_effort(u8)` becomes the bitmask predicate `spec.effort <= max`.
 
-### Scalar constraints — clamp at output time (v0.2)
+### Scalar constraints — clamp at output time
 
 For continuous axes, the constraint is a `[min, max]` clamp on the picker's scalar prediction:
 
@@ -246,9 +259,12 @@ pub struct WebpConstraints {
     pub min_chroma_quality: Option<f32>,
 }
 
-// At inference (sketch, v0.2):
-let cat_idx = picker.argmin_masked(...)?;
-let effort_raw = scalar_outputs[cat_idx][effort_axis];
+// At inference:
+let cell_idx = picker
+    .argmin_masked_in_range(features, (0, N_CELLS), &mask, None)?
+    .expect("at least one cell allowed");
+let out = picker.predict(features)?;
+let effort_raw = out[N_CELLS + cell_idx];
 let effort = constraints
     .max_effort
     .map(|m| effort_raw.clamp(0.0, m as f32))
