@@ -290,6 +290,85 @@ fn argmin_picks_smallest_allowed() {
 }
 
 #[test]
+fn top_k_picks_smallest_allowed_in_order() {
+    let mut buf = alloc::vec::Vec::new();
+    // Predictions: [3.0, 1.0, 2.0, 0.5]
+    write_v1_model_f32(
+        &mut buf,
+        1,
+        &[(1, 4, 0, &[0.0, 0.0, 0.0, 0.0], &[3.0, 1.0, 2.0, 0.5])],
+        0,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+
+    let mask_all = AllowedMask::new(&[true, true, true, true]);
+    let top2 = picker
+        .argmin_masked_top_k::<2>(&[0.0], &mask_all, None)
+        .unwrap();
+    assert_eq!(top2, [Some(3), Some(1)]);
+
+    let top3 = picker
+        .argmin_masked_top_k::<3>(&[0.0], &mask_all, None)
+        .unwrap();
+    assert_eq!(top3, [Some(3), Some(1), Some(2)]);
+
+    let top4 = picker
+        .argmin_masked_top_k::<4>(&[0.0], &mask_all, None)
+        .unwrap();
+    assert_eq!(top4, [Some(3), Some(1), Some(2), Some(0)]);
+
+    // K larger than number of allowed entries — surplus slots are None.
+    let top5 = picker
+        .argmin_masked_top_k::<5>(&[0.0], &mask_all, None)
+        .unwrap();
+    assert_eq!(top5, [Some(3), Some(1), Some(2), Some(0), None]);
+
+    // Mask out the best.
+    let mask_no3 = AllowedMask::new(&[true, true, true, false]);
+    let top2_masked = picker
+        .argmin_masked_top_k::<2>(&[0.0], &mask_no3, None)
+        .unwrap();
+    assert_eq!(top2_masked, [Some(1), Some(2)]);
+
+    // No allowed entries — all None.
+    let mask_none = AllowedMask::new(&[false, false, false, false]);
+    let top2_empty = picker
+        .argmin_masked_top_k::<2>(&[0.0], &mask_none, None)
+        .unwrap();
+    assert_eq!(top2_empty, [None, None]);
+}
+
+#[test]
+fn top_k_in_range_returns_subrange_indices() {
+    let mut buf = alloc::vec::Vec::new();
+    // 6 outputs split notionally [bytes_log[0..3], scalar1[0..3]].
+    write_v1_model_f32(
+        &mut buf,
+        1,
+        &[(
+            1,
+            6,
+            0,
+            &[0.0; 6],
+            &[3.0, 1.0, 2.0, /* scalar tail */ 999.0, 999.0, 999.0],
+        )],
+        0,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+
+    let mask_all = AllowedMask::new(&[true, true, true]);
+    let top2 = picker
+        .argmin_masked_top_k_in_range::<2>(&[0.0], (0, 3), &mask_all, None)
+        .unwrap();
+    // Indices are within the sub-range, so 1 (= 1.0) and 2 (= 2.0).
+    assert_eq!(top2, [Some(1), Some(2)]);
+}
+
+#[test]
 fn rejects_bad_magic() {
     let mut buf = alloc::vec::Vec::new();
     write_v1_model_f32(&mut buf, 1, &[(1, 1, 0, &[1.0], &[0.0])], 0);

@@ -53,7 +53,7 @@ mod mask;
 mod model;
 
 pub use error::PickerError;
-pub use mask::{AllowedMask, argmin_masked};
+pub use mask::{AllowedMask, argmin_masked, argmin_masked_top_k};
 pub use model::{Activation, LayerView, Model, WeightDtype};
 
 /// Caller-supplied additive cost adjustments applied to the model's
@@ -196,6 +196,48 @@ impl<'a> Picker<'a> {
             });
         }
         Ok(mask::argmin_masked(&self.output[start..end], mask, adjust))
+    }
+
+    /// Pick the top-`K` argmin output indices over the masked set in
+    /// ascending score order (best first).
+    ///
+    /// Slots beyond the number of mask-allowed entries are `None`.
+    /// Codec rescue logic (two-shot pass framework) uses `K = 2` —
+    /// the second-best is the fallback when the first pick fails
+    /// post-encode verification.
+    pub fn argmin_masked_top_k<const K: usize>(
+        &mut self,
+        features: &[f32],
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<[Option<usize>; K], PickerError> {
+        self.predict(features)?;
+        Ok(mask::argmin_masked_top_k::<K>(&self.output, mask, adjust))
+    }
+
+    /// `argmin_masked_top_k` over a sub-range, in line with
+    /// [`argmin_masked_in_range`]. Returns indices *within the
+    /// sub-range* (0..(range.1 - range.0)).
+    pub fn argmin_masked_top_k_in_range<const K: usize>(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<[Option<usize>; K], PickerError> {
+        self.predict(features)?;
+        let (start, end) = range;
+        if end > self.output.len() || start > end {
+            return Err(PickerError::FeatureLenMismatch {
+                expected: self.output.len(),
+                got: end,
+            });
+        }
+        Ok(mask::argmin_masked_top_k::<K>(
+            &self.output[start..end],
+            mask,
+            adjust,
+        ))
     }
 }
 

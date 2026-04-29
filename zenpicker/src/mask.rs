@@ -90,6 +90,83 @@ pub fn argmin_masked(
     best_idx
 }
 
+/// Pick the `K` lowest-scoring indices over `predictions` that the
+/// mask permits, returned in ascending score order (best first).
+///
+/// Slots beyond the number of allowed entries are `None`. Score
+/// semantics match [`argmin_masked`]: log-space when `adjust` is
+/// `None`, raw-byte space otherwise.
+///
+/// `K` is generic to keep the call site allocation-free; in practice
+/// `K = 2` is what codec rescue logic wants (best + cached
+/// second-best for the two-shot rescue path).
+pub fn argmin_masked_top_k<const K: usize>(
+    predictions: &[f32],
+    mask: &AllowedMask<'_>,
+    adjust: Option<CostAdjust<'_>>,
+) -> [Option<usize>; K] {
+    debug_assert!(mask.len() >= predictions.len());
+
+    // Sorted ascending by score; `count` is how many slots are filled.
+    let mut top: [(f32, usize); K] = [(f32::INFINITY, usize::MAX); K];
+    let mut count: usize = 0;
+
+    let consider = |score: f32, idx: usize, top: &mut [(f32, usize); K], count: &mut usize| {
+        if *count < K {
+            // Insert in sorted position.
+            let mut i = *count;
+            while i > 0 && top[i - 1].0 > score {
+                top[i] = top[i - 1];
+                i -= 1;
+            }
+            top[i] = (score, idx);
+            *count += 1;
+        } else if K > 0 && score < top[K - 1].0 {
+            // Replace the worst-kept and bubble up.
+            let mut i = K - 1;
+            while i > 0 && top[i - 1].0 > score {
+                top[i] = top[i - 1];
+                i -= 1;
+            }
+            top[i] = (score, idx);
+        }
+    };
+
+    match adjust {
+        None => {
+            for (i, &score) in predictions.iter().enumerate() {
+                if !mask.is_allowed(i) {
+                    continue;
+                }
+                consider(score, i, &mut top, &mut count);
+            }
+        }
+        Some(CostAdjust {
+            additive_bytes,
+            per_output_offset,
+        }) => {
+            for (i, &score) in predictions.iter().enumerate() {
+                if !mask.is_allowed(i) {
+                    continue;
+                }
+                let mut bytes = clamped_exp(score) + additive_bytes;
+                if let Some(offsets) = per_output_offset
+                    && let Some(off) = offsets.get(i)
+                {
+                    bytes += *off;
+                }
+                consider(bytes, i, &mut top, &mut count);
+            }
+        }
+    }
+
+    let mut out: [Option<usize>; K] = [None; K];
+    for slot in 0..count {
+        out[slot] = Some(top[slot].1);
+    }
+    out
+}
+
 /// `exp` with input clamped to [-30, 30] to keep training-time
 /// out-of-range predictions from producing NaN/Inf at inference.
 fn clamped_exp(x: f32) -> f32 {
