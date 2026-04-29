@@ -263,18 +263,26 @@ pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerErro
     Ok(Picker::new(model))
 }
 
-// At pick time, the manifest carries a per-target-zq reach-safety
-// table the codec ANDs into the constraint mask. For size_optimal
-// you can ignore the gate; for zensim_strict you should honor it.
+// At pick time, the manifest carries per-target-zq reach rates the
+// codec converts to an allow mask via `zenpicker::reach_gate_mask`,
+// then ANDs into its constraint mask. The threshold is a runtime
+// parameter — codec / caller picks it.
 //
-//   manifest.reach_safety.by_zq["85"].safe == [bool; n_cells]
+//   manifest.reach_safety.by_zq["85"].reach_rate == [f32; n_cells]
 //
 let mut mask = constraints.allowed_mask();   // from caller intent
 if profile == PickerProfile::ZensimStrict
-    && let Some(safe_cells) = manifest_safe_for(target_zq)
+    && let Some(rates) = manifest_reach_rate_for(target_zq)
 {
+    let mut gate = [false; N_CELLS];
+    let threshold = match caller.intent {
+        QualityIntent::Strict     => 0.99,  // SLA contract
+        QualityIntent::HighQ      => 0.95,  // relaxed
+        QualityIntent::MaxQuality => 0.0,   // disabled — relies on rescue
+    };
+    zenpicker::reach_gate_mask(&rates, threshold, &mut gate);
     for (i, allowed) in mask.iter_mut().enumerate() {
-        *allowed &= safe_cells[i];
+        *allowed &= gate[i];
     }
 }
 let cell_idx = picker.argmin_masked_in_range(&features, (0, N_CELLS), &AllowedMask::new(&mask), None)?;
@@ -282,7 +290,7 @@ let cell_idx = picker.argmin_masked_in_range(&features, (0, N_CELLS), &AllowedMa
 
 The size and runtime cost of carrying both bakes is small (~100 KB embedded total per codec, no inference-path changes — it's just two `Picker` instances). The codec exposes `PickerProfile` on its public encode API; imageflow / proxy operators flip per-request based on SLA requirements.
 
-The reach-safety table is shipped in **both** profiles' manifests (size_optimal carries it for transparency / debugging; the codec just doesn't apply it under that profile). The training script (`tools/train_hybrid.py --reach-threshold 0.99`) computes it as the empirical fraction of training rows in which each cell reached `target_zq`, then thresholds.
+The reach-safety table is shipped in **both** profiles' manifests (size_optimal carries it for transparency / debugging; the codec just doesn't apply the gate under that profile). The training script (`tools/train_hybrid.py --reach-threshold 0.99`) records both the raw `reach_rate[c]` per zq and a precomputed `safe[c]` boolean at the bake-time threshold. **Codec consumers should prefer the runtime helper** (`zenpicker::reach_gate_mask(reach_rates, threshold_at_request_time, out)`) so the threshold is a *parameter* — at very high target_zq (≥ 96), the strict 0.99 gate leaves 0–2 cells safe; "max-quality mode" callers pass `threshold = 0.0` and rely on the rescue path for tail safety. The bake-time `safe[]` is convenient when the codec wants the strict threshold without re-evaluating, nothing more.
 
 ### Caller-facing semantics
 
