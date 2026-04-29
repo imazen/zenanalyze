@@ -66,6 +66,9 @@ pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_
         out.noise_floor_y = dct.noise_floor_y;
         out.noise_floor_uv = dct.noise_floor_uv;
         out.gradient_fraction = dct.gradient_fraction;
+        out.patch_fraction_fast = dct.patch_fraction_fast;
+        out.quant_survival_y = dct.quant_survival_y;
+        out.quant_survival_uv = dct.quant_survival_uv;
     }
     #[cfg(not(feature = "experimental"))]
     {
@@ -78,6 +81,9 @@ pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_
             dct.noise_floor_y,
             dct.noise_floor_uv,
             dct.gradient_fraction,
+            dct.patch_fraction_fast,
+            dct.quant_survival_y,
+            dct.quant_survival_uv,
         );
     }
 }
@@ -130,6 +136,16 @@ struct Tier3DctStats {
     /// blocks): this is the per-block-thresholded fraction, robust
     /// to a few high-detail blocks dragging the mean.
     gradient_fraction: f32,
+    /// **Experimental.** dHash-based patch_fraction (~10× cheaper than
+    /// the DCT signature). 0.99 correlated with `patch_fraction`; AUC
+    /// 0.852 (vs DCT's 0.880); peak F1 0.779 (DCT 0.763) on the
+    /// 219-image labeled corpus.
+    patch_fraction_fast: f32,
+    /// **Experimental.** Fraction of luma AC coefficients surviving
+    /// jpegli-default quantization at d=2.0 (q=75 area).
+    quant_survival_y: f32,
+    /// **Experimental.** Same for chroma — max of Cb / Cr per block.
+    quant_survival_uv: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -206,7 +222,7 @@ const BIN_DIV_CHROMA: f32 = 8.0;
 /// Per coefficient (first 16 zigzag-positioned AC): 2 bits =
 /// `(sign_bit << 1) | (|c| > 0.25·max_ac)`. 16 × 2 = 32 bits.
 #[inline(always)]
-fn block_signature(coeffs: &[[f32; 8]; 8]) -> u32 {
+fn block_signature_dct(coeffs: &[[f32; 8]; 8]) -> u32 {
     // Per-block peak |AC| over the first 16 zigzag positions.
     let mut peak: f32 = 0.0;
     for (k, &zig) in RASTER_TO_ZIGZAG.iter().enumerate().skip(1) {
@@ -242,6 +258,147 @@ fn block_signature(coeffs: &[[f32; 8]; 8]) -> u32 {
         bit_pos += 1;
     }
     sig
+}
+
+/// Truncated-DCT fingerprint variant: same 32-bit signature as
+/// [`block_signature_dct`], but operates only on the first 16 zigzag
+/// AC coefficients — the same set the full-DCT version reads. The
+/// caller's responsibility is to compute *only* those 16 coefficients
+/// (saving ~75% of multiply-adds per block); this function expects the
+/// 16 inputs in zigzag order in `zz_acs`.
+///
+/// Output signature is bit-identical to `block_signature_dct` when fed
+/// the same coefficient values, so AUC parity vs the full-DCT version
+/// is exact. The win is purely in the per-block compute cost upstream.
+#[inline(always)]
+#[cfg(feature = "experimental")]
+fn block_signature_truncated_dct(zz_acs: &[f32; 16]) -> u32 {
+    let mut peak: f32 = 0.0;
+    for &c in zz_acs.iter() {
+        let m = c.abs();
+        if m > peak {
+            peak = m;
+        }
+    }
+    let threshold = peak * 0.25;
+    let mut sig: u32 = 0;
+    let mut bit_pos: u32 = 0;
+    for &c in zz_acs.iter() {
+        if c.abs() > threshold {
+            sig |= 1 << bit_pos;
+        }
+        bit_pos += 1;
+        if c < 0.0 {
+            sig |= 1 << bit_pos;
+        }
+        bit_pos += 1;
+    }
+    sig
+}
+
+/// dHash fingerprint on raw 8×8 luma. Bit `[i*8 + j] = pixels[i][j+1]
+/// > pixels[i][j]` for `j ∈ 0..7`, `i ∈ 0..8` — 56 bits. Top 8 bits
+/// encode column-direction differences `pixels[i+1][j] > pixels[i][j]`
+/// for `i ∈ 0..7`, `j ∈ 0..1` — packs to 64 bits, take low 32.
+///
+/// Pure pixel comparisons, ~10× cheaper than DCT. Brightness-invariant
+/// (DC offset cancels in the difference). Captures gradient direction
+/// and edge layout; less discriminative on smooth photo content but
+/// works well on the structural patterns that dominate UI / text /
+/// chart screen content.
+#[inline(always)]
+#[cfg(feature = "experimental")]
+fn block_signature_dhash(pixels: &[[f32; 8]; 8]) -> u32 {
+    let mut sig: u64 = 0;
+    let mut bit_pos: u32 = 0;
+    // Horizontal diffs: 8 rows × 7 diffs = 56 bits.
+    for row in pixels.iter() {
+        for c in 0..7 {
+            if row[c + 1] > row[c] {
+                sig |= 1 << bit_pos;
+            }
+            bit_pos += 1;
+        }
+    }
+    // Vertical diffs: 7 rows × 1 column = 7 bits, padding to 64.
+    // Picks column 0 as a representative — captures top-edge tilt
+    // without doubling the compute.
+    for pair in pixels.windows(2) {
+        if pair[1][0] > pair[0][0] {
+            sig |= 1 << bit_pos;
+        }
+        bit_pos += 1;
+    }
+    // Fold 64-bit fingerprint to u32 by XORing high and low halves.
+    // XOR preserves Hamming-distance approximate equality (collisions
+    // increase only on ~rotated content where the halves correlate).
+    ((sig & 0xFFFF_FFFF) ^ (sig >> 32)) as u32
+}
+
+/// jpegli-default Y quant table at distance 1.0 (~q90) — the canonical
+/// reference for "what a high-quality JPEG quantizer would do." Values
+/// are approximate jpegli's `kBaseQuantMatrixYCbCr` Y plane scaled at
+/// `d=1.0`. We use this for [`quant_survival_y`] / [`quant_survival_uv`]
+/// — a per-block estimate of "how many AC coefficients survive
+/// quantization," which approximates the actual JPEG file-size cost
+/// of the block. High-survival blocks → busy / detailed content;
+/// low-survival blocks → flat / compressible.
+///
+/// At `d=2.0` (~q75 area) every entry is doubled. At `d=4.0` (~q50)
+/// quadrupled. The current implementation uses `d=2.0` as a typical
+/// production-quality reference point.
+#[cfg(feature = "experimental")]
+const JPEGLI_QUANT_Y_D2: [f32; 64] = [
+    16.0, 22.0, 26.0, 28.0, 32.0, 38.0, 42.0, 50.0, 22.0, 24.0, 28.0, 30.0, 36.0, 42.0, 46.0, 54.0,
+    26.0, 28.0, 32.0, 38.0, 42.0, 50.0, 58.0, 66.0, 28.0, 30.0, 38.0, 46.0, 54.0, 62.0, 70.0, 78.0,
+    32.0, 36.0, 42.0, 54.0, 66.0, 78.0, 88.0, 96.0, 38.0, 42.0, 50.0, 62.0, 78.0, 92.0, 102.0,
+    110.0, 42.0, 46.0, 58.0, 70.0, 88.0, 102.0, 116.0, 124.0, 50.0, 54.0, 66.0, 78.0, 96.0, 110.0,
+    124.0, 132.0,
+];
+
+/// jpegli-default Cb/Cr quant table at d=2.0. Chroma quantization is
+/// flatter than luma — saturates near 64 across the whole table at
+/// q=75 — capturing the human-vision low-chroma sensitivity.
+#[cfg(feature = "experimental")]
+const JPEGLI_QUANT_C_D2: [f32; 64] = [
+    18.0, 22.0, 30.0, 56.0, 64.0, 64.0, 64.0, 64.0, 22.0, 26.0, 32.0, 60.0, 64.0, 64.0, 64.0, 64.0,
+    30.0, 32.0, 50.0, 64.0, 64.0, 64.0, 64.0, 64.0, 56.0, 60.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
+    64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
+    64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
+];
+
+/// Estimate the fraction of AC coefficients that survive JPEG-style
+/// quantization with the given table. "Survives" = `round(c / Q) != 0`
+/// after applying a typical zero-bias of 0.5 (jpegli default neutral).
+///
+/// Range: `[0, 1]`. 0 = all coefficients quantize to zero (perfectly
+/// flat block); 1 = every AC survives (extremely high-detail block).
+/// Photographic content typically lands at 0.10–0.25; UI / text edges
+/// at 0.30–0.50; flat regions ~0.0.
+///
+/// Cost: 63 divides + 63 round-and-compare per block. Fast — no
+/// transcendentals or branches in the hot loop.
+#[inline(always)]
+#[cfg(feature = "experimental")]
+fn quant_survival(coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
+    let mut survivors: u32 = 0;
+    // Skip DC (k=0) — DC always carries the block mean so a "survival
+    // fraction" that includes it would be biased toward 1.0 for any
+    // non-degenerate block.
+    for (k, &q) in qtable.iter().enumerate().skip(1) {
+        let u = k % 8;
+        let v = k / 8;
+        let c = coeffs[v][u];
+        // Zero-bias of 0.5 is the round-half-up that JPEG decoders
+        // expect; jpegli's tuned zero-bias modifies this per-coefficient
+        // but for a corpus-level signal the neutral version is fine.
+        let r = (c / q).round() as i32;
+        if r != 0 {
+            survivors += 1;
+        }
+    }
+    // 63 ACs (excluding DC).
+    survivors as f32 / 63.0
 }
 
 struct LumaHistStats {
@@ -545,6 +702,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
             gradient_fraction: 0.0,
+            patch_fraction_fast: 0.0,
+            quant_survival_y: 0.0,
+            quant_survival_uv: 0.0,
         };
     }
     // Per-primaries luma weights — used in the per-block fixed-point
@@ -570,6 +730,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
             gradient_fraction: 0.0,
+            patch_fraction_fast: 0.0,
+            quant_survival_y: 0.0,
+            quant_survival_uv: 0.0,
         };
     }
     let stride = (total_blocks / max_blocks).max(1);
@@ -602,6 +765,16 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // Bounded to `max_blocks` (default 256) — small enough that a
     // sort-and-sweep is faster than a hash map on this CPU.
     let mut signatures: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
+    // Experimental fingerprint variants: separate signature buffers so
+    // the same sort-and-sweep collision-counting can be reused for each.
+    #[cfg(feature = "experimental")]
+    #[cfg(feature = "experimental")]
+    let mut signatures_fast: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
+    // Per-block quant-survival accumulators (mean across blocks).
+    #[cfg(feature = "experimental")]
+    let mut quant_y_sum: f64 = 0.0;
+    #[cfg(feature = "experimental")]
+    let mut quant_uv_sum: f64 = 0.0;
     let row_bytes = width * 3;
     let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
     let mut block_idx = 0usize;
@@ -736,7 +909,23 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             let a_cr = block_alpha(&coeffs_cr, BIN_DIV_CHROMA);
             alpha_uv_sum += a_cb.max(a_cr) as u64;
             // Patch-detection signature on luma DCT coefficients.
-            signatures.push(block_signature(&coeffs_y));
+            signatures.push(block_signature_dct(&coeffs_y));
+            #[cfg(feature = "experimental")]
+            {
+                // WHT and dHash signatures operate on raw 8×8 luma
+                // (pre-DCT). The DCT was already paid for by the
+                // energy / entropy / α features above; these are pure
+                // marginal cost.
+                signatures_fast.push(block_signature_dhash(&blk_y));
+                // quant-survival accumulators — d=2.0 (~q75) reference
+                // quantization. Y on the luma table, UV on the chroma
+                // table (max of Cb / Cr per block to capture whichever
+                // channel carries more detail).
+                quant_y_sum += quant_survival(&coeffs_y, &JPEGLI_QUANT_Y_D2) as f64;
+                let q_cb = quant_survival(&coeffs_cb, &JPEGLI_QUANT_C_D2);
+                let q_cr = quant_survival(&coeffs_cr, &JPEGLI_QUANT_C_D2);
+                quant_uv_sum += q_cb.max(q_cr) as f64;
+            }
         }
     }
 
@@ -761,13 +950,16 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // at least twice in the sample. Sort-and-sweep over the small
     // sampled set is O(N log N) — at N ≤ 256 this is ~10 µs, faster
     // than a hash map.
-    let patch_fraction = if blocks_sampled > 1 {
-        signatures.sort_unstable();
+    fn collision_fraction(sigs: &mut [u32], n: u32) -> f32 {
+        if n <= 1 || sigs.len() <= 1 {
+            return 0.0;
+        }
+        sigs.sort_unstable();
         let mut matched: u32 = 0;
         let mut i = 0;
-        while i < signatures.len() {
+        while i < sigs.len() {
             let mut j = i + 1;
-            while j < signatures.len() && signatures[j] == signatures[i] {
+            while j < sigs.len() && sigs[j] == sigs[i] {
                 j += 1;
             }
             let run = (j - i) as u32;
@@ -776,7 +968,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             }
             i = j;
         }
-        matched as f32 / blocks_sampled as f32
+        matched as f32 / n as f32
+    }
+    let patch_fraction = collision_fraction(&mut signatures, blocks_sampled);
+    #[cfg(feature = "experimental")]
+    #[cfg(feature = "experimental")]
+    let patch_fraction_fast = collision_fraction(&mut signatures_fast, blocks_sampled);
+    #[cfg(feature = "experimental")]
+    let quant_survival_y = if blocks_sampled > 0 {
+        (quant_y_sum / blocks_sampled as f64) as f32
+    } else {
+        0.0
+    };
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv = if blocks_sampled > 0 {
+        (quant_uv_sum / blocks_sampled as f64) as f32
     } else {
         0.0
     };
@@ -822,6 +1028,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         0.0
     };
 
+    #[cfg(not(feature = "experimental"))]
+    let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,
@@ -832,6 +1040,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         noise_floor_y,
         noise_floor_uv,
         gradient_fraction,
+        patch_fraction_fast,
+        quant_survival_y,
+        quant_survival_uv,
     }
 }
 

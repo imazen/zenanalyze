@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — patch fingerprint cost-efficient sibling + quant-survival signals
+
+- **`PatchFractionFast`** (`patch_fraction_fast`, id 52, experimental).
+  Cost-efficient sibling of `PatchFraction`: same sort-and-sweep
+  collision-fraction construction, but the per-block fingerprint is a
+  64-bit dHash of raw 8×8 luma folded to 32 bits. **~10× cheaper per
+  block** than the DCT-based `patch_fraction`. AUC 0.852 (DCT 0.880);
+  peak F1 **0.779** (DCT 0.763) on the 219-image labeled corpus.
+  Pearson correlation with `patch_fraction`: 0.99 — same content
+  signal at lower cost. Pick on cost.
+- **`QuantSurvivalY` / `QuantSurvivalUv`** (id 53 / 54, experimental).
+  Mean fraction of luma / chroma AC coefficients surviving jpegli-
+  default quantization at d=2.0 (q≈75). Approximates per-block JPEG
+  file-size cost. Direction is **inverted** vs initial hypothesis on
+  this corpus: photos preserve slightly MORE coefficients than screens
+  (photo sensor noise gives every block some survivable ACs; true-flat
+  screen regions hash to 0% survival). Standalone AUC vs is_screen:
+  Y = 0.413 (|−0.5| = 0.087, weak), Uv = 0.336 (|−0.5| = 0.164,
+  decent in inverted direction). Both genuinely orthogonal to the
+  patch_fraction family (correlation −0.23 to −0.32) — useful as
+  inputs to multi-feature classifiers even if standalone AUC is
+  modest. See imazen/zenanalyze#1 for the ablation.
+
+### Reserved feature IDs
+
+- **id 51** reserved (was `PatchFractionWht`, removed pre-stabilization).
+  WHT-based variant correlated 0.997 with `patch_fraction`, AUC 0.864
+  vs DCT's 0.880, ~2.5× cheaper than DCT but ~4× more expensive than
+  dHash with no AUC win over dHash. Cut in favor of the cheaper
+  `patch_fraction_fast`. ID reserved so future wire-format compat
+  isn't broken if a different WHT-shaped feature wants the slot.
+
 ### Changed (operating thresholds — read this before upgrading consumers)
 
 - **Calibrated `text_likelihood` / `screen_content_likelihood` / `natural_likelihood`

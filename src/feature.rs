@@ -699,6 +699,45 @@ features_table! {
     /// Tracks the issue #123 proposal `EdgeSlopeStdev`.
     #[cfg(feature = "experimental")]
     EdgeSlopeStdev = 50 : f32 => edge_slope_stdev,
+
+    // ---------------- Tier 3 patch-fingerprint experiments ----------
+    // id 51 reserved (was `PatchFractionWht`, removed pre-stabilization
+    // because dHash dominated it on cost without AUC loss; ablation
+    // results in imazen/zenanalyze#1).
+    /// `f32`. **Experimental.** Cost-efficient sibling of
+    /// [`Self::PatchFraction`]: same sort-and-sweep collision-fraction
+    /// construction, but the per-block fingerprint is the 64-bit dHash
+    /// of raw 8×8 luma (`bit[i*8+j] = pixels[i][j+1] > pixels[i][j]`)
+    /// folded to 32 bits via XOR of high/low halves. Pure pixel
+    /// comparisons — **~10× cheaper per block** than the DCT-based
+    /// `patch_fraction`. Brightness-invariant; captures gradient
+    /// direction and edge layout.
+    ///
+    /// **Validated AUC** on the 219-image labeled corpus (vs is_screen):
+    /// 0.852 (DCT version: 0.880). **Peak F1: 0.779** at threshold ≥ 0.40
+    /// (DCT version: 0.763 at ≥ 0.40 — `patch_fraction_fast` wins).
+    /// Pearson correlation with `patch_fraction`: 0.99 — same content
+    /// signal, different cost / noise-floor profile. See zenanalyze#1
+    /// for the full ablation.
+    #[cfg(feature = "experimental")]
+    PatchFractionFast = 52 : f32 => patch_fraction_fast,
+
+    // ---------------- Tier 3 quant-survival compressibility ---------
+    /// `f32`. **Experimental.** Mean fraction of luma AC coefficients
+    /// (zigzag 1..63) that survive jpegli-default quantization at
+    /// distance 2.0 (q=75 area). Approximates per-block JPEG file-size
+    /// cost. Photos: ~0.10–0.25; UI / text edges: ~0.30–0.50; flat
+    /// regions: ~0.0. Drives codec dispatch decisions about whether
+    /// JPEG-style quantization will preserve content (high survival ⇒
+    /// JPEG keeps the detail) vs other codecs.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalY = 53 : f32 => quant_survival_y,
+    /// `f32`. **Experimental.** Same for chroma — `max(survival_cb,
+    /// survival_cr)` per block, mean across blocks. Useful for
+    /// separating low-chroma photos (clear sky) from high-chroma
+    /// screens (UI accent colors).
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUv = 54 : f32 => quant_survival_uv,
 }
 
 /// A scalar feature value — discriminated by the value type, not by

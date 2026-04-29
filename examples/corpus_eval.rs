@@ -97,6 +97,9 @@ fn all_features() -> Vec<AnalysisFeature> {
         LineArtScore,
         SkinToneFraction,
         EdgeSlopeStdev,
+        PatchFractionFast,
+        QuantSurvivalY,
+        QuantSurvivalUv,
     ]
 }
 
