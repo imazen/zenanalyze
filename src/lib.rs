@@ -162,6 +162,7 @@
 #![allow(dead_code)]
 
 mod alpha;
+pub(crate) mod deinterleave;
 pub mod feature;
 pub(crate) mod luma;
 mod palette;

@@ -742,21 +742,13 @@ fn stripe_block_stats_simd(
 
         for dy in 0..STRIPE_H {
             let base = dy * row_bytes + bx * STRIPE_H * 3;
-            // Deinterleave 8 RGB pixels (24 bytes) into per-channel
-            // f32 arrays. The fixed-size `&[u8; 24]` view proves the
-            // size to LLVM, eliminates interior bounds checks, and
-            // lets the autovectorizer (running under the per-tier
-            // target_feature context that `#[magetypes]` set up) emit
-            // a clean AVX2 / NEON-vld3 / WASM-shuffle deinterleave.
+            // Deinterleave 8 RGB pixels (24 bytes) into per-channel f32
+            // arrays via `deinterleave::rgb24_to_planes`. On x86_64+AVX2
+            // this emits vpshufb×6 + vpmovzxbd×3 + vcvtdq2ps×3 instead of
+            // the vpinsrb chain the scalar loop produced. On aarch64 it uses
+            // the hardware vld3.8 deinterleave. Scalar fallback otherwise.
             let chunk: &[u8; 24] = (&stripe_rows[base..base + 24]).try_into().unwrap();
-            let mut r_arr = [0.0f32; 8];
-            let mut g_arr = [0.0f32; 8];
-            let mut b_arr = [0.0f32; 8];
-            for dx in 0..8 {
-                r_arr[dx] = chunk[dx * 3] as f32;
-                g_arr[dx] = chunk[dx * 3 + 1] as f32;
-                b_arr[dx] = chunk[dx * 3 + 2] as f32;
-            }
+            let (r_arr, g_arr, b_arr) = crate::deinterleave::rgb24_to_planes(chunk);
             let r_v = f32x8::load(token, &r_arr);
             let g_v = f32x8::load(token, &g_arr);
             let b_v = f32x8::load(token, &b_arr);
@@ -929,15 +921,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let remainder = chunks.remainder();
     for chunk in chunks {
         let c: &[u8; 24] = chunk.try_into().unwrap();
-        // Deinterleave 8 RGB pixels into per-channel f32 arrays.
-        let mut r_arr = [0.0f32; 8];
-        let mut g_arr = [0.0f32; 8];
-        let mut b_arr = [0.0f32; 8];
-        for i in 0..8 {
-            r_arr[i] = c[i * 3] as f32;
-            g_arr[i] = c[i * 3 + 1] as f32;
-            b_arr[i] = c[i * 3 + 2] as f32;
-        }
+        // Deinterleave 8 RGB pixels into per-channel f32 arrays using the
+        // SIMD shuffle primitive. On x86_64+AVX2: vpshufb×6 + vpmovzxbd×3
+        // + vcvtdq2ps×3. On aarch64: vld3.8 + ucvtf. Scalar fallback otherwise.
+        let (r_arr, g_arr, b_arr) = crate::deinterleave::rgb24_to_planes(c);
         let r = f32x8::load(token, &r_arr);
         let g = f32x8::load(token, &g_arr);
         let b = f32x8::load(token, &b_arr);
