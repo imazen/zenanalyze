@@ -78,3 +78,17 @@ cast_sign_loss = "allow"
 lto = "thin"
 codegen-units = 1
 debug = true
+
+# Even debug / `cargo test` builds run optimization. The crate has
+# pixel-loop SIMD kernels that take 30-100x longer at opt-level=0,
+# which makes the unit-test suite slow enough that timing-based
+# tripwires (the "stride sampling didn't break" perf assertion) fire
+# spuriously on weaker runners. opt-level=2 keeps debug info but
+# enables the same SIMD codegen as release.
+[profile.dev]
+opt-level = 2
+debug = true
+
+[workspace]
+members = ["zenpicker"]
+resolver = "3"

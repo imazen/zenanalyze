@@ -381,7 +381,7 @@ fn run_labeled(tsv: &str, query: &AnalysisQuery, features: &[AnalysisFeature]) {
             }
         }
         println!("{}", line);
-        if found % 25 == 0 {
+        if found.is_multiple_of(25) {
             eprintln!("  {} rows", found);
         }
     }

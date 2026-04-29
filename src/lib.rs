@@ -459,6 +459,7 @@ pub fn analyze_features(
 /// values for the test / oracle override path. `analyze_features`
 /// always passes the canonical [`feature::DEFAULT_PIXEL_BUDGET`] /
 /// [`feature::DEFAULT_HF_MAX_BLOCKS`] constants.
+#[allow(clippy::too_many_arguments)] // monomorphization dispatcher: 4 const-bool tier gates + 5 runtime sub-knobs all live in one specialization site
 fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, const ALPHA: bool>(
     slice: PixelSlice<'_>,
     pixel_budget: usize,

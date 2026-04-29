@@ -1,0 +1,45 @@
+[package]
+name = "zenpicker"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+repository = "https://github.com/imazen/zenanalyze"
+description = "Codec-agnostic picker runtime: loads a packed MLP from bytes, runs SIMD inference, returns argmin under caller-supplied constraints. Used to choose codec configurations from image features at sub-microsecond cost."
+keywords = ["image", "codec", "picker", "mlp", "inference"]
+categories = ["multimedia::images", "no-std"]
+authors = ["Lilith River <lilith@imazen.io>"]
+rust-version = "1.93"
+readme = "README.md"
+
+[lib]
+name = "zenpicker"
+
+[features]
+default = ["std"]
+# Pulls in `std` for `std::error::Error` impls and any std-only test
+# helpers. The crate itself is `no_std + alloc` capable; most
+# consumers will keep `std`.
+std = []
+
+[dependencies]
+# Zero-copy byte → typed slice reinterpret without `unsafe` in our
+# tree. Tiny, no_std, well-audited.
+bytemuck = { version = "1.23", default-features = false }
+# Mandatory SIMD dispatch for the inference matmul (v0.2 work). Free
+# in the workspace — zenanalyze already pulls these in.
+archmage = { version = "0.9.23", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.23", features = ["avx512"] }
+
+[dev-dependencies]
+# Reproducibility for synthetic model tests.
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "small_rng"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+

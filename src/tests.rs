@@ -1332,19 +1332,35 @@ fn tier3_zigzag_split_is_symmetric_in_horiz_vs_vert_detail() {
 fn large_image_completes_in_reasonable_time_with_default_budget() {
     // Loose timing assertion — defends against accidental O(N²) or
     // missing budget plumbing. A 4-megapixel synth at default budget
-    // must complete in well under 1 s on any reasonable platform
-    // (typically <50 ms on x86-64). Not a benchmark — just a "did
-    // somebody disable the stride sampling" tripwire.
+    // is typically <50 ms on x86-64 release. Not a benchmark — just
+    // a "did somebody disable the stride sampling" tripwire.
+    //
+    // Threshold tiers:
+    //   3 s — release builds and `cargo test` (with [profile.dev]
+    //         opt-level=2 in Cargo.toml, dev builds run the same
+    //         SIMD codegen as release).
+    //  10 s — cross-emulated targets: i686 / aarch64 under qemu via
+    //         `cross test`. CI sets `CROSS_RUNTIME=1` for those
+    //         steps. 32-bit pointer width pinpoints i686 directly.
+    //
+    // O(N²) regression on 2048² is tens of seconds even on a fast
+    // box, so the 10 s ceiling still catches the failure mode this
+    // test exists to defend against.
     let rgb = synth_rgb(2048, 2048, 5);
     let t0 = std::time::Instant::now();
     let out = analyze_rgb8(&rgb, 2048, 2048);
     let elapsed = t0.elapsed();
     assert_well_formed(&out, 2048, 2048);
+
+    let is_emulated = std::env::var("CROSS_RUNTIME").is_ok() || cfg!(target_pointer_width = "32");
+    let threshold_ms: u128 = if is_emulated { 10_000 } else { 3_000 };
+
     assert!(
-        elapsed.as_millis() < 1000,
-        "2048×2048 default-budget analyze took {} ms — \
+        elapsed.as_millis() < threshold_ms,
+        "2048×2048 default-budget analyze took {} ms (threshold {} ms) — \
          stride sampling probably broken",
-        elapsed.as_millis()
+        elapsed.as_millis(),
+        threshold_ms,
     );
 }
 
@@ -3503,8 +3519,8 @@ mod sanity_matrix {
         let cap = (w * h) as usize * channels * ch.byte_size();
         let mut buf = Vec::with_capacity(cap);
         for _ in 0..(w * h) {
-            for c in 0..3 {
-                encode_sample(ch, rgb[c], &mut buf);
+            for &channel in &rgb {
+                encode_sample(ch, channel, &mut buf);
             }
             if with_alpha {
                 encode_sample(ch, 1.0, &mut buf);

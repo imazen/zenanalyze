@@ -209,8 +209,8 @@ const BIN_DIV_CHROMA: f32 = 8.0;
 fn block_signature(coeffs: &[[f32; 8]; 8]) -> u32 {
     // Per-block peak |AC| over the first 16 zigzag positions.
     let mut peak: f32 = 0.0;
-    for k in 1..64 {
-        if RASTER_TO_ZIGZAG[k] >= 17 {
+    for (k, &zig) in RASTER_TO_ZIGZAG.iter().enumerate().skip(1) {
+        if zig >= 17 {
             continue;
         }
         let u = k % 8;
@@ -225,8 +225,7 @@ fn block_signature(coeffs: &[[f32; 8]; 8]) -> u32 {
     let threshold = peak * 0.25;
     let mut sig: u32 = 0;
     let mut bit_pos: u32 = 0;
-    for k in 1..64 {
-        let zz = RASTER_TO_ZIGZAG[k];
+    for (k, &zz) in RASTER_TO_ZIGZAG.iter().enumerate().skip(1) {
         if zz >= 17 {
             continue;
         }
@@ -336,9 +335,9 @@ fn luma_histogram_stats(stream: &mut RowStream<'_>) -> LumaHistStats {
     let mut max_between_var: f64 = 0.0;
     let mut sum0: f64 = 0.0;
     let mut count0: f64 = 0.0;
-    for k in 0..31 {
-        sum0 += (k as f64) * (bins[k] as f64);
-        count0 += bins[k] as f64;
+    for (k, &b) in bins.iter().take(31).enumerate() {
+        sum0 += (k as f64) * (b as f64);
+        count0 += b as f64;
         let count1 = n_f as f64 - count0;
         if count0 < 1.0 || count1 < 1.0 {
             continue;
@@ -626,7 +625,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         }
 
         for bx in 0..blocks_x {
-            if block_idx % stride != 0 {
+            if !block_idx.is_multiple_of(stride) {
                 block_idx += 1;
                 continue;
             }
@@ -686,12 +685,12 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             // Per-block: total AC for AQ map + low-AC for noise floor.
             let mut block_ac: f64 = 0.0;
             let mut block_low_y_ac: f64 = 0.0;
-            for k in 1..64 {
+            for (k, &zz) in RASTER_TO_ZIGZAG.iter().enumerate().skip(1) {
                 let u = k % 8;
                 let v = k / 8;
                 let e = (coeffs_y[v][u] * coeffs_y[v][u]) as f64;
                 block_ac += e;
-                if RASTER_TO_ZIGZAG[k] < 16 {
+                if zz < 16 {
                     low_energy += e;
                     block_low_y_ac += e;
                 } else {
@@ -716,8 +715,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             // already-computed coeffs_cb / coeffs_cr.
             let mut low_cb: f64 = 0.0;
             let mut low_cr: f64 = 0.0;
-            for k in 1..64 {
-                if RASTER_TO_ZIGZAG[k] < 16 {
+            for (k, &zz) in RASTER_TO_ZIGZAG.iter().enumerate().skip(1) {
+                if zz < 16 {
                     let u = k % 8;
                     let v = k / 8;
                     low_cb += (coeffs_cb[v][u] * coeffs_cb[v][u]) as f64;
