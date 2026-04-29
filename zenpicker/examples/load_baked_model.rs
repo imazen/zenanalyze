@@ -14,11 +14,6 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use bytemuck;
-
-#[repr(C, align(8))]
-struct AlignedBytes<const N: usize>([u8; N]);
-
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {

@@ -199,6 +199,19 @@ pub(crate) fn f16_bits_to_f32(h: u16) -> f32 {
     f32::from_bits(sign | bits)
 }
 
+fn apply_activation(buf: &mut [f32], act: Activation) {
+    match act {
+        Activation::Identity => {}
+        Activation::Relu => {
+            for v in buf.iter_mut() {
+                if *v < 0.0 {
+                    *v = 0.0;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod f16_tests {
     use super::f16_bits_to_f32;
@@ -267,18 +280,5 @@ mod f16_tests {
         check(0xfc00, f32::NEG_INFINITY, "-inf");
         let nan = f16_bits_to_f32(0x7e00);
         assert!(nan.is_nan(), "0x7e00 should be NaN");
-    }
-}
-
-fn apply_activation(buf: &mut [f32], act: Activation) {
-    match act {
-        Activation::Identity => {}
-        Activation::Relu => {
-            for v in buf.iter_mut() {
-                if *v < 0.0 {
-                    *v = 0.0;
-                }
-            }
-        }
     }
 }

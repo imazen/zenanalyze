@@ -41,7 +41,7 @@ fn f32_to_f16_bits(f: f32) -> u16 {
     let sign = ((bits >> 31) & 1) as u16;
     let exp32 = ((bits >> 23) & 0xff) as i32;
     let mant32 = bits & 0x007f_ffff;
-    let out = if exp32 == 0xff {
+    if exp32 == 0xff {
         // f32 inf/NaN
         let m = if mant32 != 0 {
             ((mant32 >> 13) | 0x200) as u16
@@ -100,15 +100,17 @@ fn f32_to_f16_bits(f: f32) -> u16 {
                 (sign << 15) | ((e as u16) << 10) | (m as u16)
             }
         }
-    };
-    out
+    }
 }
+
+/// Test layer-spec tuple: (in_dim, out_dim, activation_byte, weights, biases).
+type LayerSpec<'a> = (usize, usize, u8, &'a [f32], &'a [f32]);
 
 /// Build a v1 model with f16 weights into `out`. f32 biases.
 fn write_v1_model_f16(
     out: &mut alloc::vec::Vec<u8>,
     n_inputs: usize,
-    layers: &[(usize, usize, u8, &[f32], &[f32])],
+    layers: &[LayerSpec<'_>],
     schema_hash: u64,
 ) {
     let n_outputs = layers.last().unwrap().1;
@@ -154,7 +156,7 @@ fn write_v1_model_f16(
 fn write_v1_model_f32(
     out: &mut alloc::vec::Vec<u8>,
     n_inputs: usize,
-    layers: &[(usize, usize, u8, &[f32], &[f32])], // (in, out, activation, W row-major, b)
+    layers: &[LayerSpec<'_>],
     schema_hash: u64,
 ) {
     let n_outputs = layers.last().unwrap().1;
