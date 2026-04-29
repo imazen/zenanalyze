@@ -35,6 +35,16 @@ jobs:
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
         run: cargo test --no-default-features --features "${{ matrix.features }}" --lib
+      - name: Build zenpicker
+        run: cargo build -p zenpicker
+      - name: Test zenpicker
+        run: cargo test -p zenpicker --lib
+      - name: Clippy zenpicker
+        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        run: cargo clippy -p zenpicker --all-targets -- -D warnings
+      - name: Build zenpicker examples
+        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        run: cargo build -p zenpicker --examples
 
   cross:
     name: Cross (${{ matrix.target }})
