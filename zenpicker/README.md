@@ -6,15 +6,21 @@ Codec-agnostic picker runtime. Loads a packed MLP from bytes, runs SIMD inferenc
 
 ## Documentation map
 
-| Doc | Use it for |
+This README is the canonical entry point — every concept (workflow, output layout, constraints, safety profiles, binary format, performance, roadmap) is documented here. Two subsidiary docs exist for content that's too long to inline:
+
+| Doc | Audience |
 |---|---|
-| **[README.md](README.md)** (this file) | API reference, end-to-end workflow, output layout, constraints, binary format, perf |
-| **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | 30-min tutorial: adopt zenpicker from a new codec start to finish |
-| **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Two-shot rescue design for catastrophic-zensim failures (codec-side) |
-| **[STATUS.md](STATUS.md)** | Current state of the picker work, shipped models, pending follow-ups |
-| **[examples/hybrid_heads_codec_sketch.rs](examples/hybrid_heads_codec_sketch.rs)** | Runnable codec-side reference: `CONFIGS` table, constraints, scalar clamp |
-| **[examples/load_baked_model.rs](examples/load_baked_model.rs)** | Smoke test for the loader on a bake artifact |
-| **[../tools/bake_picker.py](../tools/bake_picker.py)** | sklearn JSON → v1 binary + manifest |
+| **[README.md](README.md)** (this file) | Anyone reading the picker code or designing a new model. Single source of truth for API, format, training shape, safety profiles, codec-side patterns, and roadmap |
+| **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | Tutorial. Walk a new codec from "I have a config grid" to a shipped bake in ~30 min. Skip if you've integrated a codec before |
+| **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Codec-implementation deep dive. Two-shot rescue protocol, RescuePolicy field layout, calibration questions still open |
+
+Reference code:
+
+| File | What it is |
+|---|---|
+| **[examples/hybrid_heads_codec_sketch.rs](examples/hybrid_heads_codec_sketch.rs)** | Runnable codec-side reference: `CELLS` table, constraint mask, `argmin_masked_in_range` + scalar clamp |
+| **[examples/load_baked_model.rs](examples/load_baked_model.rs)** | Smoke test for the loader on any bake artifact |
+| **[../tools/bake_picker.py](../tools/bake_picker.py)** | sklearn JSON → v1 binary + manifest. Codec-agnostic — codec declares `extra_axes` + `schema_version_tag` in its training output |
 | **[../tools/bake_roundtrip_check.py](../tools/bake_roundtrip_check.py)** | Verify Rust loader matches numpy reference forward pass |
 
 ---
@@ -201,6 +207,73 @@ let lambda = if cfg.trellis_on {
 
 A complete codec-side reference lives in [`examples/hybrid_heads_codec_sketch.rs`](examples/hybrid_heads_codec_sketch.rs).
 
+---
+
+## Safety profiles: `size_optimal` vs `zensim_strict`
+
+The default model minimizes **mean bytes** subject to "achieves target_zq on average." That's the right shape for most consumer traffic, but for SLA-bound deployments — image proxies that promise minimum perceptual quality on every request — you want a model whose pick **reliably** hits the target, paying ~10-15 % extra bytes as the cost of that reliability.
+
+zenpicker's binary format and the bake tool support shipping **two model variants per codec, side by side**, so the codec picks at session start based on caller intent:
+
+| Profile | Loss | Reach-rate gate | Effective behavior | When to ship it |
+|---|---|---|---|---|
+| **`size_optimal`** (default) | mean log-bytes | none | Picks smallest *expected* bytes that probably hits target. p99 zensim shortfall unbounded — picker may miss target on adversarial / out-of-distribution images | Default consumer traffic |
+| **`zensim_strict`** (opt-in) | quantile loss at p99 of bytes given target_zq | mask cells with empirical reach rate < 0.99 at target_zq | Picks smallest *worst-case-safe* bytes; cells that historically miss target are excluded before argmin | Quality-SLA traffic, contractually-bound proxies, archival pipelines |
+
+### Why two models is the right number
+
+A "constraint-flavored" third variant doesn't pay back — caller constraints (forbid_xyb, max_subsampling, …) are a *runtime* axis handled by the [`AllowedMask`](#categorical-constraints--allowedmask), not a *training* axis. Held-out ablation showed dropping XYB or trellis as a runtime constraint costs +0.16 pp on the picker, well within the noise floor.
+
+The `size_optimal` ↔ `zensim_strict` split is *real* because the two models train against different objectives. You can't get strict-zensim behavior by masking — the underlying loss function is different.
+
+### What changes between the two bakes
+
+Same architecture, same input schema, same output layout. Differences are entirely on the training side:
+
+1. **Loss function.** `size_optimal` uses mean log-bytes regression (current). `zensim_strict` uses [pinball loss](https://en.wikipedia.org/wiki/Quantile_regression) at q=0.99 of bytes given target_zq, so the predicted byte cost *is* the worst-case-safe estimate.
+2. **Reach-rate gate** baked into the manifest. At training time, for each `(cell, target_zq)` pair, compute the empirical reach rate across the training corpus — fraction of images where that cell achieved ≥ target_zq. ~12 cells × 30 zq targets × 1 byte = 360-byte table per model, fits in the manifest's open extension area. Codec-side helper AND's the gate into the constraint mask before argmin runs.
+3. **Calibration.** Held-out **p99 zensim shortfall** (worst-1% miss vs target) is computed at bake time and recorded in the manifest. Codecs surface it to callers so they know what reliability to advertise.
+
+### Codec-side API
+
+```rust,ignore
+pub enum PickerProfile { SizeOptimal, ZensimStrict }
+
+const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_size_optimal_v2.0.bin");
+const PICKER_ZENSIM_STRICT: &[u8] = include_bytes!("zenjpeg_picker_zensim_strict_v2.0.bin");
+
+pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerError> {
+    let bytes = match profile {
+        PickerProfile::SizeOptimal  => PICKER_SIZE_OPTIMAL,
+        PickerProfile::ZensimStrict => PICKER_ZENSIM_STRICT,
+    };
+    let model = Model::from_bytes(bytes)?;
+    debug_assert_eq!(model.schema_hash(), MY_SCHEMA_HASH);
+    Ok(Picker::new(model))
+}
+
+// At pick time, the strict profile's manifest carries a reach-rate
+// table the codec AND's into the constraint mask:
+let mut mask = constraints.allowed_mask();
+if let Some(reach_table) = manifest.reach_rate_for(target_zq) {
+    for (i, allowed) in mask.iter_mut().enumerate() {
+        *allowed &= reach_table[i] >= 0.99;
+    }
+}
+let cell_idx = picker.argmin_masked_in_range(&features, (0, N_CELLS), &AllowedMask::new(&mask), None)?;
+```
+
+The size and runtime cost of carrying both bakes is small (~100 KB embedded total per codec, no inference-path changes — it's just two `Picker` instances). The codec exposes `PickerProfile` on its public encode API; imageflow / proxy operators flip per-request based on SLA requirements.
+
+### Caller-facing semantics
+
+- **`size_optimal`** advertises: "P50 of achieved zensim ≥ target_zq across web traffic; some images may miss by up to ~5 pp."
+- **`zensim_strict`** advertises: "P99 of achieved zensim ≥ target_zq − 1; ~10-15 % extra bytes vs `size_optimal` average; cells with bad reach gates are masked out."
+
+Combined with the [safety plane's two-shot rescue](SAFETY_PLANE.md), `zensim_strict` becomes the high-reliability tier; `size_optimal` + rescue covers most cases at lower mean cost.
+
+---
+
 ### Legacy: pure categorical (v0.1, v1.0/v1.1 zenjpeg bakes)
 
 In the categorical-only shape, every output is "predicted log-bytes for config index `i`". Codec runtime does `argmin_masked()` over allowed indices and picks one. The `config_names` manifest maps each output index to a tuple of discrete encoder settings — baked into the codec's compile-time `CONFIGS` table.
@@ -364,21 +437,37 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 
 ## Roadmap
 
-- **v0.1** (now): scalar inference, f32 + f16 storage built in, parse + validate v1 format. **Hybrid heads** (categorical bytes + scalar parameter outputs) supported via `Picker::argmin_masked_in_range()` — that's the recommended shape for new bakes. Pure-categorical bakes still load fine for legacy models.
-- **v0.2**: `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT through magetypes.
-- **v0.3**: i8 quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough.
+| Status | Item |
+|---|---|
+| ✅ v0.1 | Scalar inference, f32 + f16 storage built in, parse + validate v1 format |
+| ✅ v0.1 | **Hybrid heads** (categorical bytes + scalar parameter outputs) via `Picker::argmin_masked_in_range()` — recommended shape for new bakes |
+| ✅ v0.1 | Codec-agnostic bake tool (`tools/bake_picker.py`) — codec declares `extra_axes` + `schema_version_tag` in JSON, no script edits needed |
+| 🔜 v0.1 | **`zensim_strict` profile**: pinball-loss training + reach-rate manifest gate. Pairs with `size_optimal` (current) so codecs ship two bakes side by side |
+| 🔜 v0.1 | **Two-shot rescue** loop in zenpicker (codec-agnostic; codec injects verify + rescue strategy). See [SAFETY_PLANE.md](SAFETY_PLANE.md) |
+| ⏳ v0.2 | `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT |
+| ⏳ v0.3 | i8-quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough |
+| ⏳ v0.3 | Generational re-encode picker (round-trip JPEG-source case): see [imazen/zenanalyze#13](https://github.com/imazen/zenanalyze/issues/13) |
 
-The format header has reserved fields for future expansion. New `weight_dtype` values, new activations, and new layer types are additive.
+The format header has reserved fields for future expansion. New `weight_dtype` values, new activations, and new layer types are all additive — bakes against future versions still load on older runtimes (with the unsupported field flagged) until the format major-version bumps.
 
-### Shipped zenjpeg models (side by side, codec picks)
+### Shipped zenjpeg models
 
-| Bake | Size | Mean overhead | Argmin acc | Recommended |
-|---|---:|---:|---:|---|
-| `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20% | 13.8% | legacy, broadest features |
-| `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20% | 10.5% | legacy, reduced 8-feature schema |
-| **`zenjpeg_picker_v2.0_hybrid.bin`** | **50 KB** | **2.76%** | **52.0%** | **default** — hybrid heads, 8-feature schema |
+Same architecture, same input schema, different training objectives. Codec links all three at compile time and picks per request:
 
-Codec consumers default to v2.0; v1.x bakes remain in tree as a fallback for deployments that pinned them before the hybrid rollout.
+| Bake | Size | Mean overhead | Argmin acc | Profile | Recommended |
+|---|---:|---:|---:|---|---|
+| `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20 % | 13.8 % | size_optimal | legacy / broadest 19-feature schema |
+| `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20 % | 10.5 % | size_optimal | legacy / reduced 8-feature schema |
+| **`zenjpeg_picker_v2.0_hybrid.bin`** | **50 KB** | **2.76 %** | **52.0 %** | size_optimal | **default** — hybrid heads, 8-feature schema |
+| `zenjpeg_picker_v2.0_zensim_strict.bin` (planned) | ~50 KB | (TBD: ~12 % expected) | — | zensim_strict | SLA-bound traffic — see [Safety profiles](#safety-profiles-size_optimal-vs-zensim_strict) |
+
+Codec consumers default to v2.0 `size_optimal`; v1.x bakes remain in tree as a fallback for deployments that pinned before the hybrid rollout. The `zensim_strict` bake ships once trained.
+
+### What's not blocking lock-in
+
+Per [Safety plane](SAFETY_PLANE.md), the codec-side rescue loop is the next implementation gap. It re-uses zenjpeg's existing `ZqTarget` iteration scaffolding, so the codec change is small. Open questions captured in SAFETY_PLANE.md: rescue threshold calibration (held-out p99 zensim shortfall), pre-filter ROC, always-verify cost budget at 1MP / 4K.
+
+For the per-codec burden to stay low, the framework lives in zenpicker (codec-agnostic two-shot loop, generic `verify` + `rescue_pick` callbacks); the codec ships a thin glue layer per [FOR_NEW_CODECS.md](FOR_NEW_CODECS.md).
 
 ---
 
