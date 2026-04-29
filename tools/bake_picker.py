@@ -248,6 +248,14 @@ def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | Non
         # … sub-ranges. Optional: pure-categorical models omit it.
         if "hybrid_heads_manifest" in model:
             manifest["hybrid_heads"] = model["hybrid_heads_manifest"]
+        # Safety-profile passthrough — `safety_profile`,
+        # `training_objective`, and `reach_safety` are emitted by
+        # train_hybrid.py for both size_optimal and zensim_strict
+        # bakes. The codec consumer reads `reach_safety.by_zq[<zq>].safe`
+        # and ANDs it into its constraint mask before argmin.
+        for key in ("safety_profile", "training_objective", "reach_safety"):
+            if key in model:
+                manifest[key] = model[key]
         manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         sys.stderr.write(f"wrote manifest {manifest_out}\n")
 

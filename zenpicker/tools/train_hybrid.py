@@ -368,7 +368,16 @@ def evaluate_scalars(pred_chroma, actual_chroma, pred_lam, actual_lam, reach):
 # ---------- Train ----------
 
 
-def train_teacher_per_cell(Xs_tr, bytes_log_tr, chroma_tr, lam_tr, reach_tr, n_cells, params=None):
+def train_teacher_per_cell(
+    Xs_tr,
+    bytes_log_tr,
+    chroma_tr,
+    lam_tr,
+    reach_tr,
+    n_cells,
+    params=None,
+    bytes_quantile=None,
+):
     """Per-cell HistGB regressors for: bytes_log, chroma_scale, lambda.
 
     Three teachers per cell × 12 cells × ~5 s each = ~3 min serial.
@@ -378,6 +387,13 @@ def train_teacher_per_cell(Xs_tr, bytes_log_tr, chroma_tr, lam_tr, reach_tr, n_c
 
     `params` defaults to `HISTGB_FULL` (production training). Pass
     `HISTGB_FAST` for iteration / ablation runs.
+
+    `bytes_quantile`: when not None, switches the bytes head to
+    quantile regression at that q (e.g. 0.99). Used by the
+    `zensim_strict` safety profile so the bytes head predicts the
+    worst-case-safe cost, not the mean. Chroma_scale and lambda
+    heads always stay at mean regression — they predict the within-
+    cell-optimal scalar conditional on the cell being chosen.
     """
     from _picker_lib import HISTGB_FULL, train_teachers_per_cell_parallel
 
@@ -388,8 +404,12 @@ def train_teacher_per_cell(Xs_tr, bytes_log_tr, chroma_tr, lam_tr, reach_tr, n_c
     lam_means = np.nanmean(np.where(lam_tr > 0, lam_tr, np.nan), axis=0)
 
     # Bytes head — per-cell reach mask (cell achieved target_zq).
+    bytes_params = dict(params)
+    if bytes_quantile is not None:
+        bytes_params["loss"] = "quantile"
+        bytes_params["quantile"] = bytes_quantile
     teachers_bytes = train_teachers_per_cell_parallel(
-        Xs_tr, bytes_log_tr, reach_tr, params=params, label="bytes"
+        Xs_tr, bytes_log_tr, reach_tr, params=bytes_params, label="bytes"
     )
 
     # Chroma head — same reach mask (chroma_scale only meaningful
@@ -419,6 +439,45 @@ def teacher_predict_all(teachers, Xs, fallback_means, n_cells):
     return out
 
 
+def compute_reach_safe_cells(
+    bytes_log_tr,
+    reach_tr,
+    meta_tr,
+    n_cells,
+    zq_targets,
+    threshold: float,
+) -> dict:
+    """Per-target_zq, return the per-cell empirical reach rate and
+    the boolean safety mask (`reach_rate >= threshold`).
+
+    Used by the `zensim_strict` profile: cells whose historical reach
+    rate at a target_zq band is below `threshold` (default 0.99) are
+    masked out at inference. Codec consumers AND this gate with their
+    caller mask before argmin.
+
+    Returns:
+        {
+          "threshold": float,
+          "by_zq": {str(zq): {"reach_rate": [f32; n_cells],
+                              "safe": [bool; n_cells]}},
+        }
+    """
+    out = {"threshold": float(threshold), "by_zq": {}}
+    for zq in zq_targets:
+        zq_rows = [i for i, m in enumerate(meta_tr) if m[2] == zq]
+        if not zq_rows:
+            continue
+        zq_idx = np.array(zq_rows)
+        rch = reach_tr[zq_idx]
+        rate = rch.mean(axis=0).astype(np.float32)
+        safe = (rate >= threshold).tolist()
+        out["by_zq"][str(zq)] = {
+            "reach_rate": [float(x) for x in rate],
+            "safe": [bool(x) for x in safe],
+        }
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -428,8 +487,64 @@ def main():
         "KEEP_FEATURES/parse_config_name. Example: zenjpeg_picker_config (which "
         "must be importable on PYTHONPATH).",
     )
+    parser.add_argument(
+        "--objective",
+        choices=["size_optimal", "zensim_strict"],
+        default="size_optimal",
+        help="Safety profile. `size_optimal` (default) trains the bytes head "
+        "with mean log-bytes regression — minimum mean cost subject to reach. "
+        "`zensim_strict` trains with quantile regression at --bytes-quantile "
+        "(default 0.99) and emits a per-zq reach-rate gate; cells whose "
+        "empirical reach rate is below --reach-threshold at a given target "
+        "are masked out at inference.",
+    )
+    parser.add_argument(
+        "--bytes-quantile",
+        type=float,
+        default=0.99,
+        help="Quantile for the bytes head when --objective=zensim_strict. "
+        "Default 0.99: bytes prediction is the p99 worst-case cost so "
+        "argmin biases toward configs that are safe at the tail.",
+    )
+    parser.add_argument(
+        "--reach-threshold",
+        type=float,
+        default=0.99,
+        help="Per-cell empirical reach-rate floor for the zensim_strict "
+        "safety gate. Cells with reach_rate < threshold at a given "
+        "target_zq are excluded from the runtime mask. Default 0.99.",
+    )
+    parser.add_argument(
+        "--out-suffix",
+        default=None,
+        help="Override the OUT_JSON / OUT_LOG basename suffix. Defaults to "
+        "the codec config's OUT_JSON for size_optimal, and "
+        "<basename>_zensim_strict for zensim_strict.",
+    )
     args = parser.parse_args()
     load_codec_config(args.codec_config)
+
+    # Per-objective output naming. The codec config defines the
+    # baseline OUT_JSON/OUT_LOG; we suffix when training a non-default
+    # safety profile so both bakes can co-exist.
+    global OUT_JSON, OUT_LOG
+    if args.out_suffix is not None:
+        suffix = args.out_suffix
+    elif args.objective == "zensim_strict":
+        suffix = "_zensim_strict"
+    else:
+        suffix = ""
+    if suffix:
+        OUT_JSON = OUT_JSON.with_name(OUT_JSON.stem + suffix + OUT_JSON.suffix)
+        OUT_LOG = OUT_LOG.with_name(OUT_LOG.stem + suffix + OUT_LOG.suffix)
+    sys.stderr.write(
+        f"Training objective: {args.objective}\n"
+        f"  bytes head loss: "
+        f"{'quantile q=' + str(args.bytes_quantile) if args.objective == 'zensim_strict' else 'mean (squared error)'}\n"
+        f"  reach gate: "
+        f"{'>= ' + str(args.reach_threshold) + ' per zq band' if args.objective == 'zensim_strict' else 'none (any reachable cell allowed)'}\n"
+        f"  output JSON: {OUT_JSON}\n"
+    )
 
     sys.stderr.write(f"Loading {PARETO}...\n")
     pareto = load_pareto(PARETO)
@@ -467,8 +582,9 @@ def main():
     meta_va = [meta[i] for i in va]
 
     # --- Teacher
+    bytes_quantile = args.bytes_quantile if args.objective == "zensim_strict" else None
     t_bytes, t_chroma, t_lambda, cs_means, lam_means = train_teacher_per_cell(
-        Xs_tr, bl_tr, cs_tr, lam_tr, rch_tr, n_cells
+        Xs_tr, bl_tr, cs_tr, lam_tr, rch_tr, n_cells, bytes_quantile=bytes_quantile
     )
     sys.stderr.write("\nGenerating teacher soft targets (val + train)...\n")
     bytes_pred_tr = teacher_predict_all(t_bytes, Xs_tr, np.nanmean(bl_tr, axis=0), n_cells)
@@ -531,12 +647,20 @@ def main():
         f"lambda {student_scalars['lambda']:.3f}\n"
     )
 
+    # --- Per-zq reach-rate gate (zensim_strict only; recorded
+    # always so the manifest is shape-stable across profiles)
+    meta_tr = [meta[i] for i in tr]
+    reach_safety = compute_reach_safe_cells(
+        bl_tr, rch_tr, meta_tr, n_cells, ZQ_TARGETS, args.reach_threshold
+    )
+
     # --- Persist
     n_params = sum(c.size + i.size for c, i in zip(student.coefs_, student.intercepts_))
     out = {
         "n_inputs": int(Xe.shape[1]),
         "n_outputs": 3 * n_cells,
         "n_cells": n_cells,
+        "safety_profile": args.objective,
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
         "scaler_mean": scaler.mean_.tolist(),
@@ -560,6 +684,14 @@ def main():
                 0.0,
             ),
         },
+        "training_objective": {
+            "name": args.objective,
+            "bytes_quantile": (
+                args.bytes_quantile if args.objective == "zensim_strict" else None
+            ),
+            "reach_threshold": args.reach_threshold,
+        },
+        "reach_safety": reach_safety,
         "teacher_metrics": {"argmin": teacher_argmin, "scalars": teacher_scalars},
         "student_metrics": {"argmin": student_argmin, "scalars": student_scalars},
     }
@@ -575,6 +707,24 @@ def main():
         sys.stderr.write(s + "\n")
 
     w("\n# Hybrid-heads picker — categorical bytes + scalar (chroma_scale, lambda)")
+    w(f"Safety profile: {args.objective}")
+    if args.objective == "zensim_strict":
+        w(f"  bytes head: quantile q={args.bytes_quantile}")
+        w(f"  reach gate: cells with reach_rate < {args.reach_threshold} per zq are masked")
+        # Quick summary of how many cells survive the gate at each zq
+        # band — useful sanity-check during training.
+        for zq_str, info in sorted(
+            reach_safety["by_zq"].items(), key=lambda kv: int(kv[0])
+        ):
+            n_safe = sum(1 for s in info["safe"] if s)
+            w(
+                f"    zq={int(zq_str):3d}: {n_safe:>2d}/{n_cells} cells safe "
+                f"(rates: min {min(info['reach_rate']):.2f}, "
+                f"max {max(info['reach_rate']):.2f})"
+            )
+    else:
+        w("  bytes head: mean (squared error)")
+        w("  reach gate: none — any reachable cell allowed at inference")
     w(f"Train rows: {len(tr)}, val rows: {len(va)}")
     w(f"n_cells: {n_cells}, output_dim: {3 * n_cells}")
     w(f"Student: MLP {Xe.shape[1]} -> 128 -> 128 -> {3 * n_cells}, "

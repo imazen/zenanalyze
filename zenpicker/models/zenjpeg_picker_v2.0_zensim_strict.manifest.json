@@ -1288,12 +1288,12 @@
     },
     "threshold": 0.99
   },
-  "safety_profile": "size_optimal",
+  "safety_profile": "zensim_strict",
   "schema_hash": "0xe39b0b25870d23aa",
   "schema_version_tag": "zenpicker.v1.generic",
   "training_objective": {
-    "bytes_quantile": null,
-    "name": "size_optimal",
+    "bytes_quantile": 0.99,
+    "name": "zensim_strict",
     "reach_threshold": 0.99
   }
 }
