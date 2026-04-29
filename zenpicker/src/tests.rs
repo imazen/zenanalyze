@@ -404,6 +404,57 @@ fn f16_weight_dtype_round_trips() {
 }
 
 #[test]
+fn hybrid_heads_argmin_in_range() {
+    // Simulate a 6-output hybrid model: 3 bytes_log + 3 scalar
+    // chroma_scale predictions. Argmin over the bytes-log sub-range
+    // [0..3] should pick the smallest of {2, 1, 3} → idx 1, ignoring
+    // the scalar predictions in [3..6].
+    let mut buf = alloc::vec::Vec::new();
+    write_v1_model_f32(
+        &mut buf,
+        1,
+        &[(
+            1,
+            6,
+            0,
+            &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            &[2.0, 1.0, 3.0, 0.85, 0.95, 1.05],
+        )],
+        0,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+
+    // Bytes head: indices 0..3, all allowed.
+    let mask_all = AllowedMask::new(&[true, true, true]);
+    assert_eq!(
+        picker
+            .argmin_masked_in_range(&[0.0], (0, 3), &mask_all, None)
+            .unwrap(),
+        Some(1),
+        "smallest in bytes head [2,1,3] is idx 1"
+    );
+
+    // Forbid idx 1, expect idx 0.
+    let mask_no1 = AllowedMask::new(&[true, false, true]);
+    assert_eq!(
+        picker
+            .argmin_masked_in_range(&[0.0], (0, 3), &mask_no1, None)
+            .unwrap(),
+        Some(0)
+    );
+
+    // Read the chroma_scale predictions directly (just verifying
+    // they're reachable via predict()).
+    let out = picker.predict(&[0.0]).unwrap();
+    assert_eq!(out.len(), 6);
+    assert!((out[3] - 0.85).abs() < 1e-6);
+    assert!((out[4] - 0.95).abs() < 1e-6);
+    assert!((out[5] - 1.05).abs() < 1e-6);
+}
+
+#[test]
 fn schema_hash_round_trips() {
     let mut buf = alloc::vec::Vec::new();
     write_v1_model_f32(

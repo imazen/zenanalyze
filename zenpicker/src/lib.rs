@@ -53,7 +53,7 @@ mod mask;
 mod model;
 
 pub use error::PickerError;
-pub use mask::AllowedMask;
+pub use mask::{AllowedMask, argmin_masked};
 pub use model::{Activation, LayerView, Model, WeightDtype};
 
 /// Caller-supplied additive cost adjustments applied to the model's
@@ -165,6 +165,37 @@ impl<'a> Picker<'a> {
     ) -> Result<Option<usize>, PickerError> {
         self.predict(features)?;
         Ok(mask::argmin_masked(&self.output, mask, adjust))
+    }
+
+    /// Pick the argmin within a sub-range of the output vector.
+    ///
+    /// Hybrid-heads picker layout (v0.2): the model's output vector
+    /// is laid out as
+    /// `[bytes_log[0..n_cells], scalar1[0..n_cells], scalar2[0..n_cells], …]`.
+    /// The argmin of interest is over `bytes_log` only — not the
+    /// scalar prediction heads. Codec consumers slice the output
+    /// vector and feed the bytes-only sub-range here.
+    ///
+    /// `range.0..range.1` indexes into the output vector. `mask.len()`
+    /// must equal `range.1 - range.0`. Returns the masked-argmin
+    /// index *within the sub-range* (0..(range.1 - range.0)) — add
+    /// `range.0` if you need the absolute index in the full output.
+    pub fn argmin_masked_in_range(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<Option<usize>, PickerError> {
+        self.predict(features)?;
+        let (start, end) = range;
+        if end > self.output.len() || start > end {
+            return Err(PickerError::FeatureLenMismatch {
+                expected: self.output.len(),
+                got: end,
+            });
+        }
+        Ok(mask::argmin_masked(&self.output[start..end], mask, adjust))
     }
 }
 
