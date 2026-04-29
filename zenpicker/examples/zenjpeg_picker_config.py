@@ -30,32 +30,80 @@ from pathlib import Path
 
 # ---------- Paths ----------
 
-# zenjpeg's pareto sweep harness produces these:
+# zenjpeg's pareto sweep harness produces these. The pareto sweep
+# itself (encode + zensim per (image, config, q)) is the expensive
+# step and stays at 2026-04-29; the v2.1 retrain reuses it but pulls
+# the wider analyzer feature set from the features-only
+# `..._v2_1.tsv` re-extraction.
 PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
-FEATURES = Path("benchmarks/zq_pareto_features_2026-04-29.tsv")
+FEATURES = Path("benchmarks/zq_pareto_features_2026-04-29_v2_1.tsv")
 
 # Where to write the trained model + summary:
-OUT_JSON = Path("benchmarks/zq_bytes_hybrid_2026-04-29.json")
-OUT_LOG = Path("benchmarks/zq_bytes_hybrid_2026-04-29.log")
+OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_1.json")
+OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_1.log")
 
 
 # ---------- Schema ----------
 
-# 8-feature reduced schema (validated by zenjpeg's PR #129 ablation;
-# 11 of 19 zenanalyze features dropped including the entire Tier 2
-# chroma sliding-window pass + alpha + palette tiers). See the
-# zenpicker README's "Documentation map" → FOR_NEW_CODECS.md for
-# how the codec runs its own ablation if a different feature set
-# is preferred.
+# v2.1 expanded schema. Original 8-feature reduced set (PR #129
+# ablation winner) plus all stable + experimental analyzer features
+# that are broadly applicable to the photographic / screenshot /
+# line-art mix in the training corpus. After v2.1 trains, run the
+# ablation (`tools/feature_ablation.py` + `tools/feature_group_ablation.py`)
+# to prune.
+#
+# Skipped intentionally:
+#   - HDR-specific features (peak/p99 luminance, hdr_*, wide_gamut_*,
+#     gamut_coverage_*) — corpus is SDR-only; signals collapse to 0
+#   - palette_fits_in_256 / indexed_palette_width — bool/int gating
+#     features that are nearly redundant with distinct_color_bins
+#   - patch_fraction (slow exact form) — superseded by patch_fraction_fast
+#   - composite likelihoods (text/screen/natural_likelihood) — derived
+#     from raw signals already in the set; redundant input to picker
+#   - skin_tone_fraction — too narrow for codec-config picking
+#   - alpha_present (bool) — usually constant per partition
+#   - effective_bit_depth — corpus-wide constant 8
 KEEP_FEATURES = [
+    # Tier 1 (stable)
     "feat_variance",
     "feat_edge_density",
     "feat_uniformity",
     "feat_chroma_complexity",
     "feat_cb_sharpness",
     "feat_cr_sharpness",
+    "feat_flat_color_block_ratio",
+    "feat_colourfulness",
+    "feat_laplacian_variance",
+    "feat_variance_spread",
+    "feat_grayscale_score",
+    # Tier 2 (per-axis chroma sharpness)
+    "feat_cb_horiz_sharpness",
+    "feat_cb_vert_sharpness",
+    "feat_cb_peak_sharpness",
+    "feat_cr_horiz_sharpness",
+    "feat_cr_vert_sharpness",
+    "feat_cr_peak_sharpness",
+    # Tier 3 (sampled DCT)
     "feat_high_freq_energy_ratio",
     "feat_luma_histogram_entropy",
+    "feat_dct_compressibility_y",
+    "feat_dct_compressibility_uv",
+    "feat_patch_fraction_fast",
+    "feat_quant_survival_y",
+    "feat_quant_survival_uv",
+    "feat_aq_map_mean",
+    "feat_aq_map_std",
+    "feat_noise_floor_y",
+    "feat_noise_floor_uv",
+    "feat_edge_slope_stdev",
+    "feat_gradient_fraction",
+    "feat_line_art_score",
+    # Palette
+    "feat_distinct_color_bins",
+    "feat_palette_density",
+    # Alpha (kept for completeness; corpus has some RGBA)
+    "feat_alpha_used_fraction",
+    "feat_alpha_bimodal_score",
 ]
 
 # Zq target grid: step 5 from 0..70 + step 2 from 70..100 (the
