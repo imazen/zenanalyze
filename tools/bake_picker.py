@@ -185,8 +185,8 @@ def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | Non
     if activation != "relu":
         raise SystemExit(f"unsupported activation {activation!r}; only relu is wired today")
 
-    extra_axes = derive_extra_axes(n_inputs, feat_cols)
-    sh = schema_hash(feat_cols, extra_axes, SCHEMA_VERSION_TAG)
+    extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
+    sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
 
     # Header.
     blob = b""
