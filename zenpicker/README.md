@@ -14,13 +14,15 @@ This README is the canonical entry point — every concept (workflow, output lay
 | **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | Tutorial. Walk a new codec from "I have a config grid" to a shipped bake in ~30 min. Skip if you've integrated a codec before |
 | **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Codec-implementation deep dive. Two-shot rescue protocol, RescuePolicy field layout, calibration questions still open |
 
-Reference code:
+Reference code + tools:
 
 | File | What it is |
 |---|---|
 | **[examples/hybrid_heads_codec_sketch.rs](examples/hybrid_heads_codec_sketch.rs)** | Runnable codec-side reference: `CELLS` table, constraint mask, `argmin_masked_in_range` + scalar clamp |
 | **[examples/load_baked_model.rs](examples/load_baked_model.rs)** | Smoke test for the loader on any bake artifact |
-| **[../tools/bake_picker.py](../tools/bake_picker.py)** | sklearn JSON → v1 binary + manifest. Codec-agnostic — codec declares `extra_axes` + `schema_version_tag` in its training output |
+| **[examples/zenjpeg_picker_config.py](examples/zenjpeg_picker_config.py)** | Reference codec config the training pipeline imports — paths, KEEP_FEATURES, ZQ_TARGETS, `parse_config_name`. New codecs copy and edit |
+| **[tools/](tools/README.md)** | Codec-agnostic training pipeline (`train_hybrid.py`, `train_distill.py`, `feature_ablation.py`, …). Each script imports `_picker_lib.py` and a codec config module — see [tools/README.md](tools/README.md) |
+| **[../tools/bake_picker.py](../tools/bake_picker.py)** | sklearn JSON → v1 binary + manifest. Codec-agnostic |
 | **[../tools/bake_roundtrip_check.py](../tools/bake_roundtrip_check.py)** | Verify Rust loader matches numpy reference forward pass |
 
 ---
@@ -48,8 +50,9 @@ zenpicker owns this. Each codec crate owns its `ConfigSpec` enumeration, constra
                 └──────────┬──────────┘
                            ↓
                 ┌─────────────────────┐
-                │  Train teacher      │  ← scripts/zq_bytes_distill.py
-                │  HistGB per-config  │     n_configs × HistGradientBoosting
+                │  Train teacher      │  ← zenpicker/tools/train_hybrid.py
+                │  HistGB per-cell    │     N cells × 3 heads, parallel via joblib
+                │  (parallel)         │     ~30 s on 16 cores
                 └──────────┬──────────┘
                            ↓
                 ┌─────────────────────┐
@@ -81,12 +84,20 @@ Per the project-wide sweep discipline (size × quality × mode × content axes; 
 
 ### Phase 2 — Train + distill
 
-`scripts/zq_bytes_distill.py` (in the codec repo) does both halves:
+The training pipeline lives at [`zenpicker/tools/`](tools/README.md) — codec-agnostic. Each codec writes a small **codec config module** declaring its TSV paths, feature subset, target_zq grid, and config-name parser; the training scripts import it via `--codec-config <module-name>`.
 
-1. **Teacher** — per-config HistGradientBoostingRegressor (max_iter=400, max_depth=8). Predicts log-bytes from the simple feature vector. Accuracy ceiling, but bakes to MB-class artifacts.
-2. **Student** — single shared MLP (`n_inputs → 64 → 64 → n_configs`) with engineered cross-terms (`zq × feat[i]`, `log_pixels`, polynomials, `icc_bytes`). Trained on the teacher's soft targets, not raw labels — closes most of the gap to the teacher.
+```bash
+PYTHONPATH=<zenanalyze>/zenpicker/examples:<zenanalyze>/zenpicker/tools \
+    python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+        --codec-config zenjpeg_picker_config
+```
 
-Output: `benchmarks/zq_bytes_distill_<DATE>.json` carrying `n_inputs`, `n_outputs`, `feat_cols`, `scaler_mean`, `scaler_scale`, `layers[]` (each with `W` and `b`), and a `config_names` mapping for the manifest.
+Two phases inside the script:
+
+1. **Teacher** — per-cell HistGradientBoostingRegressor (max_iter=400, max_depth=8). Predicts log-bytes + per-cell scalar values from the simple feature vector. Trained in parallel via joblib (~30 s for 36 models on a 16-core box vs ~25 min serial).
+2. **Student** — single shared MLP (`n_inputs → 128 → 128 → 3*N_cells`) with engineered cross-terms (`zq × feat[i]`, `log_pixels`, polynomials, `icc_bytes`). Trained on the teacher's soft targets, not raw labels — closes most of the gap to the teacher.
+
+Output JSON carries `n_inputs`, `n_outputs`, `feat_cols`, `scaler_mean`, `scaler_scale`, `layers[]` (each with `W` and `b`), and a `hybrid_heads_manifest` declaring the categorical-vs-scalar layout. See [tools/README.md](tools/README.md) for the full file map and the codec-config contract.
 
 ### Phase 3 — Bake to binary
 
