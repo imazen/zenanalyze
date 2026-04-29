@@ -832,6 +832,7 @@ fn stripe_block_stats_simd(
 ///
 /// Edge pass: still scalar (per-tier target_feature region from the
 /// `#[magetypes]` macro lets LLVM autovec the simple stencil).
+#[allow(clippy::too_many_arguments)] // SIMD kernel — token + slices + strides + accumulators
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     token: Token,
@@ -1237,6 +1238,7 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
 /// SIMD iter. The stencil reads from contiguous f32 arrays so the
 /// shifted-neighbour loads are aligned and pure mul/add — LLVM emits
 /// the FMA chain directly.
+#[allow(clippy::too_many_arguments)] // SIMD kernel — token + 3 row slices + dims + accumulators
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn accumulate_laplacian_simd<const BT601: bool>(
     token: Token,
@@ -1517,6 +1519,7 @@ fn accumulate_edge_slope_sums(
     let mut sum: f64 = 0.0;
     let mut sq_sum: f64 = 0.0;
     let mut count: u64 = 0;
+    let qrgb = [weights.qr, weights.qg, weights.qb];
     match next_row {
         Some(nr) => {
             let nr = &nr[..row_bytes - 3];
@@ -1524,24 +1527,24 @@ fn accumulate_edge_slope_sums(
                 row_left,
                 row_right,
                 nr,
-                weights.qr,
-                weights.qg,
-                weights.qb,
-                &mut sum,
-                &mut sq_sum,
-                &mut count,
+                qrgb,
+                EdgeSlopeAcc {
+                    sum: &mut sum,
+                    sq_sum: &mut sq_sum,
+                    count: &mut count,
+                },
             );
         }
         None => {
             accumulate_edge_slope_horizontal(
                 row_left,
                 row_right,
-                weights.qr,
-                weights.qg,
-                weights.qb,
-                &mut sum,
-                &mut sq_sum,
-                &mut count,
+                qrgb,
+                EdgeSlopeAcc {
+                    sum: &mut sum,
+                    sq_sum: &mut sq_sum,
+                    count: &mut count,
+                },
             );
         }
     }
@@ -1556,18 +1559,25 @@ fn accumulate_edge_slope_sums(
 /// length slices give LLVM bounds-check-free indexing on the inner
 /// triplet of u8 loads, which the per-arch target_feature macro
 /// expansion then vectorises.
+/// Accumulator triple for the edge-slope kernels — `(sum, sq_sum,
+/// count)` of per-pixel gradient magnitudes that crossed the
+/// threshold. Bundles three out-params into one to keep the kernel
+/// signature under clippy's 7-arg limit while staying allocation-free.
+pub(crate) struct EdgeSlopeAcc<'a> {
+    pub sum: &'a mut f64,
+    pub sq_sum: &'a mut f64,
+    pub count: &'a mut u64,
+}
+
 #[archmage::autoversion(v4x, v4, v3, neon, scalar)]
 fn accumulate_edge_slope_with_next(
     row_left: &[u8],
     row_right: &[u8],
     next_row: &[u8],
-    qr: i32,
-    qg: i32,
-    qb: i32,
-    sum: &mut f64,
-    sq_sum: &mut f64,
-    count: &mut u64,
+    qrgb: [i32; 3],
+    acc: EdgeSlopeAcc<'_>,
 ) {
+    let [qr, qg, qb] = qrgb;
     let mut s: f64 = 0.0;
     let mut sq: f64 = 0.0;
     let mut n: u64 = 0;
@@ -1589,9 +1599,9 @@ fn accumulate_edge_slope_with_next(
             n += 1;
         }
     }
-    *sum += s;
-    *sq_sum += sq;
-    *count += n;
+    *acc.sum += s;
+    *acc.sq_sum += sq;
+    *acc.count += n;
 }
 
 /// Edge-slope kernel for the "no next row" case (last image row).
@@ -1601,13 +1611,10 @@ fn accumulate_edge_slope_with_next(
 fn accumulate_edge_slope_horizontal(
     row_left: &[u8],
     row_right: &[u8],
-    qr: i32,
-    qg: i32,
-    qb: i32,
-    sum: &mut f64,
-    sq_sum: &mut f64,
-    count: &mut u64,
+    qrgb: [i32; 3],
+    acc: EdgeSlopeAcc<'_>,
 ) {
+    let [qr, qg, qb] = qrgb;
     let mut s: f64 = 0.0;
     let mut sq: f64 = 0.0;
     let mut n: u64 = 0;
@@ -1623,7 +1630,7 @@ fn accumulate_edge_slope_horizontal(
             n += 1;
         }
     }
-    *sum += s;
-    *sq_sum += sq;
-    *count += n;
+    *acc.sum += s;
+    *acc.sq_sum += sq;
+    *acc.count += n;
 }

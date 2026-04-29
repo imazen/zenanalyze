@@ -65,4 +65,10 @@ jobs:
       - name: Build
         run: cross build --target ${{ matrix.target }} --features "experimental,composites"
       - name: Test
+        env:
+          # Surfaces inside the qemu guest so tests can detect emulated runtime
+          # and apply looser timing thresholds. `cross` passes through
+          # `CROSS_RUNTIME` automatically (passthrough is the default for
+          # uppercase env vars set in the calling shell).
+          CROSS_RUNTIME: "1"
         run: cross test --target ${{ matrix.target }} --features "experimental,composites" --lib
