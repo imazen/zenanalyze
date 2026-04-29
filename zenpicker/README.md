@@ -250,8 +250,8 @@ Same architecture, same input schema, same output layout. Differences are entire
 ```rust,ignore
 pub enum PickerProfile { SizeOptimal, ZensimStrict }
 
-const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_size_optimal_v2.0.bin");
-const PICKER_ZENSIM_STRICT: &[u8] = include_bytes!("zenjpeg_picker_zensim_strict_v2.0.bin");
+const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_v2.0_hybrid.bin");
+const PICKER_ZENSIM_STRICT: &[u8] = include_bytes!("zenjpeg_picker_v2.0_zensim_strict.bin");
 
 pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerError> {
     let bytes = match profile {
@@ -263,18 +263,26 @@ pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerErro
     Ok(Picker::new(model))
 }
 
-// At pick time, the strict profile's manifest carries a reach-rate
-// table the codec AND's into the constraint mask:
-let mut mask = constraints.allowed_mask();
-if let Some(reach_table) = manifest.reach_rate_for(target_zq) {
+// At pick time, the manifest carries a per-target-zq reach-safety
+// table the codec ANDs into the constraint mask. For size_optimal
+// you can ignore the gate; for zensim_strict you should honor it.
+//
+//   manifest.reach_safety.by_zq["85"].safe == [bool; n_cells]
+//
+let mut mask = constraints.allowed_mask();   // from caller intent
+if profile == PickerProfile::ZensimStrict
+    && let Some(safe_cells) = manifest_safe_for(target_zq)
+{
     for (i, allowed) in mask.iter_mut().enumerate() {
-        *allowed &= reach_table[i] >= 0.99;
+        *allowed &= safe_cells[i];
     }
 }
 let cell_idx = picker.argmin_masked_in_range(&features, (0, N_CELLS), &AllowedMask::new(&mask), None)?;
 ```
 
 The size and runtime cost of carrying both bakes is small (~100 KB embedded total per codec, no inference-path changes — it's just two `Picker` instances). The codec exposes `PickerProfile` on its public encode API; imageflow / proxy operators flip per-request based on SLA requirements.
+
+The reach-safety table is shipped in **both** profiles' manifests (size_optimal carries it for transparency / debugging; the codec just doesn't apply it under that profile). The training script (`tools/train_hybrid.py --reach-threshold 0.99`) computes it as the empirical fraction of training rows in which each cell reached `target_zq`, then thresholds.
 
 ### Caller-facing semantics
 
@@ -453,8 +461,9 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 | ✅ v0.1 | Scalar inference, f32 + f16 storage built in, parse + validate v1 format |
 | ✅ v0.1 | **Hybrid heads** (categorical bytes + scalar parameter outputs) via `Picker::argmin_masked_in_range()` — recommended shape for new bakes |
 | ✅ v0.1 | Codec-agnostic bake tool (`tools/bake_picker.py`) — codec declares `extra_axes` + `schema_version_tag` in JSON, no script edits needed |
-| 🔜 v0.1 | **`zensim_strict` profile**: pinball-loss training + reach-rate manifest gate. Pairs with `size_optimal` (current) so codecs ship two bakes side by side |
-| 🔜 v0.1 | **Two-shot rescue** loop in zenpicker (codec-agnostic; codec injects verify + rescue strategy). See [SAFETY_PLANE.md](SAFETY_PLANE.md) |
+| ✅ v0.1 | **`zensim_strict` profile**: pinball-loss training (`train_hybrid.py --objective zensim_strict`) + per-`target_zq` reach-rate gate in the manifest. Pairs with `size_optimal` so codecs ship both bakes side by side |
+| ✅ v0.1 | **Top-K argmin** (`Picker::argmin_masked_top_k::<K>` / `argmin_masked_top_k_in_range`) for cached second-best picks — backbone of the codec-side rescue path |
+| ✅ v0.1 | **Rescue plumbing** (`zenpicker::rescue::{should_rescue, RescuePolicy, RescueStrategy, RescueDecision}`) — codec-agnostic decision logic; codec injects `verify` + `rescue_pick`. See [SAFETY_PLANE.md](SAFETY_PLANE.md) |
 | ⏳ v0.2 | `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT |
 | ⏳ v0.3 | i8-quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough |
 | ⏳ v0.3 | Generational re-encode picker (round-trip JPEG-source case): see [imazen/zenanalyze#13](https://github.com/imazen/zenanalyze/issues/13) |
@@ -470,15 +479,40 @@ Same architecture, same input schema, different training objectives. Codec links
 | `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20 % | 13.8 % | size_optimal | legacy / broadest 19-feature schema |
 | `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20 % | 10.5 % | size_optimal | legacy / reduced 8-feature schema |
 | **`zenjpeg_picker_v2.0_hybrid.bin`** | **50 KB** | **2.76 %** | **52.0 %** | size_optimal | **default** — hybrid heads, 8-feature schema |
-| `zenjpeg_picker_v2.0_zensim_strict.bin` (planned) | ~50 KB | (TBD: ~12 % expected) | — | zensim_strict | SLA-bound traffic — see [Safety profiles](#safety-profiles-size_optimal-vs-zensim_strict) |
+| `zenjpeg_picker_v2.0_zensim_strict.bin` | 50 KB | 6.11 % | 41.7 % | zensim_strict | SLA-bound traffic — pinball-q99 bytes head + per-zq reach gate. See [Safety profiles](#safety-profiles-size_optimal-vs-zensim_strict) |
 
-Codec consumers default to v2.0 `size_optimal`; v1.x bakes remain in tree as a fallback for deployments that pinned before the hybrid rollout. The `zensim_strict` bake ships once trained.
+Codec consumers default to v2.0 `size_optimal`; v1.x bakes remain in tree as a fallback for deployments that pinned before the hybrid rollout. The v2.0 `zensim_strict` bake ships side-by-side for SLA-bound traffic.
+
+The zensim_strict overhead (6.11% mean) is roughly 2.2× size_optimal because the pinball-q99 bytes head biases toward worst-case-safe configs and the reach gate masks low-confidence cells. The reach gate is *very* strict: at `target_zq ≥ 96`, fewer than 2 cells survive `reach_rate ≥ 0.99` because the underlying configs simply don't reach that threshold reliably across the corpus. Codec consumers should pair zensim_strict with the [two-shot rescue](SAFETY_PLANE.md) so requests above the gate budget fall through to a `KnownGoodFallback` rather than failing loudly.
 
 ### What's not blocking lock-in
 
 Per [Safety plane](SAFETY_PLANE.md), the codec-side rescue loop is the next implementation gap. It re-uses zenjpeg's existing `ZqTarget` iteration scaffolding, so the codec change is small. Open questions captured in SAFETY_PLANE.md: rescue threshold calibration (held-out p99 zensim shortfall), pre-filter ROC, always-verify cost budget at 1MP / 4K.
 
-For the per-codec burden to stay low, the framework lives in zenpicker (codec-agnostic two-shot loop, generic `verify` + `rescue_pick` callbacks); the codec ships a thin glue layer per [FOR_NEW_CODECS.md](FOR_NEW_CODECS.md).
+For the per-codec burden to stay low, the picker-side framework lives in `zenpicker::rescue` (decision logic + threshold predicate + strategy/decision enums) and `Picker::argmin_masked_top_k` (cached second-best). Encode and verify themselves stay codec-side because zenpicker has no decoder, no zensim, no jpegli/lambda awareness — but the codec only writes the orchestration glue, not the rules. Sketch:
+
+```rust
+use zenpicker::{rescue::{should_rescue, RescuePolicy, RescueStrategy, RescueDecision}, AllowedMask};
+
+let top2 = picker.argmin_masked_top_k_in_range::<2>(&features, (0, N_CELLS), &mask, None)?;
+let first = top2[0].expect("mask non-empty");
+
+let bytes_0 = codec_encode(first, /* scalars from picker output */);
+let achieved = codec_verify(&bytes_0, &source);
+
+let policy = RescuePolicy::default(); // threshold 3.0pp, ConservativeBump
+let bytes_1 = match should_rescue(achieved, target_zq, &policy) {
+    RescueDecision::Ship => bytes_0,
+    RescueDecision::Rescue => match policy.strategy {
+        RescueStrategy::SecondBestPick => codec_encode(top2[1].unwrap_or(first), /* … */),
+        RescueStrategy::ConservativeBump => codec_encode_bumped(first, target_zq, achieved),
+        RescueStrategy::KnownGoodFallback => codec_encode_known_good(target_zq),
+    },
+};
+ship_best_of(bytes_0, bytes_1)
+```
+
+Per [FOR_NEW_CODECS.md](FOR_NEW_CODECS.md), the codec wires `codec_encode` + `codec_verify` + `codec_encode_bumped` + `codec_encode_known_good` and zenpicker contributes everything else.
 
 ---
 
