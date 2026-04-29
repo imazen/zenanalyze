@@ -289,6 +289,21 @@ The features vector packs zenanalyze outputs in the order declared in the bake m
 
 ---
 
+## Optional — safety profiles + rescue
+
+Once your codec ships a working `size_optimal` bake, you can add a second `zensim_strict` bake (worst-case-safe sizing) and wire the two-shot rescue path. Both use additive APIs zenpicker already exposes — no schema change.
+
+| Step | Where |
+|---|---|
+| Train the strict variant | `tools/train_hybrid.py --objective zensim_strict --codec-config <your_codec>_picker_config` |
+| Ship both bakes side-by-side via `include_bytes!` | `models/<your_codec>_picker_v2.0_{hybrid,zensim_strict}.bin` |
+| Honor the runtime reach gate | `zenpicker::reach_gate_mask(reach_rates_for_target_zq, threshold, &mut gate)` then AND with your constraint mask |
+| Run the two-shot rescue loop | `Picker::argmin_masked_top_k::<2>` for cached second-best + `zenpicker::rescue::should_rescue` for the threshold predicate |
+
+The full design + the codec orchestration sketch live in [SAFETY_PLANE.md](SAFETY_PLANE.md) and the README's [Safety profiles](README.md#safety-profiles-size_optimal-vs-zensim_strict) section. Defer all of this to v2 — your codec ships fine on `size_optimal` alone.
+
+---
+
 ## When to re-bake
 
 - Your codec's config grid changed (added/removed a knob).

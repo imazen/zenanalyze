@@ -107,20 +107,42 @@ Imageflow scrapes these per request to detect attack waves: sustained `picker_re
 
 ## zenpicker API surface (additive only)
 
-zenpicker is frozen at 0.1.x. We need one additive helper for the second-best pick:
+All shipped in 0.1.x. No schema change, no `.bin` format change.
 
 ```rust
-pub fn argmin_masked_top_k<const K: usize>(
-    &mut self,
-    features: &[f32],
-    mask: &AllowedMask<'_>,
-    adjust: Option<CostAdjust<'_>>,
-) -> Result<[Option<usize>; K], PickerError>;
+// Cached second-best for SecondBestPick rescue.
+impl<'a> Picker<'a> {
+    pub fn argmin_masked_top_k<const K: usize>(
+        &mut self,
+        features: &[f32],
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<[Option<usize>; K], PickerError>;
+
+    pub fn argmin_masked_top_k_in_range<const K: usize>(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<[Option<usize>; K], PickerError>;
+}
+
+// Codec-agnostic decision logic.
+pub mod rescue {
+    pub struct RescuePolicy { pub rescue_threshold_pp: f32, pub strategy: RescueStrategy }
+    pub enum RescueStrategy { ConservativeBump, SecondBestPick, KnownGoodFallback }
+    pub enum RescueDecision { Ship, Rescue }
+    pub fn should_rescue(achieved_zq: f32, target_zq: f32, &RescuePolicy) -> RescueDecision;
+}
+
+// Reach gate as a runtime parameter — codec / caller picks threshold.
+pub fn reach_gate_mask(reach_rates: &[f32], threshold: f32, out: &mut [bool]);
 ```
 
-`K=2` covers our use case. No new types, no schema change, model `.bin` unchanged.
+`K=2` covers the second-best-pick use case. The reach gate is a *parameter*, not a baked constant — the bake records raw `reach_rate[c]` per `target_zq` in the manifest's `reach_safety` table, and codec consumers convert with `reach_gate_mask` at request time using whatever threshold matches the caller's `QualityIntent` (0.99 strict / 0.95 high-q / 0.0 max-quality).
 
-The bake-time tripwire ("predicted-bytes confidence quantile per cell" used by the cheap pre-filter) is bake-side metadata: pack a `[f32; n_cells]` of the bottom-decile threshold into the `.bin`'s post-header extension area (the format already advertises `header_size` for forward compat). Picker exposes it via a passthrough getter.
+The bake-time tripwire ("predicted-bytes confidence quantile per cell" used by the cheap pre-filter) is bake-side metadata: pack a `[f32; n_cells]` of the bottom-decile threshold into the `.bin`'s post-header extension area (the format already advertises `header_size` for forward compat). Picker exposes it via a passthrough getter — *not yet implemented*; `reach_safety` covers the SLA-mode gate today.
 
 ## Adversarial-corpus regression test
 
@@ -143,5 +165,8 @@ The bake-time tripwire ("predicted-bytes confidence quantile per cell" used by t
 - `zenjpeg/zenjpeg/src/encode/zq.rs` — the iteration loop; gains `RescuePolicy` field
 - `zenjpeg/zenjpeg/src/encode/byte_encoders.rs` — `EncodeMetrics` extension
 - `zenjpeg/zenjpeg/src/encode/encoder_types.rs` — `RescueStrategy` / `PickerWarning` enums
-- `zenanalyze/zenpicker/src/lib.rs` — `argmin_masked_top_k`
-- `zenanalyze/zenpicker/src/mask.rs` — supporting helpers
+- `zenanalyze/zenpicker/src/lib.rs` — `argmin_masked_top_k`, `reach_gate_mask` re-exports
+- `zenanalyze/zenpicker/src/mask.rs` — `argmin_masked_top_k`, `reach_gate_mask` impl
+- `zenanalyze/zenpicker/src/rescue.rs` — `should_rescue`, `RescuePolicy`, `RescueStrategy`, `RescueDecision`
+- `zenanalyze/zenpicker/tools/train_hybrid.py` — `--objective {size_optimal,zensim_strict}`, `--reach-threshold`
+- `zenanalyze/tools/bake_picker.py` — `safety_profile` / `training_objective` / `reach_safety` manifest passthrough
