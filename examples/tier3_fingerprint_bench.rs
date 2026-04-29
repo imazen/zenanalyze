@@ -47,15 +47,28 @@ fn run_at(width: u32, height: u32, query: &AnalysisQuery, label: &str) {
 }
 
 fn main() {
-    // Just the tier-3 fingerprint family — measures the SIMD wins
-    // without amortizing across other features' costs.
+    // Three queries to measure the DCT-gate impact:
     let fingerprint_set = FeatureSet::new()
         .with(AnalysisFeature::PatchFractionFast)
         .with(AnalysisFeature::QuantSurvivalY)
         .with(AnalysisFeature::QuantSurvivalUv);
-    let q = AnalysisQuery::new(fingerprint_set);
+    let entropy_only = FeatureSet::new().with(AnalysisFeature::LumaHistogramEntropy);
+    let entropy_and_dct = FeatureSet::new()
+        .with(AnalysisFeature::LumaHistogramEntropy)
+        .with(AnalysisFeature::HighFreqEnergyRatio);
+
+    let q_fp = AnalysisQuery::new(fingerprint_set);
+    let q_entropy = AnalysisQuery::new(entropy_only);
+    let q_both = AnalysisQuery::new(entropy_and_dct);
 
     for (w, h) in &[(1024, 1024), (2048, 2048), (4096, 4096)] {
-        run_at(*w, *h, &q, "fingerprint+quant_survival");
+        run_at(*w, *h, &q_fp, "fingerprint+quant_survival (DCT on)");
+        run_at(
+            *w,
+            *h,
+            &q_entropy,
+            "luma_histogram_entropy ONLY (DCT skipped)",
+        );
+        run_at(*w, *h, &q_both, "entropy + HighFreqEnergyRatio (DCT on)");
     }
 }

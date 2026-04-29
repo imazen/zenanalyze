@@ -39,10 +39,30 @@ pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 1024;
 
 /// Fill in `high_freq_energy_ratio` and `luma_histogram_entropy`.
 ///
+/// The `run_dct` runtime bool gates the per-block DCT pass — when
+/// **false**, callers asked only for `LumaHistogramEntropy` /
+/// `LineArtScore` (or neither) and the entire `dct_stats()` call is
+/// skipped, saving the ~0.97 ms-per-Mpx cost. The cheap luma
+/// histogram pass still runs unconditionally.
+///
+/// Bool rather than `const` const-generic to avoid doubling the
+/// outer dispatch table (PAL/T2/T3/ALPHA × DCT = 32 monomorphizations
+/// vs the current 16). The single runtime branch costs ~1 ns vs the
+/// ~0.97 ms saving — const-fold gain on this gate is negligible
+/// because the saved work is the entire dct_stats body, not the
+/// gate check.
+///
+/// Set by `feature::DCT_NEEDED_BY` in the dispatcher.
+///
 /// `hf_max_blocks` caps the number of 8×8 luma blocks sampled for the
 /// high-frequency DCT energy ratio. Pass [`DEFAULT_HF_MAX_BLOCKS`] to
 /// match the oracle-trained reference; lower for proxy-server speed.
-pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_blocks: usize) {
+pub fn populate_tier3(
+    out: &mut RawAnalysis,
+    stream: &mut RowStream<'_>,
+    hf_max_blocks: usize,
+    run_dct: bool,
+) {
     let h_stats = luma_histogram_stats(stream);
     out.luma_histogram_entropy = h_stats.entropy;
     #[cfg(feature = "composites")]
@@ -50,41 +70,42 @@ pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_
         out.line_art_score = h_stats.line_art_score;
     }
     let _ = h_stats;
-    let dct = dct_stats(stream, hf_max_blocks);
-    out.high_freq_energy_ratio = dct.high_freq_ratio;
-    // The libwebp α metrics and patch_fraction land in cfg-gated
-    // RawAnalysis fields; the DCT pass that produces them runs
-    // unconditionally (its bulk cost is the DCT itself, which the
-    // unflagged HighFreqEnergyRatio also needs).
-    #[cfg(feature = "experimental")]
-    {
-        out.dct_compressibility_y = dct.compressibility_y;
-        out.dct_compressibility_uv = dct.compressibility_uv;
-        out.patch_fraction = dct.patch_fraction;
-        out.aq_map_mean = dct.aq_map_mean;
-        out.aq_map_std = dct.aq_map_std;
-        out.noise_floor_y = dct.noise_floor_y;
-        out.noise_floor_uv = dct.noise_floor_uv;
-        out.gradient_fraction = dct.gradient_fraction;
-        out.patch_fraction_fast = dct.patch_fraction_fast;
-        out.quant_survival_y = dct.quant_survival_y;
-        out.quant_survival_uv = dct.quant_survival_uv;
-    }
-    #[cfg(not(feature = "experimental"))]
-    {
-        let _ = (
-            dct.compressibility_y,
-            dct.compressibility_uv,
-            dct.patch_fraction,
-            dct.aq_map_mean,
-            dct.aq_map_std,
-            dct.noise_floor_y,
-            dct.noise_floor_uv,
-            dct.gradient_fraction,
-            dct.patch_fraction_fast,
-            dct.quant_survival_y,
-            dct.quant_survival_uv,
-        );
+    if run_dct {
+        let dct = dct_stats(stream, hf_max_blocks);
+        out.high_freq_energy_ratio = dct.high_freq_ratio;
+        // The libwebp α metrics and patch_fraction land in cfg-gated
+        // RawAnalysis fields; the DCT pass that produces them runs
+        // only when the dispatcher set DCT=true.
+        #[cfg(feature = "experimental")]
+        {
+            out.dct_compressibility_y = dct.compressibility_y;
+            out.dct_compressibility_uv = dct.compressibility_uv;
+            out.patch_fraction = dct.patch_fraction;
+            out.aq_map_mean = dct.aq_map_mean;
+            out.aq_map_std = dct.aq_map_std;
+            out.noise_floor_y = dct.noise_floor_y;
+            out.noise_floor_uv = dct.noise_floor_uv;
+            out.gradient_fraction = dct.gradient_fraction;
+            out.patch_fraction_fast = dct.patch_fraction_fast;
+            out.quant_survival_y = dct.quant_survival_y;
+            out.quant_survival_uv = dct.quant_survival_uv;
+        }
+        #[cfg(not(feature = "experimental"))]
+        {
+            let _ = (
+                dct.compressibility_y,
+                dct.compressibility_uv,
+                dct.patch_fraction,
+                dct.aq_map_mean,
+                dct.aq_map_std,
+                dct.noise_floor_y,
+                dct.noise_floor_uv,
+                dct.gradient_fraction,
+                dct.patch_fraction_fast,
+                dct.quant_survival_y,
+                dct.quant_survival_uv,
+            );
+        }
     }
 }
 
