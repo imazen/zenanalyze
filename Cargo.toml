@@ -63,7 +63,14 @@ name = "tier1_bench"
 required-features = ["experimental", "composites"]
 
 [lints.rust]
-unsafe_code = "allow"
+# zenanalyze ships zero `unsafe` blocks; SIMD goes through the
+# safe-token wrappers in archmage / magetypes. Forbidding here
+# keeps the door shut against well-meaning PRs that want to drop
+# raw `_mm_*` / `vld*` intrinsics into hot loops (see closed #17
+# for the recent example). If a future kernel genuinely needs an
+# intrinsic that magetypes hasn't wrapped yet, the right play is
+# to upstream the wrapper, not relax this lint.
+unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(feature, values("avx512", "optimized-tables"))',
 ] }
