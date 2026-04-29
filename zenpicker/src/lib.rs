@@ -54,7 +54,7 @@ mod model;
 pub mod rescue;
 
 pub use error::PickerError;
-pub use mask::{AllowedMask, argmin_masked, argmin_masked_top_k};
+pub use mask::{AllowedMask, argmin_masked, argmin_masked_top_k, reach_gate_mask};
 pub use model::{Activation, LayerView, Model, WeightDtype};
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
 

@@ -369,6 +369,31 @@ fn top_k_in_range_returns_subrange_indices() {
 }
 
 #[test]
+fn reach_gate_mask_thresholds_correctly() {
+    use crate::reach_gate_mask;
+
+    // Realistic per-cell reach rates at some target_zq band.
+    let rates = [1.0_f32, 0.99, 0.98, 0.96, 0.5, 0.0, f32::NAN];
+    let mut out = [false; 7];
+
+    // Strict default — only cells at/above 0.99 pass.
+    reach_gate_mask(&rates, 0.99, &mut out);
+    assert_eq!(out, [true, true, false, false, false, false, false]);
+
+    // Relaxed — 0.95 lets cells 0..3 through.
+    reach_gate_mask(&rates, 0.95, &mut out);
+    assert_eq!(out, [true, true, true, true, false, false, false]);
+
+    // Max-quality / disabled — any positive non-NaN cell passes.
+    reach_gate_mask(&rates, 0.0, &mut out);
+    assert_eq!(out, [true, true, true, true, true, true, false]);
+
+    // NaN never passes regardless of threshold.
+    reach_gate_mask(&[f32::NAN; 3], 0.0, &mut out[..3]);
+    assert_eq!(&out[..3], &[false, false, false]);
+}
+
+#[test]
 fn rejects_bad_magic() {
     let mut buf = alloc::vec::Vec::new();
     write_v1_model_f32(&mut buf, 1, &[(1, 1, 0, &[1.0], &[0.0])], 0);

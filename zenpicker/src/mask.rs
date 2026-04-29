@@ -167,6 +167,40 @@ pub fn argmin_masked_top_k<const K: usize>(
     out
 }
 
+/// Fill `out` with the per-cell allow flags derived from a row of
+/// `reach_rate` values and a runtime threshold.
+///
+/// `out[i] = reach_rates[i] >= threshold` (with `NaN` mapped to
+/// `false` — non-finite rates mean the cell never participated in
+/// training and shouldn't be picked).
+///
+/// This is the runtime form of the bake-time `reach_safety` gate.
+/// The bake records raw per-cell reach rates per `target_zq`;
+/// codec consumers convert them to a mask with the threshold
+/// *they* pick at request time, which makes the gate a parameter
+/// rather than a baked constant. Typical settings:
+///
+/// - `0.99` — strict default. Pairs with the `zensim_strict`
+///   bake's contract ("p99 ≥ target − 1pp"). At very high
+///   `target_zq` (≥ 96) the strict gate may leave 0–2 cells
+///   allowed; codec falls through to
+///   `RescueStrategy::KnownGoodFallback`.
+/// - `0.95` — relaxed / "high quality" mode. Trades a small
+///   amount of tail safety for more cells available to argmin.
+/// - `0.0` — "max quality" / disabled. Allows any cell with a
+///   non-zero, non-NaN reach rate. Relies on the rescue path for
+///   tail safety. Recommended at the highest `target_zq` bands
+///   where the strict gate is empty by construction.
+///
+/// `out.len()` must equal `reach_rates.len()`. Caller AND's this
+/// against its constraint mask before [`argmin_masked`].
+pub fn reach_gate_mask(reach_rates: &[f32], threshold: f32, out: &mut [bool]) {
+    debug_assert_eq!(reach_rates.len(), out.len());
+    for (i, &r) in reach_rates.iter().enumerate() {
+        out[i] = r.is_finite() && r >= threshold;
+    }
+}
+
 /// `exp` with input clamped to [-30, 30] to keep training-time
 /// out-of-range predictions from producing NaN/Inf at inference.
 fn clamped_exp(x: f32) -> f32 {
