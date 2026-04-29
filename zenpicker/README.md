@@ -93,24 +93,33 @@ Runs the Python forward pass against the Rust loader output on a deterministic i
 ### Phase 5 — Codec consumes the model
 
 ```rust,ignore
-// 1. Embed the baked model. Wrap in an aligned struct so the loader
-//    can zero-copy borrow weight slices from the bytes.
+// 1. Embed the baked hybrid-heads model. Wrap in an aligned struct so the
+//    loader can zero-copy borrow weight slices from the bytes.
 #[repr(C, align(8))]
 struct AlignedModel<const N: usize>([u8; N]);
-const MODEL_BYTES: &[u8] = &AlignedModel(*include_bytes!("zenjpeg_picker_v1.bin")).0;
+const MODEL_BYTES: &[u8] =
+    &AlignedModel(*include_bytes!("zenjpeg_picker_v2.0_hybrid.bin")).0;
 
 // 2. Load once at startup; hard-fail on schema mismatch.
 let model = zenpicker::Model::from_bytes(MODEL_BYTES)?;
 assert_eq!(model.schema_hash(), MY_SCHEMA_HASH);
 
-// 3. On each encode: build features + mask, pick.
+// 3. On each encode: build features + mask, pick categorical cell,
+//    read scalar parameter predictions, clamp to caller constraints.
 let mut picker = zenpicker::Picker::new(model);
 let features = my_codec::extract_features(&analysis, target_zq);
-let mask = my_codec::allowed_configs(&caller_constraints);
-let pick = picker.argmin_masked(&features, &mask, None)?
-    .expect("at least one config must be allowed");
-let cfg = my_codec::CONFIGS[pick];
+let mask = my_codec::allowed_cells(&caller_constraints);
+
+let cell_idx = picker
+    .argmin_masked_in_range(&features, (0, N_CELLS), &mask, None)?
+    .expect("at least one cell allowed");
+let out = picker.predict(&features)?;     // re-read for scalar heads
+let chroma = out[N_CELLS + cell_idx].clamp(c_min, c_max);
+let lambda = out[2 * N_CELLS + cell_idx].clamp(l_min, l_max);
+let cfg = build_encoder_config(CELLS[cell_idx], chroma, lambda);
 ```
+
+See [`examples/hybrid_heads_codec_sketch.rs`](examples/hybrid_heads_codec_sketch.rs) for a complete runnable codec-side reference (constraint translation, mask building, scalar clamp).
 
 ---
 
@@ -137,42 +146,60 @@ These let the small MLP learn the non-linear interactions the per-config HistGB 
 
 ---
 
-## Outputs: bytes + scalar parameter heads (hybrid heads, v0.2)
+## Outputs: hybrid heads (recommended) vs pure categorical (legacy)
 
-### Today: pure categorical
+### Recommended: hybrid heads
 
-In v0.1, every output is "predicted log-bytes for config index `i`". Codec runtime does `argmin_masked()` over allowed indices and picks one. The `config_names` manifest maps each output index to a tuple of discrete encoder settings (color_mode, sub, scan, sa_piecewise, …) — those are baked into the codec's compile-time `CONFIGS` table.
+The picker has two kinds of outputs in one flat vector:
 
-This works when every encoder axis is genuinely discrete. For zenjpeg's 120-cell grid that's almost true.
+1. **Categorical bytes head** over discrete-only axes (color_mode, sub, scan, sa_piecewise, trellis_on/off) — typically 8–16 cells.
+2. **Continuous parameter heads** — per categorical cell, predict optimal scalar values (chroma_quality / trellis_lambda / effort / speed) as f32 outputs.
 
-### v0.2: hybrid heads for continuous control axes
+At inference: argmin the categorical head over the allowed mask, read off its scalar predictions, **clamp to caller-supplied scalar constraints** (`chroma_scale ∈ [0.8, 1.2]`, `effort ≤ 5`). The MLP itself does the interpolation across training-grid points — that's what gradient descent gives you for free.
 
-For jxl / avif / webp, **effort** is a single scalar axis (libjxl effort 1–9, libwebp method 0–6, libavif speed 0–10). For zenjpeg, **chroma_quality** and **trellis_lambda** are also continuous. Discretizing them blows up cell count combinatorially without paying back in accuracy.
+**Why hybrid is the default:** the zenjpeg v2.0 hybrid model (12 cells × 3 heads = 36 outputs) achieves **2.76% mean overhead** vs the v1.1 pure-categorical 120-cell model's **8.20%** — 3× tighter on the held-out corpus, 5× higher argmin accuracy (52% vs 10.5%). The categorical space is 10× smaller so individual cell picks are confident; the within-cell scalar choice (chroma_scale, lambda) becomes a smooth f32 regression instead of buried under a categorical noise floor.
 
-The right shape: two output heads.
+For codecs with intrinsically scalar control axes — **jxl** (effort 1–9), **webp** (effort 0–9, method 0–6), **avif** (speed 0–10) — hybrid heads are the only sensible shape. Discretizing those axes into the categorical grid blows up cell count combinatorially without paying back in accuracy.
 
-1. **Categorical bytes head** over discrete-only axes (color_mode, sub, scan, sa_piecewise) — small, ~8–16 cells.
-2. **Continuous parameter heads** — per categorical bucket, predict optimal scalar values (`chroma_scale`, `lambda`, `effort`) as f32 outputs.
-
-At inference: argmin the categorical head, read off its scalar predictions, **clamp to caller-supplied scalar constraints** (`chroma_scale ∈ [0.8, 1.2]`, `effort ≤ 5`). The MLP itself does the interpolation across training-grid points — that's what gradient descent gives you for free.
-
-Format extension: same v1 binary, just additional output channels. `manifest.json` declares which output indices are categorical-bytes vs scalar-predictions and which scalar axis each predicts. Codec consumers route categorical outputs through `argmin_masked()` and scalar outputs through clamping.
+`manifest.json` declares which output indices are categorical-bytes vs scalar-predictions, the cell list, and which scalar axis each prediction maps to. Codec consumers slice `predict()` for the scalar reads and use `Picker::argmin_masked_in_range()` for the categorical pick.
 
 ```rust,ignore
-// v0.2 sketch:
-let pick = picker.predict(&features)?;
-let cat_bytes = &pick[..8];                     // 8 categorical cells
-let chroma_pred = &pick[8..16];                 // per-cell chroma_scale prediction
-let lambda_pred = &pick[16..24];                // per-cell trellis_lambda prediction
-let effort_pred = &pick[24..32];                // per-cell effort_level prediction
+// Recommended pattern (zenjpeg v2.0-shaped, 12 cells × 3 heads):
+const N_CELLS: usize = 12;
 
-let cat_idx = mask.argmin_masked(cat_bytes)?;
-let cfg = CategoricalSpec::from(cat_idx);
-let chroma = chroma_pred[cat_idx].clamp(constraints.chroma_min, constraints.chroma_max);
-let lambda = lambda_pred[cat_idx].clamp(constraints.lambda_min, constraints.lambda_max);
-let effort = effort_pred[cat_idx]
-    .round()
-    .clamp(constraints.effort_min as f32, constraints.effort_max as f32) as u8;
+let out = picker.predict(&features)?;
+let bytes_log = &out[..N_CELLS];
+let chroma_pred = &out[N_CELLS..2 * N_CELLS];
+let lambda_pred = &out[2 * N_CELLS..3 * N_CELLS];
+
+let cell_idx = picker
+    .argmin_masked_in_range(&features, (0, N_CELLS), &mask, None)?
+    .expect("at least one cell allowed");
+
+let cfg = CELLS[cell_idx];                        // (color, sub, trellis_on, sa)
+let chroma_scale = chroma_pred[cell_idx]
+    .clamp(constraints.chroma_min, constraints.chroma_max);
+let lambda = if cfg.trellis_on {
+    Some(lambda_pred[cell_idx].clamp(constraints.lambda_min, constraints.lambda_max))
+} else {
+    None
+};
+```
+
+A complete codec-side reference lives in [`examples/hybrid_heads_codec_sketch.rs`](examples/hybrid_heads_codec_sketch.rs).
+
+### Legacy: pure categorical (v0.1, v1.0/v1.1 zenjpeg bakes)
+
+In the categorical-only shape, every output is "predicted log-bytes for config index `i`". Codec runtime does `argmin_masked()` over allowed indices and picks one. The `config_names` manifest maps each output index to a tuple of discrete encoder settings — baked into the codec's compile-time `CONFIGS` table.
+
+This works only when every encoder axis is genuinely discrete *and* the cell count stays small. zenjpeg's 120-cell pure-categorical bakes (v1.0, v1.1) ship as a fallback for deployments that haven't migrated to v2.0 yet, but new codec integrations should target hybrid heads from day one.
+
+```rust,ignore
+// Legacy pattern — v1.x bakes only:
+let mask = my_codec::allowed_configs(&caller_constraints);  // [bool; 120]
+let pick = picker.argmin_masked(&features, &mask, None)?
+    .expect("at least one config allowed");
+let cfg = my_codec::CONFIGS[pick];   // 120-entry table
 ```
 
 ---
@@ -321,11 +348,21 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 
 ## Roadmap
 
-- **v0.1** (now): scalar inference, f32 + f16 storage built in, parse + validate v1 format. Categorical-only outputs.
-- **v0.2**: `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT through magetypes. **Hybrid heads** for continuous control axes (effort, chroma_quality, lambda).
+- **v0.1** (now): scalar inference, f32 + f16 storage built in, parse + validate v1 format. **Hybrid heads** (categorical bytes + scalar parameter outputs) supported via `Picker::argmin_masked_in_range()` — that's the recommended shape for new bakes. Pure-categorical bakes still load fine for legacy models.
+- **v0.2**: `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT through magetypes.
 - **v0.3**: i8 quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough.
 
 The format header has reserved fields for future expansion. New `weight_dtype` values, new activations, and new layer types are additive.
+
+### Shipped zenjpeg models (side by side, codec picks)
+
+| Bake | Size | Mean overhead | Argmin acc | Recommended |
+|---|---:|---:|---:|---|
+| `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20% | 13.8% | legacy, broadest features |
+| `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20% | 10.5% | legacy, reduced 8-feature schema |
+| **`zenjpeg_picker_v2.0_hybrid.bin`** | **50 KB** | **2.76%** | **52.0%** | **default** — hybrid heads, 8-feature schema |
+
+Codec consumers default to v2.0; v1.x bakes remain in tree as a fallback for deployments that pinned them before the hybrid rollout.
 
 ---
 
