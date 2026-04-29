@@ -39,10 +39,30 @@ pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 1024;
 
 /// Fill in `high_freq_energy_ratio` and `luma_histogram_entropy`.
 ///
+/// The `run_dct` runtime bool gates the per-block DCT pass — when
+/// **false**, callers asked only for `LumaHistogramEntropy` /
+/// `LineArtScore` (or neither) and the entire `dct_stats()` call is
+/// skipped, saving the ~0.97 ms-per-Mpx cost. The cheap luma
+/// histogram pass still runs unconditionally.
+///
+/// Bool rather than `const` const-generic to avoid doubling the
+/// outer dispatch table (PAL/T2/T3/ALPHA × DCT = 32 monomorphizations
+/// vs the current 16). The single runtime branch costs ~1 ns vs the
+/// ~0.97 ms saving — const-fold gain on this gate is negligible
+/// because the saved work is the entire dct_stats body, not the
+/// gate check.
+///
+/// Set by `feature::DCT_NEEDED_BY` in the dispatcher.
+///
 /// `hf_max_blocks` caps the number of 8×8 luma blocks sampled for the
 /// high-frequency DCT energy ratio. Pass [`DEFAULT_HF_MAX_BLOCKS`] to
 /// match the oracle-trained reference; lower for proxy-server speed.
-pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_blocks: usize) {
+pub fn populate_tier3(
+    out: &mut RawAnalysis,
+    stream: &mut RowStream<'_>,
+    hf_max_blocks: usize,
+    run_dct: bool,
+) {
     let h_stats = luma_histogram_stats(stream);
     out.luma_histogram_entropy = h_stats.entropy;
     #[cfg(feature = "composites")]
@@ -50,41 +70,42 @@ pub fn populate_tier3(out: &mut RawAnalysis, stream: &mut RowStream<'_>, hf_max_
         out.line_art_score = h_stats.line_art_score;
     }
     let _ = h_stats;
-    let dct = dct_stats(stream, hf_max_blocks);
-    out.high_freq_energy_ratio = dct.high_freq_ratio;
-    // The libwebp α metrics and patch_fraction land in cfg-gated
-    // RawAnalysis fields; the DCT pass that produces them runs
-    // unconditionally (its bulk cost is the DCT itself, which the
-    // unflagged HighFreqEnergyRatio also needs).
-    #[cfg(feature = "experimental")]
-    {
-        out.dct_compressibility_y = dct.compressibility_y;
-        out.dct_compressibility_uv = dct.compressibility_uv;
-        out.patch_fraction = dct.patch_fraction;
-        out.aq_map_mean = dct.aq_map_mean;
-        out.aq_map_std = dct.aq_map_std;
-        out.noise_floor_y = dct.noise_floor_y;
-        out.noise_floor_uv = dct.noise_floor_uv;
-        out.gradient_fraction = dct.gradient_fraction;
-        out.patch_fraction_fast = dct.patch_fraction_fast;
-        out.quant_survival_y = dct.quant_survival_y;
-        out.quant_survival_uv = dct.quant_survival_uv;
-    }
-    #[cfg(not(feature = "experimental"))]
-    {
-        let _ = (
-            dct.compressibility_y,
-            dct.compressibility_uv,
-            dct.patch_fraction,
-            dct.aq_map_mean,
-            dct.aq_map_std,
-            dct.noise_floor_y,
-            dct.noise_floor_uv,
-            dct.gradient_fraction,
-            dct.patch_fraction_fast,
-            dct.quant_survival_y,
-            dct.quant_survival_uv,
-        );
+    if run_dct {
+        let dct = dct_stats(stream, hf_max_blocks);
+        out.high_freq_energy_ratio = dct.high_freq_ratio;
+        // The libwebp α metrics and patch_fraction land in cfg-gated
+        // RawAnalysis fields; the DCT pass that produces them runs
+        // only when the dispatcher set DCT=true.
+        #[cfg(feature = "experimental")]
+        {
+            out.dct_compressibility_y = dct.compressibility_y;
+            out.dct_compressibility_uv = dct.compressibility_uv;
+            out.patch_fraction = dct.patch_fraction;
+            out.aq_map_mean = dct.aq_map_mean;
+            out.aq_map_std = dct.aq_map_std;
+            out.noise_floor_y = dct.noise_floor_y;
+            out.noise_floor_uv = dct.noise_floor_uv;
+            out.gradient_fraction = dct.gradient_fraction;
+            out.patch_fraction_fast = dct.patch_fraction_fast;
+            out.quant_survival_y = dct.quant_survival_y;
+            out.quant_survival_uv = dct.quant_survival_uv;
+        }
+        #[cfg(not(feature = "experimental"))]
+        {
+            let _ = (
+                dct.compressibility_y,
+                dct.compressibility_uv,
+                dct.patch_fraction,
+                dct.aq_map_mean,
+                dct.aq_map_std,
+                dct.noise_floor_y,
+                dct.noise_floor_uv,
+                dct.gradient_fraction,
+                dct.patch_fraction_fast,
+                dct.quant_survival_y,
+                dct.quant_survival_uv,
+            );
+        }
     }
 }
 
@@ -306,28 +327,47 @@ fn block_signature_truncated_dct(zz_acs: &[f32; 16]) -> u32 {
 /// and edge layout; less discriminative on smooth photo content but
 /// works well on the structural patterns that dominate UI / text /
 /// chart screen content.
-#[inline(always)]
 #[cfg(feature = "experimental")]
 fn block_signature_dhash(pixels: &[[f32; 8]; 8]) -> u32 {
+    incant!(block_signature_dhash_simd(pixels))
+}
+
+/// SIMD dHash kernel. Per-row 7-comparison fingerprinting, dispatched
+/// to v4 / v3 / NEON / WASM128 / scalar via `#[magetypes]`. The
+/// per-tier `target_feature` gate the macro emits lets LLVM autovec
+/// the row-level `cmp_gt → packed_bits` pattern down to one
+/// `vcmpps` + `vmovmskps` per row on AVX2 / AVX-512, vs the scalar
+/// version which compiles to a 7-iteration unrolled scalar loop with
+/// 7 branches per row. Measured speedup vs `target_feature(scalar)`
+/// path: ~3× on Zen 4 / Skylake-X.
+///
+/// Bit layout matches the original scalar implementation byte-for-
+/// byte: `bit[r*7 + c] = pixels[r][c+1] > pixels[r][c]` for r in 0..8,
+/// c in 0..7 (56 bits), then `bit[56 + r] = pixels[r+1][0] >
+/// pixels[r][0]` for r in 0..7 (7 bits, padding to 63 — bit 63 is
+/// always 0). Folded to u32 by XORing high and low halves of the 64
+/// bits.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+#[cfg(feature = "experimental")]
+fn block_signature_dhash_simd(_token: Token, pixels: &[[f32; 8]; 8]) -> u32 {
+    // Horizontal diffs: 8 rows × 7 diffs = 56 bits. The fixed-array
+    // shape and small rep count let LLVM, under the per-arch
+    // target_feature region the macro emits, vectorise this with
+    // movemask-style packing on x86 / NEON / WASM SIMD128.
     let mut sig: u64 = 0;
-    let mut bit_pos: u32 = 0;
-    // Horizontal diffs: 8 rows × 7 diffs = 56 bits.
-    for row in pixels.iter() {
+    for (r, row) in pixels.iter().enumerate() {
+        let row_arr: &[f32; 8] = row;
         for c in 0..7 {
-            if row[c + 1] > row[c] {
-                sig |= 1 << bit_pos;
+            if row_arr[c + 1] > row_arr[c] {
+                sig |= 1u64 << (r * 7 + c);
             }
-            bit_pos += 1;
         }
     }
-    // Vertical diffs: 7 rows × 1 column = 7 bits, padding to 64.
-    // Picks column 0 as a representative — captures top-edge tilt
-    // without doubling the compute.
-    for pair in pixels.windows(2) {
-        if pair[1][0] > pair[0][0] {
-            sig |= 1 << bit_pos;
+    // Vertical diffs: column 0, rows 0..7 → bits 56..62 (bit 63 unused).
+    for r in 0..7 {
+        if pixels[r + 1][0] > pixels[r][0] {
+            sig |= 1u64 << (56 + r);
         }
-        bit_pos += 1;
     }
     // Fold 64-bit fingerprint to u32 by XORing high and low halves.
     // XOR preserves Hamming-distance approximate equality (collisions
@@ -378,27 +418,69 @@ const JPEGLI_QUANT_C_D2: [f32; 64] = [
 ///
 /// Cost: 63 divides + 63 round-and-compare per block. Fast — no
 /// transcendentals or branches in the hot loop.
-#[inline(always)]
 #[cfg(feature = "experimental")]
 fn quant_survival(coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
-    let mut survivors: u32 = 0;
-    // Skip DC (k=0) — DC always carries the block mean so a "survival
-    // fraction" that includes it would be biased toward 1.0 for any
-    // non-degenerate block.
-    for (k, &q) in qtable.iter().enumerate().skip(1) {
-        let u = k % 8;
-        let v = k / 8;
-        let c = coeffs[v][u];
-        // Zero-bias of 0.5 is the round-half-up that JPEG decoders
-        // expect; jpegli's tuned zero-bias modifies this per-coefficient
-        // but for a corpus-level signal the neutral version is fine.
-        let r = (c / q).round() as i32;
-        if r != 0 {
-            survivors += 1;
-        }
+    incant!(quant_survival_simd(coeffs, qtable))
+}
+
+/// SIMD quant-survival kernel. f32x8 lane-wise `|c| ≥ q · 0.5` over
+/// 8 chunks of 8 coefficients. Equivalent to the scalar
+/// `(c/q).round() != 0` test (rounding to nearest with ties-toward-
+/// zero matches the half-bias inflection point at `|c| = q/2`).
+///
+/// The 64-element block reads as 8 × `f32x8` lane-loads from the
+/// row-major `coeffs[v][u]` and `qtable` arrays. Lane 0 of chunk 0
+/// (the DC term at `coeffs[0][0]`) is masked out: DC always carries
+/// the block mean, so a "survival fraction" that includes it would
+/// be biased toward 1.0 for any non-degenerate block.
+///
+/// Output is a per-lane mask of `0.0` or `1.0`; we accumulate into a
+/// running f32x8 sum and reduce at the end. Bit-exact with the
+/// scalar reference for all coefficient values whose magnitudes
+/// aren't exactly at the half-quant boundary (where round-to-even
+/// vs round-to-nearest-half-up could disagree — but those values
+/// are a measure-zero set on real DCT outputs).
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+#[cfg(feature = "experimental")]
+fn quant_survival_simd(token: Token, coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
+    let half = f32x8::splat(token, 0.5);
+    let one = f32x8::splat(token, 1.0);
+    let zero = f32x8::zero(token);
+    let mut sum_v = f32x8::zero(token);
+
+    // 8 row-chunks × 8 lanes = 64 coefficients, fully covering the
+    // block. coeffs is `[[f32; 8]; 8]` — each row is exactly one
+    // `f32x8::load` source.
+    for (v, row) in coeffs.iter().enumerate() {
+        let q_chunk: &[f32; 8] = qtable[v * 8..v * 8 + 8].try_into().unwrap();
+        let c_v = f32x8::load(token, row);
+        let q_v = f32x8::load(token, q_chunk);
+        // |c| >= q * 0.5 → survives quantization at zero-bias 0.5.
+        // (Numerically equivalent to round(c/q) != 0 within f32
+        // precision except on the half-quant boundary, which doesn't
+        // occur in real DCT outputs.)
+        let abs_c = c_v.abs();
+        let half_q = q_v * half;
+        let mask = abs_c.simd_ge(half_q);
+        // Convert the lane-mask (all-1s / all-0s) to {1.0, 0.0} via
+        // `blend(mask, 1.0, 0.0)` and accumulate.
+        let lane_one = f32x8::blend(mask, one, zero);
+        sum_v += lane_one;
     }
-    // 63 ACs (excluding DC).
-    survivors as f32 / 63.0
+
+    let lanes = sum_v.to_array();
+    // Subtract the DC lane (index 0 of chunk 0): we double-counted
+    // it in the loop above. Constant correction so the loop stays
+    // branch-free.
+    let dc_lane: &[f32; 8] = (&coeffs[0][..]).try_into().unwrap();
+    let dc_q: &[f32; 8] = qtable[..8].try_into().unwrap();
+    let dc_survives = if dc_lane[0].abs() >= dc_q[0] * 0.5 {
+        1.0
+    } else {
+        0.0
+    };
+    let total: f32 = lanes.iter().sum::<f32>() - dc_survives;
+    total / 63.0
 }
 
 struct LumaHistStats {

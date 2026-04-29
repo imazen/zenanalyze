@@ -357,6 +357,11 @@ pub fn analyze_features(
     let pal = features.intersects(feature::PAL_NEEDED_BY);
     let t2 = features.intersects(feature::TIER2_FEATURES);
     let t3 = features.intersects(feature::T3_NEEDED_BY);
+    // Sub-tier gate: run the per-block DCT pass only when at least
+    // one DCT-derived feature was requested. When false but `t3` is
+    // true the cheap luma-histogram pass still runs (entropy /
+    // line-art) but the ~0.97 ms-per-Mpx DCT walk is skipped.
+    let dct = features.intersects(feature::DCT_NEEDED_BY);
     let alpha = features.intersects(feature::ALPHA_FEATURES);
 
     // Pick the palette path: full-precision scan if any "exact count"
@@ -417,6 +422,7 @@ pub fn analyze_features(
                 tier1_full_kernel,
                 tier1_wants_skin,
                 run_depth,
+                dct,
             )?;
             Ok(raw.into_results(features, geometry, source_descriptor))
         }};
@@ -470,6 +476,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     tier1_full_kernel: bool,
     tier1_wants_skin: bool,
     run_depth: bool,
+    run_dct: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
     let width = slice.width();
     let height = slice.rows();
@@ -537,7 +544,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             tier2_chroma::populate_tier2(&mut raw, &mut stream, pixel_budget);
         }
         if T3 && width >= 8 && height >= 8 {
-            tier3::populate_tier3(&mut raw, &mut stream, hf_max_blocks);
+            tier3::populate_tier3(&mut raw, &mut stream, hf_max_blocks, run_dct);
         }
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
@@ -631,6 +638,7 @@ pub fn __analyze_internal(
         true, // and the Tier 1 full kernel (luma stats / Hasler M3 / edge slope)
         true, // and the Tier 1 skin gate
         run_depth,
+        true, // override path always runs the DCT pass (test/oracle wants every signal)
     )?;
     Ok(raw.into_results(query.features, geometry, source_descriptor))
 }
@@ -657,7 +665,7 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth,
+        slice, pb, hf, true, true, true, true, true, run_depth, true,
     )
 }
 

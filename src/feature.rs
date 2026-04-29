@@ -1187,10 +1187,52 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::NoiseFloorY);
         s = s.with(AnalysisFeature::NoiseFloorUV);
         s = s.with(AnalysisFeature::GradientFraction);
+        s = s.with(AnalysisFeature::PatchFractionFast);
+        s = s.with(AnalysisFeature::QuantSurvivalY);
+        s = s.with(AnalysisFeature::QuantSurvivalUv);
     }
     #[cfg(feature = "composites")]
     {
         s = s.with(AnalysisFeature::LineArtScore);
+    }
+    s
+};
+
+/// Subset of [`TIER3_FEATURES`] whose computation requires the full
+/// per-block DCT pass (`tier3::dct_stats`). Excludes
+/// [`AnalysisFeature::LumaHistogramEntropy`] and
+/// [`AnalysisFeature::LineArtScore`] which both come from the cheap
+/// luma-histogram pass alone.
+///
+/// The dispatcher uses this to set the `DCT` const-bool gate on
+/// `populate_tier3<const DCT: bool>` — when false, the
+/// ~0.97 ms-per-Mpx DCT pass is skipped entirely, leaving callers who
+/// asked for just histogram entropy / line-art on the cheap path.
+/// Compile-time const-folding ensures the unused branch contributes
+/// zero code in the monomorphized variant.
+#[allow(unused_mut, unused_assignments)]
+pub(crate) const DCT_NEEDED_BY: FeatureSet = {
+    let mut s = FeatureSet::new();
+    s = s.with(AnalysisFeature::HighFreqEnergyRatio);
+    #[cfg(feature = "experimental")]
+    {
+        s = s.with(AnalysisFeature::DctCompressibilityY);
+        s = s.with(AnalysisFeature::DctCompressibilityUV);
+        s = s.with(AnalysisFeature::PatchFraction);
+        s = s.with(AnalysisFeature::AqMapMean);
+        s = s.with(AnalysisFeature::AqMapStd);
+        s = s.with(AnalysisFeature::NoiseFloorY);
+        s = s.with(AnalysisFeature::NoiseFloorUV);
+        s = s.with(AnalysisFeature::GradientFraction);
+        s = s.with(AnalysisFeature::PatchFractionFast);
+        s = s.with(AnalysisFeature::QuantSurvivalY);
+        s = s.with(AnalysisFeature::QuantSurvivalUv);
+    }
+    // ScreenContentLikelihood reads `patch_fraction` (DCT-derived)
+    // when experimental is on; falls back to non-DCT formula otherwise.
+    #[cfg(all(feature = "composites", feature = "experimental"))]
+    {
+        s = s.with(AnalysisFeature::ScreenContentLikelihood);
     }
     s
 };
