@@ -11,7 +11,11 @@ pub enum PickerError {
     /// Header advertises a `header_size` smaller than v1 minimum.
     HeaderTooSmall { advertised: u16, min: u16 },
     /// Bytes ran out before the model was fully parsed.
-    Truncated { offset: usize, want: usize, have: usize },
+    Truncated {
+        offset: usize,
+        want: usize,
+        have: usize,
+    },
     /// `weight_dtype` was f16 but the `f16` cargo feature is off.
     F16Disabled,
     /// `weight_dtype` byte was not 0 (f32) or 1 (f16).
@@ -40,10 +44,9 @@ pub enum PickerError {
 impl fmt::Display for PickerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Self::BadMagic { found } => write!(
-                f,
-                "zenpicker: bad magic, expected ZNPK, found {found:?}"
-            ),
+            Self::BadMagic { found } => {
+                write!(f, "zenpicker: bad magic, expected ZNPK, found {found:?}")
+            }
             Self::UnsupportedVersion {
                 version,
                 max_supported,
@@ -51,10 +54,9 @@ impl fmt::Display for PickerError {
                 f,
                 "zenpicker: format version {version} not supported (max supported: {max_supported})"
             ),
-            Self::HeaderTooSmall { advertised, min } => write!(
-                f,
-                "zenpicker: header_size {advertised} < minimum {min}"
-            ),
+            Self::HeaderTooSmall { advertised, min } => {
+                write!(f, "zenpicker: header_size {advertised} < minimum {min}")
+            }
             Self::Truncated { offset, want, have } => write!(
                 f,
                 "zenpicker: truncated at offset {offset}, wanted {want} bytes, have {have}"

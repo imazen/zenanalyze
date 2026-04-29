@@ -125,13 +125,7 @@ fn saxpy_matmul_f32(src: &[f32], w: &[f32], dst: &mut [f32], in_dim: usize, out_
 }
 
 #[cfg(feature = "f16")]
-fn saxpy_matmul_f16(
-    src: &[f32],
-    w: &[half::f16],
-    dst: &mut [f32],
-    in_dim: usize,
-    out_dim: usize,
-) {
+fn saxpy_matmul_f16(src: &[f32], w: &[half::f16], dst: &mut [f32], in_dim: usize, out_dim: usize) {
     debug_assert_eq!(w.len(), in_dim * out_dim);
     let chunks = out_dim / 8;
     let tail = out_dim % 8;

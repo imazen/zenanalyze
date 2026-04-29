@@ -170,10 +170,14 @@ impl<'a> Model<'a> {
             let _reserved = cur.take_array::<2>()?;
 
             if in_dim == 0 {
-                return Err(PickerError::ZeroDimension { what: "layer.in_dim" });
+                return Err(PickerError::ZeroDimension {
+                    what: "layer.in_dim",
+                });
             }
             if out_dim == 0 {
-                return Err(PickerError::ZeroDimension { what: "layer.out_dim" });
+                return Err(PickerError::ZeroDimension {
+                    what: "layer.out_dim",
+                });
             }
             if in_dim != prev_out {
                 return Err(PickerError::LayerDimMismatch {
@@ -273,14 +277,11 @@ impl<'a> Cursor<'a> {
     }
 
     fn take_array<const N: usize>(&mut self) -> Result<[u8; N], PickerError> {
-        let end = self
-            .pos
-            .checked_add(N)
-            .ok_or(PickerError::Truncated {
-                offset: self.pos,
-                want: N,
-                have: self.bytes.len().saturating_sub(self.pos),
-            })?;
+        let end = self.pos.checked_add(N).ok_or(PickerError::Truncated {
+            offset: self.pos,
+            want: N,
+            have: self.bytes.len().saturating_sub(self.pos),
+        })?;
         if end > self.bytes.len() {
             return Err(PickerError::Truncated {
                 offset: self.pos,
@@ -380,18 +381,19 @@ impl<'a> Cursor<'a> {
 
     #[cfg(feature = "f16")]
     fn take_f16_slice(&mut self, n: usize) -> Result<&'a [half::f16], PickerError> {
-        let byte_len = n
-            .checked_mul(2)
+        let byte_len = n.checked_mul(2).ok_or(PickerError::Truncated {
+            offset: self.pos,
+            want: usize::MAX,
+            have: 0,
+        })?;
+        let end = self
+            .pos
+            .checked_add(byte_len)
             .ok_or(PickerError::Truncated {
                 offset: self.pos,
-                want: usize::MAX,
-                have: 0,
+                want: byte_len,
+                have: self.bytes.len().saturating_sub(self.pos),
             })?;
-        let end = self.pos.checked_add(byte_len).ok_or(PickerError::Truncated {
-            offset: self.pos,
-            want: byte_len,
-            have: self.bytes.len().saturating_sub(self.pos),
-        })?;
         if end > self.bytes.len() {
             return Err(PickerError::Truncated {
                 offset: self.pos,

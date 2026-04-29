@@ -97,12 +97,7 @@ fn parse_minimal_one_layer_identity() {
 #[test]
 fn relu_zeros_negatives() {
     let mut buf = alloc::vec::Vec::new();
-    write_v1_model_f32(
-        &mut buf,
-        1,
-        &[(1, 2, 1, &[-2.0, 1.0], &[0.0, 0.0])],
-        0,
-    );
+    write_v1_model_f32(&mut buf, 1, &[(1, 2, 1, &[-2.0, 1.0], &[0.0, 0.0])], 0);
     let aligned = AlignedBuf::from_slice(&buf);
     let model = Model::from_bytes(aligned.as_bytes()).unwrap();
     let mut picker = Picker::new(model);
@@ -128,12 +123,7 @@ fn two_layer_mlp() {
                 4,
                 3,
                 0,
-                &[
-                    1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0,
-                    1.0, 1.0, 1.0,
-                ],
+                &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
                 &[0.0, 0.0, 0.0],
             ),
         ],
@@ -175,7 +165,10 @@ fn argmin_picks_smallest_allowed() {
     );
 
     let mask_none = AllowedMask::new(&[false, false, false, false]);
-    assert_eq!(picker.argmin_masked(&[0.0], &mask_none, None).unwrap(), None);
+    assert_eq!(
+        picker.argmin_masked(&[0.0], &mask_none, None).unwrap(),
+        None
+    );
 }
 
 #[test]

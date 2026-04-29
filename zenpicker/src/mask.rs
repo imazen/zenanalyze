@@ -118,7 +118,7 @@ fn libm_exp_f32(x: f32) -> f32 {
         // libm if a no_std consumer needs better.
         let _ = x;
         0.0 // intentionally inert; no_std users should enable `std`
-            // or supply libm. Surfaces as "all picks tie" which the
-            // caller will notice loudly.
+        // or supply libm. Surfaces as "all picks tie" which the
+        // caller will notice loudly.
     }
 }
