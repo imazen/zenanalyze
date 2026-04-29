@@ -83,18 +83,39 @@ def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -
     return int.from_bytes(h.digest(), "little")
 
 
-def derive_extra_axes(n_inputs: int, feat_cols: list[str]) -> list[str]:
-    """Reverse-engineer which engineered features the model used.
+DEFAULT_SCHEMA_VERSION_TAG = "zenpicker.v1.generic"
 
-    The distill / shared-MLP fit scripts use this layout:
-      19 raw feats + 4 size onehot + 5 zq/log_pixels polynomials
-      + 19 zq×feat crosses + 1 icc_bytes = 48 inputs
 
-    The shared-MLP-only path used 4+1+1=6 inputs of polynomials and
-    no icc, giving 49. Codify the layouts here so the schema_hash is
-    stable per layout family.
+def derive_extra_axes(n_inputs: int, feat_cols: list[str], model: dict) -> list[str]:
+    """Determine the engineered-axes list for schema_hash computation.
+
+    Resolution order, most explicit wins:
+
+    1. **`model["extra_axes"]`** — codec explicitly declares the
+       names of every input column past the raw feature columns.
+       Most reusable; recommended for new codecs.
+
+    2. **Built-in known layouts** — the legacy zenjpeg
+       `shared-mlp.distill+icc` layout
+       (n_feat + 4 size + 5 polynomials + n_feat zq×feat + 1 icc).
+       Bumping `SCHEMA_VERSION_TAG` to a layout name forces re-bake.
+
+    3. **Fallback** — synthesize unnamed `aux_<i>` axes. The
+       schema_hash will still be stable per (n_inputs, feat_cols),
+       but the codec must hash the same axis list at compile time.
+       Emit a warning so the codec author notices.
     """
+    explicit = model.get("extra_axes")
+    if explicit is not None:
+        n_aux = n_inputs - len(feat_cols)
+        if len(explicit) != n_aux:
+            raise SystemExit(
+                f"model.extra_axes has {len(explicit)} entries but n_inputs - n_feats = {n_aux}"
+            )
+        return list(explicit)
+
     n_feat = len(feat_cols)
+    # Legacy zenjpeg layout: 8/19 feats + 4 size + 5 poly + n_feat cross + 1 icc.
     if n_inputs == n_feat + 4 + 5 + n_feat + 1:
         return (
             ["size_tiny", "size_small", "size_medium", "size_large"]
@@ -102,13 +123,27 @@ def derive_extra_axes(n_inputs: int, feat_cols: list[str]) -> list[str]:
             + [f"zq_x_{c}" for c in feat_cols]
             + ["icc_bytes"]
         )
-    raise SystemExit(
-        f"unrecognized input layout: {n_inputs} inputs vs {n_feat} feat cols. "
-        f"add the layout to derive_extra_axes() and bump SCHEMA_VERSION_TAG."
+
+    # Fallback: synthesize anonymous names; codec must hash these
+    # exact strings at compile time.
+    sys.stderr.write(
+        f"WARNING: bake_picker received n_inputs={n_inputs} with no `extra_axes` "
+        f"in model JSON and no built-in layout match (n_feat={n_feat}). "
+        f"Using anonymous 'aux_*' axis names — codec must use the same.\n"
     )
+    n_aux = n_inputs - n_feat
+    return [f"aux_{i:02d}" for i in range(n_aux)]
 
 
-SCHEMA_VERSION_TAG = "zenpicker.v1.shared-mlp.distill+icc"
+def schema_version_tag(model: dict) -> str:
+    """The model JSON may declare its own version tag. Falls back to
+    the crate-wide default when omitted."""
+    return model.get("schema_version_tag", DEFAULT_SCHEMA_VERSION_TAG)
+
+
+# Kept for backwards compatibility with older callers that import
+# this constant. New code should call `schema_version_tag(model)`.
+SCHEMA_VERSION_TAG = DEFAULT_SCHEMA_VERSION_TAG
 
 
 def encode_dtype(arr: np.ndarray, dtype: str) -> bytes:
