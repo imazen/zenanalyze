@@ -102,6 +102,14 @@ pub fn populate_tier3(
             out.patch_fraction_fast = dct.patch_fraction_fast;
             out.quant_survival_y = dct.quant_survival_y;
             out.quant_survival_uv = dct.quant_survival_uv;
+            out.quant_survival_y_p10 = dct.quant_survival_y_p10;
+            out.quant_survival_y_p25 = dct.quant_survival_y_p25;
+            out.quant_survival_y_p50 = dct.quant_survival_y_p50;
+            out.quant_survival_y_p75 = dct.quant_survival_y_p75;
+            out.quant_survival_uv_p10 = dct.quant_survival_uv_p10;
+            out.quant_survival_uv_p25 = dct.quant_survival_uv_p25;
+            out.quant_survival_uv_p50 = dct.quant_survival_uv_p50;
+            out.quant_survival_uv_p75 = dct.quant_survival_uv_p75;
         }
         #[cfg(not(feature = "experimental"))]
         {
@@ -202,6 +210,18 @@ struct Tier3DctStats {
     quant_survival_y: f32,
     /// **Experimental.** Same for chroma — max of Cb / Cr per block.
     quant_survival_uv: f32,
+    /// Per-block QuantSurvival percentiles. p10 = worst-block survival
+    /// (drives trellis ROI); p75 = best-block survival (caps possible
+    /// compression). Buffered at sample time, sorted once at end.
+    /// Zero in non-experimental builds.
+    quant_survival_y_p10: f32,
+    quant_survival_y_p25: f32,
+    quant_survival_y_p50: f32,
+    quant_survival_y_p75: f32,
+    quant_survival_uv_p10: f32,
+    quant_survival_uv_p25: f32,
+    quant_survival_uv_p50: f32,
+    quant_survival_uv_p75: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -835,6 +855,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            quant_survival_y_p10: 0.0,
+            quant_survival_y_p25: 0.0,
+            quant_survival_y_p50: 0.0,
+            quant_survival_y_p75: 0.0,
+            quant_survival_uv_p10: 0.0,
+            quant_survival_uv_p25: 0.0,
+            quant_survival_uv_p50: 0.0,
+            quant_survival_uv_p75: 0.0,
         };
     }
     // Per-primaries luma weights — used in the per-block fixed-point
@@ -876,6 +904,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            quant_survival_y_p10: 0.0,
+            quant_survival_y_p25: 0.0,
+            quant_survival_y_p50: 0.0,
+            quant_survival_y_p75: 0.0,
+            quant_survival_uv_p10: 0.0,
+            quant_survival_uv_p25: 0.0,
+            quant_survival_uv_p50: 0.0,
+            quant_survival_uv_p75: 0.0,
         };
     }
     let stride = (total_blocks / max_blocks).max(1);
@@ -913,11 +949,17 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     #[cfg(feature = "experimental")]
     #[cfg(feature = "experimental")]
     let mut signatures_fast: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
-    // Per-block quant-survival accumulators (mean across blocks).
+    // Per-block quant-survival accumulators (mean across blocks) +
+    // per-block buffers for percentile reduction (issue #42 →
+    // distributional features analysis 2026-04-30 → Batch 3).
     #[cfg(feature = "experimental")]
     let mut quant_y_sum: f64 = 0.0;
     #[cfg(feature = "experimental")]
     let mut quant_uv_sum: f64 = 0.0;
+    #[cfg(feature = "experimental")]
+    let mut quant_y_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
+    #[cfg(feature = "experimental")]
+    let mut quant_uv_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
     let row_bytes = width * 3;
     let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
     let mut block_idx = 0usize;
@@ -1064,10 +1106,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                 // quantization. Y on the luma table, UV on the chroma
                 // table (max of Cb / Cr per block to capture whichever
                 // channel carries more detail).
-                quant_y_sum += quant_survival(&coeffs_y, &JPEGLI_QUANT_Y_D2) as f64;
+                let q_y = quant_survival(&coeffs_y, &JPEGLI_QUANT_Y_D2);
+                quant_y_sum += q_y as f64;
+                quant_y_blocks.push(q_y);
                 let q_cb = quant_survival(&coeffs_cb, &JPEGLI_QUANT_C_D2);
                 let q_cr = quant_survival(&coeffs_cr, &JPEGLI_QUANT_C_D2);
-                quant_uv_sum += q_cb.max(q_cr) as f64;
+                let q_uv = q_cb.max(q_cr);
+                quant_uv_sum += q_uv as f64;
+                quant_uv_blocks.push(q_uv);
             }
         }
     }
@@ -1129,6 +1175,51 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     } else {
         0.0
     };
+
+    // Per-block quant-survival percentiles. Sort once per channel,
+    // read at p10/p25/p50/p75. p10 = "worst-block survival" — directly
+    // proxies trellis ROI; high-survival p75 ⇒ uniformly compressible.
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p10: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p25: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p50: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p75: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p10: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p25: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p50: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p75: f32;
+    #[cfg(feature = "experimental")]
+    {
+        let sort_f32 = |arr: &mut [f32]| {
+            arr.sort_unstable_by(|a, b| {
+                a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal)
+            });
+        };
+        let qs_at = |arr: &[f32], q: f32| -> f32 {
+            if arr.is_empty() {
+                return 0.0;
+            }
+            let idx = ((arr.len() as f32 * q) as usize).min(arr.len() - 1);
+            arr[idx]
+        };
+        sort_f32(&mut quant_y_blocks);
+        sort_f32(&mut quant_uv_blocks);
+        quant_survival_y_p10 = qs_at(&quant_y_blocks, 0.10);
+        quant_survival_y_p25 = qs_at(&quant_y_blocks, 0.25);
+        quant_survival_y_p50 = qs_at(&quant_y_blocks, 0.50);
+        quant_survival_y_p75 = qs_at(&quant_y_blocks, 0.75);
+        quant_survival_uv_p10 = qs_at(&quant_uv_blocks, 0.10);
+        quant_survival_uv_p25 = qs_at(&quant_uv_blocks, 0.25);
+        quant_survival_uv_p50 = qs_at(&quant_uv_blocks, 0.50);
+        quant_survival_uv_p75 = qs_at(&quant_uv_blocks, 0.75);
+    }
 
     // Batched log10(1 + ac) over `block_acs` via magetypes `ln_lowp`,
     // dispatched to v4 / v3 / NEON / WASM128 / scalar. Replaces the
@@ -1221,6 +1312,17 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
 
     #[cfg(not(feature = "experimental"))]
     let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
+    #[cfg(not(feature = "experimental"))]
+    let (
+        quant_survival_y_p10,
+        quant_survival_y_p25,
+        quant_survival_y_p50,
+        quant_survival_y_p75,
+        quant_survival_uv_p10,
+        quant_survival_uv_p25,
+        quant_survival_uv_p50,
+        quant_survival_uv_p75,
+    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,
@@ -1247,6 +1349,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         patch_fraction_fast,
         quant_survival_y,
         quant_survival_uv,
+        quant_survival_y_p10,
+        quant_survival_y_p25,
+        quant_survival_y_p50,
+        quant_survival_y_p75,
+        quant_survival_uv_p10,
+        quant_survival_uv_p25,
+        quant_survival_uv_p50,
+        quant_survival_uv_p75,
     }
 }
 

@@ -874,6 +874,64 @@ features_table! {
     /// `f32`. Noise floor (UV) at p90.
     #[cfg(feature = "experimental")]
     NoiseFloorUvP90 = 80 : f32 => noise_floor_uv_p90,
+
+    // ---------------- LaplacianVariance percentiles -----------------
+    // Tier 1 piggyback. Driven by a 256-bin histogram over `|∇²L|`
+    // (clamped to `[0, 255]`) accumulated alongside the existing
+    // Laplacian variance pass — see
+    // `src/tier1.rs::accumulate_laplacian_simd`. The histogram lives
+    // in `PixelStats` and adds 8 scalar adds per SIMD iter (lane
+    // scatter); no per-pixel branching, no allocation.
+    /// `f32`. `|∇²L|` at the 50th percentile (median) over interior
+    /// pixels. Range `[0, 255]` (saturated at the ceiling).
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP50 = 81 : f32 => laplacian_variance_p50,
+    /// `f32`. `|∇²L|` p75. Sharpness floor — distinguishes "single
+    /// sharp edge in a smooth image" (low p75 + high p99) from
+    /// "uniformly textured" (high p75) where the variance alone
+    /// can't tell them apart.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP75 = 82 : f32 => laplacian_variance_p75,
+    /// `f32`. `|∇²L|` p90.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP90 = 83 : f32 => laplacian_variance_p90,
+    /// `f32`. `|∇²L|` p99 — peak-edge magnitude. Picks up the
+    /// rare-but-loud sharpness events that drive the codec's
+    /// per-block trellis decision.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP99 = 84 : f32 => laplacian_variance_p99,
+    /// `f32`. Highest histogram bin (`0`–`255`) with at least one
+    /// observation. Saturates at `255` when any pixel hit the
+    /// histogram-clamp ceiling — flag value for "extreme edge
+    /// present somewhere in the image". Size-dependent (larger
+    /// images roll more chances at extremes); see issue #42 size
+    /// features for cross-term cushioning.
+    #[cfg(feature = "experimental")]
+    LaplacianVariancePeak = 85 : f32 => laplacian_variance_peak,
+
+    // ---------------- QuantSurvival percentiles ---------------------
+    // Per-block buffer of `quant_survival(...)` values is collected
+    // alongside the existing streaming mean (one f32 per block, ≤4096
+    // entries on a 4 MP image, ≤16 KB transient per channel). Sorted
+    // once at end of pass, indexed at fixed quantiles. p10 ⇒
+    // worst-block survival ⇒ trellis ROI proxy; p75 ⇒ best-block
+    // survival ⇒ compression ceiling.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP10 = 86 : f32 => quant_survival_y_p10,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP25 = 87 : f32 => quant_survival_y_p25,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP50 = 88 : f32 => quant_survival_y_p50,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP75 = 89 : f32 => quant_survival_y_p75,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP10 = 90 : f32 => quant_survival_uv_p10,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP25 = 91 : f32 => quant_survival_uv_p25,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP50 = 92 : f32 => quant_survival_uv_p50,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1839,9 +1897,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the percentile features (issue #42 +
-        // distributional analysis 2026-04-30, ids 56–80).
-        assert!(AnalysisFeature::from_u16(81).is_none());
+        // First unused id past the QuantSurvival percentile features
+        // (issue #42 + distributional analysis 2026-04-30, ids 56–93).
+        assert!(AnalysisFeature::from_u16(94).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 

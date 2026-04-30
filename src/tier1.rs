@@ -128,7 +128,7 @@ const STRIPE_H: usize = 8;
 /// `AnalyzerConfig::default().pixel_budget`.
 pub(crate) const DEFAULT_PIXEL_BUDGET: usize = 500_000;
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct PixelStats {
     luma_sum: f64,
     luma_sq_sum: f64,
@@ -152,6 +152,14 @@ struct PixelStats {
     laplacian_sum: f64,
     laplacian_sq_sum: f64,
     laplacian_count: u64,
+    /// 256-bin histogram of `|∇²L|` clamped to `[0, 255]`. Drives
+    /// `LaplacianVarianceP{50,75,90,99}` and `…Peak` distributional
+    /// features. The clamp absorbs the rare extreme magnitudes
+    /// (|lap| > 255 happens at ≤ 0.5% of pixels in natural-image
+    /// content) into bin 255 — those pixels are by definition
+    /// "peak" anyway, so the lossy clamp doesn't matter for the
+    /// peak/p99 use case. Bin width = 1 luma unit.
+    laplacian_histogram: [u32; 256],
     /// Skin-tone pixel count: pigmentation-invariant Chai-Ngan YCbCr
     /// gate computed lane-wise in the f32x8 stats pass alongside
     /// luma/chroma stats. Branchless: lane mask → blend(1.0, 0.0) → sum.
@@ -163,6 +171,37 @@ struct PixelStats {
     edge_grad_sum: f64,
     edge_grad_sq_sum: f64,
     edge_grad_count: u64,
+}
+
+impl Default for PixelStats {
+    fn default() -> Self {
+        // [u32; 256] doesn't auto-impl Default (the auto-derived
+        // arrays cap at length 32). Manually construct a zero state.
+        Self {
+            luma_sum: 0.0,
+            luma_sq_sum: 0.0,
+            cb_sum: 0.0,
+            cb_sq_sum: 0.0,
+            cr_sum: 0.0,
+            cr_sq_sum: 0.0,
+            edge_count: 0,
+            cb_grad_sum: 0.0,
+            cr_grad_sum: 0.0,
+            chroma_grad_count: 0,
+            rg_sum: 0.0,
+            rg_sq_sum: 0.0,
+            yb_sum: 0.0,
+            yb_sq_sum: 0.0,
+            laplacian_sum: 0.0,
+            laplacian_sq_sum: 0.0,
+            laplacian_count: 0,
+            laplacian_histogram: [0u32; 256],
+            skin_count: 0,
+            edge_grad_sum: 0.0,
+            edge_grad_sq_sum: 0.0,
+            edge_grad_count: 0,
+        }
+    }
 }
 
 impl PixelStats {
@@ -184,6 +223,9 @@ impl PixelStats {
         self.laplacian_sum += o.laplacian_sum;
         self.laplacian_sq_sum += o.laplacian_sq_sum;
         self.laplacian_count += o.laplacian_count;
+        for i in 0..256 {
+            self.laplacian_histogram[i] += o.laplacian_histogram[i];
+        }
         self.skin_count += o.skin_count;
         self.edge_grad_sum += o.edge_grad_sum;
         self.edge_grad_sq_sum += o.edge_grad_sq_sum;
@@ -550,6 +592,55 @@ pub(crate) fn extract_tier1_into_dispatch(
         } else {
             0.0
         };
+        // Laplacian percentiles: prefix-sum the 256-bin histogram of
+        // `|∇²L|` to find the smallest bin where the cumulative
+        // count crosses each quantile. Bin index doubles as the
+        // feature value (bin width = 1 luma unit). Peak = highest
+        // non-empty bin.
+        let total: u64 = stats.laplacian_histogram.iter().map(|&c| c as u64).sum();
+        if total > 0 {
+            let mut acc: u64 = 0;
+            let mut p50: u32 = 0;
+            let mut p75: u32 = 0;
+            let mut p90: u32 = 0;
+            let mut p99: u32 = 0;
+            let mut peak: u32 = 0;
+            let t50 = ((total as f64) * 0.50) as u64;
+            let t75 = ((total as f64) * 0.75) as u64;
+            let t90 = ((total as f64) * 0.90) as u64;
+            let t99 = ((total as f64) * 0.99) as u64;
+            let mut found_50 = false;
+            let mut found_75 = false;
+            let mut found_90 = false;
+            let mut found_99 = false;
+            for (bin, &count) in stats.laplacian_histogram.iter().enumerate() {
+                if count > 0 {
+                    peak = bin as u32;
+                }
+                acc += count as u64;
+                if !found_50 && acc >= t50 {
+                    p50 = bin as u32;
+                    found_50 = true;
+                }
+                if !found_75 && acc >= t75 {
+                    p75 = bin as u32;
+                    found_75 = true;
+                }
+                if !found_90 && acc >= t90 {
+                    p90 = bin as u32;
+                    found_90 = true;
+                }
+                if !found_99 && acc >= t99 {
+                    p99 = bin as u32;
+                    found_99 = true;
+                }
+            }
+            out.laplacian_variance_p50 = p50 as f32;
+            out.laplacian_variance_p75 = p75 as f32;
+            out.laplacian_variance_p90 = p90 as f32;
+            out.laplacian_variance_p99 = p99 as f32;
+            out.laplacian_variance_peak = peak as f32;
+        }
     }
     // Variance heterogeneity: log10(1 + max_var / max(1, mean_var)).
     // Captures how much louder the loudest block is than typical.
@@ -1309,6 +1400,7 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         laplacian_sum: 0.0,
         laplacian_sq_sum: 0.0,
         laplacian_count: 0,
+        laplacian_histogram: [0u32; 256],
     }
 }
 
@@ -1330,6 +1422,7 @@ fn accumulate_laplacian_simd<const BT601: bool>(
     kr: f32,
     kg: f32,
     kb: f32,
+    histogram: &mut [u32; 256],
 ) -> (f64, f64, u64) {
     let (kr, kg, kb) = if BT601 {
         (0.299_f32, 0.587_f32, 0.114_f32)
@@ -1379,6 +1472,15 @@ fn accumulate_laplacian_simd<const BT601: bool>(
         let lap = ll_v + lr_v + lu_v + ld_v - four_v * lc_v;
         sum_v += lap;
         sq_v = lap.mul_add(lap, sq_v);
+        // Bin |lap| → histogram[0..256]. Lanes are scattered scalar
+        // (no efficient SIMD scatter for this shape on x86 / NEON).
+        // 8 scalar adds per SIMD iter — well under the FMA cost
+        // already in the loop.
+        let lap_arr = lap.to_array();
+        for &v in &lap_arr {
+            let bin = (v.abs() as u32).min(255) as usize;
+            histogram[bin] += 1;
+        }
         count += 8;
         iters_since_flush += 1;
         if iters_since_flush >= FLUSH {
@@ -1403,6 +1505,8 @@ fn accumulate_laplacian_simd<const BT601: bool>(
         let lap = ll + lr + lu + ld - 4.0 * lc;
         lap_sum += lap as f64;
         lap_sq_sum += (lap * lap) as f64;
+        let bin = (lap.abs() as u32).min(255) as usize;
+        histogram[bin] += 1;
         count += 1;
     }
 
@@ -1422,11 +1526,11 @@ fn accumulate_laplacian_dispatch(
     let kb = weights.kb;
     let (s, sq, n) = if weights.is_bt601_baseline() {
         incant!(accumulate_laplacian_simd::<true>(
-            prev_row, cur_row, next_row, width, kr, kg, kb
+            prev_row, cur_row, next_row, width, kr, kg, kb, &mut stats.laplacian_histogram
         ))
     } else {
         incant!(accumulate_laplacian_simd::<false>(
-            prev_row, cur_row, next_row, width, kr, kg, kb
+            prev_row, cur_row, next_row, width, kr, kg, kb, &mut stats.laplacian_histogram
         ))
     };
     stats.laplacian_sum += s;
