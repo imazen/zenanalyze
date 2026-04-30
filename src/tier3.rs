@@ -1198,9 +1198,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     #[cfg(feature = "experimental")]
     {
         let sort_f32 = |arr: &mut [f32]| {
-            arr.sort_unstable_by(|a, b| {
-                a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal)
-            });
+            arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
         };
         let qs_at = |arr: &[f32], q: f32| -> f32 {
             if arr.is_empty() {
@@ -1286,8 +1284,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     sort_in_place(&mut block_low_y);
     sort_in_place(&mut block_low_cb);
     sort_in_place(&mut block_low_cr);
-    let nf_scale =
-        |raw: f32| -> f32 { ((raw / 15.0).sqrt() / 32.0).clamp(0.0, 1.0) };
+    let nf_scale = |raw: f32| -> f32 { ((raw / 15.0).sqrt() / 32.0).clamp(0.0, 1.0) };
     let noise_floor_y = nf_scale(quantile_at(&block_low_y, 0.10));
     let noise_floor_y_p25 = nf_scale(quantile_at(&block_low_y, 0.25));
     let noise_floor_y_p50 = nf_scale(quantile_at(&block_low_y, 0.50));

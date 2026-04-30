@@ -241,7 +241,14 @@ fn write_v1_model_f32(
     layers: &[LayerSpec<'_>],
     schema_hash: u64,
 ) {
-    write_v1_model_f32_with_scaler(out, n_inputs, &alloc::vec![0.0; n_inputs], &alloc::vec![1.0; n_inputs], layers, schema_hash);
+    write_v1_model_f32_with_scaler(
+        out,
+        n_inputs,
+        &alloc::vec![0.0; n_inputs],
+        &alloc::vec![1.0; n_inputs],
+        layers,
+        schema_hash,
+    );
 }
 
 /// Variant that takes explicit `(mean, scale)` for the input scaler
@@ -766,9 +773,13 @@ fn f32_vs_i8_within_tolerance() {
     // on a 4×8×4 ReLU MLP with random-ish weights. Mean abs error
     // should sit well under 1% of typical output magnitudes thanks
     // to per-output scaling.
-    let w0: alloc::vec::Vec<f32> = (0..32).map(|i| ((i * 7 + 3) % 17) as f32 * 0.1 - 0.8).collect();
+    let w0: alloc::vec::Vec<f32> = (0..32)
+        .map(|i| ((i * 7 + 3) % 17) as f32 * 0.1 - 0.8)
+        .collect();
     let b0 = alloc::vec![0.0f32; 8];
-    let w1: alloc::vec::Vec<f32> = (0..32).map(|i| ((i * 11 + 5) % 13) as f32 * 0.2 - 1.2).collect();
+    let w1: alloc::vec::Vec<f32> = (0..32)
+        .map(|i| ((i * 11 + 5) % 13) as f32 * 0.2 - 1.2)
+        .collect();
     let b1 = alloc::vec![0.1f32; 4];
 
     let mut buf32 = alloc::vec::Vec::new();

@@ -1526,11 +1526,25 @@ fn accumulate_laplacian_dispatch(
     let kb = weights.kb;
     let (s, sq, n) = if weights.is_bt601_baseline() {
         incant!(accumulate_laplacian_simd::<true>(
-            prev_row, cur_row, next_row, width, kr, kg, kb, &mut stats.laplacian_histogram
+            prev_row,
+            cur_row,
+            next_row,
+            width,
+            kr,
+            kg,
+            kb,
+            &mut stats.laplacian_histogram
         ))
     } else {
         incant!(accumulate_laplacian_simd::<false>(
-            prev_row, cur_row, next_row, width, kr, kg, kb, &mut stats.laplacian_histogram
+            prev_row,
+            cur_row,
+            next_row,
+            width,
+            kr,
+            kg,
+            kb,
+            &mut stats.laplacian_histogram
         ))
     };
     stats.laplacian_sum += s;
