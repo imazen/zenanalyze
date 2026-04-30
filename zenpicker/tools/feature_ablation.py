@@ -28,7 +28,9 @@ Outputs:
 - benchmarks/zq_feature_ablation_2026-04-29.json
 """
 
+import argparse
 import csv
+import importlib
 import json
 import math
 import sys
@@ -38,12 +40,31 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+# Defaults — overridden by `--codec-config <module>` (recommended) so the
+# script is codec-agnostic in shape. Module-level placeholders keep the
+# helpers below readable.
 PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
 FEATURES = Path("benchmarks/zq_pareto_features_2026-04-29.tsv")
 OUT_LOG = Path("benchmarks/zq_feature_ablation_2026-04-29.log")
 OUT_JSON = Path("benchmarks/zq_feature_ablation_2026-04-29.json")
 
 ZQ_TARGETS = list(range(0, 70, 5)) + list(range(70, 101, 2))
+
+
+def load_codec_config(name: str):
+    """Bind the codec config module's PARETO/FEATURES/ZQ_TARGETS to
+    this script's module-level names. The OUT_LOG / OUT_JSON paths
+    derive from the codec's OUT_LOG basename (suffix `_ablation`)
+    so ablation artifacts ship next to the trained model."""
+    global PARETO, FEATURES, OUT_LOG, OUT_JSON, ZQ_TARGETS
+    mod = importlib.import_module(name)
+    PARETO = Path(mod.PARETO)
+    FEATURES = Path(mod.FEATURES)
+    ZQ_TARGETS = list(mod.ZQ_TARGETS)
+    base = Path(mod.OUT_LOG)
+    OUT_LOG = base.with_name(base.stem + "_ablation" + base.suffix)
+    OUT_JSON = base.with_name(base.stem + "_ablation.json")
+    return mod
 SIZE_CLASSES = ["tiny", "small", "medium", "large"]
 SIZE_INDEX = {s: i for i, s in enumerate(SIZE_CLASSES)}
 HOLDOUT_FRAC = 0.20
@@ -168,6 +189,93 @@ def evaluate_argmin(Y_pred, Y_actual, meta, mask):
     }
 
 
+def train_all_configs(X_tr, Y_tr, n_configs):
+    """Train one HistGB per config, return list of estimators (None for
+    cells with too few rows). Used by permutation-importance ablation."""
+    teachers = [None] * n_configs
+    for cfg in range(n_configs):
+        mask = ~np.isnan(Y_tr[:, cfg])
+        if mask.sum() < 50:
+            continue
+        gbm = HistGradientBoostingRegressor(**HISTGB_KW)
+        gbm.fit(X_tr[mask], Y_tr[mask, cfg])
+        teachers[cfg] = gbm
+    return teachers
+
+
+def predict_with_teachers(teachers, X, Y_tr_for_fallback):
+    """Predict per-config log-bytes using `teachers`; columns whose
+    teacher is None get filled with the per-column nanmean of Y_tr."""
+    n_configs = len(teachers)
+    Y_pred = np.zeros((X.shape[0], n_configs), dtype=np.float32)
+    for cfg, t in enumerate(teachers):
+        if t is None:
+            fill = float(np.nanmean(Y_tr_for_fallback[:, cfg])) if n_configs else 0.0
+            if math.isnan(fill):
+                fill = 0.0
+            Y_pred[:, cfg] = fill
+        else:
+            Y_pred[:, cfg] = t.predict(X)
+    return Y_pred
+
+
+def permutation_importance_analysis(
+    teachers,
+    X_va,
+    Y_va,
+    Y_tr,
+    meta_va,
+    feat_cols,
+    n_configs,
+    seed=SEED,
+    n_repeats=3,
+):
+    """Permutation feature importance for the Pareto controller.
+
+    Train teachers once (caller does this), then for each feature
+    permute that column on the validation set, run inference, record
+    the mean-overhead delta vs the unpermuted baseline. ~50× faster
+    than retrain-LOO and the ranking is well-known to track LOO
+    closely on tree ensembles.
+
+    Returns:
+      baseline (dict) — metrics on unpermuted X_va
+      loo_results (dict[name → metrics]) — same shape as the
+        retrain-LOO output so downstream code is unchanged. Each
+        entry's `mean_pct` is the *permuted* mean overhead (i.e.
+        what the model produces when that feature is shuffled).
+    """
+    rng = np.random.default_rng(seed)
+    Y_pred_base = predict_with_teachers(teachers, X_va, Y_tr)
+    baseline = evaluate_argmin(Y_pred_base, Y_va, meta_va, np.ones(n_configs, dtype=bool))
+
+    n_feat = len(feat_cols)
+    loo_results = {}
+    for fi in range(n_feat):
+        # Average across n_repeats permutations to denoise.
+        ovs, accs = [], []
+        for _ in range(n_repeats):
+            X_perm = X_va.copy()
+            X_perm[:, fi] = rng.permutation(X_perm[:, fi])
+            Y_pred = predict_with_teachers(teachers, X_perm, Y_tr)
+            m = evaluate_argmin(Y_pred, Y_va, meta_va, np.ones(n_configs, dtype=bool))
+            if m is None:
+                continue
+            ovs.append(m["mean_pct"])
+            accs.append(m["argmin_acc"])
+        if not ovs:
+            loo_results[feat_cols[fi]] = baseline
+            continue
+        loo_results[feat_cols[fi]] = {
+            "n": baseline["n"],
+            "argmin_acc": float(np.mean(accs)),
+            "mean_pct": float(np.mean(ovs)),
+            "p50_pct": baseline["p50_pct"],
+            "p90_pct": baseline["p90_pct"],
+        }
+    return baseline, loo_results
+
+
 def train_and_eval(X_tr, Y_tr, X_va, Y_va, meta_va, mask_cols, n_configs):
     """Train HistGB per-config using only the columns where mask_cols is True.
 
@@ -190,7 +298,36 @@ def train_and_eval(X_tr, Y_tr, X_va, Y_va, meta_va, mask_cols, n_configs):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--codec-config",
+        default=None,
+        help="Python module name exporting PARETO/FEATURES/OUT_*/ZQ_TARGETS. "
+        "Same contract as train_hybrid.py. Without this flag the script falls "
+        "back to the legacy hardcoded paths.",
+    )
+    parser.add_argument(
+        "--method",
+        choices=["loo", "permutation"],
+        default="permutation",
+        help="Importance estimation method. `permutation` (default) trains the "
+        "baseline once then shuffles each feature column on the val set — "
+        "~50× faster than retrain-LOO with near-identical ranking. `loo` "
+        "retrains the model with each feature dropped (legacy; ground truth "
+        "for ranking but slow).",
+    )
+    parser.add_argument(
+        "--n-repeats",
+        type=int,
+        default=3,
+        help="Permutation repeats per feature (averaged). Default 3 — high "
+        "enough to denoise small datasets without inflating wall-time.",
+    )
+    args = parser.parse_args()
+    if args.codec_config:
+        load_codec_config(args.codec_config)
     sys.stderr.write(f"Loading {PARETO}...\n")
+    sys.stderr.write(f"        {FEATURES}\n")
     pareto = load_pareto(PARETO)
     feats, feat_cols = load_features(FEATURES)
     sys.stderr.write(f"Loaded {len(pareto)} cells × {len(feat_cols)} features\n")
@@ -218,21 +355,65 @@ def main():
     fixed_indices = list(range(n_feat, n_total))
 
     # ============ Phase 1: baseline (all features) ============
-    sys.stderr.write("\n[1/3] Baseline (all 19 features)...\n")
-    baseline_mask = np.ones(n_total, dtype=bool)
-    baseline = train_and_eval(X_tr, Y_tr, X_va, Y_va, meta_va, baseline_mask, n_configs)
-    sys.stderr.write(f"  baseline: mean overhead {baseline['mean_pct']:.2f}% argmin_acc {baseline['argmin_acc']:.1%}\n")
+    if args.method == "permutation":
+        sys.stderr.write(f"\n[1/3] Baseline + per-config teachers (all {n_feat} features)...\n")
+        teachers = train_all_configs(X_tr, Y_tr, n_configs)
+        baseline_pred = predict_with_teachers(teachers, X_va, Y_tr)
+        baseline = evaluate_argmin(
+            baseline_pred, Y_va, meta_va, np.ones(n_configs, dtype=bool)
+        )
+        sys.stderr.write(
+            f"  baseline: mean overhead {baseline['mean_pct']:.2f}% "
+            f"argmin_acc {baseline['argmin_acc']:.1%}\n"
+        )
 
-    # ============ Phase 2: leave-one-out per feature ============
-    sys.stderr.write(f"\n[2/3] Leave-one-out across {n_feat} features...\n")
-    loo_results = {}
-    for fi in range(n_feat):
-        mask = np.ones(n_total, dtype=bool)
-        mask[fi] = False
-        m = train_and_eval(X_tr, Y_tr, X_va, Y_va, meta_va, mask, n_configs)
-        loo_results[feat_cols[fi]] = m
-        delta = m["mean_pct"] - baseline["mean_pct"]
-        sys.stderr.write(f"  drop {feat_cols[fi]:35s}: {m['mean_pct']:.2f}% (Δ {delta:+.2f}pp)\n")
+        sys.stderr.write(
+            f"\n[2/3] Permutation importance across {n_feat} features "
+            f"({args.n_repeats} repeats each)...\n"
+        )
+        _, loo_results = permutation_importance_analysis(
+            teachers,
+            X_va,
+            Y_va,
+            Y_tr,
+            meta_va,
+            feat_cols,
+            n_configs,
+            seed=SEED,
+            n_repeats=args.n_repeats,
+        )
+        for fi in range(n_feat):
+            m = loo_results[feat_cols[fi]]
+            delta = m["mean_pct"] - baseline["mean_pct"]
+            sys.stderr.write(
+                f"  permute {feat_cols[fi]:35s}: {m['mean_pct']:.2f}% "
+                f"(Δ {delta:+.2f}pp)\n"
+            )
+    else:
+        sys.stderr.write(f"\n[1/3] Baseline (all {n_feat} features)...\n")
+        baseline_mask = np.ones(n_total, dtype=bool)
+        baseline = train_and_eval(
+            X_tr, Y_tr, X_va, Y_va, meta_va, baseline_mask, n_configs
+        )
+        sys.stderr.write(
+            f"  baseline: mean overhead {baseline['mean_pct']:.2f}% "
+            f"argmin_acc {baseline['argmin_acc']:.1%}\n"
+        )
+
+        sys.stderr.write(f"\n[2/3] Leave-one-out across {n_feat} features...\n")
+        loo_results = {}
+        for fi in range(n_feat):
+            mask = np.ones(n_total, dtype=bool)
+            mask[fi] = False
+            m = train_and_eval(
+                X_tr, Y_tr, X_va, Y_va, meta_va, mask, n_configs
+            )
+            loo_results[feat_cols[fi]] = m
+            delta = m["mean_pct"] - baseline["mean_pct"]
+            sys.stderr.write(
+                f"  drop {feat_cols[fi]:35s}: {m['mean_pct']:.2f}% "
+                f"(Δ {delta:+.2f}pp)\n"
+            )
 
     # Sort by Δ (largest hurt = most important).
     loo_sorted = sorted(loo_results.items(), key=lambda kv: -kv[1]["mean_pct"])

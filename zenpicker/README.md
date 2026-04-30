@@ -250,8 +250,10 @@ Same architecture, same input schema, same output layout. Differences are entire
 ```rust,ignore
 pub enum PickerProfile { SizeOptimal, ZensimStrict }
 
-const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_v2.0_hybrid.bin");
+const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_v2.1_full.bin");
 const PICKER_ZENSIM_STRICT: &[u8] = include_bytes!("zenjpeg_picker_v2.0_zensim_strict.bin");
+// (v2.1's wider schema confused the pinball-loss teacher; v2.0 strict
+//  ships until the strict variant is retrained on a pruned schema.)
 
 pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerError> {
     let bytes = match profile {
@@ -473,7 +475,9 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 | ✅ v0.1 | **Top-K argmin** (`Picker::argmin_masked_top_k::<K>` / `argmin_masked_top_k_in_range`) for cached second-best picks — backbone of the codec-side rescue path |
 | ✅ v0.1 | **Rescue plumbing** (`zenpicker::rescue::{should_rescue, RescuePolicy, RescueStrategy, RescueDecision}`) — codec-agnostic decision logic; codec injects `verify` + `rescue_pick`. See [SAFETY_PLANE.md](SAFETY_PLANE.md) |
 | ✅ v0.1 | **Reach-gate as parameter** (`zenpicker::reach_gate_mask`) — codec / caller picks the threshold per request. Strict 0.99 = SLA mode, 0.95 = high-q, 0.0 = max-quality (relies on rescue) |
-| 🔜 v0.1 | **v2.1 retrain with new tier3 features** (`patch_fraction_fast`, `quant_survival_y/uv`) — needs re-running the zenjpeg pareto sweep harness against the new analyzer features TSV. Tracked in [imazen/zenanalyze#22](https://github.com/imazen/zenanalyze/issues/22) |
+| ✅ v0.1 | **v2.1 zenjpeg bake** (35-feature schema, 192³ MLP) — adds `patch_fraction_fast`, `quant_survival_y/uv`, `aq_map_*`, `laplacian_variance`, etc. Beats v2.0 by 0.43pp mean overhead, +4.3pp argmin acc |
+| ✅ v0.1 | **Permutation feature importance** (`feature_ablation.py --method permutation`) — train once, shuffle each column. ~50× faster than retrain-LOO (2 min vs 1-2 hr at 53 features × 120 configs) |
+| ✅ v0.1 | **`--hidden W,W,W` capacity sweep** in `train_hybrid.py` — depth helps more than width past ~50-input cross-termed MLPs; 192³ overtakes the 128² default cleanly |
 | ⏳ v0.2 | `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT |
 | ⏳ v0.3 | i8-quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough |
 | ⏳ v0.3 | Generational re-encode picker (round-trip JPEG-source case): see [imazen/zenanalyze#13](https://github.com/imazen/zenanalyze/issues/13) |
@@ -488,10 +492,11 @@ Same architecture, same input schema, different training objectives. Codec links
 |---|---:|---:|---:|---|---|
 | `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20 % | 13.8 % | size_optimal | legacy / broadest 19-feature schema |
 | `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20 % | 10.5 % | size_optimal | legacy / reduced 8-feature schema |
-| **`zenjpeg_picker_v2.0_hybrid.bin`** | **50 KB** | **2.76 %** | **52.0 %** | size_optimal | **default** — hybrid heads, 8-feature schema |
+| `zenjpeg_picker_v2.0_hybrid.bin` | 50 KB | 2.76 % | 52.0 % | size_optimal | hybrid heads, 8-feature schema (post-ablation reduced); good fallback if codec wants the smaller analyzer hot path |
 | `zenjpeg_picker_v2.0_zensim_strict.bin` | 50 KB | 6.11 % | 41.7 % | zensim_strict | SLA-bound traffic — pinball-q99 bytes head + per-zq reach gate. See [Safety profiles](#safety-profiles-size_optimal-vs-zensim_strict) |
+| **`zenjpeg_picker_v2.1_full.bin`** | **195 KB** | **2.33 %** | **56.3 %** | size_optimal | **default** — 35-feature schema (incl. new `patch_fraction_fast`, `quant_survival_y/uv`, `aq_map_*`, `laplacian_variance`), 192³ MLP |
 
-Codec consumers default to v2.0 `size_optimal`; v1.x bakes remain in tree as a fallback for deployments that pinned before the hybrid rollout. The v2.0 `zensim_strict` bake ships side-by-side for SLA-bound traffic.
+Codec consumers default to v2.1 `size_optimal`; v2.0 stays as the smaller-schema option (when analyzer hot-path cost outranks picker accuracy by 0.43pp). v1.x bakes are deep-legacy. The v2.0 `zensim_strict` bake remains the recommended strict-profile model — v2.1's wider schema confused the pinball-loss teacher, so the v2.1 strict variant is not shipped (pending feature pruning, see [tools/README.md](tools/README.md#permutation-feature-ranking) and [FOR_NEW_CODECS.md Step 8](FOR_NEW_CODECS.md#step-8--tune-capacity--prune-the-schema)).
 
 The zensim_strict overhead (6.11% mean) is roughly 2.2× size_optimal because the pinball-q99 bytes head biases toward worst-case-safe configs and the reach gate masks low-confidence cells. The reach gate is *very* strict: at `target_zq ≥ 96`, fewer than 2 cells survive `reach_rate ≥ 0.99` because the underlying configs simply don't reach that threshold reliably across the corpus. Codec consumers should pair zensim_strict with the [two-shot rescue](SAFETY_PLANE.md) so requests above the gate budget fall through to a `KnownGoodFallback` rather than failing loudly.
 
