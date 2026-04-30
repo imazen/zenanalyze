@@ -50,34 +50,86 @@ sentinel value for cells where the axis is N/A).
 
 For the zenjpeg reference, see [`examples/zenjpeg_picker_config.py`](../examples/zenjpeg_picker_config.py).
 
-## End-to-end
+## Canonical end-to-end command sequence
+
+Every codec bake should run this six-stage pipeline, in order. Stages 4–6 are the safety gates — they may fail and that is the point. Don't skip any of them. Run from the codec's repo root (where the Pareto sweep TSVs live in `benchmarks/`); paths shown assume `<zenanalyze>` is the path to your zenanalyze checkout, and the codec config module is `<your_codec>_picker_config` importable on `PYTHONPATH`.
 
 ```bash
-# 1. Codec runs its Pareto sweep harness, producing TSVs.
-cd zenjpeg-checkout
-cargo run --release -p zenjpeg --features 'target-zq trellis' \
-    --example zq_pareto_calibrate
+PP="<zenanalyze>/zenpicker/examples:<zenanalyze>/zenpicker/tools"
 
-# 2. Train the hybrid-heads picker against zenjpeg's config taxonomy.
-PYTHONPATH=zenanalyze/zenpicker/examples:zenanalyze/zenpicker/tools \
-    python3 zenanalyze/zenpicker/tools/train_hybrid.py \
-        --codec-config zenjpeg_picker_config
+# 1. Sweep. Codec's harness emits per-(image, size, config, q) Pareto rows
+#    + per-(image, size) features TSV. Hours; do once, then only re-extract
+#    features when zenanalyze adds variants (--features-only flag, ~1 s).
+cargo run --release -p <your_codec> --features '<...>' \
+    --example <your_codec>_pareto_calibrate
+# (when re-extracting features only after a zenanalyze upgrade:)
+cargo run --release -p <your_codec> --features '<...>' \
+    --example <your_codec>_pareto_calibrate -- --features-only \
+    --features-output benchmarks/<your_codec>_features_v2_1.tsv
 
-# 3. Bake to v1 binary.
-python3 zenanalyze/tools/bake_picker.py \
-    --model benchmarks/zq_bytes_hybrid_2026-04-29.json \
-    --out   models/zenjpeg_picker_v2.0_hybrid.bin \
+# 2. Train. Codec config supplies CATEGORICAL_AXES, SCALAR_AXES, parser,
+#    optional SAFETY_THRESHOLDS, KEEP_FEATURES. Default --hidden 128,128
+#    is fine for ≤8-feature schemas; bump to 192,192,192 when n_inputs
+#    grows past ~50. For SLA traffic, also bake a zensim_strict variant.
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+    --codec-config <your_codec>_picker_config \
+    --objective size_optimal --hidden 192,192,192
+# zensim_strict variant (pinball-q99 bytes head + reach gate):
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+    --codec-config <your_codec>_picker_config \
+    --objective zensim_strict --hidden 192,192,192
+
+# 3. Permutation-importance ablation. Drop features with Δ < 0 (model
+#    overfits noise) before locking the schema. ~2 min wall-clock.
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/feature_ablation.py \
+    --codec-config <your_codec>_picker_config
+
+# 4. Bake. bake_picker.py refuses to bake when the model JSON's
+#    safety_report.passed=false — see strict-gate failures from step 2
+#    and pass --allow-unsafe only after writing down a reviewer note.
+python3 <zenanalyze>/tools/bake_picker.py \
+    --model benchmarks/<bake-base>.json \
+    --out   <zenanalyze>/zenpicker/models/<your_codec>_picker_v<X>.bin \
     --dtype f16
 
-# 4. Verify round-trip.
-python3 zenanalyze/tools/bake_roundtrip_check.py \
-    --model benchmarks/zq_bytes_hybrid_2026-04-29.json \
-    --dtype f16
+# 5. Round-trip check. Asserts Rust loader + numpy reference forward
+#    pass agree to within tolerance; catches binary-format regressions.
+python3 <zenanalyze>/tools/bake_roundtrip_check.py \
+    --model benchmarks/<bake-base>.json --dtype f16
+
+# 6. Post-bake spot checks.
+#    a) Adversarial probe: zeros / huge / NaN / Inf / single-feature spike.
+python3 <zenanalyze>/zenpicker/tools/adversarial_probe.py --strict \
+    --model benchmarks/<bake-base>.json
+#    b) Human-readable health report — review by eye.
+python3 <zenanalyze>/zenpicker/tools/diagnose_picker.py \
+    --model benchmarks/<bake-base>.json
 ```
 
 End-to-end retrain on a 16-core box, with the dataset cache warm:
-~3 minutes wall-clock (was ~25 minutes before the parallel-teachers
-refactor).
+~3 minutes wall-clock for steps 2-6 combined (was ~25 minutes before
+the parallel-teachers refactor).
+
+**CI rule:** every codec's CI must run stages 2-3 with `CI=1`
+(auto-strict) and stages 4 + 6a as separate jobs. A regression in any
+of them fails the workflow before a bad bake ever reaches `models/`.
+
+### Quick reference — which flag does what
+
+| Flag | Stage | When |
+|---|---|---|
+| `--codec-config <module>` | 2, 3 | Always. Module declares paths + schema + parser |
+| `--objective {size_optimal, zensim_strict}` | 2 | Default `size_optimal`. Bake `zensim_strict` alongside for SLA traffic |
+| `--bytes-quantile 0.99` | 2 | Quantile for the zensim_strict bytes head |
+| `--reach-threshold 0.99` | 2 | Per-cell reach-rate floor for the zensim_strict gate |
+| `--hidden W1,W2,...` | 2 | MLP hidden widths. Default `128,128`; bump to `192,192,192` past ~50 inputs |
+| `--out-suffix <suffix>` | 2 | Capacity sweep — keeps multiple bakes side-by-side |
+| `--strict` / `CI=1` env | 2, 3, 6a | Exit 1 on safety-gate violation. Always on in CI |
+| `--allow-unsafe` | 2, 3, 4 | Override strict gate. Only with a reviewer note |
+| `--method {permutation, loo}` | 3 | Default `permutation` (~50× faster than LOO) |
+| `--n-repeats N` | 3 | Permutation repeats per feature (default 3, bump to 5 on small val sets) |
+| `--max-negative-delta-pp X` | 3 | Strict-mode threshold for negative-Δ features (default −0.05pp) |
+| `--dtype {f16, f32}` | 4, 5 | Bake weight storage. f16 halves size at no measurable accuracy cost |
 
 ## Iteration vs production
 

@@ -253,6 +253,12 @@ def main():
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
         "scaler_mean": scaler.mean_.tolist(),
+        # NOTE: `scaler_scale` stores sklearn's `StandardScaler.scale_`
+        # (= the standard deviation, not its inverse). The runtime in
+        # `zenpicker/src/inference.rs` multiplies by this rather than
+        # dividing — see that file's comment for the full explanation
+        # of why every shipped v1.x / v2.x bake depends on this
+        # convention.
         "scaler_scale": scaler.scale_.tolist(),
         "layers": [
             {"W": w.tolist(), "b": b.tolist()}
