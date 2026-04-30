@@ -66,6 +66,10 @@ required-features = ["experimental", "composites"]
 name = "tier3_fingerprint_bench"
 required-features = ["experimental"]
 
+[[example]]
+name = "per_feature_cost"
+required-features = ["experimental", "composites"]
+
 [lints.rust]
 # zenanalyze ships zero `unsafe` blocks; SIMD goes through the
 # safe-token wrappers in archmage / magetypes. Forbidding here
