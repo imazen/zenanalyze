@@ -383,6 +383,23 @@ reductions but catch any genuine architecture divergence.
 > these files looks ≈30 % on x86_64. Real coverage of executable code paths
 > (counted on the dispatched variant only) is ≥95 % across every module.
 
+## Companion crates in this repo
+
+The repository hosts two sibling pieces that the codecs in
+[`imazen/zenjpeg`](https://github.com/imazen/zenjpeg),
+[`imazen/zenwebp`](https://github.com/imazen/zenwebp), etc. compose with
+zenanalyze:
+
+| Path | Identity | Status |
+|---|---|---|
+| [`zenpredict/`](zenpredict/) | **Rust runtime** — zero-copy MLP loader (ZNPR v2 binary format), forward pass, masked argmin, typed metadata, OOD bounds, two-shot rescue policy. Used by codec pickers (`zenjpeg`/`zenwebp`/`zenavif`/`zenjxl`) and by `zensim` V0.4 perceptual scoring | Crate, `0.1.x` |
+| [`zenpicker/`](zenpicker/) | **Python training pipeline** — pareto sweep harness, teacher fit, distill, ablation, holdout probes, safety reports, bake to `.bin` for zenpredict to load | Tooling, in-repo |
+
+The runtime (zenpredict) and the trainer (zenpicker) version independently;
+the binary format (`ZNPR v2`) is the contract between them. See
+[`MIGRATION.md`](MIGRATION.md) for the path from the previous (unpublished)
+zenpicker Rust crate to zenpredict.
+
 ## License
 
 AGPL-3.0-only OR LicenseRef-Imazen-Commercial. Commercial licensing available
