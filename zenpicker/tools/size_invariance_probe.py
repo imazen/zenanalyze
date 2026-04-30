@@ -4,21 +4,38 @@ Size-invariance probe for a baked picker JSON.
 
 Size invariance is a *safety property* of the picker (see
 SAFETY_PLANE.md → "Size invariance is a safety property"). The picker
-is a feature-vector-in / argmin-out function — it has no notion of
-image dimensions at runtime, only what the codec packs into the
-feature vector via `size_class` one-hot, `log_pixels`, and the
-zq×feature cross-terms. The picker MUST produce trustworthy picks at
-every (width, height), not just at the four sample sizes
-{tiny, small, medium, large} we sampled at training time.
+must produce *trustworthy picks at every (width, height)* — not just
+at the four sample sizes (`tiny / small / medium / large`) we
+sampled at training time.
 
-This probe answers: given the same image content at four sizes, does
-the picker's argmin cell stay stable across `size_class`? At each
-`target_zq`? A stable argmin across all four sizes for a given image
-is the canonical "size invariant" outcome — the codec is making the
-*same encoder-config decision* regardless of resize. If the cell
-flips drastically when an image is resized, the picker's pick at
-that (image, zq) is sensitive to size in a way the safety plane
-needs to know about.
+# What "size invariance" actually means for a size-aware picker
+
+The picker is **trained size-aware** — `size_class` one-hot,
+`log_pixels`, and zq×feature cross-terms are explicit inputs. So
+it's *intentionally* allowed to pick *different* cells at different
+sizes; doing so is the point of including those features. Demanding
+identical argmin across the four sizes contradicts training intent.
+
+The right "invariance" criterion is therefore not pick identity but
+**per-size correctness**: the picker should pick a *good* cell at
+every size, even if it's a different good cell per size. We measure
+this by:
+
+  1. **Principal criterion** — read
+     `safety_report.diagnostics.by_size` (training-time per-size
+     mean overhead) and check that the worst size_class is no more
+     than `--max-size-overhead-ratio` × the best (default 3.0). One
+     size_class being dramatically worse than another is a real bug
+     (often: data starvation at that size — see
+     `DATA_STARVED_SIZE` in `train_hybrid.py`).
+  2. **Diagnostic** — argmin-identical-across-sizes rate. Reports
+     how often the same cell is chosen across all four sizes for
+     the same image at the same target_zq. Useful as a baseline
+     check on whether size-awareness is doing anything at all
+     (a value near 100% means the picker isn't using size_class
+     much; a value near 0% means it's heavily size-driven). Not a
+     hard gate by default; set `--argmin-identical-floor` non-zero
+     to enable.
 
 # Inputs
 
@@ -43,41 +60,27 @@ the same feature vector `train_hybrid.py` builds (raw feats +
 size_oh + log_px + zq cross-terms + icc placeholder) and runs the
 forward pass via the Python numpy reference (no Rust dependency).
 
-# Stability metric
+The model JSON must carry `safety_report.diagnostics.by_size` —
+trained with current `train_hybrid.py` so the per-size aggregates
+are populated. Bakes that pre-date the safety machinery emit a
+warning and skip the principal criterion.
 
-For each image i and target_zq z:
-    cells_i_z = {argmin_cell(i, sz, z) for sz in
-                  {tiny, small, medium, large}}
-    stable_i_z = (|cells_i_z| == 1)
+# Strict gate
 
-Image-level stability:
-    stable_i = mean over z of stable_i_z
+`--strict` exits 1 when:
+  - per-size worst/best mean overhead ratio > `--max-size-overhead-ratio`,
+    OR
+  - argmin-identical rate < `--argmin-identical-floor` (when that
+    threshold is set non-zero)
 
-Corpus-level stability:
-    stability_pct = 100 * mean over (i, z) of stable_i_z
-
-`--strict` exits 1 when `stability_pct < --threshold` (default 90.0).
-This is the post-bake gate counterpart to `train_hybrid.py`'s
-in-trainer `PER_SIZE_TAIL` and `DATA_STARVED_SIZE` violations.
-
-# Why this matters
-
-A picker that flips its cell pick when the same image is fed at a
-different size is making encoder-config decisions on signal that
-*should* be size-invariant. The right response is one of:
-  1. Retrain with denser per-size coverage (DATA_STARVED_SIZE gate)
-  2. Re-engineer the cross-term layout so size enters more
-     gracefully into the feature vector
-  3. Accept that some content (e.g. tiny screen captures) genuinely
-     wants a different config than the same content at 4K — but
-     surface the rate so it's not silently the picker's failure mode
+This is the post-bake counterpart to `train_hybrid.py`'s in-trainer
+`PER_SIZE_TAIL` and `DATA_STARVED_SIZE` violations. Auto-strict in CI.
 
 # Usage
 
-    python3 size_invariance_probe.py \\
+    python3 size_invariance_probe.py --strict \\
         --model benchmarks/zq_bytes_hybrid_v2_1.json \\
-        --features-tsv benchmarks/zq_pareto_features_2026-04-29_v2_1.tsv \\
-        [--n-images 10] [--threshold 90.0] [--strict]
+        --features-tsv benchmarks/zq_pareto_features_2026-04-29_v2_1.tsv
 """
 
 from __future__ import annotations
@@ -226,11 +229,35 @@ def main() -> int:
                     help="comma-separated target_zq values to probe. "
                     "Default: read from model JSON's training_objective "
                     "or the canonical zenjpeg grid 0..70 step 5 + 70..100 step 2")
-    ap.add_argument("--threshold", type=float, default=90.0,
-                    help="stability percentage floor for --strict (default 90.0)")
-    ap.add_argument("--strict", action="store_true",
-                    help="Auto-enabled in CI. Exit code 1 when "
-                    "stability_pct < threshold.")
+    ap.add_argument(
+        "--max-size-overhead-ratio",
+        type=float,
+        default=3.0,
+        help="Principal pass criterion: ratio of worst-size mean "
+        "overhead to best-size mean overhead, read from "
+        "safety_report.diagnostics.by_size. Default 3.0 — no "
+        "size_class may be more than 3× worse than the best. This "
+        "catches real per-size regressions (the picker is bad at "
+        "one size_class) without penalizing intentional size-aware "
+        "cell variation. Requires a model JSON with safety_report.",
+    )
+    ap.add_argument(
+        "--argmin-identical-floor",
+        type=float,
+        default=0.0,
+        help="Diagnostic gate (default 0.0 = disabled). Was the only "
+        "criterion in earlier versions; kept for explicit users. The "
+        "picker is *trained* with size_class as an input feature, so "
+        "demanding identical argmin across sizes contradicts training "
+        "intent. Set to a non-zero value (e.g. 25.0) only when probing "
+        "a baseline that is supposed to be size-invariant by design.",
+    )
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit code 1 when the principal criterion fails (or, "
+        "when --argmin-identical-floor > 0, that secondary gate also).",
+    )
     args = ap.parse_args()
 
     model = json.loads(args.model.read_text())
@@ -316,8 +343,12 @@ def main() -> int:
         )
 
     sys.stderr.write(
-        f"\nCorpus stability: {n_stable}/{n_pairs} = {stability_pct:.2f}% "
-        f"(threshold {args.threshold:.1f}%)\n"
+        f"\n[diagnostic] argmin-identical-across-sizes: "
+        f"{n_stable}/{n_pairs} = {stability_pct:.2f}%\n"
+        f"             (the picker is *trained* size-aware via the "
+        f"size_class one-hot, so per-size variation is *expected*; this\n"
+        f"             rate matters only as a baseline check on whether "
+        f"size-awareness is doing anything at all.)\n"
     )
 
     # Top flips (worst non-stable cases by cell-count diversity).
@@ -332,14 +363,78 @@ def main() -> int:
                 f"  {img}  @zq{zq}  {k} distinct cells: {picks_str}\n"
             )
 
-    failed = stability_pct < args.threshold
-    if failed:
+    # Principal criterion: per-size correctness from safety_report.
+    sr = model.get("safety_report") or {}
+    by_size = (sr.get("diagnostics") or {}).get("by_size") or {}
+    if not by_size:
         sys.stderr.write(
-            f"\n[FAIL] stability {stability_pct:.2f}% < threshold {args.threshold:.1f}%\n"
+            "\n[WARN] model JSON has no safety_report.diagnostics.by_size — "
+            "principal criterion (per-size mean-overhead ratio) cannot run. "
+            "Re-bake with current train_hybrid.py to populate it.\n"
         )
+        ratio_failed = True
+        ratio = float("nan")
+    else:
+        means = {sz: by_size[sz].get("mean_pct") for sz in SIZE_CLASSES if sz in by_size}
+        means = {sz: v for sz, v in means.items() if v is not None}
+        if not means:
+            sys.stderr.write(
+                "[WARN] safety_report.by_size has no per-size mean values; "
+                "principal criterion skipped.\n"
+            )
+            ratio_failed = True
+            ratio = float("nan")
+        else:
+            best = min(means.values())
+            worst = max(means.values())
+            ratio = worst / max(best, 1e-9)
+            sys.stderr.write(
+                "\n[principal] per-size mean overhead "
+                "(from training-time safety_report):\n"
+            )
+            for sz in SIZE_CLASSES:
+                if sz in means:
+                    flag = "  ←worst" if means[sz] == worst else (
+                        "  ←best" if means[sz] == best else ""
+                    )
+                    sys.stderr.write(
+                        f"    {sz:8s}  mean={means[sz]:6.2f}%{flag}\n"
+                    )
+            sys.stderr.write(
+                f"\n             worst/best ratio = {ratio:.2f}× "
+                f"(threshold {args.max_size_overhead_ratio:.2f}×)\n"
+            )
+            ratio_failed = ratio > args.max_size_overhead_ratio
+
+    # Secondary gate (off by default).
+    identical_failed = (
+        args.argmin_identical_floor > 0.0
+        and stability_pct < args.argmin_identical_floor
+    )
+
+    failed = ratio_failed or identical_failed
+    if failed:
+        msgs = []
+        if ratio_failed:
+            msgs.append(
+                f"per-size ratio {ratio:.2f}× > "
+                f"{args.max_size_overhead_ratio:.2f}× (one size_class "
+                "is much worse than another — re-train with more rows "
+                "for the lagging size, or tighten "
+                "DATA_STARVED_SIZE / PER_SIZE_TAIL thresholds)"
+            )
+        if identical_failed:
+            msgs.append(
+                f"argmin-identical {stability_pct:.2f}% < "
+                f"{args.argmin_identical_floor:.1f}% (size-invariant "
+                "baseline check)"
+            )
+        sys.stderr.write("\n[FAIL] " + "; ".join(msgs) + "\n")
     else:
         sys.stderr.write(
-            f"\n[OK] stability {stability_pct:.2f}% >= threshold {args.threshold:.1f}%\n"
+            f"\n[OK] per-size ratio {ratio:.2f}× ≤ "
+            f"{args.max_size_overhead_ratio:.2f}× — picker overheads "
+            "are coherent across size_classes.\n"
         )
 
     return 1 if (failed and args.strict) else 0
