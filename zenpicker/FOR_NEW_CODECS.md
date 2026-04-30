@@ -94,7 +94,12 @@ If you're using zenanalyze, declare a `FeatureSet` and walk `FeatureSet::SUPPORT
 
 **Add a `--features-only` flag to your harness.** The Pareto encode loop is the expensive step (~hours on a typical corpus). When zenanalyze ships new features, you want to extend the existing TSV without re-running the encode pass — `--features-only` skips encoding and emits just the per-image feature rows. Re-extraction takes ~1 second on 1000-image corpora; without it iteration is gated on the encode loop. zenjpeg's harness has this; copy the pattern.
 
-**One TSV writer pitfall:** if you open the features TSV in append mode (the typical zenjpeg pattern), the column header is only written when the file is *new*. If you re-extract after adding columns to your `KEEP_FEATURES`, **delete the old TSV first** — otherwise zenjpeg appends rows with the new column count under the old header and the trainer silently misaligns. Same advice for any harness that defaults to append.
+**One TSV writer pitfall to design around.** If your harness opens the features TSV in append mode (the typical zenjpeg pattern), the column header is only written when the file is *new*. After expanding `KEEP_FEATURES`, an append-mode re-run would write rows with the new column count under the old header and the trainer silently misaligns. Two safe ways to avoid this:
+
+1. **Date-stamp the output path** — `zq_pareto_features_2026-04-30_v2_2.tsv`, `..._v2_3.tsv`, etc. Each schema version gets its own file; old runs are preserved as historical record. This is what zenjpeg does in practice.
+2. **Have your harness validate the header before appending.** If the existing first line's tab-count doesn't match `column_count + 1`, abort with a loud error rather than appending. Truncate-and-rewrite is a fine alternative when the harness *knows* it has the latest schema.
+
+**Don't suggest "delete the TSV first" as standard procedure** — it's a destructive op for what should be a deterministic pipeline. If your harness silently corrupts on schema mismatch, fix the harness.
 
 Cost rule: every feature costs hot-path zenanalyze time on every encode decision. Run a permutation-importance ablation (Step 8 below) to drop features that don't pay for themselves before locking in your schema.
 
