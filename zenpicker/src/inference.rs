@@ -30,6 +30,21 @@ pub fn forward(
     debug_assert_eq!(output.len(), model.n_outputs());
 
     // Scale inputs: x' = (x - mean) * scale.
+    //
+    // **Wire-format convention.** `scale` here is the value baked into
+    // the model from the Python side, where the emitter writes
+    // sklearn's `StandardScaler.scale_` (= **standard deviation**, not
+    // its inverse) into the `scaler_scale` JSON field. sklearn's own
+    // transform divides by `scale_` (giving `(x - mean) / std`), so
+    // mathematically this multiplies by `std` instead of dividing —
+    // the formal opposite of standardization.
+    //
+    // It works because the trained MLP's first layer has absorbed
+    // whichever direction the Python pipeline used; end-to-end the
+    // function is still correct. **Do not "fix" the direction in
+    // isolation** — that would silently miscalibrate every shipped
+    // v1.x / v2.x bake. If a future format ever flips the convention,
+    // bump the bake version and migrate.
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     let cur = &mut scratch_a[..n_inputs];
