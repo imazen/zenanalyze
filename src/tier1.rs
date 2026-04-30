@@ -18,6 +18,100 @@ use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use archmage::{incant, magetypes};
 
+// ---------------------------------------------------------------------------
+// Tier-aware RGB24 chunk-8 deinterleave dispatch
+// ---------------------------------------------------------------------------
+//
+// The hot loops below process 8 packed-RGB24 pixels per chunk and want
+// the result as 3 × `[f32; 8]` so the magetypes-generic `f32x8::load`
+// can pick them up. The naive `for i in 0..8 { arr[i] = c[i*3] as f32 }`
+// scatter compiles to a 21-`vpinsrb` chain on AVX2 (~5× slower than the
+// optimal `vpshufb` pattern; see closed PR #17 in zenanalyze and the
+// `garb::deinterleave` benches that ship the optimal kernel).
+//
+// We hide the per-tier choice behind a sealed trait so each magetypes
+// monomorphization picks its own impl at compile time:
+// - `X64V3Token` / `X64V4Token` route to garb's hand-tuned AVX2 kernel
+//   (V4 hardware downcasts to V3 since AVX2 is a strict subset).
+// - Other tokens (`NeonToken`, `Wasm128Token`, `ScalarToken`) call the
+//   scalar fallback in garb, which inlines into the caller's
+//   target_feature region and lets LLVM autovectorize. The inline
+//   keeps zenanalyze unsafe-free (`unsafe_code = "forbid"`); the
+//   raw intrinsics live behind garb's safe wrappers.
+mod deinterleave_dispatch {
+    use archmage::arcane;
+
+    /// Sealed trait — implemented for every token magetypes might hand
+    /// us in the v4/v3/neon/wasm128/scalar tier list. Sealed because
+    /// callers shouldn't extend it; if a new tier is added, add the impl
+    /// here at the same time as the `#[magetypes(...)]` axis.
+    pub trait DeinterleaveRgb24Chunk8: Copy {
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]);
+    }
+
+    // `#[arcane]` generates a safe outer wrapper with `#[target_feature]`
+    // applied to the body, so callers don't need to be in a matching
+    // target_feature region themselves. Inlining keeps the call free of
+    // dispatch cost when the magetypes-generated caller happens to share
+    // the same features (which is the common case here — the magetypes
+    // v3 monomorphization already runs under AVX2 attrs).
+    #[cfg(target_arch = "x86_64")]
+    #[arcane]
+    fn rgb24_chunk8_via_garb_v3(
+        token: archmage::X64V3Token,
+        chunk: &[u8; 24],
+    ) -> ([f32; 8], [f32; 8], [f32; 8]) {
+        garb::deinterleave::rgb24_chunk8_to_planes_v3(token, chunk)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    impl DeinterleaveRgb24Chunk8 for archmage::X64V3Token {
+        #[inline(always)]
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+            rgb24_chunk8_via_garb_v3(self, chunk)
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "avx512"))]
+    impl DeinterleaveRgb24Chunk8 for archmage::X64V4Token {
+        #[inline(always)]
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+            // AVX-512 hardware runs AVX2 instructions; downcast and reuse the
+            // V3 kernel. A bespoke AVX-512 path could pack two 8-pixel chunks
+            // into one f32x16, but the surrounding magetypes loop is f32x8 —
+            // wider would need a structural change.
+            rgb24_chunk8_via_garb_v3(self.v3(), chunk)
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    impl DeinterleaveRgb24Chunk8 for archmage::NeonToken {
+        #[inline(always)]
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+            // No 8-pixel NEON kernel in garb yet (vld3_u8 has no safe
+            // wrapper; the q-suffix variant is 16-pixel). Scalar fallback
+            // inlines and gets autovec'd in the NEON region.
+            garb::deinterleave::rgb24_chunk8_to_planes_scalar(chunk)
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    impl DeinterleaveRgb24Chunk8 for archmage::Wasm128Token {
+        #[inline(always)]
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+            garb::deinterleave::rgb24_chunk8_to_planes_scalar(chunk)
+        }
+    }
+
+    impl DeinterleaveRgb24Chunk8 for archmage::ScalarToken {
+        #[inline(always)]
+        fn rgb24_chunk8(self, chunk: &[u8; 24]) -> ([f32; 8], [f32; 8], [f32; 8]) {
+            garb::deinterleave::rgb24_chunk8_to_planes_scalar(chunk)
+        }
+    }
+}
+use deinterleave_dispatch::DeinterleaveRgb24Chunk8;
+
 // Luma weights are no longer constants — they're picked per-source-
 // primaries by `crate::luma::LumaWeights::for_primaries(...)` and
 // threaded into the SIMD kernels as `kr / kg / kb` parameters.
@@ -742,21 +836,13 @@ fn stripe_block_stats_simd(
 
         for dy in 0..STRIPE_H {
             let base = dy * row_bytes + bx * STRIPE_H * 3;
-            // Deinterleave 8 RGB pixels (24 bytes) into per-channel
-            // f32 arrays. The fixed-size `&[u8; 24]` view proves the
-            // size to LLVM, eliminates interior bounds checks, and
-            // lets the autovectorizer (running under the per-tier
-            // target_feature context that `#[magetypes]` set up) emit
-            // a clean AVX2 / NEON-vld3 / WASM-shuffle deinterleave.
+            // Deinterleave 8 RGB pixels (24 bytes) → 3 × [f32; 8] via
+            // garb's tier-specialized chunk primitive. Inlines into the
+            // current target_feature region; on AVX2 it emits 6×vpshufb
+            // + 3×vpor + 3×vpmovzxbd + 3×vcvtdq2ps in place of the
+            // 21×vpinsrb scatter the autovectorizer used to produce.
             let chunk: &[u8; 24] = (&stripe_rows[base..base + 24]).try_into().unwrap();
-            let mut r_arr = [0.0f32; 8];
-            let mut g_arr = [0.0f32; 8];
-            let mut b_arr = [0.0f32; 8];
-            for dx in 0..8 {
-                r_arr[dx] = chunk[dx * 3] as f32;
-                g_arr[dx] = chunk[dx * 3 + 1] as f32;
-                b_arr[dx] = chunk[dx * 3 + 2] as f32;
-            }
+            let (r_arr, g_arr, b_arr) = token.rgb24_chunk8(chunk);
             let r_v = f32x8::load(token, &r_arr);
             let g_v = f32x8::load(token, &g_arr);
             let b_v = f32x8::load(token, &b_arr);
@@ -930,15 +1016,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let remainder = chunks.remainder();
     for chunk in chunks {
         let c: &[u8; 24] = chunk.try_into().unwrap();
-        // Deinterleave 8 RGB pixels into per-channel f32 arrays.
-        let mut r_arr = [0.0f32; 8];
-        let mut g_arr = [0.0f32; 8];
-        let mut b_arr = [0.0f32; 8];
-        for i in 0..8 {
-            r_arr[i] = c[i * 3] as f32;
-            g_arr[i] = c[i * 3 + 1] as f32;
-            b_arr[i] = c[i * 3 + 2] as f32;
-        }
+        // Deinterleave via garb's tier-specialized chunk primitive
+        // (replaces the 21-vpinsrb autovec scatter — see the
+        // `deinterleave_dispatch` trait at the top of this file).
+        let (r_arr, g_arr, b_arr) = token.rgb24_chunk8(c);
         let r = f32x8::load(token, &r_arr);
         let g = f32x8::load(token, &g_arr);
         let b = f32x8::load(token, &b_arr);
