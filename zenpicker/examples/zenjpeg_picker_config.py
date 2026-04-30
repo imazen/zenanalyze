@@ -137,6 +137,26 @@ _CONFIG_RE = re.compile(
 LAMBDA_NOTRELLIS_SENTINEL = 0.0
 
 
+# ---------- Axis schema (consumed by train_hybrid.py) ----------
+
+# Explicit declaration of which `parse_config_name` keys are
+# categorical (form cells) vs scalar (per-cell prediction heads).
+# This was the implicit zenjpeg shape baked into the trainer prior to
+# the codec-agnostic refactor; declaring it explicitly here lets new
+# codec configs use a different shape without hardcoding.
+CATEGORICAL_AXES = ["color", "sub", "trellis_on", "sa"]
+SCALAR_AXES = ["chroma_scale", "lambda"]
+# `lambda` is a sentinel-bearing axis: rows with lambda <= 0.0 are
+# trellis-off cells where the lambda value is just a placeholder.
+# Train_hybrid.py masks these out of lambda's per-cell teacher.
+SCALAR_SENTINELS = {"lambda": LAMBDA_NOTRELLIS_SENTINEL}
+# Display-only ranges for the training log.
+SCALAR_DISPLAY_RANGES = {
+    "chroma_scale": (0.6, 1.5),
+    "lambda": (8.0, 25.0),
+}
+
+
 def parse_config_name(name: str) -> dict:
     """Parse a zenjpeg config name into its categorical + scalar axes.
 

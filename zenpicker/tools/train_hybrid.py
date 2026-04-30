@@ -79,6 +79,25 @@ ZQ_TARGETS: list
 KEEP_FEATURES: list
 parse_config_name = None  # type: ignore[assignment]
 
+# Codec-driven axis schema. The codec config exports CATEGORICAL_AXES
+# (list[str] — keys of parsed dict that form the cell tuple) and
+# SCALAR_AXES (list[str] — keys of parsed dict that become per-cell
+# scalar prediction heads). Default to zenjpeg's shape so configs that
+# pre-date the explicit declaration keep working.
+CATEGORICAL_AXES: list = ["color", "sub", "trellis_on", "sa"]
+SCALAR_AXES: list = ["chroma_scale", "lambda"]
+# Per-axis sentinel values for "not applicable" rows. The trainer
+# masks rows where actual_value <= sentinel out of that axis's per-cell
+# regression so the model doesn't learn from sentinel placeholders.
+# Default mirrors zenjpeg's lambda<=0 → trellis-off semantics.
+SCALAR_SENTINELS: dict = {"lambda": 0.0}
+# Per-axis (min, max) ranges shown in the training log next to RMSE,
+# purely for human readability. Optional.
+SCALAR_DISPLAY_RANGES: dict = {
+    "chroma_scale": (0.6, 1.5),
+    "lambda": (8.0, 25.0),
+}
+
 
 def load_codec_config(name: str):
     """Import a codec-config module and bind its exports to module-level
@@ -86,18 +105,27 @@ def load_codec_config(name: str):
       PARETO, FEATURES, OUT_JSON, OUT_LOG, ZQ_TARGETS, KEEP_FEATURES,
       parse_config_name(name: str) -> dict.
 
+    Optional codec-config exports (recommended for non-zenjpeg codecs):
+      CATEGORICAL_AXES: list[str] — parsed-dict keys forming the cell
+                                    tuple. Defaults to zenjpeg's shape
+                                    `["color", "sub", "trellis_on", "sa"]`.
+      SCALAR_AXES:      list[str] — parsed-dict keys that become per-cell
+                                    scalar prediction heads. Defaults to
+                                    `["chroma_scale", "lambda"]`.
+      SCALAR_SENTINELS: dict[str, float] — per-axis sentinels. Rows with
+                                    `actual_value <= sentinel` are masked
+                                    out of that axis's per-cell teacher.
+                                    Defaults to `{"lambda": 0.0}`.
+      SCALAR_DISPLAY_RANGES: dict[str, (float, float)] — log formatting.
+
     `parse_config_name` returns a dict whose keys partition into:
-      - categorical axes (hashable values, used to form cells via
-        `categorical_key()`)
+      - categorical axes (hashable values, used to form cells)
       - scalar axes (float values; sentinel allowed for "not
         applicable" — e.g. lambda=0.0 in trellis-off cells)
-
-    The `categorical_key` and the scalar-axis list are determined by
-    the codec config; this script reads them via the codec's
-    `CATEGORICAL_AXES` and `SCALAR_AXES` constants when present.
     """
     global PARETO, FEATURES, OUT_LOG, OUT_JSON
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
+    global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
     mod = importlib.import_module(name)
     PARETO = Path(mod.PARETO)
     FEATURES = Path(mod.FEATURES)
@@ -106,6 +134,23 @@ def load_codec_config(name: str):
     ZQ_TARGETS = list(mod.ZQ_TARGETS)
     KEEP_FEATURES = list(mod.KEEP_FEATURES)
     parse_config_name = mod.parse_config_name
+    # Optional axis schema — fall back to module defaults (zenjpeg shape)
+    # when the codec config doesn't declare. Pre-existing zenjpeg config
+    # keeps working without changes.
+    if hasattr(mod, "CATEGORICAL_AXES"):
+        CATEGORICAL_AXES = list(mod.CATEGORICAL_AXES)
+    if hasattr(mod, "SCALAR_AXES"):
+        SCALAR_AXES = list(mod.SCALAR_AXES)
+    if hasattr(mod, "SCALAR_SENTINELS"):
+        SCALAR_SENTINELS = dict(mod.SCALAR_SENTINELS)
+    elif hasattr(mod, "CATEGORICAL_AXES") or hasattr(mod, "SCALAR_AXES"):
+        # Codec explicitly declared schema → don't inherit zenjpeg's
+        # lambda sentinel by default.
+        SCALAR_SENTINELS = {}
+    if hasattr(mod, "SCALAR_DISPLAY_RANGES"):
+        SCALAR_DISPLAY_RANGES = dict(mod.SCALAR_DISPLAY_RANGES)
+    elif hasattr(mod, "CATEGORICAL_AXES") or hasattr(mod, "SCALAR_AXES"):
+        SCALAR_DISPLAY_RANGES = {}
     return mod
 
 
@@ -134,8 +179,41 @@ def _placeholder_parse_config_name(name: str) -> dict:
 
 
 def categorical_key(parsed: dict) -> tuple:
-    """The (color, sub, trellis_on, sa) tuple. xyb cells always have sa=False."""
-    return (parsed["color"], parsed["sub"], parsed["trellis_on"], parsed["sa"])
+    """The cell-forming tuple, driven by the codec's CATEGORICAL_AXES.
+
+    For zenjpeg (default): `(color, sub, trellis_on, sa)`.
+    For zenwebp: `(method, segments)`.
+    """
+    return tuple(parsed[axis] for axis in CATEGORICAL_AXES)
+
+
+def cell_label_from_key(key: tuple) -> str:
+    """Build a human-readable label by joining axis values with `_`.
+
+    For zenjpeg `(ycbcr, 444, True, False)` → `ycbcr_444_True_False`.
+    For zenwebp `(4, 1)` → `m4_seg1` via the zenjpeg-historical
+    short-hand (color/sub/trellis/sa get special-cased so the label
+    matches what the existing zenjpeg report expects). For unknown
+    axis schemas we just stringify each component and join with `_`.
+    """
+    # Special-case the zenjpeg axis order so the report keeps
+    # producing labels like `ycbcr_444_trellis_sa` (matches v2.1 logs).
+    if list(CATEGORICAL_AXES) == ["color", "sub", "trellis_on", "sa"]:
+        color, sub, trellis_on, sa = key
+        sa_tag = "_sa" if sa else ""
+        trel_tag = "trellis" if trellis_on else "noT"
+        return f"{color}_{sub}_{trel_tag}{sa_tag}"
+    # Generic path — `{axis}{value}` per component.
+    return "_".join(_render_axis_value(axis, v) for axis, v in zip(CATEGORICAL_AXES, key))
+
+
+def _render_axis_value(axis: str, value) -> str:
+    """Compact label for a categorical axis value."""
+    if isinstance(value, bool):
+        return f"{axis}={int(value)}"
+    if isinstance(value, (int, float)):
+        return f"{axis}{value}"
+    return str(value)
 
 
 # ---------- Data loading ----------
@@ -176,8 +254,10 @@ def load_features(path):
 
 def build_cell_index():
     """Return:
-       cells: list of dicts describing each cell (in stable order)
-       cell_id_by_key: {(color, sub, trellis_on, sa) -> int}
+       cells: list of dicts describing each cell (in stable order).
+              Each carries `id`, `label`, `member_config_ids`, plus
+              one entry per CATEGORICAL_AXES axis with its value.
+       cell_id_by_key: {tuple -> int}
        config_to_cell: {config_id -> cell_id}
        config_to_parsed: {config_id -> parsed dict}
     """
@@ -190,24 +270,19 @@ def build_cell_index():
 
     cells = []
     for k in keys:
-        color, sub, trellis_on, sa = k
-        # Pick a representative human-readable label
-        sa_tag = "_sa" if sa else ""
-        trel_tag = "trellis" if trellis_on else "noT"
-        label = f"{color}_{sub}_{trel_tag}{sa_tag}"
-        # Find member configs
+        label = cell_label_from_key(k)
         members = [cid for cid, p in parsed_all.items() if categorical_key(p) == k]
-        cells.append(
-            {
-                "id": cell_id_by_key[k],
-                "label": label,
-                "color": color,
-                "sub": sub,
-                "trellis_on": trellis_on,
-                "sa": sa,
-                "member_config_ids": sorted(members),
-            }
-        )
+        cell = {
+            "id": cell_id_by_key[k],
+            "label": label,
+            "member_config_ids": sorted(members),
+        }
+        # Carry each categorical axis value back into the cell dict so
+        # downstream consumers (codec runtime, manifest readers) can
+        # reconstruct the encoder config from the cell index alone.
+        for axis, value in zip(CATEGORICAL_AXES, k):
+            cell[axis] = value
+        cells.append(cell)
 
     config_to_cell = {cid: cell_id_by_key[categorical_key(p)] for cid, p in parsed_all.items()}
     return cells, cell_id_by_key, config_to_cell, parsed_all
@@ -219,13 +294,16 @@ def build_cell_index():
 def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
     """Per (image, size, zq) row, compute within-cell optimal:
        bytes_log[c]    = log(min bytes in cell c over configs that reach zq)
-       chroma_scale[c] = chroma of the within-cell optimal
-       lambda[c]       = lambda of the within-cell optimal
+       scalars[axis][c] = scalar value of the within-cell optimal for axis
        reachable[c]    = 1 if any config in cell c reached zq, 0 otherwise
+
+    Returns (Xs, Xe, bytes_log, scalars, reach, meta) where `scalars` is
+    a `dict[axis_name -> ndarray(n_rows, n_cells)]` keyed by SCALAR_AXES.
     """
     n_cells = len(cells)
     Xs_rows, Xe_rows = [], []
-    bytes_log_rows, chroma_rows, lambda_rows, reach_rows = [], [], [], []
+    bytes_log_rows, reach_rows = [], []
+    scalar_rows = {axis: [] for axis in SCALAR_AXES}
     meta = []
 
     for (image, size, w, h), samples in pareto.items():
@@ -246,8 +324,7 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
 
         for zq in ZQ_TARGETS:
             cell_bytes = [math.inf] * n_cells
-            cell_cs = [math.nan] * n_cells
-            cell_lam = [math.nan] * n_cells
+            cell_scalars = {axis: [math.nan] * n_cells for axis in SCALAR_AXES}
             cell_reach = [False] * n_cells
 
             for cfg_id, hits in by_cfg.items():
@@ -262,8 +339,8 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
                 if best_b < cell_bytes[c]:
                     cell_bytes[c] = best_b
                     p = parsed_all[cfg_id]
-                    cell_cs[c] = p["chroma_scale"]
-                    cell_lam[c] = p["lambda"]
+                    for axis in SCALAR_AXES:
+                        cell_scalars[axis][c] = p[axis]
                     cell_reach[c] = True
 
             if not any(cell_reach):
@@ -288,24 +365,22 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
                 [math.log(b) if not math.isinf(b) else math.nan for b in cell_bytes],
                 dtype=np.float32,
             )
-            chroma = np.array(cell_cs, dtype=np.float32)
-            lam = np.array(cell_lam, dtype=np.float32)
             reach = np.array(cell_reach, dtype=bool)
 
             Xs_rows.append(xs)
             Xe_rows.append(xe)
             bytes_log_rows.append(bytes_log)
-            chroma_rows.append(chroma)
-            lambda_rows.append(lam)
+            for axis in SCALAR_AXES:
+                scalar_rows[axis].append(np.array(cell_scalars[axis], dtype=np.float32))
             reach_rows.append(reach)
             meta.append((image, size, zq))
 
+    scalars = {axis: np.stack(scalar_rows[axis]) for axis in SCALAR_AXES}
     return (
         np.stack(Xs_rows),
         np.stack(Xe_rows),
         np.stack(bytes_log_rows),
-        np.stack(chroma_rows),
-        np.stack(lambda_rows),
+        scalars,
         np.stack(reach_rows),
         meta,
     )
@@ -341,28 +416,39 @@ def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
     }
 
 
-def evaluate_scalars(pred_chroma, actual_chroma, pred_lam, actual_lam, reach):
-    """RMSE on the chroma_scale and lambda predictions, computed over
-    reachable cells only (where the targets exist).
+def evaluate_scalars(pred_scalars, actual_scalars, reach):
+    """Per-axis RMSE + MAE on scalar predictions, over reachable cells
+    (where the target exists). Rows below SCALAR_SENTINELS[axis] (when
+    declared) are excluded — for example zenjpeg's lambda<=0 marks
+    trellis-off cells where the lambda value is a placeholder.
+
+    `pred_scalars` and `actual_scalars` are dicts keyed by axis name,
+    each mapping to an ndarray of shape `(n_rows, n_cells)`.
+
+    Returns a flat dict like:
+        {axis: rmse, axis+"_mae": mae, ...}
+    so existing code that reads `metrics["chroma_scale"]` keeps working.
     """
-    rmse = {}
-    cs_diff = []
-    lam_diff = []
-    for i in range(pred_chroma.shape[0]):
-        for c in range(pred_chroma.shape[1]):
-            if not reach[i, c]:
-                continue
-            cs_diff.append(pred_chroma[i, c] - actual_chroma[i, c])
-            # lambda only meaningful when trellis_on (target != sentinel)
-            if not math.isnan(actual_lam[i, c]) and actual_lam[i, c] > 0:
-                lam_diff.append(pred_lam[i, c] - actual_lam[i, c])
-    cs_arr = np.array(cs_diff, dtype=np.float64)
-    lam_arr = np.array(lam_diff, dtype=np.float64) if lam_diff else np.array([0.0])
-    rmse["chroma_scale"] = float(np.sqrt((cs_arr ** 2).mean()))
-    rmse["chroma_scale_mae"] = float(np.abs(cs_arr).mean())
-    rmse["lambda"] = float(np.sqrt((lam_arr ** 2).mean()))
-    rmse["lambda_mae"] = float(np.abs(lam_arr).mean())
-    return rmse
+    out = {}
+    for axis in SCALAR_AXES:
+        pred = pred_scalars[axis]
+        actual = actual_scalars[axis]
+        sentinel = SCALAR_SENTINELS.get(axis, None)
+        diffs = []
+        for i in range(pred.shape[0]):
+            for c in range(pred.shape[1]):
+                if not reach[i, c]:
+                    continue
+                a = actual[i, c]
+                if math.isnan(a):
+                    continue
+                if sentinel is not None and a <= sentinel:
+                    continue
+                diffs.append(pred[i, c] - a)
+        arr = np.array(diffs, dtype=np.float64) if diffs else np.array([0.0])
+        out[axis] = float(np.sqrt((arr ** 2).mean()))
+        out[axis + "_mae"] = float(np.abs(arr).mean())
+    return out
 
 
 # ---------- Train ----------
@@ -371,19 +457,27 @@ def evaluate_scalars(pred_chroma, actual_chroma, pred_lam, actual_lam, reach):
 def train_teacher_per_cell(
     Xs_tr,
     bytes_log_tr,
-    chroma_tr,
-    lam_tr,
+    scalars_tr,
     reach_tr,
     n_cells,
     params=None,
     bytes_quantile=None,
 ):
-    """Per-cell HistGB regressors for: bytes_log, chroma_scale, lambda.
+    """Per-cell HistGB regressors for: bytes_log + each scalar axis.
 
-    Three teachers per cell × 12 cells × ~5 s each = ~3 min serial.
-    With `train_teachers_per_cell_parallel` from `_zq_picker_lib.py`
-    on a 16-core box, drops to ~30 s × 3 = ~90 s. ~12× speedup vs the
-    pre-2026-04-29 serial loop.
+    `scalars_tr` is a dict `{axis_name: ndarray(n_rows, n_cells)}`.
+    Returns `(teachers_bytes, teachers_per_axis, scalar_means)` where:
+      - teachers_per_axis: dict[axis_name -> list[teacher per cell]]
+      - scalar_means:      dict[axis_name -> ndarray(n_cells,)]
+
+    Per-axis sentinel mask: when SCALAR_SENTINELS[axis] is declared,
+    rows where actual_value <= sentinel are excluded from that axis's
+    training (matches zenjpeg's lambda<=0 → trellis-off semantics).
+
+    (1 + len(SCALAR_AXES)) teachers per cell × n_cells × ~5 s each.
+    With `train_teachers_per_cell_parallel` on a 16-core box it ends
+    up ~30 s per head pass. ~12× speedup vs the pre-2026-04-29 serial
+    loop.
 
     `params` defaults to `HISTGB_FULL` (production training). Pass
     `HISTGB_FAST` for iteration / ablation runs.
@@ -391,17 +485,24 @@ def train_teacher_per_cell(
     `bytes_quantile`: when not None, switches the bytes head to
     quantile regression at that q (e.g. 0.99). Used by the
     `zensim_strict` safety profile so the bytes head predicts the
-    worst-case-safe cost, not the mean. Chroma_scale and lambda
-    heads always stay at mean regression — they predict the within-
-    cell-optimal scalar conditional on the cell being chosen.
+    worst-case-safe cost, not the mean. Scalar heads always stay at
+    mean regression — they predict the within-cell-optimal scalar
+    conditional on the cell being chosen.
     """
     from _picker_lib import HISTGB_FULL, train_teachers_per_cell_parallel
 
     if params is None:
         params = HISTGB_FULL
 
-    cs_means = np.nanmean(chroma_tr, axis=0)
-    lam_means = np.nanmean(np.where(lam_tr > 0, lam_tr, np.nan), axis=0)
+    # Per-axis fallback means computed from sentinel-filtered values.
+    scalar_means = {}
+    for axis in SCALAR_AXES:
+        arr = scalars_tr[axis]
+        sentinel = SCALAR_SENTINELS.get(axis, None)
+        if sentinel is not None:
+            scalar_means[axis] = np.nanmean(np.where(arr > sentinel, arr, np.nan), axis=0)
+        else:
+            scalar_means[axis] = np.nanmean(arr, axis=0)
 
     # Bytes head — per-cell reach mask (cell achieved target_zq).
     bytes_params = dict(params)
@@ -412,21 +513,19 @@ def train_teacher_per_cell(
         Xs_tr, bytes_log_tr, reach_tr, params=bytes_params, label="bytes"
     )
 
-    # Chroma head — same reach mask (chroma_scale only meaningful
-    # when the cell actually reaches target).
-    teachers_chroma = train_teachers_per_cell_parallel(
-        Xs_tr, chroma_tr, reach_tr, params=params, label="chroma"
-    )
+    # Scalar heads — same reach mask, plus per-axis sentinel mask
+    # when declared.
+    teachers_per_axis = {}
+    for axis in SCALAR_AXES:
+        arr = scalars_tr[axis]
+        sentinel = SCALAR_SENTINELS.get(axis, None)
+        extra_mask = arr > sentinel if sentinel is not None else None
+        teachers_per_axis[axis] = train_teachers_per_cell_parallel(
+            Xs_tr, arr, reach_tr,
+            extra_mask=extra_mask, params=params, label=axis,
+        )
 
-    # Lambda head — additional mask: lambda > 0 (trellis-on rows
-    # only). noT cells will fall through to the < 50 row check
-    # inside the worker and return None.
-    lambda_extra_mask = lam_tr > 0
-    teachers_lambda = train_teachers_per_cell_parallel(
-        Xs_tr, lam_tr, reach_tr, extra_mask=lambda_extra_mask, params=params, label="lambda"
-    )
-
-    return teachers_bytes, teachers_chroma, teachers_lambda, cs_means, lam_means
+    return teachers_bytes, teachers_per_axis, scalar_means
 
 
 def teacher_predict_all(teachers, Xs, fallback_means, n_cells):
@@ -567,12 +666,14 @@ def main():
     for c in cells:
         sys.stderr.write(f"  {c['id']:>2d}: {c['label']:30s}  ({len(c['member_config_ids'])} configs)\n")
 
-    Xs, Xe, bytes_log, chroma, lam, reach, meta = build_dataset(
+    Xs, Xe, bytes_log, scalars, reach, meta = build_dataset(
         pareto, feats, feat_cols, cells, config_to_cell, parsed_all
     )
     sys.stderr.write(
         f"\nDecision rows: {len(Xs)}; Xs={Xs.shape[1]}, Xe={Xe.shape[1]}, n_cells={n_cells}\n"
     )
+    n_scalar_axes = len(SCALAR_AXES)
+    output_dim = (1 + n_scalar_axes) * n_cells
 
     rng = np.random.default_rng(SEED)
     images = sorted({m[0] for m in meta})
@@ -586,39 +687,46 @@ def main():
     Xs_tr, Xs_va = Xs[tr], Xs[va]
     Xe_tr, Xe_va = Xe[tr], Xe[va]
     bl_tr, bl_va = bytes_log[tr], bytes_log[va]
-    cs_tr, cs_va = chroma[tr], chroma[va]
-    lam_tr, lam_va = lam[tr], lam[va]
+    scalars_tr = {axis: scalars[axis][tr] for axis in SCALAR_AXES}
+    scalars_va = {axis: scalars[axis][va] for axis in SCALAR_AXES}
     rch_tr, rch_va = reach[tr], reach[va]
     meta_va = [meta[i] for i in va]
 
     # --- Teacher
     bytes_quantile = args.bytes_quantile if args.objective == "zensim_strict" else None
-    t_bytes, t_chroma, t_lambda, cs_means, lam_means = train_teacher_per_cell(
-        Xs_tr, bl_tr, cs_tr, lam_tr, rch_tr, n_cells, bytes_quantile=bytes_quantile
+    t_bytes, t_per_axis, scalar_means = train_teacher_per_cell(
+        Xs_tr, bl_tr, scalars_tr, rch_tr, n_cells, bytes_quantile=bytes_quantile
     )
     sys.stderr.write("\nGenerating teacher soft targets (val + train)...\n")
     bytes_pred_tr = teacher_predict_all(t_bytes, Xs_tr, np.nanmean(bl_tr, axis=0), n_cells)
     bytes_pred_va = teacher_predict_all(t_bytes, Xs_va, np.nanmean(bl_tr, axis=0), n_cells)
-    chroma_pred_tr = teacher_predict_all(t_chroma, Xs_tr, cs_means, n_cells)
-    chroma_pred_va = teacher_predict_all(t_chroma, Xs_va, cs_means, n_cells)
-    lam_pred_tr = teacher_predict_all(t_lambda, Xs_tr, lam_means, n_cells)
-    lam_pred_va = teacher_predict_all(t_lambda, Xs_va, lam_means, n_cells)
+    scalar_pred_tr = {
+        axis: teacher_predict_all(t_per_axis[axis], Xs_tr, scalar_means[axis], n_cells)
+        for axis in SCALAR_AXES
+    }
+    scalar_pred_va = {
+        axis: teacher_predict_all(t_per_axis[axis], Xs_va, scalar_means[axis], n_cells)
+        for axis in SCALAR_AXES
+    }
 
     all_mask = np.ones(n_cells, dtype=bool)
     teacher_argmin = evaluate_argmin(bytes_pred_va, bl_va, rch_va, meta_va, all_mask)
-    teacher_scalars = evaluate_scalars(chroma_pred_va, cs_va, lam_pred_va, lam_va, rch_va)
+    teacher_scalars = evaluate_scalars(scalar_pred_va, scalars_va, rch_va)
     sys.stderr.write(
         f"\nTeacher metrics: argmin mean overhead {teacher_argmin['mean_pct']:.2f}% "
         f"argmin_acc {teacher_argmin['argmin_acc']:.1%}\n"
     )
     sys.stderr.write(
-        f"  scalar RMSE: chroma {teacher_scalars['chroma_scale']:.4f}  "
-        f"lambda {teacher_scalars['lambda']:.3f}\n"
+        "  scalar RMSE: " + "  ".join(
+            f"{axis} {teacher_scalars[axis]:.4f}" for axis in SCALAR_AXES
+        ) + "\n"
     )
 
     # --- Student
-    # Soft targets: 12 bytes + 12 chroma + 12 lambda = 36 outputs
-    soft_tr = np.concatenate([bytes_pred_tr, chroma_pred_tr, lam_pred_tr], axis=1)
+    # Soft targets: bytes + (one block per scalar axis), each block n_cells wide.
+    soft_tr = np.concatenate(
+        [bytes_pred_tr] + [scalar_pred_tr[axis] for axis in SCALAR_AXES], axis=1
+    )
     hidden_repr = "x".join(str(x) for x in hidden_layer_sizes)
     sys.stderr.write(
         f"\nTraining MLP student (hidden={hidden_repr}, output_dim={soft_tr.shape[1]})...\n"
@@ -646,18 +754,21 @@ def main():
 
     Y_va_pred = student.predict(Xe_va_s)
     pred_bytes = Y_va_pred[:, :n_cells]
-    pred_chroma = Y_va_pred[:, n_cells : 2 * n_cells]
-    pred_lambda = Y_va_pred[:, 2 * n_cells : 3 * n_cells]
+    student_pred_scalars = {
+        axis: Y_va_pred[:, (i + 1) * n_cells : (i + 2) * n_cells]
+        for i, axis in enumerate(SCALAR_AXES)
+    }
 
     student_argmin = evaluate_argmin(pred_bytes, bl_va, rch_va, meta_va, all_mask)
-    student_scalars = evaluate_scalars(pred_chroma, cs_va, pred_lambda, lam_va, rch_va)
+    student_scalars = evaluate_scalars(student_pred_scalars, scalars_va, rch_va)
     sys.stderr.write(
         f"\nStudent metrics: argmin mean overhead {student_argmin['mean_pct']:.2f}% "
         f"argmin_acc {student_argmin['argmin_acc']:.1%}\n"
     )
     sys.stderr.write(
-        f"  scalar RMSE: chroma {student_scalars['chroma_scale']:.4f}  "
-        f"lambda {student_scalars['lambda']:.3f}\n"
+        "  scalar RMSE: " + "  ".join(
+            f"{axis} {student_scalars[axis]:.4f}" for axis in SCALAR_AXES
+        ) + "\n"
     )
 
     # --- Per-zq reach-rate gate (zensim_strict only; recorded
@@ -669,9 +780,18 @@ def main():
 
     # --- Persist
     n_params = sum(c.size + i.size for c, i in zip(student.coefs_, student.intercepts_))
+    # Output layout: bytes_log first, then one block per scalar axis.
+    output_layout = {"bytes_log": [0, n_cells]}
+    for i, axis in enumerate(SCALAR_AXES):
+        output_layout[axis] = [(i + 1) * n_cells, (i + 2) * n_cells]
+    # Sentinel record for runtime — codec config supplies values.
+    sentinels_for_manifest = {
+        axis: float(SCALAR_SENTINELS[axis])
+        for axis in SCALAR_AXES if axis in SCALAR_SENTINELS
+    }
     out = {
         "n_inputs": int(Xe.shape[1]),
-        "n_outputs": 3 * n_cells,
+        "n_outputs": output_dim,
         "n_cells": n_cells,
         "safety_profile": args.objective,
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
@@ -686,15 +806,20 @@ def main():
         "hybrid_heads_manifest": {
             "n_cells": n_cells,
             "cells": cells,
-            "output_layout": {
-                "bytes_log": [0, n_cells],
-                "chroma_scale": [n_cells, 2 * n_cells],
-                "lambda": [2 * n_cells, 3 * n_cells],
-            },
-            "lambda_notrellis_sentinel": getattr(
-                sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
-                "LAMBDA_NOTRELLIS_SENTINEL",
-                0.0,
+            "categorical_axes": list(CATEGORICAL_AXES),
+            "scalar_axes": list(SCALAR_AXES),
+            "output_layout": output_layout,
+            "scalar_sentinels": sentinels_for_manifest,
+            # Back-compat alias for runtime code that still reads the
+            # old key. New code should use scalar_sentinels["lambda"].
+            "lambda_notrellis_sentinel": (
+                sentinels_for_manifest.get("lambda")
+                if "lambda" in SCALAR_AXES
+                else getattr(
+                    sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
+                    "LAMBDA_NOTRELLIS_SENTINEL",
+                    0.0,
+                )
             ),
         },
         "training_objective": {
@@ -719,7 +844,8 @@ def main():
         lines.append(s)
         sys.stderr.write(s + "\n")
 
-    w("\n# Hybrid-heads picker — categorical bytes + scalar (chroma_scale, lambda)")
+    scalar_axes_label = ", ".join(SCALAR_AXES) if SCALAR_AXES else "none"
+    w(f"\n# Hybrid-heads picker — categorical bytes + scalar ({scalar_axes_label})")
     w(f"Safety profile: {args.objective}")
     if args.objective == "zensim_strict":
         w(f"  bytes head: quantile q={args.bytes_quantile}")
@@ -739,9 +865,9 @@ def main():
         w("  bytes head: mean (squared error)")
         w("  reach gate: none — any reachable cell allowed at inference")
     w(f"Train rows: {len(tr)}, val rows: {len(va)}")
-    w(f"n_cells: {n_cells}, output_dim: {3 * n_cells}")
+    w(f"n_cells: {n_cells}, output_dim: {output_dim}")
     arch_str = " -> ".join(
-        [str(Xe.shape[1])] + [str(h) for h in hidden_layer_sizes] + [str(3 * n_cells)]
+        [str(Xe.shape[1])] + [str(h) for h in hidden_layer_sizes] + [str(output_dim)]
     )
     w(f"Student: MLP {arch_str}, "
       f"{n_params} params (~{n_params*2/1024:.1f} KB f16)")
@@ -754,15 +880,15 @@ def main():
     w(f"  Teacher: mean {teacher_argmin['mean_pct']:.2f}%  argmin_acc {teacher_argmin['argmin_acc']:.1%}")
     w(f"  Student: mean {student_argmin['mean_pct']:.2f}%  argmin_acc {student_argmin['argmin_acc']:.1%}")
     w("")
-    w("## Scalar regression RMSE")
-    w(f"  Teacher chroma_scale RMSE: {teacher_scalars['chroma_scale']:.4f}  "
-      f"(MAE {teacher_scalars['chroma_scale_mae']:.4f}, range 0.6..1.5)")
-    w(f"  Teacher lambda RMSE:       {teacher_scalars['lambda']:.3f}   "
-      f"(MAE {teacher_scalars['lambda_mae']:.3f}, range 8..25)")
-    w(f"  Student chroma_scale RMSE: {student_scalars['chroma_scale']:.4f}  "
-      f"(MAE {student_scalars['chroma_scale_mae']:.4f})")
-    w(f"  Student lambda RMSE:       {student_scalars['lambda']:.3f}   "
-      f"(MAE {student_scalars['lambda_mae']:.3f})")
+    if SCALAR_AXES:
+        w("## Scalar regression RMSE")
+        for axis in SCALAR_AXES:
+            range_lo, range_hi = SCALAR_DISPLAY_RANGES.get(axis, (None, None))
+            range_str = f", range {range_lo}..{range_hi}" if range_lo is not None else ""
+            w(f"  Teacher {axis} RMSE: {teacher_scalars[axis]:.4f}  "
+              f"(MAE {teacher_scalars[axis + '_mae']:.4f}{range_str})")
+            w(f"  Student {axis} RMSE: {student_scalars[axis]:.4f}  "
+              f"(MAE {student_scalars[axis + '_mae']:.4f})")
 
     OUT_LOG.write_text("\n".join(lines))
 
