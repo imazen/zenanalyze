@@ -49,6 +49,7 @@ authoritative byte/JSON specs.
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import struct
@@ -294,14 +295,30 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     return entries
 
 
+# Finite f32 sentinels for "no bound" cells. JSON has no Infinity
+# literal; strict parsers (incl. zenpredict-bake's serde_json) reject
+# `-Infinity` / `Infinity` even though Python's json.dumps emits them
+# by default with `allow_nan=True`. Use values just inside f32 range
+# so the runtime OOD comparison treats them as "always in-bounds"
+# without overflowing on any side. f32::MAX ≈ 3.4028235e38.
+_FEATURE_BOUND_OPEN_LO = -3.4028235e38
+_FEATURE_BOUND_OPEN_HI = 3.4028235e38
+
+
 def encode_feature_bounds(model: dict, n_inputs: int, feat_cols: list[str]) -> list[dict]:
     """Build the v2 top-level feature_bounds Section from
     safety_report.diagnostics.feature_bounds.
 
     Output length must equal n_inputs (one bound per model input).
-    Engineered axes past feat_cols get (-inf, +inf) so they never
-    trigger the OOD gate. Returns an empty list when no bounds are
-    available — the loader emits an empty Section.
+    Engineered axes past feat_cols get the finite-f32-max "open"
+    sentinels so they never trigger the OOD gate. Returns an empty
+    list when no bounds are available — the loader emits an empty
+    Section.
+
+    Why finite sentinels and not Infinity: ZNPR v2 BakeRequestJson is
+    strict JSON and rejects `Infinity` / `-Infinity` literals. The
+    sentinels round-trip cleanly and behave identically in the
+    runtime OOD comparison (any feature value falls inside).
     """
     sr = model.get("safety_report")
     if not isinstance(sr, dict):
@@ -313,12 +330,28 @@ def encode_feature_bounds(model: dict, n_inputs: int, feat_cols: list[str]) -> l
     for col in feat_cols:
         s = fb.get(col)
         if isinstance(s, dict) and s.get("p01") is not None and s.get("p99") is not None:
-            out.append({"low": float(s["p01"]), "high": float(s["p99"])})
+            lo = float(s["p01"])
+            hi = float(s["p99"])
+            # Defensive: replace any non-finite training-side bound
+            # (a constant feature can produce NaN/inf percentiles) with
+            # the open sentinels so the JSON stays strict.
+            if not math.isfinite(lo):
+                lo = _FEATURE_BOUND_OPEN_LO
+            if not math.isfinite(hi):
+                hi = _FEATURE_BOUND_OPEN_HI
+            out.append({"low": lo, "high": hi})
         else:
-            out.append({"low": float("-inf"), "high": float("inf")})
-    # Pad to n_inputs with permissive bounds.
+            out.append({
+                "low": _FEATURE_BOUND_OPEN_LO,
+                "high": _FEATURE_BOUND_OPEN_HI,
+            })
+    # Pad to n_inputs with permissive bounds (engineered axes past
+    # feat_cols get the open sentinels).
     while len(out) < n_inputs:
-        out.append({"low": float("-inf"), "high": float("inf")})
+        out.append({
+            "low": _FEATURE_BOUND_OPEN_LO,
+            "high": _FEATURE_BOUND_OPEN_HI,
+        })
     return out
 
 

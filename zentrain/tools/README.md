@@ -10,7 +10,7 @@ config-name parser. Then runs these scripts against that config.
 | File | Purpose |
 |---|---|
 | `_picker_lib.py` | Shared library: disk-cached dataset construction, parallel teacher training (joblib), HISTGB_FAST/FULL presets, subsample helper, StepTimer |
-| `train_hybrid.py` | **Recommended.** Hybrid-heads training: N categorical cells + K scalar prediction heads per cell. Codec supplies the cell taxonomy via `parse_config_name`. Flags: `--objective {size_optimal, zensim_strict}`, `--bytes-quantile`, `--reach-threshold`, `--hidden 192,192,192`, `--out-suffix` |
+| `train_hybrid.py` | **Recommended.** Hybrid-heads training: N categorical cells + K scalar prediction heads per cell. Codec supplies the cell taxonomy via `parse_config_name`. **Always pass `--activation leakyrelu`** for new bakes — the default `relu` routes through sklearn's single-threaded `MLPRegressor.fit` and is 10–20× slower at the same shape (sklearn keeps Adam matmuls below the BLAS-threading threshold; pytorch matches our actual wall-clock budget). Other flags: `--objective {size_optimal, zensim_strict}`, `--bytes-quantile`, `--reach-threshold`, `--hidden 192,192,192`, `--out-suffix` |
 | `train_distill.py` | Categorical-only distillation (legacy v1.x picker shape). Per-config HistGB teacher → small shared MLP student |
 | `train_distill_reduced.py` | Same as `train_distill.py` but with a reduced feature subset declared in the codec config |
 | `feature_ablation.py` | Per-feature importance ranking. **`--method permutation`** (default) — train once, shuffle each column, ~50× faster than LOO. `--method loo` retrains the model with each feature dropped (legacy ground truth). `--strict` exits 1 on features whose Δ is below `--max-negative-delta-pp` (overfit-on-noise signal) |
