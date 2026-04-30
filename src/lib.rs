@@ -163,6 +163,7 @@
 
 mod alpha;
 pub mod feature;
+mod grayscale;
 pub(crate) mod luma;
 mod palette;
 pub(crate) mod row_stream;
@@ -363,6 +364,11 @@ pub fn analyze_features(
     // line-art) but the ~0.97 ms-per-Mpx DCT walk is skipped.
     let dct = features.intersects(feature::DCT_NEEDED_BY);
     let alpha = features.intersects(feature::ALPHA_FEATURES);
+    // Strict-equality grayscale classifier (R == G == B for every
+    // pixel). Runtime axis like `run_depth` — independent of the
+    // const-bool tier dispatch. Walks rows with early exit on the
+    // first non-gray row; sub-microsecond on colored images.
+    let run_strict_gray = features.contains(feature::AnalysisFeature::IsGrayscale);
 
     // Pick the palette path: full-precision scan if any "exact count"
     // palette feature was requested; otherwise the early-exit scan
@@ -423,6 +429,7 @@ pub fn analyze_features(
                 tier1_wants_skin,
                 run_depth,
                 dct,
+                run_strict_gray,
             )?;
             Ok(raw.into_results(features, geometry, source_descriptor))
         }};
@@ -477,6 +484,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     tier1_wants_skin: bool,
     run_depth: bool,
     run_dct: bool,
+    run_strict_gray: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
     let width = slice.width();
     let height = slice.rows();
@@ -545,6 +553,15 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         }
         if T3 && width >= 8 && height >= 8 {
             tier3::populate_tier3(&mut raw, &mut stream, hf_max_blocks, run_dct);
+        }
+        // Strict-equality grayscale classifier — runtime axis. Walks
+        // every row with early exit at the first non-gray pixel. Uses
+        // the same RowStream the tier passes do; on Native RGB8
+        // sources this is zero-copy. Independent of the palette tier;
+        // costs ~6 µs on colored content (exits row 1) and a few ms
+        // on truly grayscale 4 MP images.
+        if run_strict_gray {
+            raw.is_grayscale = grayscale::scan_strict_grayscale(&mut stream);
         }
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
@@ -639,6 +656,7 @@ pub fn __analyze_internal(
         true, // and the Tier 1 skin gate
         run_depth,
         true, // override path always runs the DCT pass (test/oracle wants every signal)
+        true, // and the strict-grayscale classifier
     )?;
     Ok(raw.into_results(query.features, geometry, source_descriptor))
 }
@@ -665,7 +683,7 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth, true,
+        slice, pb, hf, true, true, true, true, true, run_depth, true, true,
     )
 }
 

@@ -738,6 +738,25 @@ features_table! {
     /// screens (UI accent colors).
     #[cfg(feature = "experimental")]
     QuantSurvivalUv = 54 : f32 => quant_survival_uv,
+
+    // ---------------- Strict-equality grayscale classifier ----------
+    /// `bool`. **True iff every pixel in the image has `R == G == B`**
+    /// (no tolerance). Distinct from [`Self::GrayscaleScore`] which
+    /// surfaces a 4-unit-tolerance fraction; this is the binary signal
+    /// codec selectors use to decide whether to encode without chroma
+    /// planes (YUV400 JPEG / monochrome JXL / single-plane WebP).
+    ///
+    /// Computed by [`crate::grayscale`] as a row-by-row OR-reduction
+    /// of `(r ^ g) | (g ^ b)` with **early exit** on the first
+    /// non-gray row. Typical photo: bails on row 1, ~6 µs at 4 MP.
+    /// Truly grayscale 4 MP image: walks every row, ~3-5 ms. Mean
+    /// across a mixed corpus: < 100 µs at any size.
+    ///
+    /// Independent of the palette tier — does not require
+    /// [`Self::GrayscaleScore`] / [`Self::DistinctColorBins`] to be
+    /// requested. Set both if you want both the binary classifier and
+    /// the tolerance fraction.
+    IsGrayscale = 55 : bool => is_grayscale,
 }
 
 /// A scalar feature value — discriminated by the value type, not by

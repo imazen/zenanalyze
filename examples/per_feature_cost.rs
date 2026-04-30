@@ -71,7 +71,13 @@ fn run_at(buf: &[u8], w: u32, h: u32, iters: usize) -> (f64, Vec<(AnalysisFeatur
     let baseline = time_query(buf, w, h, &AnalysisQuery::new(supported), iters);
     let mut rows = Vec::new();
     for f in supported.iter() {
-        let solo = time_query(buf, w, h, &AnalysisQuery::new(FeatureSet::new().with(f)), iters);
+        let solo = time_query(
+            buf,
+            w,
+            h,
+            &AnalysisQuery::new(FeatureSet::new().with(f)),
+            iters,
+        );
         let loo = time_query(buf, w, h, &AnalysisQuery::new(supported.without(f)), iters);
         rows.push((f, solo, loo));
     }
@@ -108,10 +114,17 @@ fn main() {
 
     println!("# Per-feature timing (zenanalyze, 7950X release build)");
     println!();
-    println!("Baselines: 1 MP `SUPPORTED` = {:.0} µs, 4 MP `SUPPORTED` = {:.0} µs.", base_1m, base_4m);
+    println!(
+        "Baselines: 1 MP `SUPPORTED` = {:.0} µs, 4 MP `SUPPORTED` = {:.0} µs.",
+        base_1m, base_4m
+    );
     println!();
-    println!("- **Solo**: time when this feature is the only one requested. Includes all tier dispatch + dependencies.");
-    println!("- **LOO (leave-one-out)**: `SUPPORTED` baseline minus `SUPPORTED \\ F` time. Negative = noise; 0 = shares pass with another feature; positive = unique cost in the full pipeline.");
+    println!(
+        "- **Solo**: time when this feature is the only one requested. Includes all tier dispatch + dependencies."
+    );
+    println!(
+        "- **LOO (leave-one-out)**: `SUPPORTED` baseline minus `SUPPORTED \\ F` time. Negative = noise; 0 = shares pass with another feature; positive = unique cost in the full pipeline."
+    );
     println!();
     println!("| Feature | Solo 1 MP (µs) | Solo 4 MP (µs) | LOO 1 MP (µs) | LOO 4 MP (µs) |");
     println!("|---|---:|---:|---:|---:|");
