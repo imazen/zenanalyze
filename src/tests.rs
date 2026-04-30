@@ -267,11 +267,14 @@ fn analyze_with_default_matches_legacy_analyze() {
 
 #[test]
 fn analyze_with_full_budget_changes_results_on_large_image() {
-    // 1024×1024 image. Default budget (500k pixels, 256 blocks) samples a
-    // small fraction; full() scans every stripe and every 8×8 block. At least
-    // one feature MUST differ — otherwise the config plumbing is a no-op.
-    let w = 1024;
-    let h = 1024;
+    // 2304×2304 ≈ 5.31 MP. Default budget (2 MP, 4096 blocks) still
+    // subsamples (post-bump 2026-04-30 — was 1024×1024 / 500 kpx;
+    // 1024×1024 is now exhaustive at the new 2 MP default and would no
+    // longer differ from full()); full() scans every stripe and every
+    // 8×8 block. At least one feature MUST differ — otherwise the
+    // config plumbing is a no-op.
+    let w = 2304;
+    let h = 2304;
     let rgb = synth_rgb(w, h, 7);
     let stride = (w as usize) * 3;
 
@@ -656,9 +659,9 @@ fn medium_image_is_deterministic() {
 #[test]
 fn large_2048x2048_with_default_budget_is_well_formed() {
     // 2048×2048 = 256×256 blocks = 65,536 blocks. Default
-    // hf_max_blocks=256 ⇒ stride = 256, so we sample 1-in-256 blocks.
-    // Default pixel_budget=500_000 ⇒ stripe_step ≈ 8 (sample every
-    // 8th 8-row stripe). Neither tier should walk the full image.
+    // hf_max_blocks=4096 ⇒ stride = 16, so we sample 1-in-16 blocks.
+    // Default pixel_budget=2_000_000 ⇒ stripe_step ≈ 2 (sample every
+    // 2nd 8-row stripe). Neither tier should walk the full image.
     let rgb = synth_rgb(2048, 2048, 17);
     let out = analyze_rgb8(&rgb, 2048, 2048);
     assert_well_formed(&out, 2048, 2048);

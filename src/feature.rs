@@ -1651,8 +1651,32 @@ impl AnalysisQuery {
 /// Tests / oracle re-extraction that genuinely need different
 /// sampling go through the `__internal_with_overrides` ctor —
 /// double-underscored, `#[doc(hidden)]`, **not** a stable API.
-pub(crate) const DEFAULT_PIXEL_BUDGET: usize = 500_000;
-pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 1024;
+///
+/// # Current values (raised 2026-04-30)
+///
+/// `DEFAULT_PIXEL_BUDGET = 2_000_000` and `DEFAULT_HF_MAX_BLOCKS =
+/// 4096`. The previous defaults (500_000 / 1024) shipped under-budget
+/// for multi-megapixel inputs once the SIMD pass landed. The bump is
+/// backed by `/mnt/v/output/zenpicker/budget_generalization_report_2026-04-30.md`:
+///
+/// - **94 % pick agreement** vs the old 0.5 MP default on the v2.1
+///   picker (100 % on photo content; 6 % adjacent-cell flips on
+///   screen content — all near-tie decisions).
+/// - **≤ 0.10·σ** mean feature drift on every input feature except
+///   `patch_fraction_fast` (whose semantics are inherently
+///   sample-rate dependent; max +0.15·σ at 16 MP).
+/// - **Drift saturates at 2 MP** — agreement, OOD count, and per-feature
+///   drift all stop moving from 2 MP onward. 2 MP is the natural plateau.
+/// - **Runtime cost ≤ 90 ms** on a 5.6 MP image (release build, no
+///   `target-cpu=native`); ≤ 65 ms on 3 MP.
+///
+/// Per the crate-level threshold contract, numeric drift inside 0.1.x
+/// is expected — downstream consumers that compile-in fitted models
+/// pin to a patch and re-validate when they bump. The picker bake
+/// trained at the old budget continues to work; a re-extract+retrain
+/// at the new budget would close the residual 6 % screen-content gap.
+pub(crate) const DEFAULT_PIXEL_BUDGET: usize = 2_000_000;
+pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 4096;
 
 #[doc(hidden)]
 impl AnalysisQuery {
