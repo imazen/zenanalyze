@@ -82,6 +82,51 @@ pub(crate) fn populate_dimensions(
     raw.block_misalignment_16 = block_misalignment(width, height, 16);
     raw.block_misalignment_32 = block_misalignment(width, height, 32);
     raw.block_misalignment_64 = block_misalignment(width, height, 64);
+
+    // Log / derivative variants — give the network multiple
+    // numerical handles for the same underlying resolution signal.
+    // Lets ablation distinguish "real size dependence" from "memo-
+    // rized PixelCount" (the latter shows up as PixelCount having
+    // huge ablation impact while every log variant is near zero).
+    if pixels_u64 > 0 {
+        let pixels_f64 = pixels_u64 as f64;
+        raw.log2_pixels = (pixels_f64.log2()) as f32;
+        raw.log10_pixels = (pixels_f64.log10()) as f32;
+        // Round ln(pixels) to the nearest 0.5 — quantized smooth
+        // bucket signal. `(ln*2).round()/2` form.
+        raw.log_pixels_rounded = ((pixels_f64.ln() * 2.0).round() / 2.0) as f32;
+        raw.sqrt_pixels = (pixels_f64.sqrt()) as f32;
+    }
+    if bytes_u64 > 0 {
+        raw.log_bitmap_bytes = ((bytes_u64 as f64).ln()) as f32;
+    }
+    if width > 0 && height > 0 {
+        raw.log_min_dim = ((width.min(height) as f64).ln()) as f32;
+        raw.log_max_dim = ((width.max(height) as f64).ln()) as f32;
+    }
+    raw.log_padded_pixels_8 = log_padded_pixels(width, height, 8);
+    raw.log_padded_pixels_16 = log_padded_pixels(width, height, 16);
+    raw.log_padded_pixels_32 = log_padded_pixels(width, height, 32);
+    raw.log_padded_pixels_64 = log_padded_pixels(width, height, 64);
+}
+
+/// `ln(ceil(w/N)*N × ceil(h/N)*N)` — log of the block-padded
+/// encoded surface area at block size N. For aligned images equals
+/// `ln(w*h)`; off-bucket sizes are slightly larger.
+fn log_padded_pixels(width: u32, height: u32, block: u32) -> f32 {
+    if width == 0 || height == 0 || block == 0 {
+        return 0.0;
+    }
+    let pad_w = (block - width % block) % block;
+    let pad_h = (block - height % block) % block;
+    let padded_w = (width + pad_w) as u64;
+    let padded_h = (height + pad_h) as u64;
+    let padded = padded_w * padded_h;
+    if padded == 0 {
+        0.0
+    } else {
+        ((padded as f64).ln()) as f32
+    }
 }
 
 /// Returns `padded(N) / (w * h) - 1.0` — the fraction of *padding*
@@ -213,6 +258,86 @@ mod tests {
     }
 
     #[test]
+    fn log_variants_match_expected() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 1024, 1024, rgb8());
+        // 1024² = 1 048 576
+        // ln = 13.8629, log2 = 20, log10 = 6.0206, sqrt = 1024
+        assert!(
+            (raw.log2_pixels - 20.0).abs() < 1e-3,
+            "log2_pixels: got {}",
+            raw.log2_pixels
+        );
+        assert!((raw.log10_pixels - 6.0206).abs() < 1e-3);
+        assert!((raw.sqrt_pixels - 1024.0).abs() < 0.5);
+        // Rounded ln(1024²) = round(13.8629 * 2)/2 = round(27.7258)/2 = 28/2 = 14.0
+        assert!(
+            (raw.log_pixels_rounded - 14.0).abs() < 1e-3,
+            "log_pixels_rounded: got {}",
+            raw.log_pixels_rounded
+        );
+    }
+
+    #[test]
+    fn log_min_max_dim_separates_strips() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 1024, 16, rgb8());
+        // ln(16) ≈ 2.773, ln(1024) ≈ 6.931
+        assert!((raw.log_min_dim - 2.773).abs() < 1e-2);
+        assert!((raw.log_max_dim - 6.931).abs() < 1e-2);
+    }
+
+    #[test]
+    fn log_padded_pixels_aligned_matches_log_pixels() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 256, 256, rgb8());
+        // 256 is a multiple of 8/16/32/64 — all padded values equal
+        // the visible log_pixels.
+        assert!(
+            (raw.log_padded_pixels_8 - raw.log_pixels).abs() < 1e-5,
+            "8-aligned: log_padded {} vs log_pixels {}",
+            raw.log_padded_pixels_8,
+            raw.log_pixels
+        );
+        assert!((raw.log_padded_pixels_16 - raw.log_pixels).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_32 - raw.log_pixels).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_64 - raw.log_pixels).abs() < 1e-5);
+    }
+
+    #[test]
+    fn log_padded_pixels_off_by_one_pads_up() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 257, 257, rgb8());
+        // 257 → padded to 264 (block 8), 272 (block 16), 288 (32), 320 (64).
+        let expect_8 = (264.0_f64 * 264.0).ln() as f32;
+        let expect_16 = (272.0_f64 * 272.0).ln() as f32;
+        let expect_32 = (288.0_f64 * 288.0).ln() as f32;
+        let expect_64 = (320.0_f64 * 320.0).ln() as f32;
+        assert!(
+            (raw.log_padded_pixels_8 - expect_8).abs() < 1e-5,
+            "8: got {} expect {}",
+            raw.log_padded_pixels_8,
+            expect_8
+        );
+        assert!((raw.log_padded_pixels_16 - expect_16).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_32 - expect_32).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_64 - expect_64).abs() < 1e-5);
+        // Padded values should be strictly greater than the
+        // unpadded `log_pixels`.
+        assert!(raw.log_padded_pixels_8 > raw.log_pixels);
+        assert!(raw.log_padded_pixels_64 > raw.log_padded_pixels_32);
+    }
+
+    #[test]
+    fn log_bitmap_bytes_matches_expected() {
+        let mut raw = RawAnalysis::default();
+        // 100×100 RGBA16 = 100*100*4*2 = 80 000 bytes.
+        populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGBA16_SRGB);
+        let expect = (80_000.0_f64).ln() as f32;
+        assert!((raw.log_bitmap_bytes - expect).abs() < 1e-3);
+    }
+
+    #[test]
     fn zero_dim_inputs_are_safe() {
         let mut raw = RawAnalysis::default();
         populate_dimensions(&mut raw, 0, 100, rgb8());
@@ -223,5 +348,9 @@ mod tests {
         assert_eq!(raw.aspect_min_over_max, 0.0);
         assert_eq!(raw.log_aspect_abs, 0.0);
         assert_eq!(raw.log_pixels, 0.0);
+        assert_eq!(raw.log2_pixels, 0.0);
+        assert_eq!(raw.log10_pixels, 0.0);
+        assert_eq!(raw.sqrt_pixels, 0.0);
+        assert_eq!(raw.log_padded_pixels_8, 0.0);
     }
 }

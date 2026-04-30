@@ -36,11 +36,16 @@ from pathlib import Path
 # the wider analyzer feature set from the features-only
 # `..._v2_1.tsv` re-extraction.
 PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
-FEATURES = Path("benchmarks/zq_pareto_features_2026-04-29_v2_1.tsv")
+# v2.2 features: same pareto, but re-extracted with the post-#42
+# zenanalyze (12 dimension features + 26 percentile features added on
+# top of v2.1's 35 raw features). Total 73-feature TSV.
+# `_subset100` is the fast-iteration subset (100 of 347 images). For
+# the final v2.2 bake, point at `_v2_2.tsv` (full corpus).
+FEATURES = Path("benchmarks/zq_pareto_features_2026-04-30_v2_2_subset100.tsv")
 
 # Where to write the trained model + summary:
-OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_1.json")
-OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_1.log")
+OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_2.json")
+OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_2.log")
 
 
 # ---------- Schema ----------
@@ -104,6 +109,67 @@ KEEP_FEATURES = [
     # Alpha (kept for completeness; corpus has some RGBA)
     "feat_alpha_used_fraction",
     "feat_alpha_bimodal_score",
+    # ---------- v2.2 ----------
+    # Dimension features (zenanalyze#42). The picker can now drop the
+    # hand-built `size_tiny/small/medium/large` one-hot from extra_axes
+    # and let the model learn from continuous resolution signals.
+    "feat_pixel_count",
+    "feat_log_pixels",
+    "feat_min_dim",
+    "feat_max_dim",
+    "feat_bitmap_bytes",
+    "feat_aspect_min_over_max",
+    "feat_log_aspect_abs",
+    "feat_block_misalignment_8",
+    "feat_block_misalignment_16",
+    "feat_block_misalignment_32",
+    "feat_block_misalignment_64",
+    "feat_channel_count",
+    # Log / derivative variants — disambiguate raw-PixelCount over-
+    # fit risk vs real size signal. With multiple log scales available,
+    # ablation impact on PixelCount itself drops if the signal is
+    # genuinely about resolution; if PixelCount remains dominant, the
+    # network was memorizing.
+    "feat_log2_pixels",
+    "feat_log10_pixels",
+    "feat_log_pixels_rounded",
+    "feat_sqrt_pixels",
+    "feat_log_bitmap_bytes",
+    "feat_log_min_dim",
+    "feat_log_max_dim",
+    "feat_log_padded_pixels_8",
+    "feat_log_padded_pixels_16",
+    "feat_log_padded_pixels_32",
+    "feat_log_padded_pixels_64",
+    # Percentile expansions of features whose mean alone collapsed
+    # the distribution. The ablation (next pass) will tell us which
+    # of these earn their bytes vs the existing parents.
+    "feat_aq_map_p50",
+    "feat_aq_map_p75",
+    "feat_aq_map_p90",
+    "feat_aq_map_p95",
+    "feat_aq_map_p99",
+    "feat_noise_floor_y_p25",
+    "feat_noise_floor_y_p50",
+    "feat_noise_floor_y_p75",
+    "feat_noise_floor_y_p90",
+    "feat_noise_floor_uv_p25",
+    "feat_noise_floor_uv_p50",
+    "feat_noise_floor_uv_p75",
+    "feat_noise_floor_uv_p90",
+    "feat_laplacian_variance_p50",
+    "feat_laplacian_variance_p75",
+    "feat_laplacian_variance_p90",
+    "feat_laplacian_variance_p99",
+    "feat_laplacian_variance_peak",
+    "feat_quant_survival_y_p10",
+    "feat_quant_survival_y_p25",
+    "feat_quant_survival_y_p50",
+    "feat_quant_survival_y_p75",
+    "feat_quant_survival_uv_p10",
+    "feat_quant_survival_uv_p25",
+    "feat_quant_survival_uv_p50",
+    "feat_quant_survival_uv_p75",
 ]
 
 # Zq target grid: step 5 from 0..70 + step 2 from 70..100 (the

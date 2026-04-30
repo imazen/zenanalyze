@@ -935,6 +935,50 @@ features_table! {
     QuantSurvivalUvP50 = 92 : f32 => quant_survival_uv_p50,
     #[cfg(feature = "experimental")]
     QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
+
+    // ---------------- Dimension log/derivative variants -------------
+    // Companions to PixelCount/LogPixels (#42). Different bases give
+    // the network different numerical handles for the same underlying
+    // resolution signal — and let ablation tell us whether
+    // PixelCount's dominance is real signal or memorization. The
+    // block-padded variants reflect the *encoded* surface area: for
+    // a 257×257 image the codec actually encodes 264×264 (block-8
+    // grid), 272×272 (block-16), etc. These correlate with bytes
+    // spent more directly than the visible pixel count does.
+    /// `f32`. `log2(w * h)`. Range ~12 → 24 for typical images.
+    /// Power-of-2 friendly, integer-clean for power-of-2 sizes.
+    Log2Pixels = 94 : f32 => log2_pixels,
+    /// `f32`. `log10(w * h)`. Range ~3.6 → 7.2 for typical images.
+    Log10Pixels = 95 : f32 => log10_pixels,
+    /// `f32`. `ln(w * h)` rounded to the nearest 0.5 — bucket-
+    /// aligned smooth signal that gives the network a quantized
+    /// "size class" handle without the 4-bucket cliff of the
+    /// engineered `size_*` one-hot.
+    LogPixelsRounded = 96 : f32 => log_pixels_rounded,
+    /// `f32`. `sqrt(w * h)` — geometric mean linear dimension.
+    /// Useful when the network wants a linear (not log) size axis
+    /// that doesn't blow up the dynamic range like raw `PixelCount`.
+    SqrtPixels = 97 : f32 => sqrt_pixels,
+    /// `f32`. `ln(bitmap_bytes)`. Compressed-vs-uncompressed-
+    /// reference signal in log space — `BitmapBytes` itself has the
+    /// same wide-dynamic-range memorization risk as `PixelCount`.
+    LogBitmapBytes = 98 : f32 => log_bitmap_bytes,
+    /// `f32`. `ln(min(w, h))` — log of the shorter dimension.
+    /// Captures strips and thumbnails where one dim is dominant.
+    LogMinDim = 99 : f32 => log_min_dim,
+    /// `f32`. `ln(max(w, h))` — log of the longer dimension.
+    LogMaxDim = 100 : f32 => log_max_dim,
+    /// `f32`. `ln(ceil(w/8)*8 × ceil(h/8)*8)`. Log of the block-
+    /// padded encoded surface area at the JPEG 8×8 / WebP/AVIF 8×8
+    /// grid. For aligned images equals `LogPixels`; for
+    /// off-by-one sizes is slightly larger by `ln(1 + alignment_loss)`.
+    LogPaddedPixels8 = 101 : f32 => log_padded_pixels_8,
+    /// `f32`. Same for 16×16 (JPEG 4:2:0 MCU, AVIF 16×16).
+    LogPaddedPixels16 = 102 : f32 => log_padded_pixels_16,
+    /// `f32`. Same for 32×32 (JXL DCT32, AV1 32×32).
+    LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
+    /// `f32`. Same for 64×64 (JXL DCT64).
+    LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1900,9 +1944,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the QuantSurvival percentile features
-        // (issue #42 + distributional analysis 2026-04-30, ids 56–93).
-        assert!(AnalysisFeature::from_u16(94).is_none());
+        // First unused id past the dimension log/derivative variants
+        // (issue #42, ids 56–104).
+        assert!(AnalysisFeature::from_u16(105).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -1962,7 +2006,7 @@ mod tests {
         // the upper bound when new ids land — `assert_eq!` below
         // catches drift between SUPPORTED.len() and this loop's
         // walked range.
-        for id in 0..96u16 {
+        for id in 0..120u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }

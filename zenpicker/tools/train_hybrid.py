@@ -1103,6 +1103,10 @@ def compute_reach_safe_cells(
 
 
 def main():
+    # Declare globals first — `--seed` help text reads `SEED` and
+    # later code may rebind it, so the `global` declaration must come
+    # before any read of these names per Python scoping rules.
+    global SEED, OUT_JSON, OUT_LOG
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--codec-config",
@@ -1204,8 +1208,8 @@ def main():
     is_ci = bool(os.environ.get("CI"))
     strict = (args.strict or is_ci) and not args.allow_unsafe
     # Per-run seed override — falls back to the module-level SEED so
-    # default behavior is unchanged.
-    global SEED
+    # default behavior is unchanged. (`global SEED` already declared
+    # at top of `main()`.)
     if args.seed is not None:
         SEED = args.seed
         sys.stderr.write(f"  seed override: SEED={SEED:#x}\n")
@@ -1213,8 +1217,8 @@ def main():
 
     # Per-objective output naming. The codec config defines the
     # baseline OUT_JSON/OUT_LOG; we suffix when training a non-default
-    # safety profile so both bakes can co-exist.
-    global OUT_JSON, OUT_LOG
+    # safety profile so both bakes can co-exist. `global OUT_JSON,
+    # OUT_LOG` already declared at top of `main()`.
     if args.out_suffix is not None:
         suffix = args.out_suffix
     elif args.objective == "zensim_strict":
