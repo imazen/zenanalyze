@@ -314,6 +314,25 @@ fn parse_minimal_one_layer_identity() {
 }
 
 #[test]
+fn leaky_relu_scales_negatives() {
+    // Layer: 1 → 2 with W = [-2.0, 1.0], b = [0.0, 0.0]. Activation
+    // byte 2 = LeakyRelu(0.01). Input 1.0 produces pre-activations
+    // [-2.0, 1.0], so post-activation should be [-0.02, 1.0].
+    let mut buf = alloc::vec::Vec::new();
+    write_v1_model_f32(&mut buf, 1, &[(1, 2, 2, &[-2.0, 1.0], &[0.0, 0.0])], 0);
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+    let out = picker.predict(&[1.0]).unwrap();
+    assert!(
+        (out[0] - (-0.02)).abs() < 1e-6,
+        "leaky relu negative leg: got {} expected -0.02",
+        out[0]
+    );
+    assert!((out[1] - 1.0).abs() < 1e-6);
+}
+
+#[test]
 fn relu_zeros_negatives() {
     let mut buf = alloc::vec::Vec::new();
     write_v1_model_f32(&mut buf, 1, &[(1, 2, 1, &[-2.0, 1.0], &[0.0, 0.0])], 0);

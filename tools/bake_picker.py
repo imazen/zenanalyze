@@ -112,6 +112,14 @@ HEADER_SIZE = 32
 
 ACTIVATION_IDENTITY = 0
 ACTIVATION_RELU = 1
+ACTIVATION_LEAKY_RELU = 2  # alpha = 0.01, see zenpicker::model::LEAKY_RELU_ALPHA
+
+ACTIVATION_BY_NAME = {
+    "identity": ACTIVATION_IDENTITY,
+    "relu": ACTIVATION_RELU,
+    "leakyrelu": ACTIVATION_LEAKY_RELU,
+    "leaky_relu": ACTIVATION_LEAKY_RELU,
+}
 DTYPE_F32 = 0
 DTYPE_F16 = 1
 DTYPE_I8 = 2
@@ -296,6 +304,14 @@ def bake(
     n_layers = len(layers)
     feat_cols = list(model["feat_cols"])
     activation = model.get("activation", "relu")
+    activation_key = activation.replace("-", "_").replace(" ", "_").lower()
+    if activation_key not in ACTIVATION_BY_NAME or activation_key == "identity":
+        # Identity-only models don't make sense; bail loudly.
+        raise SystemExit(
+            f"unsupported activation {activation!r}; expected one of "
+            f"{sorted(k for k in ACTIVATION_BY_NAME if k != 'identity')}"
+        )
+    hidden_activation_byte = ACTIVATION_BY_NAME[activation_key]
     # Tolerate both "n_outputs" (shared-MLP fit) and "n_configs"
     # (distill fit; same meaning, different field name in the JSON).
     n_outputs = int(
@@ -303,8 +319,7 @@ def bake(
         if model.get("n_outputs") is not None
         else model.get("n_configs", len(layers[-1]["b"]))
     )
-    if activation != "relu":
-        raise SystemExit(f"unsupported activation {activation!r}; only relu is wired today")
+    # `hidden_activation_byte` already validated above.
 
     extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
     sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
@@ -336,7 +351,7 @@ def bake(
             raise SystemExit(f"final layer out_dim {out_dim} != header n_outputs {n_outputs}")
         if b.shape != (out_dim,):
             raise SystemExit(f"layer {i} bias shape {b.shape} != (out_dim={out_dim},)")
-        act = ACTIVATION_IDENTITY if i == last_idx else ACTIVATION_RELU
+        act = ACTIVATION_IDENTITY if i == last_idx else hidden_activation_byte
         blob = write_layer(blob, W, b, act, dtype)
 
     out_path.write_bytes(blob)

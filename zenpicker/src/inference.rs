@@ -11,7 +11,7 @@
 //! the output axis. archmage tokens at the outer-layer boundary
 //! prevent LLVM from un-inlining the per-tier dispatch.
 
-use crate::model::{Activation, LayerView, Model, WeightStorage};
+use crate::model::{Activation, LEAKY_RELU_ALPHA, LayerView, Model, WeightStorage};
 
 /// Run the full forward pass: scale inputs, then layer-by-layer.
 ///
@@ -279,6 +279,16 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
             for v in buf.iter_mut() {
                 if *v < 0.0 {
                     *v = 0.0;
+                }
+            }
+        }
+        Activation::LeakyRelu => {
+            // f(x) = x if x >= 0 else alpha * x. Branchless via
+            // mul_add of a per-element factor would be marginal here;
+            // the simple branch lets LLVM emit a vectorized blend.
+            for v in buf.iter_mut() {
+                if *v < 0.0 {
+                    *v *= LEAKY_RELU_ALPHA;
                 }
             }
         }

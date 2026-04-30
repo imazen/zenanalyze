@@ -63,6 +63,14 @@ const MIN_HEADER_SIZE: u16 = 32;
 pub enum Activation {
     Identity = 0,
     Relu = 1,
+    /// `LeakyRelu(alpha = 0.01)` — same shape as ReLU on the positive
+    /// side, but `0.01 * x` instead of `0` for negatives. Eliminates
+    /// the ReLU dead-neuron problem with one extra FP multiply per
+    /// element. The slope is fixed at 0.01 to keep the binary format
+    /// flat (no per-layer parameter); 0.01 matches the PyTorch
+    /// default and the value used by `tools/train_hybrid.py
+    /// --activation leakyrelu`.
+    LeakyRelu = 2,
 }
 
 impl Activation {
@@ -70,10 +78,17 @@ impl Activation {
         match b {
             0 => Ok(Self::Identity),
             1 => Ok(Self::Relu),
+            2 => Ok(Self::LeakyRelu),
             other => Err(PickerError::UnknownActivation { byte: other }),
         }
     }
 }
+
+/// Fixed LeakyReLU slope. 0.01 matches PyTorch's
+/// `nn.LeakyReLU` default and is what the training pipeline emits.
+/// Hard-coded so the binary format doesn't need a per-layer
+/// parameter — every published bake uses the same value.
+pub const LEAKY_RELU_ALPHA: f32 = 0.01;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WeightDtype {
