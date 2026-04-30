@@ -204,4 +204,116 @@ impl<'a> Predictor<'a> {
         let top = argmin::argmin_masked_top_k::<2>(slice, mask, transform, offsets);
         Ok(pick_confidence_from_top_k(slice, transform, offsets, top))
     }
+
+    /// Run forward pass, then argmin under a caller-supplied score
+    /// function (#55). The closure is called for each `i` where
+    /// `mask.is_allowed(i)` and reads from the model's output slice
+    /// `out` to compute a scalar score; smallest score wins.
+    ///
+    /// Use this when a `ScoreTransform + ArgminOffsets` adjustment
+    /// can't express the desired reduction — e.g. RD-vs-time
+    /// (`bytes + μ·ms` reading from two hybrid heads), multi-metric
+    /// pickers (selecting one metric's sub-range with a runtime
+    /// index), or codec-specific saturating clamps.
+    ///
+    /// Returns `None` when no entry is allowed by the mask.
+    /// `mask.len()` must be ≥ `n_outputs`.
+    pub fn argmin_masked_with_scorer<F>(
+        &mut self,
+        features: &[f32],
+        mask: &AllowedMask<'_>,
+        scorer: F,
+    ) -> Result<Option<usize>, PredictError>
+    where
+        F: Fn(&[f32], usize) -> f32,
+    {
+        self.predict(features)?;
+        let out = &self.output[..];
+        Ok(argmin::argmin_masked_with_scorer(out.len(), mask, |i| {
+            scorer(out, i)
+        }))
+    }
+
+    /// Top-`K` argmin under a caller-supplied score function.
+    /// Slots beyond the number of mask-allowed entries are `None`.
+    pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
+        &mut self,
+        features: &[f32],
+        mask: &AllowedMask<'_>,
+        scorer: F,
+    ) -> Result<[Option<usize>; K], PredictError>
+    where
+        F: Fn(&[f32], usize) -> f32,
+    {
+        self.predict(features)?;
+        let out = &self.output[..];
+        Ok(argmin::argmin_masked_top_k_with_scorer::<K, _>(
+            out.len(),
+            mask,
+            |i| scorer(out, i),
+        ))
+    }
+
+    /// Top-`K` argmin with scorer over a sub-range of the output
+    /// vector. Slots beyond the number of mask-allowed entries are
+    /// `None`. The scorer's `out` is the full predict output (so
+    /// the closure can read any head); `i` is the cell index within
+    /// the sub-range.
+    pub fn argmin_masked_top_k_with_scorer_in_range<const K: usize, F>(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        scorer: F,
+    ) -> Result<[Option<usize>; K], PredictError>
+    where
+        F: Fn(&[f32], usize) -> f32,
+    {
+        self.predict(features)?;
+        let (start, end) = range;
+        if end > self.output.len() || start > end {
+            return Err(PredictError::OutputDimMismatch {
+                expected: self.output.len(),
+                got: end,
+            });
+        }
+        let out = &self.output[..];
+        Ok(argmin::argmin_masked_top_k_with_scorer::<K, _>(
+            end - start,
+            mask,
+            |i| scorer(out, i),
+        ))
+    }
+
+    /// Argmin with scorer over a sub-range of the output vector.
+    /// Hybrid-heads pickers expose multiple per-cell heads; this
+    /// lets the caller restrict the argmin to e.g. the bytes head
+    /// while the closure freely reads from any head. The closure's
+    /// `i` is **within the sub-range** (`0..(range.1 - range.0)`);
+    /// the scorer's `out` slice is the full predictor output, so
+    /// the closure can compute `out[N_CELLS + i]` for the time head
+    /// while ranking by cell index `i`.
+    pub fn argmin_masked_with_scorer_in_range<F>(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        scorer: F,
+    ) -> Result<Option<usize>, PredictError>
+    where
+        F: Fn(&[f32], usize) -> f32,
+    {
+        self.predict(features)?;
+        let (start, end) = range;
+        if end > self.output.len() || start > end {
+            return Err(PredictError::OutputDimMismatch {
+                expected: self.output.len(),
+                got: end,
+            });
+        }
+        let out = &self.output[..];
+        Ok(argmin::argmin_masked_with_scorer(end - start, mask, |i| {
+            scorer(out, i)
+        }))
+    }
 }

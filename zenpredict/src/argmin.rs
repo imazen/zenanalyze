@@ -233,6 +233,111 @@ pub fn argmin_masked_top_k_in_range<const K: usize>(
     argmin_masked_top_k::<K>(&predictions[start..end], mask, transform, offsets)
 }
 
+/// Argmin under a caller-supplied score function. `scorer(i)` is
+/// invoked once per `i` where `mask.is_allowed(i)`; returns the
+/// scalar score to compare. Smallest score wins. Returns `None`
+/// when no entry is allowed.
+///
+/// The closure-based form is for cases the
+/// `transform + offsets` shape can't express cleanly: RD-vs-time
+/// (`bytes + μ·ms` reading from two hybrid heads), multi-metric
+/// pickers (selecting one metric's sub-range with a runtime index),
+/// or codec-specific saturating clamps.
+///
+/// `n` is the number of candidate indices; the caller binds the
+/// model output (or any other source) inside the closure. `mask.len()`
+/// must be ≥ `n`; mismatched lengths panic in debug builds and
+/// short-circuit at the shorter length in release.
+///
+/// # Examples
+///
+/// RD-vs-time argmin with hybrid-heads outputs (#56):
+///
+/// ```
+/// use zenpredict::{AllowedMask, argmin};
+///
+/// // bytes_log[0..3] then time[3..6] (per-cell, hybrid-heads layout).
+/// let out = [10.0_f32, 11.0, 12.0,    // bytes_log per cell
+///            5.0, 8.0, 12.0];         // ms per cell
+/// let mask_data = [true, true, true];
+/// let mask = AllowedMask::new(&mask_data);
+/// let mu = 100.0_f32;
+/// let pick = argmin::argmin_masked_with_scorer(3, &mask, |i| {
+///     let bytes = out[i].exp();
+///     let ms    = out[3 + i];
+///     bytes + mu * ms
+/// });
+/// // Cell 0: e^10 ≈ 22 026 + 500 = 22 526
+/// // Cell 1: e^11 ≈ 59 874 + 800 = 60 674
+/// // Cell 2: e^12 ≈ 162 754 + 1200 = 163 954
+/// assert_eq!(pick, Some(0));
+/// ```
+pub fn argmin_masked_with_scorer<F>(n: usize, mask: &AllowedMask<'_>, scorer: F) -> Option<usize>
+where
+    F: Fn(usize) -> f32,
+{
+    debug_assert!(mask.len() >= n);
+    let mut best_idx: Option<usize> = None;
+    let mut best_score: f32 = f32::INFINITY;
+    for i in 0..n {
+        if !mask.is_allowed(i) {
+            continue;
+        }
+        let score = scorer(i);
+        if score < best_score {
+            best_score = score;
+            best_idx = Some(i);
+        }
+    }
+    best_idx
+}
+
+/// Top-`K` over a caller-supplied score function. Same shape as
+/// [`argmin_masked_top_k`] but with a closure replacing the
+/// `transform + offsets` score-derivation. Slots beyond the number
+/// of mask-allowed entries are `None`.
+pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
+    n: usize,
+    mask: &AllowedMask<'_>,
+    scorer: F,
+) -> [Option<usize>; K]
+where
+    F: Fn(usize) -> f32,
+{
+    debug_assert!(mask.len() >= n);
+    let mut top: [(f32, usize); K] = [(f32::INFINITY, usize::MAX); K];
+    let mut count: usize = 0;
+
+    for i in 0..n {
+        if !mask.is_allowed(i) {
+            continue;
+        }
+        let score = scorer(i);
+        if count < K {
+            let mut j = count;
+            while j > 0 && top[j - 1].0 > score {
+                top[j] = top[j - 1];
+                j -= 1;
+            }
+            top[j] = (score, i);
+            count += 1;
+        } else if K > 0 && score < top[K - 1].0 {
+            let mut j = K - 1;
+            while j > 0 && top[j - 1].0 > score {
+                top[j] = top[j - 1];
+                j -= 1;
+            }
+            top[j] = (score, i);
+        }
+    }
+
+    let mut out: [Option<usize>; K] = [None; K];
+    for slot in 0..count {
+        out[slot] = Some(top[slot].1);
+    }
+    out
+}
+
 /// Pick the argmin and report a confidence signal: the score gap
 /// to the second-best mask-allowed entry. Returns `(best_idx, gap)`
 /// where `gap` is in the same score units argmin used (post-

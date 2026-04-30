@@ -144,8 +144,8 @@ pub mod bake;
 
 pub use argmin::{
     AllowedMask, ArgminOffsets, ScoreTransform, argmin_masked, argmin_masked_in_range,
-    argmin_masked_top_k, argmin_masked_top_k_in_range, pick_with_confidence,
-    pick_with_confidence_in_range, threshold_mask,
+    argmin_masked_top_k, argmin_masked_top_k_in_range, argmin_masked_top_k_with_scorer,
+    argmin_masked_with_scorer, pick_with_confidence, pick_with_confidence_in_range, threshold_mask,
 };
 pub use bounds::{FeatureBound, first_out_of_distribution};
 pub use error::PredictError;
