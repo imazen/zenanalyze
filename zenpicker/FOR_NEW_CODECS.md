@@ -336,6 +336,36 @@ Output: `benchmarks/<codec>_hybrid_<date>_ablation.json` (machine-readable) and 
 
 The ranking is stable between `HISTGB_FAST` and `HISTGB_FULL` so use FAST for the ablation pass; absolute numbers will shift but the ordering won't.
 
+### Mandatory: ship the safety gate in CI
+
+**Every codec must run `train_hybrid.py --strict` in CI (or set `CI=1` in the environment) before any bake is allowed to ship.** The strict gate exits 1 on any safety violation, making the workflow fail loudly.
+
+The gate catches (full list in [tools/README.md → Safety gates](tools/README.md#safety-gates-mandatory-before-shipping-any-bake)):
+
+- overfitting (train/val gap > threshold)
+- catastrophic per-zq-band tails (p99 overhead exceeds threshold for any single band — caught a real 85.4% miss at zq=94 in zenjpeg's own v2.1)
+- single-row worst-case overshoot (>200% by default)
+- data-starved cells (fewer than 3 member configs)
+- NaN/Inf in weights or predictions
+- dead neurons (>30% with ~0 variance on val)
+- weight blowup (max-to-median ratio >1000×)
+- empty reach gate at top zq (zensim_strict only — picker can't reach high quality at all)
+
+Defaults are conservative and safe to ship. Tighten in your codec config when you need stricter SLA:
+
+```python
+# in <your_codec>_picker_config.py
+SAFETY_THRESHOLDS = dict(
+    max_per_zq_p99_overhead_pct=50.0,
+    min_argmin_acc=0.40,
+    # ... any subset of DEFAULT_SAFETY_THRESHOLDS keys
+)
+```
+
+`bake_picker.py` is the second line of defense — it refuses to bake a JSON whose `safety_report.passed=false` unless `--allow-unsafe` is explicitly passed. The codec runtime is the third: the `safety_report` block flows into the `.manifest.json` so runtime can refuse to load if it disagrees with bake-time's verdict.
+
+**A picker bake that fails any safety check is not a candidate for production.** No exceptions without a written reviewer override.
+
 ### Don't pre-emptively `pip install lightgbm`
 
 We benchmarked lightgbm 4.6 against sklearn's `HistGradientBoostingRegressor` on this picker workload (~4000 rows × 80 inputs, max_iter=400, depth=8): sklearn HistGB is **2-16× faster** because per-fit overhead dominates lightgbm on the picker's many-small-fits pattern (12 cells × 3 heads = 36 fits per training run, plus 53 permute passes in ablation). lightgbm wins on huge single-shot training matrices — exactly the wrong shape here. Stick with sklearn HistGB.
