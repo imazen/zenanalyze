@@ -89,6 +89,8 @@ pub fn populate_tier3(
             out.patch_fraction_fast = dct.patch_fraction_fast;
             out.quant_survival_y = dct.quant_survival_y;
             out.quant_survival_uv = dct.quant_survival_uv;
+            out.patch_fraction_structured = dct.patch_fraction_structured;
+            out.flat_block_fraction = dct.flat_block_fraction;
         }
         #[cfg(not(feature = "experimental"))]
         {
@@ -104,6 +106,8 @@ pub fn populate_tier3(
                 dct.patch_fraction_fast,
                 dct.quant_survival_y,
                 dct.quant_survival_uv,
+                dct.patch_fraction_structured,
+                dct.flat_block_fraction,
             );
         }
     }
@@ -167,6 +171,13 @@ struct Tier3DctStats {
     quant_survival_y: f32,
     /// **Experimental.** Same for chroma — max of Cb / Cr per block.
     quant_survival_uv: f32,
+    /// **Experimental.** Sibling of `patch_fraction` excluding near-flat
+    /// blocks (`block_ac > 64.0`) before counting collisions. See
+    /// imazen/zenanalyze#1 § 2.
+    patch_fraction_structured: f32,
+    /// **Experimental.** Fraction of sampled blocks classified flat
+    /// (`block_ac ≤ 64.0`). Independent signal.
+    flat_block_fraction: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -787,6 +798,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            patch_fraction_structured: 0.0,
+            flat_block_fraction: 0.0,
         };
     }
     // Per-primaries luma weights — used in the per-block fixed-point
@@ -815,6 +828,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            patch_fraction_structured: 0.0,
+            flat_block_fraction: 0.0,
         };
     }
     let stride = (total_blocks / max_blocks).max(1);
@@ -850,8 +865,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // Experimental fingerprint variants: separate signature buffers so
     // the same sort-and-sweep collision-counting can be reused for each.
     #[cfg(feature = "experimental")]
-    #[cfg(feature = "experimental")]
     let mut signatures_fast: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
+    // Structured-only signature buffer (collision count restricted to
+    // non-flat blocks). Pairs with `flat_blocks` to derive
+    // `flat_block_fraction`.
+    #[cfg(feature = "experimental")]
+    let mut signatures_structured: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
+    #[cfg(feature = "experimental")]
+    let mut flat_blocks: u32 = 0;
     // Per-block quant-survival accumulators (mean across blocks).
     #[cfg(feature = "experimental")]
     let mut quant_y_sum: f64 = 0.0;
@@ -1007,6 +1028,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                 let q_cb = quant_survival(&coeffs_cb, &JPEGLI_QUANT_C_D2);
                 let q_cr = quant_survival(&coeffs_cr, &JPEGLI_QUANT_C_D2);
                 quant_uv_sum += q_cb.max(q_cr) as f64;
+
+                // Structured-vs-flat split. Threshold `block_ac > 64.0`
+                // matches "any visible AC structure": flat photo
+                // backgrounds (sky, wall) and constant UI fills both
+                // fall below; anything with even subtle texture or
+                // edges is above. Flat blocks all hash to the same
+                // near-zero signature in DCT space, which inflates
+                // legacy `patch_fraction` for both screen-flat AND
+                // photo-flat content. Excluding them here isolates
+                // genuine structural repetition (UI / icon / chart).
+                if block_ac > 64.0 {
+                    signatures_structured.push(block_signature_dct(&coeffs_y));
+                } else {
+                    flat_blocks += 1;
+                }
             }
         }
     }
@@ -1054,8 +1090,18 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     }
     let patch_fraction = collision_fraction(&mut signatures, blocks_sampled);
     #[cfg(feature = "experimental")]
-    #[cfg(feature = "experimental")]
     let patch_fraction_fast = collision_fraction(&mut signatures_fast, blocks_sampled);
+    #[cfg(feature = "experimental")]
+    let structured_count = signatures_structured.len() as u32;
+    #[cfg(feature = "experimental")]
+    let patch_fraction_structured =
+        collision_fraction(&mut signatures_structured, structured_count);
+    #[cfg(feature = "experimental")]
+    let flat_block_fraction = if blocks_sampled > 0 {
+        flat_blocks as f32 / blocks_sampled as f32
+    } else {
+        0.0
+    };
     #[cfg(feature = "experimental")]
     let quant_survival_y = if blocks_sampled > 0 {
         (quant_y_sum / blocks_sampled as f64) as f32
@@ -1111,7 +1157,13 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     };
 
     #[cfg(not(feature = "experimental"))]
-    let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
+    let (
+        patch_fraction_fast,
+        quant_survival_y,
+        quant_survival_uv,
+        patch_fraction_structured,
+        flat_block_fraction,
+    ) = (0.0, 0.0, 0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,
@@ -1125,6 +1177,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         patch_fraction_fast,
         quant_survival_y,
         quant_survival_uv,
+        patch_fraction_structured,
+        flat_block_fraction,
     }
 }
 

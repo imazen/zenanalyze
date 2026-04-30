@@ -100,6 +100,8 @@ fn all_features() -> Vec<AnalysisFeature> {
         PatchFractionFast,
         QuantSurvivalY,
         QuantSurvivalUv,
+        PatchFractionStructured,
+        FlatBlockFraction,
     ]
 }
 

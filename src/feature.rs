@@ -738,6 +738,31 @@ features_table! {
     /// screens (UI accent colors).
     #[cfg(feature = "experimental")]
     QuantSurvivalUv = 54 : f32 => quant_survival_uv,
+
+    // ---------------- Tier 3 structured-fraction experiments --------
+    /// `f32`. **Experimental.** Sibling of [`Self::PatchFraction`] that
+    /// excludes near-flat blocks before counting signature collisions.
+    /// Threshold: `block_ac > 64.0` (sum of squared AC coefficients;
+    /// roughly "any visible AC structure"). The exclusion removes both
+    /// photo-flat regions (sky / wall, where every block hashes to the
+    /// same near-zero signature and inflates the fraction) and dead-
+    /// constant areas; what's left is genuine structural repetition.
+    ///
+    /// Pairs with [`Self::FlatBlockFraction`] which surfaces the
+    /// excluded-blocks fraction as its own signal. Tracked in
+    /// imazen/zenanalyze#1 § 2.
+    #[cfg(feature = "experimental")]
+    PatchFractionStructured = 55 : f32 => patch_fraction_structured,
+    /// `f32`. **Experimental.** Fraction of sampled tier-3 blocks
+    /// classified as flat (`block_ac ≤ 64.0`). Independent signal
+    /// from `patch_fraction*`: a value near 1.0 means "mostly flat
+    /// content" (sky photos, plain-color UI backgrounds, gradients);
+    /// near 0.0 means "every block carries visible AC" (textures,
+    /// busy photos, dense UI). Useful for distinguishing photo
+    /// uniform / sky from photo natural / busy texture, and for
+    /// detecting backgrounds that benefit from large-block transforms.
+    #[cfg(feature = "experimental")]
+    FlatBlockFraction = 56 : f32 => flat_block_fraction,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1190,6 +1215,8 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::PatchFractionFast);
         s = s.with(AnalysisFeature::QuantSurvivalY);
         s = s.with(AnalysisFeature::QuantSurvivalUv);
+        s = s.with(AnalysisFeature::PatchFractionStructured);
+        s = s.with(AnalysisFeature::FlatBlockFraction);
     }
     #[cfg(feature = "composites")]
     {
@@ -1227,6 +1254,8 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         s = s.with(AnalysisFeature::PatchFractionFast);
         s = s.with(AnalysisFeature::QuantSurvivalY);
         s = s.with(AnalysisFeature::QuantSurvivalUv);
+        s = s.with(AnalysisFeature::PatchFractionStructured);
+        s = s.with(AnalysisFeature::FlatBlockFraction);
     }
     // ScreenContentLikelihood reads `patch_fraction` (DCT-derived)
     // when experimental is on; falls back to non-DCT formula otherwise.
