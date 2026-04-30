@@ -8,11 +8,12 @@ AGPL-3.0-only / Commercial dual license.
 
 ## Documentation map
 
-This README is the canonical entry point. Two subsidiary docs cover content too long to inline:
+This README is the canonical entry point. Three subsidiary docs cover content too long to inline:
 
 | Doc | Audience |
 |---|---|
 | **[README.md](README.md)** (this file) | Anyone designing a bake. Single source of truth for the workflow, output layout, safety profiles, and the codec-config-module contract |
+| **[PRINCIPLES.md](PRINCIPLES.md)** | **Cross-codec defaults reference.** Read this first if you're adopting / re-baking for any codec — the data discipline, argmin objectives, per-codec adoption notes, default settings, validation gates, and known landmines that apply to every consumer (zenjpeg / zenwebp / zenavif / zenjxl / zenpng / zengif / zenpicker / zensim) |
 | **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | Tutorial. Walk a new codec from "I have a config grid" to a shipped bake in ~30 min |
 | **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Codec-implementation deep dive. Two-shot rescue protocol, `RescuePolicy` field layout, calibration questions |
 

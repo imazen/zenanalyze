@@ -401,6 +401,14 @@ independently; the binary format (`ZNPR v2`) is the contract between them.
 See [`MIGRATION.md`](MIGRATION.md) for the path from the previous
 (unpublished) `zenpicker` Rust shell to the current layout.
 
+**Cross-codec defaults + data discipline**: read
+[`zentrain/PRINCIPLES.md`](zentrain/PRINCIPLES.md) before adopting or
+re-baking a picker for any codec (zenjpeg / zenwebp / zenavif /
+zenjxl / zenpng / zengif / zenpicker / zensim). It's the source of
+truth for what's invariant — corpus shape, argmin objectives, time-
+budget patterns, multi-metric bakes, OOD / reach gates, validation
+gates that block release.
+
 ## License
 
 AGPL-3.0-only OR LicenseRef-Imazen-Commercial. Commercial licensing available

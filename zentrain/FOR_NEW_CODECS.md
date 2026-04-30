@@ -1,6 +1,8 @@
-# Adding zenpicker to a new codec
+# Adding a per-codec picker to a new codec
 
 This walkthrough takes you from "I have a codec with N configs" to "the picker chooses one given image features and a quality target." Estimated time: 30 minutes for the first model, ~10 minutes for re-bakes after that.
+
+> **Before starting**, read [`PRINCIPLES.md`](PRINCIPLES.md). It captures the cross-codec data-discipline, argmin objectives, default settings, and validation gates every consumer must follow. This tutorial is the procedural how-to; PRINCIPLES is the why-and-what.
 
 The example throughout uses a hypothetical "zenwidget" codec with two scalar control axes (effort, quality) and one categorical axis (compression_mode). Substitute your own.
 

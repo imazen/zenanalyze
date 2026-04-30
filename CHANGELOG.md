@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — picker training principles + cross-codec defaults
+
+- **`zentrain/PRINCIPLES.md`** — single source of truth for what's
+  invariant across codec pickers (zenjpeg / zenwebp / zenavif /
+  zenjxl / zenpng / zengif / zenpicker / zensim). Covers the data
+  discipline (sweep four dimensions, per-(image, size) zensim
+  ceiling, sample-count floors, OOD bounds), argmin score
+  composition (default size-optimal, RD-vs-time, hard time cap,
+  time-to-percent-saved, multi-metric bakes for ssim2 / butter /
+  zensim), per-codec adoption notes (each codec's categorical /
+  scalar axes + rescue strategy default), default settings cheat
+  sheet (trainer / bake / sweep / runtime), validation gates that
+  block release, and known landmines (re-bake triggers, OOD
+  necessity, composite-features stability, metadata necessity).
+  Cross-linked from `zentrain/README.md`, `zentrain/FOR_NEW_CODECS.md`
+  (now points at PRINCIPLES first), and the top-level `README.md`.
+
 ### Added — zenpredict 0.1.0 (new Rust runtime crate)
 
 - **`zenpredict/`** — zero-copy MLP runtime: ZNPR v2 binary format
