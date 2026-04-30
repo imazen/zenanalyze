@@ -37,6 +37,37 @@
 //! at ~no accuracy cost; SIMD f16→f32 (F16C / FCVT) is the v0.2
 //! work, scalar today.
 //!
+//! ## Size invariance is a codec-edge concern
+//!
+//! `zenpicker` is feature-vector-in / argmin-out. It has no notion of
+//! image dimensions at runtime — the picker doesn't know whether the
+//! caller's image is 64×64 or 4096×4096 except through whatever the
+//! codec packs into the feature vector (`size_class` one-hot,
+//! `log_pixels`, etc., all defined by the codec's bake schema).
+//!
+//! That means **size invariance is enforced at the codec edge**, not
+//! here. The picker faithfully runs whatever forward pass the bake
+//! encoded; if the training-time `(size_class, target_zq)` grid was
+//! sparsely populated, the picker will silently extrapolate at
+//! inference and the codec will get bad picks for those (size,
+//! quality) corners.
+//!
+//! Two structural gates protect against this and they live outside
+//! this crate (in the training/bake pipeline):
+//!
+//! 1. `train_hybrid.py`'s `PER_SIZE_TAIL` + `DATA_STARVED_SIZE`
+//!    safety violations — fail the strict gate when any size class's
+//!    p99 overhead is too high or when any `(size_class, zq)` cell
+//!    has fewer training rows than the floor.
+//! 2. `tools/size_invariance_probe.py` — post-bake stability check
+//!    that resizes a fixture corpus to each of {tiny, small, medium,
+//!    large} and asserts the picker's argmin cell stays stable.
+//!
+//! See [`SAFETY_PLANE.md`](https://github.com/imazen/zenanalyze/blob/main/zenpicker/SAFETY_PLANE.md)
+//! → "Size invariance is a safety property" for the design notes and
+//! [`FOR_NEW_CODECS.md`](https://github.com/imazen/zenanalyze/blob/main/zenpicker/FOR_NEW_CODECS.md)
+//! → Step 1.5 for the codec-side sweep discipline.
+//!
 //! ## no_std
 //!
 //! `default-features = false` keeps the crate `no_std + alloc`. The

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — zenpicker size-invariance discipline
+
+- **Size invariance is a safety property.** The picker is now
+  *required* to be near-optimal at every image `(width, height)`, not
+  just at the four sample sizes (`tiny / small / medium / large`)
+  sampled at training time. This is now structural, not a "be
+  thorough" guideline.
+- **`tools/train_hybrid.py`: new safety-gate violations.** Two new
+  thresholds in `DEFAULT_SAFETY_THRESHOLDS`:
+  - `max_per_size_p99_overhead_pct` (default 80) — `PER_SIZE_TAIL`
+    fires when any single `size_class`'s p99 overhead exceeds the
+    ceiling.
+  - `min_train_rows_per_size_zq` (default 50) — `DATA_STARVED_SIZE`
+    fires when any `(size_class, target_zq)` training cell has fewer
+    rows than the floor. Catches sweep harnesses that silently skip a
+    size class for a chunk of the corpus.
+- **`safety_report.diagnostics.train_rows_by_size_zq`**: new dict in
+  the diagnostics block exposing per-`(size, zq)` training-row counts.
+  Forwarded into the bake manifest by `bake_picker.py` (passes through
+  the existing `safety_report` plumbing — no bake-tool change needed).
+- **`zenpicker/tools/size_invariance_probe.py`** — post-bake
+  generalization gate. Resizes a fixture corpus to each of `tiny /
+  small / medium / large` and asserts the picker's argmin cell stays
+  stable across sizes per `(image, target_zq)`. `--strict` exits 1
+  when stability < threshold (default 90 %). Counterpart to the
+  in-trainer `PER_SIZE_TAIL` / `DATA_STARVED_SIZE` violations.
+- **Documentation updates.** `SAFETY_PLANE.md` gains a "Size
+  invariance is a safety property" section; `FOR_NEW_CODECS.md` gains
+  Step 1.5 ("sweep at all four size classes") between Steps 1 and 2;
+  `tools/README.md` extends the canonical command sequence with the
+  size-invariance probe; `README.md` marks the size-invariance gate
+  ✅ v0.1; `lib.rs` docstring documents that size invariance is
+  enforced at the codec edge, not in the picker runtime.
+
 ### Changed — zenpicker
 
 - **`tools/train_hybrid.py`: codec-agnostic `CATEGORICAL_AXES` + `SCALAR_AXES`.**

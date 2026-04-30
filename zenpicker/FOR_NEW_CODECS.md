@@ -40,6 +40,48 @@ For zenjpeg this is `zenjpeg/examples/zq_pareto_calibrate.rs`. Yours can be a on
 
 ---
 
+## Step 1.5 — sweep at all four size classes (size invariance is a safety property)
+
+The codec's pareto sweep harness MUST emit rows for `tiny / small / medium / large` for **every image** in the corpus, not just one size per image. Sparse-by-size sweeps silently produce mis-calibrated pickers — the safety plane treats this as a first-class concern, not a "be thorough" guideline.
+
+**Why this is non-negotiable:**
+
+The picker is feature-vector-in / argmin-out. It has no notion of image dimensions at runtime — only the `size_class` one-hot and `log_pixels` cross-terms the codec packs into the feature vector. A picker that was trained without enough samples in (e.g.) the `tiny` × `zq=94` corner has nothing to learn from there; at inference it extrapolates and the codec gets a bad pick at exactly the (size, quality) pair where SLA-bound traffic lives.
+
+`train_hybrid.py` enforces this with two strict-gate violations:
+
+- **`PER_SIZE_TAIL`** — fails when any single `size_class`'s p99 overhead exceeds `max_per_size_p99_overhead_pct` (default 80 %).
+- **`DATA_STARVED_SIZE`** — fails when any `(size_class, target_zq)` cell has fewer than `min_train_rows_per_size_zq` (default 50) training rows.
+
+**Reference implementation:** zenjpeg's harness loops over all four size classes per image, producing one feature row + one `(image, size, config, q)` pareto row per size:
+
+```rust
+// zenjpeg/zenjpeg/examples/zq_pareto_calibrate.rs:506-512
+let work_units: Vec<(PathBuf, u32)> = paths
+    .iter()
+    .flat_map(|path| args.sizes.iter().map(move |&sz| (path.clone(), sz)))
+    .collect();
+work_units.par_iter().for_each(|(path, target_size)| {
+    let target_size = *target_size;
+    let (rgb_native, w_native, h_native) = load_png(path);
+    let (rgb, w, h) = resize_to(&rgb_native, w_native, h_native, target_size);
+    let size_class = match target_size {
+        64 => "tiny",
+        256 => "small",
+        1024 => "medium",
+        0 => "large",     // native — no resize
+        _ => "custom",
+    };
+    // ... analyze + encode + emit rows ...
+});
+```
+
+The default `--sizes 64,256,1024,0` covers `(tiny, small, medium, large)` per image. Don't override that grid unless you genuinely have a domain reason (e.g. a thumbnail-only product where `medium` and `large` are out-of-scope) — and if you do, document it in the codec config and tighten `min_train_rows_per_size_zq` accordingly.
+
+**Post-bake gate.** Once the `.bin` ships, `tools/size_invariance_probe.py` resizes a fixture corpus through the picker at all four sizes and asserts the argmin cell stays stable across them per `(image, target_zq)`. Run it as part of CI alongside `adversarial_probe.py`. See [tools/README.md](tools/README.md) → step 6c.
+
+---
+
 ## Step 2 — produce a features TSV
 
 One row per `(image, size_class)`, columns prefixed `feat_`:
@@ -344,6 +386,8 @@ The gate catches (full list in [tools/README.md → Safety gates](tools/README.m
 
 - overfitting (train/val gap > threshold)
 - catastrophic per-zq-band tails (p99 overhead exceeds threshold for any single band — caught a real 85.4% miss at zq=94 in zenjpeg's own v2.1)
+- catastrophic per-size-class tails (`PER_SIZE_TAIL`: p99 overhead exceeds `max_per_size_p99_overhead_pct` for any single `size_class`. Size invariance is a safety property — see Step 1.5)
+- size-starved sweep grids (`DATA_STARVED_SIZE`: fewer than `min_train_rows_per_size_zq` training rows in any `(size_class, target_zq)` cell)
 - single-row worst-case overshoot (>200% by default)
 - data-starved cells (fewer than 3 member configs)
 - NaN/Inf in weights or predictions

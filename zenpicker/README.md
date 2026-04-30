@@ -478,6 +478,7 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 | ✅ v0.1 | **v2.1 zenjpeg bake** (35-feature schema, 192³ MLP) — adds `patch_fraction_fast`, `quant_survival_y/uv`, `aq_map_*`, `laplacian_variance`, etc. Beats v2.0 by 0.43pp mean overhead, +4.3pp argmin acc |
 | ✅ v0.1 | **Permutation feature importance** (`feature_ablation.py --method permutation`) — train once, shuffle each column. ~50× faster than retrain-LOO (2 min vs 1-2 hr at 53 features × 120 configs) |
 | ✅ v0.1 | **`--hidden W,W,W` capacity sweep** in `train_hybrid.py` — depth helps more than width past ~50-input cross-termed MLPs; 192³ overtakes the 128² default cleanly |
+| ✅ v0.1 | **Size-invariance gate** — `train_hybrid.py` ships `PER_SIZE_TAIL` + `DATA_STARVED_SIZE` strict-gate violations and `safety_report.diagnostics.train_rows_by_size_zq`; `tools/size_invariance_probe.py` is the post-bake stability check. The picker is *required* to be near-optimal at every `(width, height)`, not just at the four sample sizes — see [SAFETY_PLANE.md → "Size invariance is a safety property"](SAFETY_PLANE.md#size-invariance-is-a-safety-property) |
 | ⏳ v0.2 | `#[magetypes]`-dispatched matmul (AVX-512 / AVX2 / NEON / WASM SIMD128 / scalar). 8-wide f16 → f32 via F16C / FCVT |
 | ⏳ v0.3 | i8-quantized weights option (per-row scale) for the case where ~50 KB still isn't small enough |
 | ⏳ v0.3 | Generational re-encode picker (round-trip JPEG-source case): see [imazen/zenanalyze#13](https://github.com/imazen/zenanalyze/issues/13) |
