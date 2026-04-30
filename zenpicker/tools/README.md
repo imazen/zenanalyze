@@ -10,10 +10,10 @@ config-name parser. Then runs these scripts against that config.
 | File | Purpose |
 |---|---|
 | `_picker_lib.py` | Shared library: disk-cached dataset construction, parallel teacher training (joblib), HISTGB_FAST/FULL presets, subsample helper, StepTimer |
-| `train_hybrid.py` | **Recommended.** Hybrid-heads training: N categorical cells + K scalar prediction heads per cell. Codec supplies the cell taxonomy via `parse_config_name` |
+| `train_hybrid.py` | **Recommended.** Hybrid-heads training: N categorical cells + K scalar prediction heads per cell. Codec supplies the cell taxonomy via `parse_config_name`. Flags: `--objective {size_optimal, zensim_strict}`, `--bytes-quantile`, `--reach-threshold`, `--hidden 192,192,192`, `--out-suffix` |
 | `train_distill.py` | Categorical-only distillation (legacy v1.x picker shape). Per-config HistGB teacher → small shared MLP student |
 | `train_distill_reduced.py` | Same as `train_distill.py` but with a reduced feature subset declared in the codec config |
-| `feature_ablation.py` | Single-feature LOO ablation across `KEEP_FEATURES` |
+| `feature_ablation.py` | Per-feature importance ranking. **`--method permutation`** (default) — train once, shuffle each column, ~50× faster than LOO. `--method loo` retrains the model with each feature dropped (legacy ground truth) |
 | `feature_group_ablation.py` | Group ablation (drop entire tier-aligned groups) |
 | `validate_schema.py` | Re-train production HistGB with a chosen feature subset, report held-out metrics |
 | `capacity_sweep.py` | Architecture × cross-term-recipe sweep over the student MLP |
@@ -90,6 +90,66 @@ The picker ablation work confirmed feature-importance ranking is
 stable between FAST and FULL; absolute mean overhead drops by ~1pp
 when switching FAST→FULL. Use FAST for everything except the final
 bake.
+
+## Tuning the bake (post-training-script)
+
+Two knobs matter most when distillation underperforms the teacher:
+
+### Student MLP capacity (`--hidden W1,W2,...`)
+
+Default `128,128` matches the v2.0 baseline. When the input layer
+grows past ~50 cross-termed inputs (e.g. v2.1's 35-feature schema
+feeds 80 inputs into the MLP), the default is undersized. Sweep with
+`--out-suffix _hWxWxW` to compare side-by-side without clobbering
+bakes. Empirically 3 hidden layers narrow (~192) beat 2 wide (~256):
+
+| hidden        | params  | mean overhead | argmin acc |
+|---|---:|---:|---:|
+| 128x128 (default) | 24.6 K | 2.91% | 50.8% |
+| 128x128x128   | 48 K  | 2.59% | 53.9% |
+| 192x192x192   | 97 K  | **2.33%** | **56.3%** ← v2.1 winner |
+| 256x256x256   | 162 K | 2.42% | 53.9% |
+| 384x384x384   | 363 K | 3.42% | 44.1% (overfit) |
+
+(zenjpeg v2.1, 80 inputs → 36 outputs, mean log-bytes regression.)
+
+Numbers will differ across codecs but the shape generalizes:
+**depth helps more than width**; overfitting kicks in beyond
+~150 K params on this data scale. Sweep first, then bake at the
+chosen size.
+
+### Permutation feature ranking
+
+`feature_ablation.py --method permutation` ranks features by
+shuffling each column on the validation set and measuring
+mean-overhead delta. Train once, permute 53 times → **~2 minutes
+wall-clock** for a 53-feature × 120-config matrix vs ~1-2 hours for
+retrain-LOO. Ranking tracks LOO closely (well-known result for tree
+ensembles).
+
+Workflow when starting from the broadest possible feature set:
+
+1. Run `train_hybrid.py` once with all features → baseline.
+2. Run `feature_ablation.py --method permutation`.
+3. Drop features with `Δ ≤ 0.00pp` (zero-impact) — usually HDR /
+   wide-gamut / palette signals on a non-HDR / non-palette corpus.
+4. Optionally drop features with `Δ < 0.05pp` (very low impact).
+5. Retrain with the pruned `KEEP_FEATURES`, compare held-out
+   metrics, and bake.
+
+Use `--n-repeats 5` if held-out validation set is small; default 3
+is enough at our 7000-row scale.
+
+### GBM backend choice
+
+`_picker_lib._make_teacher(params)` returns the GBM. Today: always
+sklearn `HistGradientBoostingRegressor`. lightgbm 4.6 was
+benchmarked and is **2-16× slower** than sklearn HistGB on our
+many-small-fits workload (per-cell × per-head decomposition keeps
+each fit small; lightgbm's per-fit overhead dominates). The wrapper
+is kept so dispatch can flip if a future single-shot fit makes
+lightgbm a win, but don't pre-emptively `pip install lightgbm` —
+sklearn HistGB is the right default.
 
 ## Adding a new codec
 
