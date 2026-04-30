@@ -3807,7 +3807,12 @@ mod sanity_matrix {
 }
 
 // ---------------------------------------------------------------------
-// Stage 0 + 1.5 dispatch plan tests (issue #53).
+// Stage 0 dispatch plan tests (issue #53). The dispatch plan is
+// purely additive — it adjusts sampling budgets, never narrows the
+// caller's feature query. Parity with `analyze_features` is the
+// strongest test we can write; below-threshold tiny-image override
+// is the one observable Stage 0 effect (caller sees the same
+// numerics, just computed exhaustively).
 // ---------------------------------------------------------------------
 
 #[cfg(test)]
@@ -3839,17 +3844,55 @@ mod dispatch_plan {
         assert!(r.get(AnalysisFeature::HighFreqEnergyRatio).is_none());
     }
 
-    /// Stage 0: a 32 × 32 grayscale image triggers the exhaustive-budget
-    /// override (≤ 64 K pixels) and the `is_grayscale = true` Stage 1.5
-    /// path. Picker-relevant Tier 1 luma signals are still computed;
-    /// chroma signals are dropped.
+    /// On any image (above the exhaustive-budget threshold) the
+    /// dispatch plan produces the same numerics as `analyze_features`
+    /// for every requested feature — same budgets, same code path,
+    /// purely additive front. This is the load-bearing parity test.
     #[test]
-    fn stage15_grayscale_drops_chroma_keeps_luma() {
+    fn stage0_above_threshold_matches_analyze_features_exactly() {
+        // 256 × 256 = 65 536 pixels > MIN_EXHAUSTIVE_THRESHOLD (64 000),
+        // so Stage 0 leaves the budget alone.
+        let buf = synth_rgb(256, 256, 7);
+        let slice = rgb_slice(&buf, 256, 256);
+
+        // Request a wide mix: Tier 1 luma + chroma, Tier 2, Tier 3,
+        // dimensions, alpha-irrelevant (RGB8). Use SUPPORTED so we
+        // exercise every cfg-enabled feature.
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, 256, 256), &q).unwrap();
+        let plan = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        // Every feature the baseline produced must be present in the
+        // dispatch-plan output, with bit-identical numerics.
+        for f in FeatureSet::SUPPORTED.iter() {
+            let b = baseline.get_f32(f);
+            let p = plan.get_f32(f);
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for {f:?}: baseline={b:?} plan={p:?}",
+            );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "value mismatch for {f:?}: baseline={bv} plan={pv}",
+                );
+            }
+        }
+    }
+
+    /// Grayscale parity: a true grayscale image gets every requested
+    /// chroma feature populated (with the cheap algorithm running on
+    /// flat-chroma input), not dropped. Picker MLPs were trained on
+    /// grayscale samples seeing those columns — the dispatch plan
+    /// must not change that distribution.
+    #[test]
+    fn stage0_grayscale_keeps_all_requested_features() {
         let w = 32;
         let h = 32;
         let mut buf = vec![0u8; (w * h * 3) as usize];
-        // Diagonal luma ramp — gray (R == G == B), non-uniform so the
-        // saturating drop set doesn't also fire.
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 3) as usize;
@@ -3861,54 +3904,6 @@ mod dispatch_plan {
         }
         let slice = rgb_slice(&buf, w, h);
 
-        // Request a mix of luma + chroma + Tier 2 features.
-        let mut requested = FeatureSet::new()
-            .with(AnalysisFeature::Variance)
-            .with(AnalysisFeature::EdgeDensity)
-            .with(AnalysisFeature::Uniformity)
-            .with(AnalysisFeature::CbSharpness)
-            .with(AnalysisFeature::CrSharpness)
-            .with(AnalysisFeature::ChromaComplexity)
-            .with(AnalysisFeature::CbHorizSharpness)
-            .with(AnalysisFeature::CrHorizSharpness);
-        // Always include `IsGrayscale` so we can assert the Stage 1
-        // strict-grayscale signal made it into the output too.
-        requested = requested.with(AnalysisFeature::IsGrayscale);
-        let q = AnalysisQuery::new(requested);
-
-        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
-
-        // Stage 1 luma features still computed.
-        assert!(r.get(AnalysisFeature::Variance).is_some());
-        assert!(r.get(AnalysisFeature::EdgeDensity).is_some());
-        assert!(r.get(AnalysisFeature::Uniformity).is_some());
-
-        // Strict-grayscale gate fired and is reported true.
-        let is_gray = r
-            .get(AnalysisFeature::IsGrayscale)
-            .and_then(|v| v.as_bool())
-            .unwrap();
-        assert!(is_gray, "diagonal R==G==B ramp must be is_grayscale=true");
-
-        // Stage 1.5 dropped these — `get` returns `None`, never
-        // a stale zero.
-        assert!(r.get(AnalysisFeature::CbSharpness).is_none());
-        assert!(r.get(AnalysisFeature::CrSharpness).is_none());
-        assert!(r.get(AnalysisFeature::ChromaComplexity).is_none());
-        assert!(r.get(AnalysisFeature::CbHorizSharpness).is_none());
-        assert!(r.get(AnalysisFeature::CrHorizSharpness).is_none());
-    }
-
-    /// On a non-grayscale, non-uniform photo neither Stage 1.5 trigger
-    /// fires; the dispatch plan output matches `analyze_features` for
-    /// every feature both entries computed.
-    #[test]
-    fn stage15_no_drops_on_typical_photo() {
-        // Use the existing synth_rgb generator — varied content,
-        // not flat, not grayscale.
-        let buf = synth_rgb(128, 128, 7);
-        let slice = rgb_slice(&buf, 128, 128);
-
         let requested = FeatureSet::new()
             .with(AnalysisFeature::Variance)
             .with(AnalysisFeature::EdgeDensity)
@@ -3918,16 +3913,22 @@ mod dispatch_plan {
             .with(AnalysisFeature::ChromaComplexity)
             .with(AnalysisFeature::CbHorizSharpness)
             .with(AnalysisFeature::CrHorizSharpness)
-            .with(AnalysisFeature::HighFreqEnergyRatio)
-            .with(AnalysisFeature::LumaHistogramEntropy);
+            .with(AnalysisFeature::IsGrayscale);
         let q = AnalysisQuery::new(requested);
 
-        let baseline = analyze_features(rgb_slice(&buf, 128, 128), &q).unwrap();
-        let plan = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
 
-        // Every feature the baseline produced should also be present
-        // in the dispatch-plan output (no Stage 1.5 drops on a
-        // standard photo).
+        // Strict-grayscale gate fired.
+        let is_gray = r
+            .get(AnalysisFeature::IsGrayscale)
+            .and_then(|v| v.as_bool())
+            .unwrap();
+        assert!(is_gray, "diagonal R==G==B ramp must be is_grayscale=true");
+
+        // Every requested feature populated — including the chroma
+        // ones, which compute the (near-zero) values on flat chroma
+        // and ship them so consumer MLPs see the in-distribution
+        // numerics they were trained on.
         for f in [
             AnalysisFeature::Variance,
             AnalysisFeature::EdgeDensity,
@@ -3937,62 +3938,38 @@ mod dispatch_plan {
             AnalysisFeature::ChromaComplexity,
             AnalysisFeature::CbHorizSharpness,
             AnalysisFeature::CrHorizSharpness,
-            AnalysisFeature::HighFreqEnergyRatio,
-            AnalysisFeature::LumaHistogramEntropy,
         ] {
-            let b = baseline.get_f32(f);
-            let p = plan.get_f32(f);
-            assert_eq!(
-                b.is_some(),
-                p.is_some(),
-                "presence mismatch for {f:?}: baseline={b:?} plan={p:?}",
+            assert!(
+                r.get(f).is_some(),
+                "{f:?} must be populated on grayscale input — dispatch plan never drops",
             );
-            // Bit-identical numerical agreement: same code path under
-            // the hood, just the dispatcher front differs.
-            if let (Some(bv), Some(pv)) = (b, p) {
-                assert_eq!(
-                    bv.to_bits(),
-                    pv.to_bits(),
-                    "value mismatch for {f:?}: baseline={bv} plan={pv}",
-                );
-            }
         }
     }
 
     /// Stage 0: a 64 × 64 image is below [`MIN_EXHAUSTIVE_THRESHOLD`]
     /// (4096 ≤ 64 000), so the dispatch plan promotes the budget to
-    /// the pixel count. Verified indirectly: the small image runs the
-    /// full feature surface without panicking, every requested
-    /// non-chroma / non-saturating feature comes back populated, and
-    /// hints are accepted in both `Some` and `None` form.
+    /// exhaustive. Smoke test: full-feature surface runs without
+    /// panicking, hints are accepted in `Some` and `None` form.
     #[test]
     fn stage0_tiny_image_exhaustive_budget() {
         let buf = synth_rgb(64, 64, 99);
         let slice = rgb_slice(&buf, 64, 64);
 
-        // Request from FeatureSet::SUPPORTED so we exercise every
-        // build-supported feature (drops cfg-disabled variants).
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
         let hints = DispatchHints::empty();
         let r = analyze_with_dispatch_plan(slice, &q, Some(&hints)).unwrap();
 
-        // Tier 1 features always populated regardless of stage 1.5.
         assert!(r.get(AnalysisFeature::Variance).is_some());
         assert!(r.get(AnalysisFeature::EdgeDensity).is_some());
         assert!(r.get(AnalysisFeature::Uniformity).is_some());
-        // Geometry available.
         assert_eq!(r.geometry().width(), 64);
         assert_eq!(r.geometry().height(), 64);
     }
 
     /// Stage 0: ≥ 8 MP image still produces results (the
-    /// extended-pass flag is recorded but Stage 2 is deferred). Smoke
-    /// test: no panic on a width × height that crosses the threshold,
-    /// even with the full feature surface requested.
+    /// extended-pass flag is recorded but Stage 2 is deferred).
     #[test]
     fn stage0_large_image_smoke() {
-        // Just-over threshold without burning RAM in CI: 4000 × 2001
-        // = 8 004 000 ≥ LARGE_THRESHOLD.
         let w = 4000u32;
         let h = 2001u32;
         let buf = vec![64u8; (w as usize) * (h as usize) * 3];
@@ -4005,39 +3982,5 @@ mod dispatch_plan {
         let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
         assert!(r.get(AnalysisFeature::Variance).is_some());
         assert!(r.get(AnalysisFeature::Uniformity).is_some());
-    }
-
-    /// Stage 1.5: a constant-color image trips both `is_grayscale =
-    /// true` AND `uniformity > 0.95`, so both drop sets fire. The
-    /// chroma and saturating features are absent from the output;
-    /// `Variance` (Tier 1, neither dropped) is present and zero.
-    #[test]
-    fn stage15_flat_image_drops_both() {
-        let buf = vec![128u8; 64 * 64 * 3];
-        let slice = rgb_slice(&buf, 64, 64);
-
-        #[allow(unused_mut)]
-        let mut requested = FeatureSet::new()
-            .with(AnalysisFeature::Variance)
-            .with(AnalysisFeature::Uniformity)
-            .with(AnalysisFeature::CbHorizSharpness)
-            .with(AnalysisFeature::CrHorizSharpness);
-        // Saturating drop set is `experimental`-only; conditionally
-        // request a member to verify the drop fires when available.
-        #[cfg(feature = "experimental")]
-        {
-            requested = requested.with(AnalysisFeature::PatchFractionFast);
-        }
-        let q = AnalysisQuery::new(requested);
-
-        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
-
-        assert_eq!(r.get_f32(AnalysisFeature::Variance), Some(0.0));
-        // Chroma drop fired (flat image is `R == G == B`).
-        assert!(r.get(AnalysisFeature::CbHorizSharpness).is_none());
-        assert!(r.get(AnalysisFeature::CrHorizSharpness).is_none());
-        // Saturating drop fired on the experimental feature.
-        #[cfg(feature = "experimental")]
-        assert!(r.get(AnalysisFeature::PatchFractionFast).is_none());
     }
 }

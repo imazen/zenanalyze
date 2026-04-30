@@ -1,9 +1,14 @@
 //! Adaptive dispatch tree for [`crate::analyze_with_dispatch_plan`].
 //!
-//! Stages 0 + 1.5 of the issue-#53 plan: cheap per-image pre-tier1
-//! decisions and post-tier1 query narrowing based on `is_grayscale` /
-//! `uniformity`. Layered on top of the existing tier code — no
-//! changes to tier internals.
+//! Stage 0 of the issue-#53 plan: cheap per-image pre-tier1 decisions
+//! that adjust **how much budget** to spend, never **which features
+//! to skip**. The dispatch tree is purely additive — it can grow the
+//! sampling budget on tiny images and (eventually, in Stage 2) on
+//! large ones, but it never drops a feature the caller asked for.
+//! Returning a populated value for every requested feature keeps the
+//! contract intact for consumers that fill fixed-shape input vectors
+//! (e.g. zenpicker's MLP) and were trained on the full feature
+//! distribution including grayscale / flat content.
 //!
 //! ## Stages
 //!
@@ -12,41 +17,28 @@
 //!   short-circuit; ≤ 64K-pixel images get the budget bumped to
 //!   exhaustive; ≥ 8 MP images get [`DispatchPlan::flag_extended_pass`]
 //!   set for a future Stage 2 follow-up (see issue #53 / #46 / corpus
-//!   #47).
-//! - **Stage 1**: runs Tier 1 + the strict-grayscale classifier +
-//!   alpha + dimension + depth features. Same code path as today,
-//!   just structured to expose the partial [`RawAnalysis`] before
-//!   the rest of the dispatcher decides what to do with it.
-//! - **Stage 1.5**: narrows the remaining query by subtracting
-//!   [`feature::CHROMA_DROP_FEATURES`] (when `is_grayscale = true`)
-//!   and [`feature::SATURATING_DROP_FEATURES`] (when `uniformity >
-//!   0.95`), then runs Tier 2 / Tier 3 / palette gated on the
-//!   narrowed set. Dropped features come back as `None` from
-//!   [`feature::AnalysisResults::get`] — the layered defense in
-//!   [`feature::RawAnalysis::into_results`] guarantees no caller
-//!   ever sees garbage for a dropped feature.
+//!   #47). The flag is **not acted on today** — Stage 2 lands in a
+//!   separate PR after corpus #47 validates the threshold values.
+//! - Stages 1+ run the same code path as [`crate::analyze_features`],
+//!   just with the Stage 0 budget overrides applied.
 //!
-//! Stage 2 (extended-budget retry on the budget-sensitive features
-//! when `flag_extended_pass = true`) is **deferred** — its threshold
-//! values need empirical validation against the imazen/zenanalyze#47
-//! corpus sweep before they can ship.
+//! Stages 2 (extended-budget retry on the budget-sensitive features
+//! when `flag_extended_pass = true`), 3, and 4 are deferred to
+//! follow-up PRs. None of them add or remove features from the output
+//! either — the dispatch tree's job is to *spend more compute when
+//! it'll help*, not to skip work the caller asked for.
 
 use zenpixels::PixelSlice;
 
-#[cfg(feature = "experimental")]
-use crate::feature::AnalysisFeature;
-use crate::feature::{
-    self, AnalysisQuery, AnalysisResults, FeatureSet, ImageGeometry, RawAnalysis,
-};
-use crate::row_stream::RowStream;
-use crate::{AnalyzeError, alpha, dimensions, grayscale, palette, tier1, tier2_chroma, tier3};
+use crate::feature::{self, AnalysisQuery, AnalysisResults, ImageGeometry};
+use crate::{AnalyzeError, analyze_specialized_raw};
 
 /// Optional caller hints for [`crate::analyze_with_dispatch_plan`].
 ///
 /// Advisory only — every field is optional and the analyzer falls
 /// back to safe defaults when [`crate::analyze_with_dispatch_plan`]
-/// receives `None`. Stages 0 and 1.5 do not act on any hint yet; the
-/// fields exist so future stages (corpus#47-validated Stage 2,
+/// receives `None`. Stage 0 does not act on any hint yet; the fields
+/// exist so future stages (corpus#47-validated Stage 2,
 /// content-hash result caching) can consume them without a
 /// signature change to the public entry. See issue
 /// imazen/zenanalyze#53.
@@ -54,10 +46,9 @@ use crate::{AnalyzeError, alpha, dimensions, grayscale, palette, tier1, tier2_ch
 #[derive(Copy, Clone, Debug, Default)]
 pub struct DispatchHints {
     /// Picker's target perceptual quality, in zq units. High targets
-    /// (lossless / near-lossless) are budget-sensitive on
-    /// [`AnalysisFeature::PatchFractionFast`]; low targets aren't.
-    /// Reserved for Stage 2 once the corpus sweep validates the
-    /// thresholds.
+    /// (lossless / near-lossless) are budget-sensitive on the
+    /// patch / percentile features; low targets aren't. Reserved for
+    /// Stage 2 once the corpus sweep validates the thresholds.
     pub target_zq: Option<f32>,
     /// Caller-supplied content hash for cross-call result caching.
     /// Reserved for a future cache layer; not consumed today.
@@ -152,7 +143,11 @@ pub(crate) fn run(
 
     // Stage 0: empty request → no work.
     if requested.is_empty() {
-        return Ok(RawAnalysis::default().into_results(requested, geometry, source_descriptor));
+        return Ok(feature::RawAnalysis::default().into_results(
+            requested,
+            geometry,
+            source_descriptor,
+        ));
     }
 
     // Stage 0: budget + extended-pass flag from dimensions alone.
@@ -162,171 +157,72 @@ pub(crate) fn run(
     // so future readers see the deliberate no-op.
     let _ = plan.flag_extended_pass;
 
-    // Re-derive the same per-feature gates `analyze_features` uses,
-    // but split them so we can apply the Stage 1.5 narrowing
-    // *between* Tier 1 and Tier 2/3.
-    let pal_initial = requested.intersects(feature::PAL_NEEDED_BY);
+    // Mirror the per-feature gates `analyze_features` uses. Same
+    // canonical decisions (no narrowing, no synthesised values) — the
+    // dispatch plan only changes Tier 1/2/3/alpha sampling budgets.
+    let pal = requested.intersects(feature::PAL_NEEDED_BY);
+    let t2 = requested.intersects(feature::TIER2_FEATURES);
+    let t3 = requested.intersects(feature::T3_NEEDED_BY);
     let alpha = requested.intersects(feature::ALPHA_FEATURES);
-    let run_depth = requested.intersects(feature::DEPTH_FEATURES);
-    // Always run the strict-grayscale classifier — Stage 1.5 needs
-    // its output to decide whether to drop the chroma tiers, and
-    // the cost is sub-microsecond on coloured content (early-exit
-    // at the first non-gray row).
-    let run_strict_gray_for_plan = true;
 
-    let alpha_stats = if alpha {
-        alpha::scan_alpha(&slice, plan.pixel_budget)
-    } else {
-        Default::default()
-    };
-
-    #[cfg(feature = "experimental")]
-    let depth_stats = if run_depth {
-        crate::tier_depth::scan_depth(&slice, plan.pixel_budget)
-    } else {
-        Default::default()
-    };
-    let _ = run_depth;
-
-    let mut stream = RowStream::new(slice).map_err(AnalyzeError::Convert)?;
-
-    // Palette path needs the *initial* query to decide between
-    // full-scan / quick-scan / no-scan — Stage 1.5 doesn't drop any
-    // palette features (palette outputs are content-class signals
-    // for the codec, not chroma signals).
     let palette_full_required = requested.intersects(feature::PALETTE_FULL_FEATURES);
     let palette_wants_grayscale = palette_wants_grayscale(requested);
-    let palette_stats = if pal_initial {
-        if palette_full_required {
-            palette::scan_palette(&mut stream, palette_wants_grayscale)
-        } else {
-            palette::scan_palette_quick(&mut stream)
-        }
-    } else {
-        Default::default()
-    };
+    let run_depth = requested.intersects(feature::DEPTH_FEATURES);
+    let run_strict_gray = requested.contains(feature::AnalysisFeature::IsGrayscale);
+    let wants_laplacian = tier1_wants_laplacian(requested);
+    let wants_full_kernel = requested.intersects(feature::TIER1_FULL_FEATURES);
+    let wants_skin = requested.intersects(feature::TIER1_SKIN_FEATURES);
+    let dct = requested.intersects(feature::DCT_NEEDED_BY);
 
-    let mut raw = RawAnalysis::default();
-
-    // Always-on dimension features (pure descriptor math).
-    dimensions::populate_dimensions(&mut raw, width, height, source_descriptor);
-
-    // ----- Stage 1: Tier 1 + strict-grayscale gate ------------------
-    if width >= 2 && height >= 2 {
-        let t1_dispatch = tier1::Tier1Dispatch {
-            wants_laplacian: tier1_wants_laplacian(requested),
-            wants_full_kernel: requested.intersects(feature::TIER1_FULL_FEATURES),
-            wants_skin: requested.intersects(feature::TIER1_SKIN_FEATURES),
-        };
-        tier1::extract_tier1_into_dispatch(&mut raw, &mut stream, plan.pixel_budget, t1_dispatch);
-
-        if run_strict_gray_for_plan {
-            raw.is_grayscale = grayscale::scan_strict_grayscale(&mut stream);
-        }
+    // Mirror the 16-arm const-bool dispatch from `analyze_features`,
+    // just with the Stage 0 budget overrides. Keeps the same LLVM
+    // monomorphisation table — no extra code-bloat, no divergence in
+    // tier internals.
+    macro_rules! dispatch {
+        ($pal:literal, $t2:literal, $t3:literal, $a:literal) => {{
+            let (raw, geometry) = analyze_specialized_raw::<$pal, $t2, $t3, $a>(
+                slice,
+                plan.pixel_budget,
+                plan.hf_max_blocks,
+                palette_full_required,
+                palette_wants_grayscale,
+                wants_laplacian,
+                wants_full_kernel,
+                wants_skin,
+                run_depth,
+                dct,
+                run_strict_gray,
+            )?;
+            Ok(raw.into_results(requested, geometry, source_descriptor))
+        }};
     }
-
-    // ----- Stage 1.5: narrow remaining query ------------------------
-    let mut narrowed = requested;
-    if raw.is_grayscale {
-        narrowed = narrowed.difference(feature::CHROMA_DROP_FEATURES);
+    match (pal, t2, t3, alpha) {
+        (false, false, false, false) => dispatch!(false, false, false, false),
+        (false, false, false, true) => dispatch!(false, false, false, true),
+        (false, false, true, false) => dispatch!(false, false, true, false),
+        (false, false, true, true) => dispatch!(false, false, true, true),
+        (false, true, false, false) => dispatch!(false, true, false, false),
+        (false, true, false, true) => dispatch!(false, true, false, true),
+        (false, true, true, false) => dispatch!(false, true, true, false),
+        (false, true, true, true) => dispatch!(false, true, true, true),
+        (true, false, false, false) => dispatch!(true, false, false, false),
+        (true, false, false, true) => dispatch!(true, false, false, true),
+        (true, false, true, false) => dispatch!(true, false, true, false),
+        (true, false, true, true) => dispatch!(true, false, true, true),
+        (true, true, false, false) => dispatch!(true, true, false, false),
+        (true, true, false, true) => dispatch!(true, true, false, true),
+        (true, true, true, false) => dispatch!(true, true, true, false),
+        (true, true, true, true) => dispatch!(true, true, true, true),
     }
-    // `uniformity` is a Tier 1 output written above. The threshold is
-    // the issue-#53 spec value (0.95 — flat enough that Laplacian
-    // percentiles will pin to ~0 and `patch_fraction_fast` won't
-    // vary). Stage 2 will revisit this with corpus-validated
-    // numbers; the hard-coded 0.95 is fine for stages 0 + 1.5.
-    if raw.uniformity > 0.95 {
-        narrowed = narrowed.difference(feature::SATURATING_DROP_FEATURES);
-    }
-
-    // ----- Stage 2: run Tier 2 + Tier 3 with the narrowed query -----
-    let t2 = narrowed.intersects(feature::TIER2_FEATURES);
-    let t3 = narrowed.intersects(feature::T3_NEEDED_BY);
-    let dct = narrowed.intersects(feature::DCT_NEEDED_BY);
-
-    if width >= 2 && height >= 2 {
-        if t2 && width >= 3 && height >= 3 {
-            tier2_chroma::populate_tier2(&mut raw, &mut stream, plan.pixel_budget);
-        }
-        if t3 && width >= 8 && height >= 8 {
-            tier3::populate_tier3(&mut raw, &mut stream, plan.hf_max_blocks, dct);
-        }
-        // Const-bool derived likelihoods: same maximum-instantiation
-        // discipline as the main dispatcher — the layered defense in
-        // `compute_derived_likelihoods` refuses to write a likelihood
-        // whose deps weren't computed.
-        if t3 && pal_initial {
-            tier3::compute_derived_likelihoods::<true, true>(&mut raw);
-        } else if t3 {
-            tier3::compute_derived_likelihoods::<true, false>(&mut raw);
-        } else if pal_initial {
-            tier3::compute_derived_likelihoods::<false, true>(&mut raw);
-        } else {
-            tier3::compute_derived_likelihoods::<false, false>(&mut raw);
-        }
-    }
-
-    // ----- Alpha + palette + depth writeback ------------------------
-    if alpha {
-        raw.alpha_present = alpha_stats.present;
-        raw.alpha_used_fraction = alpha_stats.used_fraction;
-        raw.alpha_bimodal_score = alpha_stats.bimodal_score;
-    }
-    if pal_initial {
-        #[cfg(feature = "experimental")]
-        {
-            raw.indexed_palette_width = palette_stats.indexed_width;
-            raw.palette_fits_in_256 = palette_stats.fits_in_256;
-        }
-        if palette_full_required {
-            raw.distinct_color_bins = palette_stats.distinct;
-            #[cfg(feature = "experimental")]
-            {
-                let pixel_count = (width as f64) * (height as f64);
-                let denom = pixel_count.clamp(1.0, 32_768.0);
-                raw.palette_density =
-                    (raw.distinct_color_bins as f64 / denom).clamp(0.0, 1.0) as f32;
-                raw.grayscale_score = if palette_stats.total_pixels > 0 {
-                    let gray = palette_stats
-                        .total_pixels
-                        .saturating_sub(palette_stats.non_grayscale);
-                    (gray as f64 / palette_stats.total_pixels as f64) as f32
-                } else {
-                    0.0
-                };
-            }
-        }
-        let _ = palette_stats;
-    }
-
-    #[cfg(feature = "experimental")]
-    if run_depth {
-        raw.peak_luminance_nits = depth_stats.peak_nits;
-        raw.p99_luminance_nits = depth_stats.p99_nits;
-        raw.hdr_headroom_stops = depth_stats.headroom_stops;
-        raw.hdr_pixel_fraction = depth_stats.hdr_pixel_fraction;
-        raw.wide_gamut_peak = depth_stats.wide_gamut_peak;
-        raw.wide_gamut_fraction = depth_stats.wide_gamut_fraction;
-        raw.effective_bit_depth = depth_stats.effective_bit_depth;
-        raw.hdr_present = depth_stats.hdr_present;
-        raw.gamut_coverage_srgb = depth_stats.gamut_coverage_srgb;
-        raw.gamut_coverage_p3 = depth_stats.gamut_coverage_p3;
-    }
-
-    // Emit only the *narrowed* set so dropped features come back as
-    // `None` to the caller (the original `requested` would re-include
-    // them and yield zeroed garbage from the default-initialized
-    // RawAnalysis fields).
-    Ok(raw.into_results(narrowed, geometry, source_descriptor))
 }
 
 /// Mirror of the gate in `analyze_features`. Crate-internal helper
 /// so we don't drift from the canonical dispatch decision.
 #[inline]
-fn tier1_wants_laplacian(features: FeatureSet) -> bool {
+fn tier1_wants_laplacian(features: feature::FeatureSet) -> bool {
     #[cfg(feature = "experimental")]
     {
-        features.contains(AnalysisFeature::LaplacianVariance)
+        features.contains(feature::AnalysisFeature::LaplacianVariance)
     }
     #[cfg(not(feature = "experimental"))]
     {
@@ -335,12 +231,12 @@ fn tier1_wants_laplacian(features: FeatureSet) -> bool {
     }
 }
 
-/// Mirror of the gate in `analyze_features` for `palette_wants_grayscale`.
+/// Mirror of the `palette_wants_grayscale` gate in `analyze_features`.
 #[inline]
-fn palette_wants_grayscale(features: FeatureSet) -> bool {
+fn palette_wants_grayscale(features: feature::FeatureSet) -> bool {
     #[cfg(feature = "experimental")]
     {
-        features.contains(AnalysisFeature::GrayscaleScore)
+        features.contains(feature::AnalysisFeature::GrayscaleScore)
     }
     #[cfg(not(feature = "experimental"))]
     {

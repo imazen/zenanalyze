@@ -477,7 +477,12 @@ pub fn analyze_features(
 /// always passes the canonical [`feature::DEFAULT_PIXEL_BUDGET`] /
 /// [`feature::DEFAULT_HF_MAX_BLOCKS`] constants.
 #[allow(clippy::too_many_arguments)] // monomorphization dispatcher: 4 const-bool tier gates + 5 runtime sub-knobs all live in one specialization site
-fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, const ALPHA: bool>(
+pub(crate) fn analyze_specialized_raw<
+    const PAL: bool,
+    const T2: bool,
+    const T3: bool,
+    const ALPHA: bool,
+>(
     slice: PixelSlice<'_>,
     pixel_budget: usize,
     hf_max_blocks: usize,
@@ -646,34 +651,31 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     Ok((raw, geometry))
 }
 
-/// Adaptive analyzer entry. Inspects image dimensions and the
-/// cheap Tier 1 + strict-grayscale signals, then runs only the
-/// remaining tiers + features the picker actually needs. Layered
-/// on top of [`analyze_features`] — the existing entry stays
-/// available; codecs opt into the dispatch tree by switching call
-/// sites.
+/// Adaptive analyzer entry. Inspects image dimensions before any
+/// scan and adjusts the **sampling budget** for Tier 1 / Tier 2 /
+/// Tier 3 / palette / alpha — never narrows the caller's feature
+/// query. Layered on top of [`analyze_features`]: the existing
+/// entry stays available; codecs opt into the dispatch tree by
+/// switching call sites.
 ///
 /// See issue [imazen/zenanalyze#53](https://github.com/imazen/zenanalyze/issues/53)
 /// for the full design and per-stage rationale.
 ///
-/// # Stages (this PR ships 0 + 1.5)
+/// # Stages (this PR ships 0 only)
 ///
 /// - **Stage 0** (free, runs in <1 µs): empty-feature requests
 ///   short-circuit; ≤ 64 K-pixel images get the budget bumped to
-///   exhaustive; ≥ 8 MP images record an internal flag for a
-///   future Stage 2 retry.
-/// - **Stage 1**: Tier 1 + strict-grayscale + alpha + dimension +
-///   depth features run as today (no change to tier internals).
-/// - **Stage 1.5**: when Tier 1 reports `is_grayscale = true`, the
-///   chroma half of Tiers 2 / 3 is dropped from the remaining
-///   query; when `uniformity > 0.95`, the saturating Tier 3
-///   percentile columns are dropped. Dropped features come back as
-///   `None` from [`feature::AnalysisResults::get`] — the layered
-///   defense in [`feature::RawAnalysis::into_results`] guarantees
-///   no caller ever sees garbage for a dropped feature.
+///   exhaustive (the per-call fixed overhead dominates per-pixel
+///   work below this size, so sampling buys nothing); ≥ 8 MP
+///   images record an internal flag for a future Stage 2 retry.
+/// - Stages 1+ run the same code path as [`analyze_features`],
+///   just with Stage 0's budget overrides applied.
 /// - **Stage 2** (extended-budget retry on budget-sensitive
-///   features) is **deferred** until the imazen/zenanalyze#47
-///   corpus sweep validates the threshold values.
+///   features when the ≥ 8 MP flag is set), **3** (selective Tier 3
+///   when content suggests it), and **4** (derived likelihoods)
+///   are deferred to follow-up PRs. None of them remove features
+///   the caller asked for either — the dispatch tree's job is to
+///   *spend more compute when it'll help*, not to skip work.
 ///
 /// # Hints
 ///
@@ -686,12 +688,16 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
 ///
 /// # Stability
 ///
-/// Same opaque-results contract as [`analyze_features`]. Output of
-/// [`feature::AnalysisResults::get`] is unchanged for any feature
-/// the dispatch plan didn't drop, modulo the
+/// Same opaque-results contract as [`analyze_features`]. For every
+/// feature the caller requests, the dispatch plan returns the same
+/// `Some(_)` / `None` shape `analyze_features` would have returned
+/// with the same query, modulo the
 /// [crate-level threshold contract](crate#threshold-contract---iterating-during-01x).
-/// Dropped features' values come back as `None`, never as a stale
-/// or zero-default `Some(_)`.
+/// The dispatch plan never returns `None` for a feature the caller
+/// requested unless `analyze_features` would also have returned
+/// `None` (e.g. an experimental-only feature in a build without the
+/// `experimental` cargo feature). This preserves the contract for
+/// fixed-shape consumers (the picker MLP, regression baselines).
 ///
 /// # Errors
 ///
