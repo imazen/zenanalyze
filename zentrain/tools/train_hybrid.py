@@ -1482,7 +1482,7 @@ def main():
         # `scaler_scale` stores sklearn's `StandardScaler.scale_`
         # directly — that attribute IS the standard deviation
         # (`np.sqrt(var_)`). The Rust runtime in
-        # `zenpicker::inference` divides by this on every forward
+        # `zenpredict::inference` divides by this on every forward
         # pass — same operation sklearn's `transform` applies, same
         # operation `scaler.fit_transform(X_tr)` applied to produce
         # the standardized inputs the MLP was trained on.

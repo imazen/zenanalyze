@@ -37,13 +37,13 @@
 //! ## `MetadataEntryJson`
 //!
 //! ```json
-//! { "key": "zenpicker.bake_name",
+//! { "key": "zentrain.bake_name",
 //!   "type": "utf8",
 //!   "text": "v2.1_full" }
 //! ```
 //!
 //! ```json
-//! { "key": "zenpicker.calibration_metrics",
+//! { "key": "zentrain.calibration_metrics",
 //!   "type": "numeric",
 //!   "f32": [0.0233, 0.0512, 0.563] }
 //! ```

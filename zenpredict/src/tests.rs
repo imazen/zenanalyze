@@ -217,17 +217,17 @@ mod bake_roundtrip {
         let metrics_bytes: [u8; 12] = unsafe_to_bytes(&metrics);
         let metadata = [
             BakeMetadataEntry {
-                key: "zenpicker.profile",
+                key: "zentrain.profile",
                 kind: MetadataType::Numeric,
                 value: &prof_value,
             },
             BakeMetadataEntry {
-                key: "zenpicker.bake_name",
+                key: "zentrain.bake_name",
                 kind: MetadataType::Utf8,
                 value: b"test_bake_v0",
             },
             BakeMetadataEntry {
-                key: "zenpicker.calibration_metrics",
+                key: "zentrain.calibration_metrics",
                 kind: MetadataType::Numeric,
                 value: &metrics_bytes,
             },
@@ -247,15 +247,15 @@ mod bake_roundtrip {
         let md = model.metadata();
 
         assert_eq!(md.len(), 3);
-        assert_eq!(md.get_utf8("zenpicker.bake_name").unwrap(), "test_bake_v0");
-        assert_eq!(md.get_numeric("zenpicker.profile").unwrap(), &[1u8]);
+        assert_eq!(md.get_utf8("zentrain.bake_name").unwrap(), "test_bake_v0");
+        assert_eq!(md.get_numeric("zentrain.profile").unwrap(), &[1u8]);
 
         // Wrong-type lookup fails.
-        let err = md.get_utf8("zenpicker.profile").unwrap_err();
+        let err = md.get_utf8("zentrain.profile").unwrap_err();
         assert!(matches!(err, PredictError::MetadataTypeMismatch { .. }));
 
         // pod_read_unaligned of the calibration metrics struct.
-        let metrics_back: [f32; 3] = md.get_pod("zenpicker.calibration_metrics").unwrap();
+        let metrics_back: [f32; 3] = md.get_pod("zentrain.calibration_metrics").unwrap();
         assert!((metrics_back[0] - 0.0233).abs() < 1e-6);
         assert!((metrics_back[2] - 0.563).abs() < 1e-6);
     }

@@ -85,7 +85,7 @@ fn bake_codec_picker() -> Vec<u8> {
 
     let metadata = vec![
         BakeMetadataEntry {
-            key: keys::PICKER_PROFILE,
+            key: keys::PROFILE,
             kind: MetadataType::Numeric,
             value: &prof,
         },
@@ -137,7 +137,7 @@ fn end_to_end_codec_picker_lifecycle() {
     // Verify metadata.
     let md = model.metadata();
     assert_eq!(md.len(), 5);
-    let prof: u8 = md.get_pod(keys::PICKER_PROFILE).unwrap();
+    let prof: u8 = md.get_pod(keys::PROFILE).unwrap();
     assert_eq!(prof, 0);
     assert_eq!(
         md.get_utf8(keys::SCHEMA_VERSION_TAG).unwrap(),
@@ -322,7 +322,7 @@ fn metadata_namespace_convention_works() {
     }];
     let entries = [
         BakeMetadataEntry {
-            key: "zenpicker.profile",
+            key: "zentrain.profile",
             kind: MetadataType::Numeric,
             value: &[0u8],
         },
@@ -357,7 +357,7 @@ fn metadata_namespace_convention_works() {
     let md = model.metadata();
     assert_eq!(md.len(), 4);
     // Each namespace's keys are visible.
-    assert!(md.get("zenpicker.profile").is_some());
+    assert!(md.get("zentrain.profile").is_some());
     assert!(md.get("zensim.calibration").is_some());
     assert!(md.get("zenjpeg.cell_config").is_some());
     assert!(md.get("zenwebp.method_grid").is_some());

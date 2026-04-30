@@ -19,19 +19,23 @@
 //!
 //! Entries are packed back-to-back; no padding. `value_len` is read
 //! unaligned via `u32::from_le_bytes`. Values that are themselves
-//! `#[repr(C)]` structs (e.g. `zenpicker.calibration_metrics`'s
+//! `#[repr(C)]` structs (e.g. `zentrain.calibration_metrics`'s
 //! three-`f32` payload) are read with `bytemuck::pod_read_unaligned`
 //! at the call site — metadata is not zero-copy by design.
 //!
 //! ## Namespace convention
 //!
-//! - `zenpicker.*` — defined by the picker training pipeline.
-//!   Loader exposes typed accessors for the standard ones via
-//!   well-known constants in [`keys`].
-//! - `zensim.*` — defined by the zensim scorer pipeline.
+//! - `zentrain.*` — defined by the Python training pipeline. Loader
+//!   exposes typed accessors for the standard ones via well-known
+//!   constants in [`keys`].
+//! - `zenpicker.*` — reserved for the Rust meta-picker
+//!   ([`zenpicker::FAMILY_ORDER_KEY`] etc.).
+//! - `zensim.*` — reserved for the zensim scorer pipeline.
 //! - `<codec>.*` (e.g. `zenjpeg.*`, `zenwebp.*`) — codec-private,
 //!   opaque to zenpredict.
 //! - No prefix — reserved.
+//!
+//! [`zenpicker::FAMILY_ORDER_KEY`]: https://docs.rs/zenpicker
 //!
 //! Unknown keys are not removed; iteration via [`Metadata::iter`]
 //! still surfaces them, so debug/dump tools see everything.
@@ -266,26 +270,35 @@ impl<'a> Metadata<'a> {
 /// Well-known metadata key constants. Bakes are encouraged to use
 /// these for consistency; loaders can match against them without
 /// allocating a string.
+///
+/// Naming convention: keys land under the namespace of the **producer**.
+/// The training pipeline lives in [`zentrain`] (Python) and emits these
+/// keys at bake time, so they're under `zentrain.*`. The
+/// `zenpicker.*` namespace is reserved for the Rust meta-picker
+/// (`zenpicker::FAMILY_ORDER_KEY`, etc.); codec-private keys land
+/// under `<codec>.*` (e.g. `zenjpeg.cell_config`).
+///
+/// [`zentrain`]: https://github.com/imazen/zenanalyze/tree/main/zentrain
 pub mod keys {
     /// `u8` — 0=size_optimal, 1=zensim_strict.
-    pub const PICKER_PROFILE: &str = "zenpicker.profile";
-    /// utf8 — `zenpicker.v1.shared-mlp.distill+icc` etc.
-    pub const SCHEMA_VERSION_TAG: &str = "zenpicker.schema_version_tag";
+    pub const PROFILE: &str = "zentrain.profile";
+    /// utf8 — `zentrain.v1.shared-mlp.distill+icc` etc.
+    pub const SCHEMA_VERSION_TAG: &str = "zentrain.schema_version_tag";
     /// bytes — `[u32 count][count × (u16 len + utf8 bytes)]`.
-    pub const FEATURE_COLUMNS: &str = "zenpicker.feature_columns";
+    pub const FEATURE_COLUMNS: &str = "zentrain.feature_columns";
     /// bytes — `#[repr(C)] { n_cells: u32, n_heads: u32, head_kinds: [u8; n_heads] }`.
-    pub const HYBRID_HEADS_LAYOUT: &str = "zenpicker.hybrid_heads_layout";
+    pub const HYBRID_HEADS_LAYOUT: &str = "zentrain.hybrid_heads_layout";
     /// utf8 — free-form provenance (git, corpus, sklearn, ts, host).
-    pub const PROVENANCE: &str = "zenpicker.provenance";
+    pub const PROVENANCE: &str = "zentrain.provenance";
     /// numeric (12 bytes) — `#[repr(C)] { mean_overhead, p99_shortfall, argmin_acc: f32 }`.
-    pub const CALIBRATION_METRICS: &str = "zenpicker.calibration_metrics";
+    pub const CALIBRATION_METRICS: &str = "zentrain.calibration_metrics";
     /// bytes — `[u8 passed]` then optional utf8 violation list.
-    pub const SAFETY_REPORT: &str = "zenpicker.safety_report";
+    pub const SAFETY_REPORT: &str = "zentrain.safety_report";
     /// utf8 — friendly name (`zenjpeg_picker_v2.1_full`).
-    pub const BAKE_NAME: &str = "zenpicker.bake_name";
+    pub const BAKE_NAME: &str = "zentrain.bake_name";
     /// bytes (numeric) — `f32[n_zq * n_cells]`. Read by codecs
     /// applying the strict reach-rate gate. Copied out at startup.
-    pub const REACH_RATES: &str = "zenpicker.reach_rates";
+    pub const REACH_RATES: &str = "zentrain.reach_rates";
     /// bytes (numeric) — `u8[n_zq]`. Paired with [`REACH_RATES`].
-    pub const REACH_ZQ_TARGETS: &str = "zenpicker.reach_zq_targets";
+    pub const REACH_ZQ_TARGETS: &str = "zentrain.reach_zq_targets";
 }

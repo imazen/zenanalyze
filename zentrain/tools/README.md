@@ -23,7 +23,7 @@ config-name parser. Then runs these scripts against that config.
 
 The [`tools/bake_picker.py`](../../tools/bake_picker.py) script (parent
 directory, not this one) consumes the JSON output of any of the
-training scripts and emits the v1 binary blob + manifest.
+training scripts and emits the v2 binary blob + manifest.
 
 ## Codec config contract
 
@@ -72,17 +72,17 @@ cargo run --release -p <your_codec> --features '<...>' \
 #    optional SAFETY_THRESHOLDS, KEEP_FEATURES. Default --hidden 128,128
 #    is fine for ≤8-feature schemas; bump to 192,192,192 when n_inputs
 #    grows past ~50. For SLA traffic, also bake a zensim_strict variant.
-PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zentrain/tools/train_hybrid.py \
     --codec-config <your_codec>_picker_config \
     --objective size_optimal --hidden 192,192,192
 # zensim_strict variant (pinball-q99 bytes head + reach gate):
-PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zentrain/tools/train_hybrid.py \
     --codec-config <your_codec>_picker_config \
     --objective zensim_strict --hidden 192,192,192
 
 # 3. Permutation-importance ablation. Drop features with Δ < 0 (model
 #    overfits noise) before locking the schema. ~2 min wall-clock.
-PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zenpicker/tools/feature_ablation.py \
+PYTHONPATH=$PP CI=1 python3 <zenanalyze>/zentrain/tools/feature_ablation.py \
     --codec-config <your_codec>_picker_config
 
 # 4. Bake. bake_picker.py refuses to bake when the model JSON's
@@ -100,18 +100,18 @@ python3 <zenanalyze>/tools/bake_roundtrip_check.py \
 
 # 6. Post-bake spot checks.
 #    a) Adversarial probe: zeros / huge / NaN / Inf / single-feature spike.
-python3 <zenanalyze>/zenpicker/tools/adversarial_probe.py --strict \
+python3 <zenanalyze>/zentrain/tools/adversarial_probe.py --strict \
     --model benchmarks/<bake-base>.json
 #    b) Size-invariance probe: resize fixture images to all four
 #       size_classes and assert the picker's argmin stays stable.
 #       The post-bake counterpart to train_hybrid.py's PER_SIZE_TAIL
 #       + DATA_STARVED_SIZE violations. See SAFETY_PLANE.md →
 #       "Size invariance is a safety property".
-python3 <zenanalyze>/zenpicker/tools/size_invariance_probe.py --strict \
+python3 <zenanalyze>/zentrain/tools/size_invariance_probe.py --strict \
     --model        benchmarks/<bake-base>.json \
     --features-tsv benchmarks/<features>.tsv
 #    c) Human-readable health report — review by eye.
-python3 <zenanalyze>/zenpicker/tools/diagnose_picker.py \
+python3 <zenanalyze>/zentrain/tools/diagnose_picker.py \
     --model benchmarks/<bake-base>.json
 ```
 
@@ -240,7 +240,7 @@ SAFETY_THRESHOLDS = dict(
 
 `train_hybrid.py` also computes per-feature distribution stats — `{min, p01, p25, p50, p75, p99, max, mean, std}` over the **training** image set — and ships them in `safety_report.diagnostics.feature_bounds`. `bake_picker.py` lifts the `(p01, p99)` pair into a top-level `manifest.feature_bounds_p01_p99` array aligned 1:1 with `feat_cols`.
 
-Codec runtime emits a compile-time `FEATURE_BOUNDS: &[zenpicker::FeatureBounds]` table from the manifest, then calls `zenpicker::first_out_of_distribution(&features, FEATURE_BOUNDS)` before `argmin_masked`. On `Some(idx)`, fall through to `RescueStrategy::KnownGoodFallback` instead of trusting an MLP extrapolation. NaN / Inf inputs always trigger the gate.
+Codec runtime emits a compile-time `FEATURE_BOUNDS: &[zenpredict::FeatureBound]` table from the manifest, then calls `zenpredict::first_out_of_distribution(&features, FEATURE_BOUNDS)` before `argmin_masked`. On `Some(idx)`, fall through to `RescueStrategy::KnownGoodFallback` instead of trusting an MLP extrapolation. NaN / Inf inputs always trigger the gate.
 
 ### Pick confidence (runtime metric)
 

@@ -182,5 +182,5 @@ The bake-time tripwire ("predicted-bytes confidence quantile per cell" used by t
 - `zenanalyze/zenpicker/src/lib.rs` — `argmin_masked_top_k`, `reach_gate_mask` re-exports
 - `zenanalyze/zenpicker/src/mask.rs` — `argmin_masked_top_k`, `reach_gate_mask` impl
 - `zenanalyze/zenpicker/src/rescue.rs` — `should_rescue`, `RescuePolicy`, `RescueStrategy`, `RescueDecision`
-- `zenanalyze/zenpicker/tools/train_hybrid.py` — `--objective {size_optimal,zensim_strict}`, `--reach-threshold`
+- `zenanalyze/zentrain/tools/train_hybrid.py` — `--objective {size_optimal,zensim_strict}`, `--reach-threshold`
 - `zenanalyze/tools/bake_picker.py` — `safety_profile` / `training_objective` / `reach_safety` manifest passthrough

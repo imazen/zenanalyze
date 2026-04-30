@@ -5,7 +5,7 @@ imports these helpers and supplies its own KEEP_FEATURES list,
 config-name parser, and Pareto TSV path. The per-codec wrapper
 script stays short (~30-50 lines).
 
-Lives at `zenanalyze/zenpicker/tools/_picker_lib.py`. Was
+Lives at `zenanalyze/zentrain/tools/_picker_lib.py`. Was
 previously `zenjpeg/scripts/_zq_picker_lib.py`; moved 2026-04-29
 to make the training pipeline a first-class part of zenpicker
 rather than zenjpeg-specific tooling that other codecs would have

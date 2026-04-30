@@ -1,7 +1,7 @@
 """
 Codec config for zenjpeg's hybrid-heads picker.
 
-Used by `zenpicker/tools/train_hybrid.py` (and the other tools/
+Used by `zentrain/tools/train_hybrid.py` (and the other tools/
 training scripts). The codec defines:
 
   - paths to the Pareto sweep + features TSVs and the desired
@@ -15,7 +15,7 @@ Run training with:
 
     cd <zenjpeg checkout>
     PYTHONPATH=<zenanalyze>/zenpicker/examples \\
-      python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \\
+      python3 <zenanalyze>/zentrain/tools/train_hybrid.py \\
         --codec-config zenjpeg_picker_config
 
 A new codec (zenwebp / zenavif / zenjxl) writes its own copy of

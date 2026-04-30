@@ -6,7 +6,13 @@ Zero-copy MLP runtime. Parse a packed binary model (ZNPR v2), run scaler + layer
 
 ## Crate boundary
 
-zenpredict is the **Rust runtime**. The training pipeline lives at [`zenanalyze/zenpicker/`](../zenpicker/) (Python) — pareto sweep harness, teacher fit, distill, ablation, holdout probes, safety reports. The two are versioned and released independently; the binary format (ZNPR v2) is the contract between them.
+zenpredict is the **Rust runtime**. Three pieces compose with it:
+
+- [`zenanalyze`](../) — feature extractor (one pass over a `zenpixels::PixelSlice`, returns the numeric features the model consumes).
+- [`zenpicker`](../zenpicker/) — codec-family meta-picker that wraps `zenpredict::Predictor`; picks `{jpeg, webp, jxl, avif, png, gif}` ahead of the per-codec config picker.
+- [`zentrain`](../zentrain/) — Python training pipeline: pareto sweep, teacher fit, distill, ablation, holdout probes, safety reports, `.bin` bake (via `tools/bake_picker.py` → `zenpredict-bake`).
+
+All three version independently from `zenpredict`; the binary format (ZNPR v2) is the contract between them.
 
 ## Two consumer shapes
 
@@ -60,7 +66,7 @@ Three activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`.
 
 ## Metadata
 
-The TLV metadata blob carries everything that's not raw weights: `zenpicker.profile` (size_optimal vs zensim_strict), `zenpicker.feature_columns`, `zenpicker.calibration_metrics`, `zenpicker.reach_rates` for the strict reach-rate gate, codec-private `<codec>.cell_config` payloads. Typed accessors (`get_utf8`, `get_numeric`, `get_bytes`) fail loudly on type mismatch instead of silently misreading.
+The TLV metadata blob carries everything that's not raw weights: `zentrain.profile` (size_optimal vs zensim_strict), `zentrain.feature_columns`, `zentrain.calibration_metrics`, `zentrain.reach_rates` for the strict reach-rate gate, codec-private `<codec>.cell_config` payloads. Typed accessors (`get_utf8`, `get_numeric`, `get_bytes`) fail loudly on type mismatch instead of silently misreading.
 
 Three value types: `bytes`, `utf8`, `numeric`. Numeric width is implied by `value_len`; per-key loader knows the exact shape.
 

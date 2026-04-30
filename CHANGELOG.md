@@ -7,7 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — zenpicker size-invariance discipline
+### Added — zenpredict 0.1.0 (new Rust runtime crate)
+
+- **`zenpredict/`** — zero-copy MLP runtime: ZNPR v2 binary format
+  parser, forward pass (f32 / f16 / i8 weights, Identity / ReLU /
+  LeakyReLU activations), `Predictor` scratch wrapper, masked argmin
+  with `ScoreTransform` + `ArgminOffsets`, top-K with confidence,
+  `FeatureBound` + `first_out_of_distribution`, typed-TLV metadata
+  blob, `RescuePolicy` / `should_rescue` two-shot decision logic,
+  Rust-side `bake::bake_v2` composer + JSON-driven `bake_from_json`
+  + `zenpredict-bake` CLI binary. 80 Rust tests (63 unit + 7
+  lifecycle + 8 json_bake + 5 doc tests). Cargo features: `std`
+  (default), `bake` (default).
+- **ZNPR v2 binary format** — fixed `#[repr(C)]` 128-byte header,
+  packed `[LayerEntry; n_layers]` table, aligned data blobs at
+  Section-described offsets, optional zero-copy `feature_bounds`
+  Section, typed-TLV metadata blob with `bytes` / `utf8` / `numeric`
+  value types. Magic changed from `ZNPK` to `ZNPR`; v1 bakes do not
+  load (rebake required).
+
+### Added — zenpicker 0.1.0 (codec-family meta-picker)
+
+- **`zenpicker/`** — Rust crate. `MetaPicker` wraps a
+  `zenpredict::Predictor` whose output dimension equals the
+  `CodecFamily` count. Given features + target quality + an
+  `AllowedFamilies` mask, picks one of `{jpeg, webp, jxl, avif, png,
+  gif}`. Per-codec config pickers run after, resolving the family
+  into a concrete encoder config. Bake declares the family order via
+  `zenpicker.family_order` metadata key; runtime validates via
+  `MetaPicker::validate_family_order`.
+- **Layered picker architecture**: `zenpicker::MetaPicker` chooses
+  the family → per-codec `zenpredict::Predictor` resolves the family
+  into a concrete config. Both layers use the same ZNPR v2 format
+  and the same `zenpredict` runtime.
+
+### Renamed — three-crate cleanup
+
+- **The unpublished `zenpicker` Rust shell** (the placeholder runtime
+  that path-dep'd from `zenwebp`) → split into `zenpredict` (generic
+  Rust runtime) and `zenpicker` (codec-family meta-picker; was
+  briefly named `zenpickerchoose` in earlier drafts). The old shell's
+  `Cargo.toml` and `src/` are deleted.
+- **`zenpicker/tools/`, `zenpicker/examples/`** (the Python training
+  pipeline) → moved to **[`zentrain/`](zentrain/)**. The Python
+  pipeline is unambiguously named after what it does (train); the
+  `zenpicker` name now belongs to the meta-picker call site.
+- **Trainer-emitted metadata-key namespace** → moved from
+  `zenpicker.*` (in v2 design drafts) to **`zentrain.*`**. Producer
+  matches the namespace. Affected keys (all in
+  `zenpredict::keys::*`):
+  `zenpicker.profile` → `zentrain.profile`,
+  `zenpicker.schema_version_tag` → `zentrain.schema_version_tag`,
+  `zenpicker.feature_columns` → `zentrain.feature_columns`,
+  `zenpicker.hybrid_heads_layout` → `zentrain.hybrid_heads_layout`,
+  `zenpicker.provenance` → `zentrain.provenance`,
+  `zenpicker.calibration_metrics` → `zentrain.calibration_metrics`,
+  `zenpicker.safety_report` → `zentrain.safety_report`,
+  `zenpicker.bake_name` → `zentrain.bake_name`,
+  `zenpicker.reach_rates` → `zentrain.reach_rates`,
+  `zenpicker.reach_zq_targets` → `zentrain.reach_zq_targets`.
+- **Constant rename**: `zenpredict::keys::PICKER_PROFILE` →
+  `zenpredict::keys::PROFILE`. The `PICKER_` prefix was redundant
+  given the producer-namespace rename.
+- The `zenpicker.*` namespace is reserved for the **meta-picker**
+  (currently just `zenpicker.family_order`); codec-private keys live
+  under `<codec>.*` (e.g. `zenjpeg.cell_config`).
+
+### Changed — Python training pipeline
+
+- **`tools/bake_picker.py` rewritten** to emit a portable
+  `BakeRequestJson` and shell out to `zenpredict-bake`. Byte-packing
+  (struct.pack, magic constants, i8 quantization, alignment padding)
+  all moved to Rust. Drops ~180 lines.
+- **`tools/bake_roundtrip_check.py`** runs against the new
+  `zenpredict load_baked_model` example, handles all three
+  activations (`relu` / `leakyrelu` / `identity`) in the numpy
+  reference forward pass.
+- **`tools/test_bake_roundtrip.py`** (new) — regression test that
+  exercises the full bake → CLI → load → forward chain across
+  3 activations × 3 dtypes = 9 combinations on synthetic models.
+  All pass with f32 max-abs-diff ≤ 6e-8, f16 ≤ 2.4e-7, i8 ≤ 6e-8.
+
+### Documentation
+
+- **`MIGRATION.md`** — full walkthrough at the repo root: rename
+  table, Cargo dep diff, source diffs (argmin / hybrid-heads /
+  top-K / reach-rate gate / rescue / bounds / metadata),
+  alignment note, layered-picker architecture, timeline.
+- **`README.md`** — "Companion crates in this repo" table now lists
+  `zenpredict`, `zenpicker`, and `zentrain`.
+
+### Added — zenpicker size-invariance discipline (legacy training-pipeline notes)
 
 - **Size invariance is a safety property.** The picker is now
   *required* to be near-optimal at every image `(width, height)`, not

@@ -1,372 +1,371 @@
-//! # zenpicker — codec-agnostic picker runtime
+//! Codec-family meta-picker — given image features, a quality
+//! target, and the caller's allowed-family mask, choose a codec
+//! family. Per-codec pickers (separate ZNPR v2 bakes shipped by the
+//! codec crate) then resolve the family into a concrete encoder
+//! config.
 //!
-//! Loads a packed MLP from bytes, runs SIMD inference, returns argmin
-//! under caller-supplied constraints.
+//! ## Where it sits
 //!
-//! The crate has no codec knowledge. Each codec crate (zenjpeg,
-//! zenwebp, …) ships its own baked `.bin` model, declares its own
-//! feature schema, and asks `zenpicker` to pick from a constraint
-//! mask. Two-level use is just two models — outer model picks the
-//! codec, inner model picks that codec's config.
-//!
-//! ## Lifecycle
-//!
-//! ```ignore
-//! let bytes: &'static [u8] = include_bytes!("zenjpeg_picker_v1.bin");
-//! let model = zenpicker::Model::from_bytes(bytes)?;
-//! let mut picker = zenpicker::Picker::new(model);
-//!
-//! let features = my_codec::extract_features(&analysis, target_zq);
-//! let mask = my_codec::allowed_configs(&caller_constraints);
-//! let pick = picker.argmin_masked(&features, &mask, None)
-//!     .expect("at least one config must be allowed");
+//! ```text
+//!     features (zenanalyze) + target_zq + caller constraints
+//!                            │
+//!                            ▼
+//!                ┌──────────────────────┐
+//!                │ zenpicker::MetaPicker│   one ZNPR v2 model;
+//!                │  argmin over family  │   N_outputs = N families
+//!                └──────────┬───────────┘
+//!                           │ chosen family
+//!                           ▼
+//!                ┌──────────────────────┐
+//!                │ Per-codec picker     │   one .bin per family,
+//!                │  (zenpredict model)  │   shipped from the codec
+//!                │  → cell + scalars    │   crate
+//!                └──────────┬───────────┘
+//!                           ▼
+//!                  concrete EncoderConfig
 //! ```
 //!
-//! ## Format stability
+//! The meta-picker emits a [`CodecFamily`]; it does **not** know how
+//! to resolve a family into a concrete encoder config. That's the
+//! job of the family's per-codec picker (a separate ZNPR v2 bake
+//! shipped by the codec crate, also loaded via [`zenpredict`]).
 //!
-//! The binary format is versioned (header.version). v1 is the only
-//! version supported today. New versions add fields after the
-//! existing header (header.header_size advertises the actual size,
-//! so old loaders can skip over future extensions).
+//! ## Wire format
 //!
-//! ## Storage
+//! Internally a [`MetaPicker`] is just a [`zenpredict::Predictor`]
+//! whose `n_outputs` equals [`CodecFamily::COUNT`]. The output index
+//! is the family enum's discriminant; bake-time and runtime must
+//! agree on the order via the model's metadata
+//! ([`FAMILY_ORDER_KEY`] = `zenpicker.family_order`, UTF-8,
+//! comma-separated lower-case labels — same order as
+//! [`CodecFamily::ALL`]).
 //!
-//! Weights are stored as f32 or f16. f16 is built in (no feature
-//! gate, no `half` dep) — the conversion is ~15 lines of integer bit
-//! math, see `inference::f16_bits_to_f32`. f16 halves the model size
-//! at ~no accuracy cost; SIMD f16→f32 (F16C / FCVT) is the v0.2
-//! work, scalar today.
+//! ## Crate boundary
 //!
-//! ## Size invariance is a codec-edge concern
+//! - [`zenpredict`] — the runtime this crate composes on. Owns the
+//!   ZNPR v2 binary format, the parser, the forward pass, the
+//!   masked-argmin math, the metadata blob, and the `Predictor`.
+//!   `zenpicker` adds: family enum + family-order validation +
+//!   `AllowedFamilies` mask sugar.
+//! - [`zentrain`](https://github.com/imazen/zenanalyze/tree/main/zentrain)
+//!   — Python training pipeline that produces the `.bin` artifact a
+//!   meta-picker (or a per-codec picker) loads. Train with
+//!   `cells = families` and `output_layout = bytes_log` only
+//!   (purely categorical, no scalar heads).
+//! - [`zenanalyze`](https://crates.io/crates/zenanalyze) — feature
+//!   extractor that produces the input vector both this meta-picker
+//!   and the per-codec pickers consume.
 //!
-//! `zenpicker` is feature-vector-in / argmin-out. It has no notion of
-//! image dimensions at runtime — the picker doesn't know whether the
-//! caller's image is 64×64 or 4096×4096 except through whatever the
-//! codec packs into the feature vector (`size_class` one-hot,
-//! `log_pixels`, etc., all defined by the codec's bake schema).
+//! ## Status
 //!
-//! That means **size invariance is enforced at the codec edge**, not
-//! here. The picker faithfully runs whatever forward pass the bake
-//! encoded; if the training-time `(size_class, target_zq)` grid was
-//! sparsely populated, the picker will silently extrapolate at
-//! inference and the codec will get bad picks for those (size,
-//! quality) corners.
-//!
-//! Two structural gates protect against this and they live outside
-//! this crate (in the training/bake pipeline):
-//!
-//! 1. `train_hybrid.py`'s `PER_SIZE_TAIL` + `DATA_STARVED_SIZE`
-//!    safety violations — fail the strict gate when any size class's
-//!    p99 overhead is too high or when any `(size_class, zq)` cell
-//!    has fewer training rows than the floor.
-//! 2. `tools/size_invariance_probe.py` — post-bake stability check
-//!    that resizes a fixture corpus to each of {tiny, small, medium,
-//!    large} and asserts the picker's argmin cell stays stable.
-//!
-//! See [`SAFETY_PLANE.md`](https://github.com/imazen/zenanalyze/blob/main/zenpicker/SAFETY_PLANE.md)
-//! → "Size invariance is a safety property" for the design notes and
-//! [`FOR_NEW_CODECS.md`](https://github.com/imazen/zenanalyze/blob/main/zenpicker/FOR_NEW_CODECS.md)
-//! → Step 1.5 for the codec-side sweep discipline.
-//!
-//! ## no_std
-//!
-//! `default-features = false` keeps the crate `no_std + alloc`. The
-//! `std` feature adds `std::error::Error` impls.
+//! v0.1 establishes the crate boundary and the API shape. Baking an
+//! actual cross-codec meta-picker model is downstream work — once a
+//! labelled training set exists where each row maps `(image
+//! features, target_zq) → best family`, run zentrain's
+//! `train_hybrid.py` with `cells = families` and `output_layout` of
+//! `bytes_log` only.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
-mod error;
-mod inference;
-mod mask;
-mod model;
-pub mod rescue;
+use alloc::format;
+use alloc::string::{String, ToString};
 
-pub use error::PickerError;
-pub use mask::{
-    AllowedMask, FeatureBounds, argmin_masked, argmin_masked_top_k, first_out_of_distribution,
-    reach_gate_mask,
-};
-pub use model::{Activation, LayerView, Model, WeightDtype};
-pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
+use zenpredict::{AllowedMask, ArgminOffsets, Model, PredictError, Predictor, ScoreTransform};
 
-/// Caller-supplied additive cost adjustments applied to the model's
-/// raw byte predictions before argmin.
+/// Codec families the meta-picker can choose between.
 ///
-/// `additive_bytes` is the size of metadata the caller plans to embed
-/// (ICC, EXIF, XMP). It's the same across all configs so it doesn't
-/// affect `argmin` on its own — but combined with `per_output_offset`
-/// (e.g., XYB intrinsic ICC vs YCbCr-no-ICC) it can shift the pick.
+/// **Important — order matters.** The discriminants here must match
+/// the order in the baked meta-picker model's output vector. Bakes
+/// declare the order via the model metadata ([`FAMILY_ORDER_KEY`]).
+/// Runtime checks this at load via [`MetaPicker::validate_family_order`].
 ///
-/// `per_output_offset[i]` is added to the model's predicted
-/// log-bytes-via-`exp` for output `i`. Use this when the format has
-/// fixed per-config overhead the model couldn't learn (e.g., a new
-/// caller constraint that disables a feature whose tax was baked
-/// into training data).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CostAdjust<'a> {
-    /// Added to all predicted byte counts (ICC, EXIF, …).
-    pub additive_bytes: f32,
-    /// Optional per-output additive bytes (length must equal `n_outputs`).
-    pub per_output_offset: Option<&'a [f32]>,
+/// Adding a new family is a breaking change for any baked model that
+/// existed before — the schema_hash will mismatch and the runtime
+/// will refuse to load the old model. Bake a fresh meta-picker that
+/// includes the new family before deploying the codec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum CodecFamily {
+    Jpeg = 0,
+    Webp = 1,
+    Jxl = 2,
+    Avif = 3,
+    Png = 4,
+    Gif = 5,
 }
 
-/// Picker — wraps a [`Model`] with reusable scratch buffers for
-/// repeated inference.
-///
-/// Allocations happen in `new`. `predict` and `argmin_masked` are
-/// allocation-free hot paths.
-pub struct Picker<'a> {
-    model: Model<'a>,
-    scratch_a: alloc::vec::Vec<f32>,
-    scratch_b: alloc::vec::Vec<f32>,
-    /// Last-prediction output buffer; sized to `n_outputs`.
-    output: alloc::vec::Vec<f32>,
+impl CodecFamily {
+    /// Number of variants currently defined. Used to size masks /
+    /// allocate output buffers. Bump this when adding a variant.
+    pub const COUNT: usize = 6;
+
+    /// All variants in declared order — same order the bake's
+    /// `output_layout` must use.
+    pub const ALL: [CodecFamily; Self::COUNT] = [
+        Self::Jpeg,
+        Self::Webp,
+        Self::Jxl,
+        Self::Avif,
+        Self::Png,
+        Self::Gif,
+    ];
+
+    /// Discriminant as `usize` for indexing into mask / output arrays.
+    #[inline]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Stable string label.
+    #[inline]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Webp => "webp",
+            Self::Jxl => "jxl",
+            Self::Avif => "avif",
+            Self::Png => "png",
+            Self::Gif => "gif",
+        }
+    }
 }
 
-impl<'a> Picker<'a> {
-    /// Create a picker over `model`. Pre-allocates scratch buffers.
-    pub fn new(model: Model<'a>) -> Self {
-        let max_hidden = model
-            .layers()
-            .iter()
-            .map(|l| l.out_dim)
-            .max()
-            .unwrap_or(0)
-            .max(model.n_inputs());
-        let n_out = model.n_outputs();
+/// Caller-supplied filter over which families are acceptable for a
+/// given encode. Wraps a fixed-size `[bool; CodecFamily::COUNT]` so
+/// the runtime can build a [`zenpredict::AllowedMask`] without
+/// allocating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AllowedFamilies {
+    flags: [bool; CodecFamily::COUNT],
+}
+
+impl AllowedFamilies {
+    pub const fn none() -> Self {
         Self {
-            model,
-            scratch_a: alloc::vec![0.0; max_hidden],
-            scratch_b: alloc::vec![0.0; max_hidden],
-            output: alloc::vec![0.0; n_out],
+            flags: [false; CodecFamily::COUNT],
         }
     }
 
-    /// Number of input features the model expects.
-    pub fn n_inputs(&self) -> usize {
-        self.model.n_inputs()
-    }
-
-    /// Number of output values the model produces (one per config /
-    /// per codec / per whatever the bake target was).
-    pub fn n_outputs(&self) -> usize {
-        self.model.n_outputs()
-    }
-
-    /// Schema hash baked into the model. Codec consumers should
-    /// compare this to their compiled-in schema hash on load and
-    /// fail loudly on mismatch.
-    pub fn schema_hash(&self) -> u64 {
-        self.model.schema_hash()
-    }
-
-    /// Run forward pass. Returns the raw output vector (for
-    /// regressors, this is log-bytes-per-config).
-    ///
-    /// `features.len()` must equal `n_inputs()`. Returns a slice of
-    /// length `n_outputs()`.
-    pub fn predict(&mut self, features: &[f32]) -> Result<&[f32], PickerError> {
-        if features.len() != self.model.n_inputs() {
-            return Err(PickerError::FeatureLenMismatch {
-                expected: self.model.n_inputs(),
-                got: features.len(),
-            });
+    pub const fn all() -> Self {
+        Self {
+            flags: [true; CodecFamily::COUNT],
         }
-        inference::forward(
-            &self.model,
-            features,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        );
-        Ok(&self.output)
     }
 
-    /// Pick the argmin output index over the masked set, optionally
-    /// applying additive cost adjustments.
-    ///
-    /// Returns `None` when no output is allowed by the mask. For a
-    /// log-bytes regressor, the argmin in log-space is the same as
-    /// argmin in raw bytes (`exp` is monotonic), but `CostAdjust`
-    /// applies in raw-byte space — so when adjustments are non-None
-    /// we materialize bytes via `exp` first.
-    pub fn argmin_masked(
-        &mut self,
-        features: &[f32],
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<Option<usize>, PickerError> {
-        self.predict(features)?;
-        Ok(mask::argmin_masked(&self.output, mask, adjust))
-    }
-
-    /// Pick the argmin within a sub-range of the output vector.
-    ///
-    /// Hybrid-heads picker layout (v0.2): the model's output vector
-    /// is laid out as
-    /// `[bytes_log[0..n_cells], scalar1[0..n_cells], scalar2[0..n_cells], …]`.
-    /// The argmin of interest is over `bytes_log` only — not the
-    /// scalar prediction heads. Codec consumers slice the output
-    /// vector and feed the bytes-only sub-range here.
-    ///
-    /// `range.0..range.1` indexes into the output vector. `mask.len()`
-    /// must equal `range.1 - range.0`. Returns the masked-argmin
-    /// index *within the sub-range* (0..(range.1 - range.0)) — add
-    /// `range.0` if you need the absolute index in the full output.
-    pub fn argmin_masked_in_range(
-        &mut self,
-        features: &[f32],
-        range: (usize, usize),
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<Option<usize>, PickerError> {
-        self.predict(features)?;
-        let (start, end) = range;
-        if end > self.output.len() || start > end {
-            return Err(PickerError::FeatureLenMismatch {
-                expected: self.output.len(),
-                got: end,
-            });
+    /// Build an `AllowedFamilies` from an iterator over allowed
+    /// families (everything else denied). Named `from` rather than
+    /// `from_iter` to keep clippy's `should_implement_trait` lint
+    /// happy without claiming the full `FromIterator` contract
+    /// (which would force `Self::from_iter(empty()) == none()`,
+    /// matching what we do — but spelling out the trait pulls in
+    /// blanket impls we don't need).
+    pub fn from_allowed<I: IntoIterator<Item = CodecFamily>>(iter: I) -> Self {
+        let mut me = Self::none();
+        for fam in iter {
+            me.flags[fam.index()] = true;
         }
-        Ok(mask::argmin_masked(&self.output[start..end], mask, adjust))
+        me
     }
 
-    /// Pick the top-`K` argmin output indices over the masked set in
-    /// ascending score order (best first).
-    ///
-    /// Slots beyond the number of mask-allowed entries are `None`.
-    /// Codec rescue logic (two-shot pass framework) uses `K = 2` —
-    /// the second-best is the fallback when the first pick fails
-    /// post-encode verification.
-    pub fn argmin_masked_top_k<const K: usize>(
-        &mut self,
-        features: &[f32],
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<[Option<usize>; K], PickerError> {
-        self.predict(features)?;
-        Ok(mask::argmin_masked_top_k::<K>(&self.output, mask, adjust))
+    pub fn allow(mut self, fam: CodecFamily) -> Self {
+        self.flags[fam.index()] = true;
+        self
     }
 
-    /// `argmin_masked_top_k` over a sub-range, in line with
-    /// [`argmin_masked_in_range`]. Returns indices *within the
-    /// sub-range* (0..(range.1 - range.0)).
-    pub fn argmin_masked_top_k_in_range<const K: usize>(
-        &mut self,
-        features: &[f32],
-        range: (usize, usize),
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<[Option<usize>; K], PickerError> {
-        self.predict(features)?;
-        let (start, end) = range;
-        if end > self.output.len() || start > end {
-            return Err(PickerError::FeatureLenMismatch {
-                expected: self.output.len(),
-                got: end,
-            });
-        }
-        Ok(mask::argmin_masked_top_k::<K>(
-            &self.output[start..end],
-            mask,
-            adjust,
-        ))
+    pub fn deny(mut self, fam: CodecFamily) -> Self {
+        self.flags[fam.index()] = false;
+        self
     }
 
-    /// Pick the argmin and report a *confidence* signal: the
-    /// log-bytes gap to the second-best mask-allowed entry.
-    ///
-    /// Returns `(best_idx, gap)` where `gap` is in the same units
-    /// the model emits — log-bytes for a regressor. A small `gap`
-    /// (< ~0.1, i.e. < ~10% byte difference) means the picker is
-    /// barely choosing top-1 over top-2; if your codec runs the
-    /// two-shot rescue path, a low-confidence pick is a strong
-    /// signal to verify and prepare the rescue. Codecs typically
-    /// surface `gap` on `EncodeMetrics` so imageflow / proxy
-    /// operators can scrape per-request and detect drift.
-    ///
-    /// `gap = +∞` when only one mask entry is allowed (no
-    /// second-best to compare to), `0.0` if every score ties at
-    /// the top.
-    ///
-    /// Returns `None` when the mask permits zero entries.
-    pub fn pick_with_confidence(
-        &mut self,
-        features: &[f32],
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<Option<(usize, f32)>, PickerError> {
-        self.predict(features)?;
-        let top = mask::argmin_masked_top_k::<2>(&self.output, mask, adjust);
-        Ok(pick_confidence_from_top_k(&self.output, mask, adjust, top))
+    pub fn is_allowed(self, fam: CodecFamily) -> bool {
+        self.flags[fam.index()]
     }
 
-    /// Like [`pick_with_confidence`] but operating on the bytes-log
-    /// sub-range of the hybrid-heads layout.
-    pub fn pick_with_confidence_in_range(
-        &mut self,
-        features: &[f32],
-        range: (usize, usize),
-        mask: &AllowedMask<'_>,
-        adjust: Option<CostAdjust<'_>>,
-    ) -> Result<Option<(usize, f32)>, PickerError> {
-        self.predict(features)?;
-        let (start, end) = range;
-        if end > self.output.len() || start > end {
-            return Err(PickerError::FeatureLenMismatch {
-                expected: self.output.len(),
-                got: end,
-            });
-        }
-        let slice = &self.output[start..end];
-        let top = mask::argmin_masked_top_k::<2>(slice, mask, adjust);
-        Ok(pick_confidence_from_top_k(slice, mask, adjust, top))
+    pub const fn as_slice(&self) -> &[bool] {
+        &self.flags
+    }
+
+    pub fn any(self) -> bool {
+        self.flags.iter().any(|f| *f)
     }
 }
 
-/// Convert a top-2 result into `(best_idx, gap_to_second)`.
+/// Metadata key the bake declares to assert family-order agreement
+/// between trainer and runtime.
+pub const FAMILY_ORDER_KEY: &str = "zenpicker.family_order";
+
+/// Expected value of [`FAMILY_ORDER_KEY`] for the current
+/// [`CodecFamily::ALL`] layout.
+pub const ALL_LABELS_CSV: &str = "jpeg,webp,jxl,avif,png,gif";
+
+/// One thin meta-picker.
 ///
-/// `gap` is computed in the same score space `argmin_masked_top_k`
-/// used: log-space when `adjust` is `None`, raw-byte space when
-/// `adjust` is `Some` (matching what the picker's argmin actually
-/// compared). Codecs surfacing the gap to operators thus get a
-/// signal in the same units the picker chose against.
-fn pick_confidence_from_top_k(
-    scores: &[f32],
-    mask: &AllowedMask<'_>,
-    adjust: Option<CostAdjust<'_>>,
-    top: [Option<usize>; 2],
-) -> Option<(usize, f32)> {
-    let best = top[0]?;
-    let Some(second) = top[1] else {
-        // Only one mask-allowed entry — no comparison to make.
-        return Some((best, f32::INFINITY));
-    };
-    let score_at = |i: usize| -> f32 {
-        let raw = scores[i];
-        match adjust {
-            None => raw,
-            Some(CostAdjust {
-                additive_bytes,
-                per_output_offset,
-            }) => {
-                let mut bytes = mask::clamped_exp_pub(raw) + additive_bytes;
-                if let Some(off) = per_output_offset.and_then(|o| o.get(i)) {
-                    bytes += *off;
-                }
-                bytes
-            }
-        }
-    };
-    // Use mask hint to keep miri-style debug builds happy if
-    // `argmin_masked_top_k` ever returns indices outside the mask.
-    let _ = mask;
-    let gap = (score_at(second) - score_at(best)).max(0.0);
-    Some((best, gap))
+/// Owns a [`zenpredict::Predictor`] (mutable scratch for one forward
+/// pass at a time). Construction is cheap; reuse a single instance
+/// across many encode requests.
+pub struct MetaPicker<'b> {
+    predictor: Predictor<'b>,
 }
+
+impl<'b> MetaPicker<'b> {
+    /// Wrap a parsed [`zenpredict::Model`]. Caller is expected to
+    /// have validated the schema hash via
+    /// [`zenpredict::Model::from_bytes_with_schema`] or by reading
+    /// the model's metadata.
+    ///
+    /// Call [`MetaPicker::validate_family_order`] right after
+    /// construction to confirm bake-time and runtime agree on the
+    /// family enum layout.
+    pub fn new(model: Model<'b>) -> Self {
+        Self {
+            predictor: Predictor::new(model),
+        }
+    }
+
+    /// Borrow the underlying predictor — useful when the caller
+    /// wants to read model metadata or run `predict` for diagnostics.
+    pub fn predictor(&mut self) -> &mut Predictor<'b> {
+        &mut self.predictor
+    }
+
+    /// Run argmin over the family dimension under the caller's
+    /// allowed-family filter.
+    ///
+    /// `features` is the same feature vector the per-codec pickers
+    /// consume — the bake declares which feature columns it uses
+    /// (`feat_cols` in the manifest).
+    ///
+    /// Returns `Ok(None)` when every family is masked out (caller
+    /// constraints unsatisfiable) and `Err` only on a runtime error
+    /// (shape mismatch, NaN, …).
+    pub fn pick(
+        &mut self,
+        features: &[f32],
+        allowed: &AllowedFamilies,
+    ) -> Result<Option<CodecFamily>, MetaPickerError> {
+        if !allowed.any() {
+            return Ok(None);
+        }
+        let mask = AllowedMask::new(allowed.as_slice());
+        let pick = self
+            .predictor
+            .argmin_masked(
+                features,
+                &mask,
+                ScoreTransform::Identity,
+                None::<&ArgminOffsets>,
+            )
+            .map_err(MetaPickerError::Predict)?;
+        Ok(pick.map(|idx| CodecFamily::ALL[idx]))
+    }
+
+    /// Read the [`FAMILY_ORDER_KEY`] (`zenpicker.family_order`)
+    /// metadata key from the bake and confirm it matches
+    /// [`ALL_LABELS_CSV`]. Returns `Ok(())` if the order matches,
+    /// `Err` on mismatch (caller should refuse to use the picker —
+    /// the bake was made against a different enum layout).
+    ///
+    /// Best practice: call once at startup, fail loudly on mismatch.
+    pub fn validate_family_order(&mut self) -> Result<(), MetaPickerError> {
+        let raw = self
+            .predictor
+            .model()
+            .metadata()
+            .get_utf8(FAMILY_ORDER_KEY)
+            .map_err(|e| MetaPickerError::Metadata(format!("metadata: {:?}", e)))?;
+
+        if raw == ALL_LABELS_CSV {
+            Ok(())
+        } else {
+            Err(MetaPickerError::FamilyOrderMismatch {
+                expected: ALL_LABELS_CSV.to_string(),
+                actual: raw.to_string(),
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum MetaPickerError {
+    Predict(PredictError),
+    Metadata(String),
+    FamilyOrderMismatch { expected: String, actual: String },
+}
+
+#[cfg(feature = "std")]
+impl core::fmt::Display for MetaPickerError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Predict(e) => write!(f, "predict: {:?}", e),
+            Self::Metadata(s) => write!(f, "metadata: {}", s),
+            Self::FamilyOrderMismatch { expected, actual } => write!(
+                f,
+                "family order mismatch: bake declares {:?}, runtime expects {:?}",
+                actual, expected
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for MetaPickerError {}
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use alloc::vec::Vec;
+
+    #[test]
+    fn family_order_csv_matches_all() {
+        let computed = CodecFamily::ALL
+            .iter()
+            .map(|f| f.label())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(computed, ALL_LABELS_CSV);
+    }
+
+    #[test]
+    fn allowed_families_basic_ops() {
+        let af = AllowedFamilies::none()
+            .allow(CodecFamily::Jpeg)
+            .allow(CodecFamily::Webp);
+        assert!(af.is_allowed(CodecFamily::Jpeg));
+        assert!(af.is_allowed(CodecFamily::Webp));
+        assert!(!af.is_allowed(CodecFamily::Avif));
+        assert!(af.any());
+
+        let none = AllowedFamilies::none();
+        assert!(!none.any());
+
+        let all = AllowedFamilies::all();
+        for fam in CodecFamily::ALL {
+            assert!(all.is_allowed(fam));
+        }
+    }
+
+    #[test]
+    fn family_indexing_is_dense_and_zero_based() {
+        for (i, fam) in CodecFamily::ALL.iter().enumerate() {
+            assert_eq!(fam.index(), i);
+        }
+    }
+
+    #[test]
+    fn family_order_constants_are_consistent() {
+        assert_eq!(CodecFamily::ALL.len(), CodecFamily::COUNT);
+        assert_eq!(ALL_LABELS_CSV.split(',').count(), CodecFamily::COUNT);
+    }
+
+    #[test]
+    fn family_order_key_is_zenpicker_namespaced() {
+        // Reflects the rename: the meta-picker IS zenpicker now.
+        // Keep this test so a future rename doesn't quietly drift.
+        assert_eq!(FAMILY_ORDER_KEY, "zenpicker.family_order");
+    }
+}

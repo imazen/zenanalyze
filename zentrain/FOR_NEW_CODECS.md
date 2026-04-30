@@ -139,7 +139,7 @@ Why split? See the [zenjpeg result](README.md#shipped-zenjpeg-models-side-by-sid
 
 ## Step 4 — train the picker
 
-Don't write your own fitter. **Reuse `zenpicker/tools/train_hybrid.py`** — it's codec-agnostic. You write a small **codec config module** declaring paths + schema + parser; the script handles teacher / distill / persist.
+Don't write your own fitter. **Reuse `zentrain/tools/train_hybrid.py`** — it's codec-agnostic. You write a small **codec config module** declaring paths + schema + parser; the script handles teacher / distill / persist.
 
 Create `examples/<your_codec>_picker_config.py` (copy `zenjpeg_picker_config.py` and edit):
 
@@ -172,7 +172,7 @@ Then run from your codec's repo:
 
 ```bash
 PYTHONPATH=<zenanalyze>/zenpicker/examples:<zenanalyze>/zenpicker/tools \
-    python3 <zenanalyze>/zenpicker/tools/train_hybrid.py \
+    python3 <zenanalyze>/zentrain/tools/train_hybrid.py \
         --codec-config zenwidget_picker_config
 ```
 
@@ -244,7 +244,7 @@ The Rust loader runs the same forward pass as the numpy reference; `max rel diff
 ## Step 6 — load + use in the codec crate
 
 ```rust
-use zenpicker::{Model, Picker, AllowedMask};
+use zenpredict::{Model, Predictor, AllowedMask};
 
 #[repr(C, align(8))]
 struct AlignedModel<const N: usize>([u8; N]);
@@ -385,7 +385,7 @@ Run permutation ablation against your full feature set:
 
 ```bash
 PYTHONPATH=<zenanalyze>/zenpicker/examples:<zenanalyze>/zenpicker/tools \
-    python3 <zenanalyze>/zenpicker/tools/feature_ablation.py \
+    python3 <zenanalyze>/zentrain/tools/feature_ablation.py \
         --codec-config <your_codec>_picker_config \
         --method permutation
 ```
@@ -538,8 +538,8 @@ Once your codec ships a working `size_optimal` bake, you can add a second `zensi
 |---|---|
 | Train the strict variant | `tools/train_hybrid.py --objective zensim_strict --codec-config <your_codec>_picker_config` |
 | Ship both bakes side-by-side via `include_bytes!` | `models/<your_codec>_picker_v2.0_{hybrid,zensim_strict}.bin` |
-| Honor the runtime reach gate | `zenpicker::reach_gate_mask(reach_rates_for_target_zq, threshold, &mut gate)` then AND with your constraint mask |
-| Run the two-shot rescue loop | `Picker::argmin_masked_top_k::<2>` for cached second-best + `zenpicker::rescue::should_rescue` for the threshold predicate |
+| Honor the runtime reach gate | `zenpredict::threshold_mask(reach_rates_for_target_zq, threshold, &mut gate)` then AND with your constraint mask |
+| Run the two-shot rescue loop | `Picker::argmin_masked_top_k::<2>` for cached second-best + `zenpredict::should_rescue` for the threshold predicate |
 
 The full design + the codec orchestration sketch live in [SAFETY_PLANE.md](SAFETY_PLANE.md) and the README's [Safety profiles](README.md#safety-profiles-size_optimal-vs-zensim_strict) section. Defer all of this to v2 — your codec ships fine on `size_optimal` alone.
 

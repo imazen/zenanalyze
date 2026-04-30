@@ -73,9 +73,9 @@ fn json_round_trip_with_metadata_and_bounds() {
             {"low": -2.0, "high": 2.0}
         ],
         "metadata": [
-            {"key": "zenpicker.profile", "type": "numeric", "hex": "00"},
-            {"key": "zenpicker.bake_name", "type": "utf8", "text": "json_round_trip"},
-            {"key": "zenpicker.calibration_metrics", "type": "numeric",
+            {"key": "zentrain.profile", "type": "numeric", "hex": "00"},
+            {"key": "zentrain.bake_name", "type": "utf8", "text": "json_round_trip"},
+            {"key": "zentrain.calibration_metrics", "type": "numeric",
              "f32": [0.0233, 0.0512, 0.563]},
             {"key": "zenjpeg.cell_config", "type": "bytes", "hex": "deadbeef"}
         ]
@@ -92,7 +92,7 @@ fn json_round_trip_with_metadata_and_bounds() {
 
     let md = model.metadata();
     assert_eq!(md.len(), 4);
-    let prof: u8 = md.get_pod(keys::PICKER_PROFILE).unwrap();
+    let prof: u8 = md.get_pod(keys::PROFILE).unwrap();
     assert_eq!(prof, 0);
     assert_eq!(md.get_utf8(keys::BAKE_NAME).unwrap(), "json_round_trip");
     let metrics: [f32; 3] = md.get_pod(keys::CALIBRATION_METRICS).unwrap();
@@ -214,7 +214,7 @@ fn cli_binary_round_trip() {
              "weights": [1.0, 0.0, 0.0, 1.0], "biases": [3.0, 4.0]}
         ],
         "metadata": [
-            {"key": "zenpicker.bake_name", "type": "utf8", "text": "cli_test"}
+            {"key": "zentrain.bake_name", "type": "utf8", "text": "cli_test"}
         ]
     }"#;
     let mut f = std::fs::File::create(&json_path).expect("write json");

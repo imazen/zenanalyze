@@ -201,7 +201,7 @@ fn main() -> ExitCode {
     view[..bytes.len()].copy_from_slice(&bytes);
     let aligned: &[u8] = &bytemuck::cast_slice::<u64, u8>(&storage)[..bytes.len()];
 
-    let model = match zenpicker::Model::from_bytes(aligned) {
+    let model = match zenpredict::Model::from_bytes(aligned) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("parse: {e}");
@@ -228,7 +228,7 @@ fn main() -> ExitCode {
     let n_in = model.n_inputs();
     let features: Vec<f32> = (0..n_in).map(|i| ((i as f32) * 0.1).sin()).collect();
 
-    let mut picker = zenpicker::Picker::new(model);
+    let mut predictor = zenpredict::Predictor::new(model);
 
     // Two demo runs:
     //   1. Unconstrained — pick the unconditional optimum.
@@ -252,11 +252,17 @@ fn main() -> ExitCode {
         ),
     ] {
         let mask_arr = constraints.allowed_mask();
-        let mask = zenpicker::AllowedMask::new(&mask_arr);
+        let mask = zenpredict::AllowedMask::new(&mask_arr);
 
         // Argmin over the categorical bytes head (output indices 0..N_CELLS).
-        let cell_idx = match picker
-            .argmin_masked_in_range(&features, (0, N_CELLS), &mask, None)
+        let cell_idx = match predictor
+            .argmin_masked_in_range(
+                &features,
+                (0, N_CELLS),
+                &mask,
+                zenpredict::ScoreTransform::Exp,
+                None,
+            )
             .unwrap()
         {
             Some(i) => i,
@@ -270,7 +276,7 @@ fn main() -> ExitCode {
         // Scalar predictions live at offsets [N_CELLS..2*N_CELLS] (chroma_scale)
         // and [2*N_CELLS..3*N_CELLS] (lambda). Re-fetch via predict() since
         // argmin_masked_in_range overwrites the scratch.
-        let out = picker.predict(&features).unwrap();
+        let out = predictor.predict(&features).unwrap();
         let chroma_pred = out[N_CELLS + cell_idx];
         let lambda_pred = out[2 * N_CELLS + cell_idx];
 

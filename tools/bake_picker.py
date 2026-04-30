@@ -65,7 +65,7 @@ ACTIVATION_KEYS = {
     "leaky_relu": "leakyrelu",
 }
 
-DEFAULT_SCHEMA_VERSION_TAG = "zenpicker.v1.generic"
+DEFAULT_SCHEMA_VERSION_TAG = "zentrain.v1.generic"
 
 
 def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -> int:
@@ -149,18 +149,19 @@ def hex_encode(b: bytes) -> str:
 def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     """Build the metadata blob entries from the training JSON.
 
-    Standard zenpredict-defined keys (lowercase `zenpicker.*`):
+    Standard zenpredict-defined keys (under the `zentrain.*` namespace
+    since the trainer is the producer):
 
-      zenpicker.schema_version_tag   utf8
-      zenpicker.bake_name            utf8
-      zenpicker.profile              numeric u8     (size_optimal=0, zensim_strict=1)
-      zenpicker.calibration_metrics  numeric f32×3  (mean_overhead, p99_shortfall, argmin_acc)
-      zenpicker.provenance           utf8
-      zenpicker.safety_report        utf8 JSON
-      zenpicker.reach_rates          numeric f32×(n_zq*n_cells)
-      zenpicker.reach_zq_targets     numeric u8 array
-      zenpicker.feature_columns      utf8 (newline-separated)
-      zenpicker.hybrid_heads_layout  bytes (custom packed: see below)
+      zentrain.schema_version_tag   utf8
+      zentrain.bake_name            utf8
+      zentrain.profile              numeric u8     (size_optimal=0, zensim_strict=1)
+      zentrain.calibration_metrics  numeric f32×3  (mean_overhead, p99_shortfall, argmin_acc)
+      zentrain.provenance           utf8
+      zentrain.safety_report        utf8 JSON
+      zentrain.reach_rates          numeric f32×(n_zq*n_cells)
+      zentrain.reach_zq_targets     numeric u8 array
+      zentrain.feature_columns      utf8 (newline-separated)
+      zentrain.hybrid_heads_layout  bytes (custom packed: see below)
 
     Codec-private keys (`<codec>.*`) pass through unchanged.
     """
@@ -169,7 +170,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # Always emit the schema version tag — codec uses it for sanity-check
     # logging beyond schema_hash.
     entries.append({
-        "key": "zenpicker.schema_version_tag",
+        "key": "zentrain.schema_version_tag",
         "type": "utf8",
         "text": schema_version_tag(model),
     })
@@ -177,7 +178,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # bake_name — friendly identifier for ops dashboards.
     bake_name = model.get("bake_name") or out_path.stem
     entries.append({
-        "key": "zenpicker.bake_name",
+        "key": "zentrain.bake_name",
         "type": "utf8",
         "text": bake_name,
     })
@@ -188,7 +189,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
         prof_byte = {"size_optimal": 0, "zensim_strict": 1}.get(profile)
         if prof_byte is not None:
             entries.append({
-                "key": "zenpicker.profile",
+                "key": "zentrain.profile",
                 "type": "numeric",
                 "hex": f"{prof_byte:02x}",
             })
@@ -202,7 +203,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             float(metrics.get("argmin_acc", 0.0)),
         ]
         entries.append({
-            "key": "zenpicker.calibration_metrics",
+            "key": "zentrain.calibration_metrics",
             "type": "numeric",
             "f32": triple,
         })
@@ -211,7 +212,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     prov = model.get("provenance")
     if isinstance(prov, str) and prov:
         entries.append({
-            "key": "zenpicker.provenance",
+            "key": "zentrain.provenance",
             "type": "utf8",
             "text": prov,
         })
@@ -221,7 +222,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     sr = model.get("safety_report")
     if sr is not None:
         entries.append({
-            "key": "zenpicker.safety_report",
+            "key": "zentrain.safety_report",
             "type": "utf8",
             "text": json.dumps(sr, sort_keys=True, separators=(",", ":")),
         })
@@ -231,7 +232,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     feat_cols = model.get("feat_cols")
     if isinstance(feat_cols, list) and feat_cols:
         entries.append({
-            "key": "zenpicker.feature_columns",
+            "key": "zentrain.feature_columns",
             "type": "utf8",
             "text": "\n".join(feat_cols),
         })
@@ -250,7 +251,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
         if head_kinds:
             packed = struct.pack("<II", n_cells, len(head_kinds)) + head_kinds
             entries.append({
-                "key": "zenpicker.hybrid_heads_layout",
+                "key": "zentrain.hybrid_heads_layout",
                 "type": "bytes",
                 "hex": packed.hex(),
             })
@@ -273,12 +274,12 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
                 rates_flat.extend(float(v) for v in row)
             if rates_flat:
                 entries.append({
-                    "key": "zenpicker.reach_zq_targets",
+                    "key": "zentrain.reach_zq_targets",
                     "type": "numeric",
                     "hex": zq_targets.hex(),
                 })
                 entries.append({
-                    "key": "zenpicker.reach_rates",
+                    "key": "zentrain.reach_rates",
                     "type": "numeric",
                     "f32": rates_flat,
                 })

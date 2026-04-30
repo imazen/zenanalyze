@@ -75,7 +75,7 @@ inference, safety machinery, and a canonical training pipeline.
 - `categorical_axes` / `scalar_axes` / `scalar_sentinels` in the
   `hybrid_heads_manifest` (79277c6, #36).
 
-### Added — training pipeline (`zenpicker/tools/`)
+### Added — training pipeline (`zentrain/tools/`)
 
 - `train_hybrid.py` — codec-agnostic hybrid-heads training
   (f76318e #23, 79277c6 #36 made axes configurable). Codec config
