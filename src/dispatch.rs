@@ -35,34 +35,23 @@ use crate::{AnalyzeError, analyze_specialized_raw};
 
 /// Optional caller hints for [`crate::analyze_with_dispatch_plan`].
 ///
-/// Advisory only — every field is optional and the analyzer falls
-/// back to safe defaults when [`crate::analyze_with_dispatch_plan`]
-/// receives `None`. Stage 0 does not act on any hint yet; the fields
-/// exist so future stages (corpus#47-validated Stage 2,
-/// content-hash result caching) can consume them without a
-/// signature change to the public entry. See issue
-/// imazen/zenanalyze#53.
+/// Empty today — Stage 0 doesn't act on any hint, so the type ships
+/// with no fields. The `#[non_exhaustive]` attribute is the seat:
+/// future stages add fields additively under 0.1.x without a public
+/// signature change to the entry function. Callers that hand a
+/// `&DispatchHints` today will keep compiling when fields land,
+/// since they construct via [`DispatchHints::empty`] /
+/// [`DispatchHints::default`] rather than struct literal syntax.
+/// See issue imazen/zenanalyze#53.
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Default)]
-pub struct DispatchHints {
-    /// Picker's target perceptual quality, in zq units. High targets
-    /// (lossless / near-lossless) are budget-sensitive on the
-    /// patch / percentile features; low targets aren't. Reserved for
-    /// Stage 2 once the corpus sweep validates the thresholds.
-    pub target_zq: Option<f32>,
-    /// Caller-supplied content hash for cross-call result caching.
-    /// Reserved for a future cache layer; not consumed today.
-    pub content_hash: Option<u64>,
-}
+pub struct DispatchHints {}
 
 impl DispatchHints {
-    /// Empty hints — every field `None`. Equivalent to passing
-    /// `None` to [`crate::analyze_with_dispatch_plan`].
+    /// Construct an empty hint bag. Equivalent to passing `None` to
+    /// [`crate::analyze_with_dispatch_plan`].
     pub const fn empty() -> Self {
-        Self {
-            target_zq: None,
-            content_hash: None,
-        }
+        Self {}
     }
 }
 
