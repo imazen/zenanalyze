@@ -1,137 +1,77 @@
 #!/usr/bin/env python3
 """
-Bake an sklearn MLPRegressor JSON dump into the zenpicker v1 binary format.
+Bake an sklearn MLPRegressor JSON dump into the zenpredict v2
+binary format (ZNPR magic).
+
+Pipeline:
+    1. Load the trained model JSON (sklearn side).
+    2. Validate the safety_report gate (--allow-unsafe overrides).
+    3. Translate to a portable `BakeRequestJson` shape that
+       `zenpredict-bake` (the Rust CLI binary) consumes.
+    4. Spawn `zenpredict-bake` to produce the `.bin`.
+
+Rust owns the byte-level format. Python only knows the JSON schema —
+adding new metadata keys, new dtypes, or new activation kinds is a
+Rust-side change that the JSON layer surfaces declaratively.
 
 Inputs:
-- `--model JSON`        : sklearn-side model file (see fields below)
-- `--out FILE.bin`      : output path
-- `--dtype f32|f16|i8`  : weight storage dtype (default f32). i8 is
-                           per-output-neuron quantized:
-                             scale[o] = max_i |W[i, o]| / 127
-                             q[i, o]  = round(W[i, o] / scale[o])
-                                          .clip(-128, 127)
-                           Empty columns get scale=1.0. Per-output
-                           scales follow the i8 weight block in the
-                           binary; biases stay f32.
-- `--manifest JSON`     : explicit manifest output path; default is
-                           `<out>.manifest.json` next to the `.bin`
-- `--allow-unsafe`      : bake even when the model JSON's
-                           `safety_report.passed = false`. Use only
-                           when the violation is intentional and
-                           reviewed (the runtime gate is defense-in-
-                           depth — the codec can still refuse to load
-                           a bake whose `safety_report.passed = false`)
+- `--model JSON`       sklearn-side training JSON (see fields below)
+- `--out FILE.bin`     output .bin path
+- `--dtype f32|f16|i8` weight storage dtype (default f32). i8 is
+                        per-output-neuron quantized at the Rust side.
+- `--manifest JSON`    legacy sibling manifest.json for codecs that
+                        haven't migrated to reading v2-embedded
+                        metadata. Default: `<out>.manifest.json`.
+                        Pass `--no-manifest` to skip.
+- `--allow-unsafe`     bake even when safety_report.passed is false
+- `--bake-bin PATH`    explicit path to `zenpredict-bake`. Defaults
+                        to looking up `zenpredict-bake` on PATH, then
+                        falling back to a workspace-relative cargo
+                        build target.
+- `--bake-json-out PATH` keep the intermediate BakeRequestJson on
+                        disk (default: deleted after bake)
 
 Required model JSON fields:
   n_inputs, n_outputs, scaler_mean, scaler_scale, layers,
-  feat_cols (used for schema_hash), activation (string: "relu")
+  feat_cols (used for schema_hash), activation (string)
 
 Optional model JSON fields (recommended for shipping bakes):
-  schema_version_tag       — bumps the schema_hash so a layout change
-                             forces a clean re-bake on consumers.
-  extra_axes               — explicit names for engineered input axes
-                             past `feat_cols`. Without it bake_picker
-                             falls back to the legacy zenjpeg layout
-                             match, then to `aux_<i>` placeholders.
-  config_names             — `{config_id: name}` per-output metadata
-                             that gets re-emitted into the manifest.
-  hybrid_heads_manifest    — `n_cells`, `cells`, `output_layout`,
-                             `categorical_axes`, `scalar_axes`,
-                             `scalar_sentinels`. Required if the
-                             codec uses the hybrid-heads layout
-                             (recommended for all new codecs).
-  safety_report            — full diagnostics + violations (see
-                             train_hybrid.py). bake_picker refuses to
-                             bake when `passed=false` unless
-                             `--allow-unsafe`.
-  safety_profile           — "size_optimal" | "zensim_strict".
-  training_objective       — `{name, bytes_quantile, reach_threshold}`.
-  reach_safety             — per-target_zq cell-safety table for the
-                             zensim_strict profile.
+  schema_version_tag, extra_axes, config_names,
+  hybrid_heads_manifest, safety_report, safety_profile,
+  training_objective, reach_safety, calibration_metrics,
+  bake_name
 
-Manifest output (`<out>.manifest.json`) contains the lifted form
-codec-side compile-time tables read:
-
-  schema_hash, schema_version_tag, feat_cols, extra_axes,
-  n_inputs, n_outputs, configs (config_id → name),
-  hybrid_heads (when present in the model JSON),
-  safety_profile, training_objective, reach_safety,
-  safety_report — full block forwarded so codec runtime can refuse
-                  to load a bake whose `passed=false`,
-  feature_bounds_p01_p99 — `[{feat, low, high}]` aligned to
-                  feat_cols, lifted from
-                  `safety_report.diagnostics.feature_bounds[col]`'s
-                  `(p01, p99)` pair. Codec runtime feeds this into
-                  `zenpicker::first_out_of_distribution(features,
-                  &FEATURE_BOUNDS)` before argmin.
-
-Output binary v1 layout matches `zenpicker::Model::from_bytes`:
-
-    Header (32 bytes):
-      magic         "ZNPK"
-      version u16   1
-      header_size u16  32
-      n_inputs u32
-      n_outputs u32
-      n_layers u32
-      schema_hash u64
-      flags u32
-    Scaler:
-      f32[n_inputs] mean
-      f32[n_inputs] scale
-    Per-layer:
-      in_dim u32
-      out_dim u32
-      activation u8     (0=Identity, 1=ReLU)
-      weight_dtype u8   (0=F32, 1=F16, 2=I8)
-      reserved u8 u8
-      W (row-major, in_dim major), in_dim*out_dim values in dtype
-      [pad to 4-byte alignment]   (i8: pad up; f16 odd-count: 2-byte pad)
-      scales (f32) out_dim values  (only when weight_dtype == I8)
-      b (f32) out_dim values
-
-Note on the scaler convention: `scaler_scale` stores sklearn's
-`StandardScaler.scale_` directly (which IS the standard deviation).
-The Rust runtime divides by this — matching sklearn's own
-`StandardScaler.transform` step that the MLP was trained on top of.
-See `zenpicker/src/inference.rs` for the full rationale.
+Format ZNPR v2 layout: `zenpredict::Model::from_bytes`. See
+`zenpredict/src/model.rs` and `zenpredict/src/bake/json.rs` for the
+authoritative byte/JSON specs.
 """
 
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 
-MAGIC = b"ZNPK"
-FORMAT_VERSION = 1
-HEADER_SIZE = 32
-
-ACTIVATION_IDENTITY = 0
-ACTIVATION_RELU = 1
-ACTIVATION_LEAKY_RELU = 2  # alpha = 0.01, see zenpicker::model::LEAKY_RELU_ALPHA
-
-ACTIVATION_BY_NAME = {
-    "identity": ACTIVATION_IDENTITY,
-    "relu": ACTIVATION_RELU,
-    "leakyrelu": ACTIVATION_LEAKY_RELU,
-    "leaky_relu": ACTIVATION_LEAKY_RELU,
+ACTIVATION_KEYS = {
+    "identity": "identity",
+    "relu": "relu",
+    "leakyrelu": "leakyrelu",
+    "leaky_relu": "leakyrelu",
 }
-DTYPE_F32 = 0
-DTYPE_F16 = 1
-DTYPE_I8 = 2
+
+DEFAULT_SCHEMA_VERSION_TAG = "zenpicker.v1.generic"
 
 
 def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -> int:
-    """Stable u64 hash of the input schema.
-
-    The codec crate compares this against its compile-time
-    expectation. Mismatch → hard error at load. Bumping
-    `version_tag` forces a re-bake when the schema changes shape.
-    """
+    """Stable u64 hash of the input schema. Codec compares against
+    its compile-time expectation. Bumping `version_tag` forces
+    re-bake when the schema layout changes."""
     h = hashlib.blake2b(digest_size=8)
     h.update(version_tag.encode("utf-8"))
     h.update(b"\x00")
@@ -145,27 +85,12 @@ def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -
     return int.from_bytes(h.digest(), "little")
 
 
-DEFAULT_SCHEMA_VERSION_TAG = "zenpicker.v1.generic"
-
-
 def derive_extra_axes(n_inputs: int, feat_cols: list[str], model: dict) -> list[str]:
-    """Determine the engineered-axes list for schema_hash computation.
+    """Engineered-axis names. Resolution order:
 
-    Resolution order, most explicit wins:
-
-    1. **`model["extra_axes"]`** — codec explicitly declares the
-       names of every input column past the raw feature columns.
-       Most reusable; recommended for new codecs.
-
-    2. **Built-in known layouts** — the legacy zenjpeg
-       `shared-mlp.distill+icc` layout
-       (n_feat + 4 size + 5 polynomials + n_feat zq×feat + 1 icc).
-       Bumping `SCHEMA_VERSION_TAG` to a layout name forces re-bake.
-
-    3. **Fallback** — synthesize unnamed `aux_<i>` axes. The
-       schema_hash will still be stable per (n_inputs, feat_cols),
-       but the codec must hash the same axis list at compile time.
-       Emit a warning so the codec author notices.
+    1. `model["extra_axes"]` — codec explicitly declares.
+    2. Built-in legacy zenjpeg layout match.
+    3. Fallback: `aux_<i>` synthesized names (loud warning).
     """
     explicit = model.get("extra_axes")
     if explicit is not None:
@@ -177,7 +102,6 @@ def derive_extra_axes(n_inputs: int, feat_cols: list[str], model: dict) -> list[
         return list(explicit)
 
     n_feat = len(feat_cols)
-    # Legacy zenjpeg layout: 8/19 feats + 4 size + 5 poly + n_feat cross + 1 icc.
     if n_inputs == n_feat + 4 + 5 + n_feat + 1:
         return (
             ["size_tiny", "size_small", "size_medium", "size_large"]
@@ -186,8 +110,6 @@ def derive_extra_axes(n_inputs: int, feat_cols: list[str], model: dict) -> list[
             + ["icc_bytes"]
         )
 
-    # Fallback: synthesize anonymous names; codec must hash these
-    # exact strings at compile time.
     sys.stderr.write(
         f"WARNING: bake_picker received n_inputs={n_inputs} with no `extra_axes` "
         f"in model JSON and no built-in layout match (n_feat={n_feat}). "
@@ -198,69 +120,365 @@ def derive_extra_axes(n_inputs: int, feat_cols: list[str], model: dict) -> list[
 
 
 def schema_version_tag(model: dict) -> str:
-    """The model JSON may declare its own version tag. Falls back to
-    the crate-wide default when omitted."""
     return model.get("schema_version_tag", DEFAULT_SCHEMA_VERSION_TAG)
 
 
-# Kept for backwards compatibility with older callers that import
-# this constant. New code should call `schema_version_tag(model)`.
-SCHEMA_VERSION_TAG = DEFAULT_SCHEMA_VERSION_TAG
+def normalize_activation(activation: str) -> str:
+    """Map various spellings to the canonical lowercase form the
+    BakeRequestJson schema accepts."""
+    key = activation.replace("-", "_").replace(" ", "_").lower()
+    if key not in ACTIVATION_KEYS:
+        raise SystemExit(
+            f"unsupported activation {activation!r}; expected one of "
+            f"{sorted(set(ACTIVATION_KEYS.values()))}"
+        )
+    return ACTIVATION_KEYS[key]
 
 
-def encode_dtype(arr: np.ndarray, dtype: str) -> bytes:
-    if dtype == "f32":
-        return arr.astype("<f4").tobytes()
-    elif dtype == "f16":
-        return arr.astype("<f2").tobytes()
-    raise ValueError(f"unknown dtype {dtype!r}")
+def f32_array(arr) -> list[float]:
+    """Numpy → float list with `<f4` round-trip semantics. Casts via
+    `astype('<f4')` first so that f64 inputs lose precision the same
+    way the Rust loader will see them."""
+    return np.asarray(arr, dtype="<f4").astype(np.float32).tolist()
 
 
-def quantize_i8_per_output(W: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-output-neuron i8 quantization.
+def hex_encode(b: bytes) -> str:
+    return b.hex()
 
-    `W` is shape `(in_dim, out_dim)`. For each output column `o`:
 
-        scale[o] = max_i |W[i, o]| / 127        (or 1.0 if column is zero)
-        q[i, o]  = round(W[i, o] / scale[o]).clip(-128, 127).astype(int8)
+def encode_metadata(model: dict, out_path: Path) -> list[dict]:
+    """Build the metadata blob entries from the training JSON.
 
-    Returns `(q, scales)` with `q.dtype == int8`, `scales.dtype == float32`.
-    The dequantized value is `q.astype(f32) * scales[o]`.
+    Standard zenpredict-defined keys (lowercase `zenpicker.*`):
+
+      zenpicker.schema_version_tag   utf8
+      zenpicker.bake_name            utf8
+      zenpicker.profile              numeric u8     (size_optimal=0, zensim_strict=1)
+      zenpicker.calibration_metrics  numeric f32×3  (mean_overhead, p99_shortfall, argmin_acc)
+      zenpicker.provenance           utf8
+      zenpicker.safety_report        utf8 JSON
+      zenpicker.reach_rates          numeric f32×(n_zq*n_cells)
+      zenpicker.reach_zq_targets     numeric u8 array
+      zenpicker.feature_columns      utf8 (newline-separated)
+      zenpicker.hybrid_heads_layout  bytes (custom packed: see below)
+
+    Codec-private keys (`<codec>.*`) pass through unchanged.
     """
-    in_dim, out_dim = W.shape
-    abs_max = np.abs(W).max(axis=0)  # shape (out_dim,)
-    scales = np.where(abs_max > 0.0, abs_max / 127.0, 1.0).astype(np.float32)
-    q = np.round(W / scales).clip(-128, 127).astype(np.int8)
-    return q, scales
+    entries: list[dict] = []
+
+    # Always emit the schema version tag — codec uses it for sanity-check
+    # logging beyond schema_hash.
+    entries.append({
+        "key": "zenpicker.schema_version_tag",
+        "type": "utf8",
+        "text": schema_version_tag(model),
+    })
+
+    # bake_name — friendly identifier for ops dashboards.
+    bake_name = model.get("bake_name") or out_path.stem
+    entries.append({
+        "key": "zenpicker.bake_name",
+        "type": "utf8",
+        "text": bake_name,
+    })
+
+    # profile — 0/1 byte. Encoded as 1-byte hex.
+    profile = model.get("safety_profile")
+    if profile is not None:
+        prof_byte = {"size_optimal": 0, "zensim_strict": 1}.get(profile)
+        if prof_byte is not None:
+            entries.append({
+                "key": "zenpicker.profile",
+                "type": "numeric",
+                "hex": f"{prof_byte:02x}",
+            })
+
+    # calibration_metrics — three f32s if present.
+    metrics = model.get("calibration_metrics")
+    if isinstance(metrics, dict):
+        triple = [
+            float(metrics.get("mean_overhead", 0.0)),
+            float(metrics.get("p99_shortfall", 0.0)),
+            float(metrics.get("argmin_acc", 0.0)),
+        ]
+        entries.append({
+            "key": "zenpicker.calibration_metrics",
+            "type": "numeric",
+            "f32": triple,
+        })
+
+    # provenance — free-form utf8.
+    prov = model.get("provenance")
+    if isinstance(prov, str) and prov:
+        entries.append({
+            "key": "zenpicker.provenance",
+            "type": "utf8",
+            "text": prov,
+        })
+
+    # safety_report — embed as utf8 JSON. Codec runtime can refuse to
+    # load a bake whose `passed` field is false.
+    sr = model.get("safety_report")
+    if sr is not None:
+        entries.append({
+            "key": "zenpicker.safety_report",
+            "type": "utf8",
+            "text": json.dumps(sr, sort_keys=True, separators=(",", ":")),
+        })
+
+    # feat_cols — newline-separated utf8. Cheap; tiny bakes don't pay
+    # much, large bakes (~50 features × ~24 chars ≈ 1.2 KB) still cheap.
+    feat_cols = model.get("feat_cols")
+    if isinstance(feat_cols, list) and feat_cols:
+        entries.append({
+            "key": "zenpicker.feature_columns",
+            "type": "utf8",
+            "text": "\n".join(feat_cols),
+        })
+
+    # hybrid_heads_manifest → packed [n_cells: u32, n_heads: u32, head_kinds: u8[n_heads]].
+    hh = model.get("hybrid_heads_manifest")
+    if isinstance(hh, dict):
+        n_cells = int(hh.get("n_cells", 0))
+        # head_kinds: 0=bytes, 1=scalar. Take from output_layout if
+        # present, else infer from categorical/scalar axis lists.
+        n_categorical = len(hh.get("categorical_axes") or [])
+        n_scalar_axes = len(hh.get("scalar_axes") or [])
+        n_heads = max(1, n_categorical) + n_scalar_axes  # bytes head + scalar heads
+        # Conservative encoding: one bytes head followed by N scalar heads.
+        head_kinds = bytes([0] + [1] * n_scalar_axes) if n_categorical >= 1 else b""
+        if head_kinds:
+            packed = struct.pack("<II", n_cells, len(head_kinds)) + head_kinds
+            entries.append({
+                "key": "zenpicker.hybrid_heads_layout",
+                "type": "bytes",
+                "hex": packed.hex(),
+            })
+
+    # reach_safety — packed f32 matrix + u8 zq targets.
+    reach = model.get("reach_safety")
+    if isinstance(reach, dict):
+        by_zq = reach.get("by_zq")
+        if isinstance(by_zq, dict) and by_zq:
+            zq_keys = sorted(by_zq.keys(), key=lambda s: int(s))
+            zq_targets = bytes(int(z) for z in zq_keys)
+            n_cells = 0
+            rates_flat: list[float] = []
+            for z in zq_keys:
+                row = by_zq[z].get("reach_rate") or by_zq[z].get("rates")
+                if not isinstance(row, list):
+                    continue
+                if n_cells == 0:
+                    n_cells = len(row)
+                rates_flat.extend(float(v) for v in row)
+            if rates_flat:
+                entries.append({
+                    "key": "zenpicker.reach_zq_targets",
+                    "type": "numeric",
+                    "hex": zq_targets.hex(),
+                })
+                entries.append({
+                    "key": "zenpicker.reach_rates",
+                    "type": "numeric",
+                    "f32": rates_flat,
+                })
+
+    # Codec-private metadata — anything under `metadata.<codec>.*` in
+    # the input JSON is forwarded as-is. Format follows the
+    # BakeRequestJson schema (each entry is {key, type, text|f32|hex}).
+    codec_md = model.get("metadata")
+    if isinstance(codec_md, list):
+        entries.extend(codec_md)
+
+    return entries
 
 
-def write_layer(out: bytes, W: np.ndarray, b: np.ndarray, activation: int, dtype: str) -> bytes:
-    in_dim, out_dim = W.shape
-    out += struct.pack("<II", in_dim, out_dim)
-    if dtype == "i8":
-        weight_dtype_byte = DTYPE_I8
-    elif dtype == "f16":
-        weight_dtype_byte = DTYPE_F16
-    else:
-        weight_dtype_byte = DTYPE_F32
-    out += struct.pack("<BBBB", activation, weight_dtype_byte, 0, 0)
-    n_weights = in_dim * out_dim
-    if dtype == "i8":
-        q, scales = quantize_i8_per_output(W)
-        out += q.tobytes()  # n_weights bytes, 1 per element
-        # Pad to 4-byte alignment before f32 scales/biases.
-        pad = (-n_weights) % 4
-        out += b"\x00" * pad
-        out += scales.astype("<f4").tobytes()  # out_dim × f32
-        out += b.astype("<f4").tobytes()
-        return out
-    out += encode_dtype(W, dtype)
-    # Pad to keep f32 biases 4-aligned. f32 weights are already 4-aligned;
-    # f16 weights might end on a 2-aligned boundary if the count is odd.
-    if dtype == "f16" and n_weights % 2 == 1:
-        out += b"\x00\x00"  # 2 bytes pad to reach 4-alignment
-    out += encode_dtype(b, "f32")
+def encode_feature_bounds(model: dict, n_inputs: int, feat_cols: list[str]) -> list[dict]:
+    """Build the v2 top-level feature_bounds Section from
+    safety_report.diagnostics.feature_bounds.
+
+    Output length must equal n_inputs (one bound per model input).
+    Engineered axes past feat_cols get (-inf, +inf) so they never
+    trigger the OOD gate. Returns an empty list when no bounds are
+    available — the loader emits an empty Section.
+    """
+    sr = model.get("safety_report")
+    if not isinstance(sr, dict):
+        return []
+    fb = sr.get("diagnostics", {}).get("feature_bounds")
+    if not isinstance(fb, dict):
+        return []
+    out: list[dict] = []
+    for col in feat_cols:
+        s = fb.get(col)
+        if isinstance(s, dict) and s.get("p01") is not None and s.get("p99") is not None:
+            out.append({"low": float(s["p01"]), "high": float(s["p99"])})
+        else:
+            out.append({"low": float("-inf"), "high": float("inf")})
+    # Pad to n_inputs with permissive bounds.
+    while len(out) < n_inputs:
+        out.append({"low": float("-inf"), "high": float("inf")})
     return out
+
+
+def build_bake_request_json(
+    model: dict,
+    out_path: Path,
+    dtype: str,
+) -> dict:
+    n_inputs = int(model["n_inputs"])
+    layers = model["layers"]
+    n_layers = len(layers)
+    feat_cols = list(model["feat_cols"])
+    activation = normalize_activation(model.get("activation", "relu"))
+    n_outputs = int(
+        model.get("n_outputs")
+        if model.get("n_outputs") is not None
+        else model.get("n_configs", len(layers[-1]["b"]))
+    )
+
+    extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
+    sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
+
+    # Validate layer chain.
+    last_idx = n_layers - 1
+    layers_json = []
+    prev_out = n_inputs
+    for i, layer in enumerate(layers):
+        W = np.asarray(layer["W"], dtype=np.float32)
+        b = np.asarray(layer["b"], dtype=np.float32)
+        if W.ndim != 2:
+            raise SystemExit(f"layer {i} W has bad ndim {W.ndim}")
+        in_dim, out_dim = W.shape
+        if in_dim != prev_out:
+            raise SystemExit(
+                f"layer {i} in_dim {in_dim} doesn't match prior out_dim {prev_out}"
+            )
+        if i == last_idx and out_dim != n_outputs:
+            raise SystemExit(
+                f"final layer out_dim {out_dim} != header n_outputs {n_outputs}"
+            )
+        if b.shape != (out_dim,):
+            raise SystemExit(f"layer {i} bias shape {b.shape} != (out_dim={out_dim},)")
+        # Last layer is identity; earlier layers carry the model's
+        # configured activation.
+        layer_act = "identity" if i == last_idx else activation
+        layers_json.append({
+            "in_dim": in_dim,
+            "out_dim": out_dim,
+            "activation": layer_act,
+            "dtype": dtype,
+            "weights": W.flatten(order="C").astype(np.float32).tolist(),
+            "biases": b.astype(np.float32).tolist(),
+        })
+        prev_out = out_dim
+
+    return {
+        "schema_hash": sh,
+        "flags": 0,
+        "scaler_mean": f32_array(model["scaler_mean"]),
+        "scaler_scale": f32_array(model["scaler_scale"]),
+        "layers": layers_json,
+        "feature_bounds": encode_feature_bounds(model, n_inputs, feat_cols),
+        "metadata": encode_metadata(model, out_path),
+    }
+
+
+def find_bake_bin(explicit: Path | None) -> Path:
+    """Locate `zenpredict-bake`. Resolution order:
+
+      1. `--bake-bin PATH` (explicit override)
+      2. `zenpredict-bake` on `$PATH`
+      3. `target/{release,debug}/zenpredict-bake` relative to the
+         workspace root (parent of `tools/`).
+      4. `cargo run -q --release -p zenpredict --bin zenpredict-bake`
+         as a last-resort fallback (slower, useful for in-tree dev).
+    """
+    if explicit is not None:
+        if not explicit.exists():
+            raise SystemExit(f"--bake-bin {explicit} does not exist")
+        return explicit
+    on_path = shutil.which("zenpredict-bake")
+    if on_path:
+        return Path(on_path)
+    repo_root = Path(__file__).resolve().parent.parent
+    for sub in ("release", "debug"):
+        cand = repo_root / "target" / sub / "zenpredict-bake"
+        if cand.exists():
+            return cand
+    # Fall back to cargo run. This returns a sentinel that
+    # `invoke_bake` interprets specially.
+    return Path("__cargo_run__")
+
+
+def invoke_bake(bake_bin: Path, json_path: Path, out_path: Path) -> None:
+    if str(bake_bin) == "__cargo_run__":
+        repo_root = Path(__file__).resolve().parent.parent
+        cmd = [
+            "cargo",
+            "run",
+            "-q",
+            "--manifest-path",
+            str(repo_root / "Cargo.toml"),
+            "--release",
+            "-p",
+            "zenpredict",
+            "--bin",
+            "zenpredict-bake",
+            "--",
+            str(json_path),
+            str(out_path),
+        ]
+    else:
+        cmd = [str(bake_bin), str(json_path), str(out_path)]
+    res = subprocess.run(cmd, check=False)
+    if res.returncode != 0:
+        raise SystemExit(
+            f"zenpredict-bake exited with status {res.returncode} "
+            f"(cmd: {' '.join(cmd)})"
+        )
+
+
+def emit_legacy_manifest(model: dict, out_path: Path, manifest_path: Path | None,
+                         schema_hash_int: int, feat_cols: list[str],
+                         extra_axes: list[str], n_inputs: int, n_outputs: int) -> None:
+    """The `<out>.manifest.json` sibling is no longer load-bearing —
+    everything the runtime consumes is embedded in the .bin via the
+    metadata blob — but codecs that haven't migrated to the
+    in-bin path still expect it. Keep emitting until they swap.
+    """
+    if manifest_path is None:
+        manifest_path = out_path.with_suffix(".manifest.json")
+    cfg_names = model.get("config_names")
+    manifest = {
+        "schema_hash": f"0x{schema_hash_int:016x}",
+        "schema_version_tag": schema_version_tag(model),
+        "feat_cols": feat_cols,
+        "extra_axes": extra_axes,
+        "n_inputs": n_inputs,
+        "n_outputs": n_outputs,
+    }
+    if cfg_names:
+        manifest["configs"] = {str(k): v for k, v in cfg_names.items()}
+    if "hybrid_heads_manifest" in model:
+        manifest["hybrid_heads"] = model["hybrid_heads_manifest"]
+    for key in ("safety_profile", "training_objective", "reach_safety"):
+        if key in model:
+            manifest[key] = model[key]
+    if "safety_report" in model:
+        manifest["safety_report"] = model["safety_report"]
+        fb = model["safety_report"].get("diagnostics", {}).get("feature_bounds")
+        if fb:
+            lifted = []
+            for col in feat_cols:
+                s = fb.get(col)
+                if s and s.get("p01") is not None and s.get("p99") is not None:
+                    lifted.append({"feat": col, "low": s["p01"], "high": s["p99"]})
+                else:
+                    lifted.append({"feat": col, "low": float("-inf"), "high": float("inf")})
+            manifest["feature_bounds_p01_p99"] = lifted
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    sys.stderr.write(f"wrote legacy manifest {manifest_path}\n")
 
 
 def bake(
@@ -268,14 +486,14 @@ def bake(
     out_path: Path,
     dtype: str,
     manifest_path: Path | None,
-    allow_unsafe: bool = False,
+    no_manifest: bool,
+    allow_unsafe: bool,
+    bake_bin: Path | None,
+    bake_json_out: Path | None,
 ) -> None:
     model = json.loads(model_path.read_text())
-    # Safety gate — refuse to bake a model whose training-side
-    # diagnostics flagged a danger. Reviewers can still inspect the
-    # JSON (we don't delete it); --allow-unsafe overrides for
-    # intentional violations. Bakes without `safety_report` (older
-    # JSONs) are tolerated with a warning so legacy data still works.
+
+    # Safety gate.
     sr = model.get("safety_report")
     if sr is None:
         sys.stderr.write(
@@ -299,130 +517,52 @@ def bake(
             )
             raise SystemExit(2)
         sys.stderr.write("--allow-unsafe set — baking despite violations.\n")
-    n_inputs = int(model["n_inputs"])
-    layers = model["layers"]
-    n_layers = len(layers)
-    feat_cols = list(model["feat_cols"])
-    activation = model.get("activation", "relu")
-    activation_key = activation.replace("-", "_").replace(" ", "_").lower()
-    if activation_key not in ACTIVATION_BY_NAME or activation_key == "identity":
-        # Identity-only models don't make sense; bail loudly.
-        raise SystemExit(
-            f"unsupported activation {activation!r}; expected one of "
-            f"{sorted(k for k in ACTIVATION_BY_NAME if k != 'identity')}"
+
+    bake_req = build_bake_request_json(model, out_path, dtype)
+
+    # Persist intermediate JSON (delete-on-success unless caller wants it).
+    if bake_json_out is not None:
+        json_path = bake_json_out
+        json_path.write_text(json.dumps(bake_req, indent=2))
+        cleanup = False
+    else:
+        # Use a sibling tempfile so cargo paths stay sensible.
+        json_path = out_path.with_suffix(out_path.suffix + ".bake_request.tmp.json")
+        json_path.write_text(json.dumps(bake_req))
+        cleanup = True
+
+    try:
+        bin_resolved = find_bake_bin(bake_bin)
+        invoke_bake(bin_resolved, json_path, out_path)
+    finally:
+        if cleanup and json_path.exists():
+            try:
+                json_path.unlink()
+            except OSError:
+                pass
+
+    if not no_manifest:
+        n_inputs = int(model["n_inputs"])
+        n_outputs = int(
+            model.get("n_outputs")
+            if model.get("n_outputs") is not None
+            else model.get("n_configs", len(model["layers"][-1]["b"]))
         )
-    hidden_activation_byte = ACTIVATION_BY_NAME[activation_key]
-    # Tolerate both "n_outputs" (shared-MLP fit) and "n_configs"
-    # (distill fit; same meaning, different field name in the JSON).
-    n_outputs = int(
-        model.get("n_outputs")
-        if model.get("n_outputs") is not None
-        else model.get("n_configs", len(layers[-1]["b"]))
-    )
-    # `hidden_activation_byte` already validated above.
+        feat_cols = list(model["feat_cols"])
+        extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
+        sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
+        emit_legacy_manifest(
+            model, out_path, manifest_path, sh, feat_cols, extra_axes, n_inputs, n_outputs
+        )
 
-    extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
-    sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
-
-    # Header.
-    blob = b""
-    blob += MAGIC
-    blob += struct.pack("<HH", FORMAT_VERSION, HEADER_SIZE)
-    blob += struct.pack("<III", n_inputs, n_outputs, n_layers)
-    blob += struct.pack("<Q", sh)
-    blob += struct.pack("<I", 0)  # flags
-    assert len(blob) == HEADER_SIZE
-
-    # Scaler.
-    blob += np.array(model["scaler_mean"], dtype="<f4").tobytes()
-    blob += np.array(model["scaler_scale"], dtype="<f4").tobytes()
-
-    # Layers — last layer identity, all earlier ReLU.
-    last_idx = n_layers - 1
-    for i, layer in enumerate(layers):
-        W = np.array(layer["W"], dtype=np.float32)
-        b = np.array(layer["b"], dtype=np.float32)
-        if W.ndim != 2:
-            raise SystemExit(f"layer {i} W has bad ndim {W.ndim}")
-        in_dim, out_dim = W.shape
-        if i == 0 and in_dim != n_inputs:
-            raise SystemExit(f"layer 0 in_dim {in_dim} != header n_inputs {n_inputs}")
-        if i == last_idx and out_dim != n_outputs:
-            raise SystemExit(f"final layer out_dim {out_dim} != header n_outputs {n_outputs}")
-        if b.shape != (out_dim,):
-            raise SystemExit(f"layer {i} bias shape {b.shape} != (out_dim={out_dim},)")
-        act = ACTIVATION_IDENTITY if i == last_idx else hidden_activation_byte
-        blob = write_layer(blob, W, b, act, dtype)
-
-    out_path.write_bytes(blob)
     sys.stderr.write(
-        f"baked {out_path} ({len(blob)} bytes), schema_hash=0x{sh:016x}, "
-        f"dtype={dtype}, n_inputs={n_inputs}, n_outputs={n_outputs}, "
-        f"n_layers={n_layers}\n"
+        f"baked {out_path} ({out_path.stat().st_size} bytes), "
+        f"schema_hash=0x{bake_req['schema_hash']:016x}, dtype={dtype}, "
+        f"n_inputs={len(bake_req['scaler_mean'])}, "
+        f"n_outputs={bake_req['layers'][-1]['out_dim']}, "
+        f"n_layers={len(bake_req['layers'])}, "
+        f"metadata_entries={len(bake_req['metadata'])}\n"
     )
-
-    # Manifest — re-emit the per-output config metadata that the codec
-    # crate consumes to build its compile-time CONFIGS table. Only
-    # written when the input model carries a `config_names` field
-    # (the distill / shared-MLP / hybrid scripts all do).
-    if "config_names" in model:
-        manifest_out = manifest_path or out_path.with_suffix(".manifest.json")
-        cfg_names = model["config_names"]
-        manifest = {
-            "schema_hash": f"0x{sh:016x}",
-            "schema_version_tag": SCHEMA_VERSION_TAG,
-            "feat_cols": feat_cols,
-            "extra_axes": extra_axes,
-            "n_inputs": n_inputs,
-            "n_outputs": n_outputs,
-            "configs": {str(k): v for k, v in cfg_names.items()},
-        }
-        # Hybrid-heads (v0.2) manifest passthrough — describes the
-        # categorical-vs-scalar layout of the n_outputs vector. Codec
-        # crate's compile-time CONFIGS table uses this to slice
-        # `predict()` output into bytes_log / chroma_scale / lambda /
-        # … sub-ranges. Optional: pure-categorical models omit it.
-        if "hybrid_heads_manifest" in model:
-            manifest["hybrid_heads"] = model["hybrid_heads_manifest"]
-        # Safety-profile passthrough — `safety_profile`,
-        # `training_objective`, and `reach_safety` are emitted by
-        # train_hybrid.py for both size_optimal and zensim_strict
-        # bakes. The codec consumer reads `reach_safety.by_zq[<zq>].safe`
-        # and ANDs it into its constraint mask before argmin.
-        for key in ("safety_profile", "training_objective", "reach_safety"):
-            if key in model:
-                manifest[key] = model[key]
-        # Safety-report passthrough — codec runtime can refuse to load
-        # a bake whose `safety_report.passed` is false even after the
-        # bake-time --allow-unsafe override (defense in depth).
-        if "safety_report" in model:
-            manifest["safety_report"] = model["safety_report"]
-            # Lift feature_bounds to the top-level of the manifest so
-            # codecs can compile a `FEATURE_BOUNDS: &[(f32, f32)]` const
-            # from a stable path. The full per-percentile dict stays
-            # inside safety_report.diagnostics; the lifted form is a
-            # compact list aligned to feat_cols, picking (p01, p99) by
-            # default. Codecs that want different bounds can read the
-            # full dict instead.
-            fb = (
-                model["safety_report"]
-                .get("diagnostics", {})
-                .get("feature_bounds")
-            )
-            if fb:
-                lifted = []
-                for col in feat_cols:
-                    s = fb.get(col)
-                    if s and s.get("p01") is not None and s.get("p99") is not None:
-                        lifted.append({"feat": col, "low": s["p01"], "high": s["p99"]})
-                    else:
-                        # If we have no usable percentiles, fall back
-                        # to (-inf, +inf) so the runtime gate doesn't
-                        # spuriously reject this column.
-                        lifted.append({"feat": col, "low": float("-inf"), "high": float("inf")})
-                manifest["feature_bounds_p01_p99"] = lifted
-        manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True))
-        sys.stderr.write(f"wrote manifest {manifest_out}\n")
 
 
 def main(argv: list[str]) -> int:
@@ -435,15 +575,43 @@ def main(argv: list[str]) -> int:
         choices=["f32", "f16", "i8"],
         help="weight storage dtype (i8 = per-output-neuron 8-bit quantization)",
     )
-    ap.add_argument("--manifest", type=Path, help="explicit manifest output path (default: <out>.manifest.json)")
+    ap.add_argument(
+        "--manifest",
+        type=Path,
+        help="explicit manifest output path (default: <out>.manifest.json)",
+    )
+    ap.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="skip writing the legacy sibling manifest.json",
+    )
     ap.add_argument(
         "--allow-unsafe",
         action="store_true",
-        help="Bake even when the model JSON's safety_report.passed is false. "
-        "Use only when the violation is intentional and reviewed.",
+        help="bake even when safety_report.passed is false",
+    )
+    ap.add_argument(
+        "--bake-bin",
+        type=Path,
+        help="explicit path to `zenpredict-bake` (default: PATH lookup → workspace target)",
+    )
+    ap.add_argument(
+        "--bake-json-out",
+        type=Path,
+        help="keep the intermediate BakeRequestJson on disk at this path "
+             "(default: written to a tempfile and deleted after bake)",
     )
     args = ap.parse_args(argv)
-    bake(args.model, args.out, args.dtype, args.manifest, allow_unsafe=args.allow_unsafe)
+    bake(
+        model_path=args.model,
+        out_path=args.out,
+        dtype=args.dtype,
+        manifest_path=args.manifest,
+        no_manifest=args.no_manifest,
+        allow_unsafe=args.allow_unsafe,
+        bake_bin=args.bake_bin,
+        bake_json_out=args.bake_json_out,
+    )
     return 0
 
 

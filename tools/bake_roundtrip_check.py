@@ -51,35 +51,49 @@ RTOL_I8 = 2e-2
 ATOL_I8 = 1.0
 
 
+LEAKY_RELU_ALPHA = 0.01  # Matches zenpredict::model::LEAKY_RELU_ALPHA
+
+
 def python_forward(model: dict, features: np.ndarray, dtype: str) -> np.ndarray:
-    """Reference forward pass — must match Rust output exactly."""
+    """Reference forward pass — must match Rust output exactly.
+
+    Mirrors `zenpredict::inference::forward`:
+      x' = (x - mean) / scale
+      for each layer: x = activation(x @ W + b)
+      last layer always uses Identity.
+    """
     mean = np.array(model["scaler_mean"], dtype=np.float32)
     scale = np.array(model["scaler_scale"], dtype=np.float32)
-    # Match sklearn's StandardScaler.transform: divide by std.
-    # `scaler_scale` is sklearn's `scale_` (= std) per the bake
-    # convention; the runtime kernel in `zenpicker::inference`
-    # divides too. See inference.rs for the full explanation.
     x = (features - mean) / scale
 
+    activation = (
+        model.get("activation", "relu").replace("-", "_").replace(" ", "_").lower()
+    )
     layers = model["layers"]
     last_idx = len(layers) - 1
     for i, layer in enumerate(layers):
         W = np.array(layer["W"], dtype=np.float32)
         b = np.array(layer["b"], dtype=np.float32)
         if dtype == "f16":
-            # Round-trip through f16 to mirror the bake's storage step.
             W = W.astype(np.float16).astype(np.float32)
         elif dtype == "i8":
-            # Mirror bake_picker's per-output-neuron quantize-then-dequant
-            # so the reference matches the runtime kernel.
-            in_dim, out_dim = W.shape
+            # Per-output-neuron quantize-then-dequant, matching the
+            # Rust bake side.
             abs_max = np.abs(W).max(axis=0)
             scales = np.where(abs_max > 0.0, abs_max / 127.0, 1.0).astype(np.float32)
             q = np.round(W / scales).clip(-128, 127).astype(np.int8)
             W = q.astype(np.float32) * scales[np.newaxis, :]
         x = x @ W + b
-        if i != last_idx:
-            x = np.maximum(x, 0.0)  # ReLU
+        if i == last_idx:
+            continue
+        if activation == "relu":
+            x = np.maximum(x, 0.0)
+        elif activation in ("leakyrelu", "leaky_relu"):
+            x = np.where(x >= 0.0, x, LEAKY_RELU_ALPHA * x)
+        elif activation == "identity":
+            pass
+        else:
+            raise SystemExit(f"unsupported activation in reference forward: {activation!r}")
     return x
 
 
@@ -113,6 +127,9 @@ def main(argv: list[str]) -> int:
                 # is still correct to test even when the bake itself
                 # is flagged.
                 "--allow-unsafe",
+                # Round-trip math check; no consumer reads the
+                # legacy sibling manifest in this flow.
+                "--no-manifest",
             ],
             check=True,
         )
@@ -128,7 +145,9 @@ def main(argv: list[str]) -> int:
                 "--release",
                 "-q",
                 "--manifest-path",
-                str(REPO_ROOT / "zenpicker" / "Cargo.toml"),
+                str(REPO_ROOT / "Cargo.toml"),
+                "-p",
+                "zenpredict",
                 "--example",
                 EXAMPLE,
                 "--",

@@ -21,6 +21,11 @@
 //! lockstep on layout but not on the training-side conveniences
 //! (loss functions, calibration metrics, manifest emission).
 
+pub mod json;
 mod v2;
 
+pub use json::{
+    ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,
+    MetadataEntryJson, MetadataKindJson, bake_from_json, bake_from_json_str,
+};
 pub use v2::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
