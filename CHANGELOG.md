@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on image dimensions before any scan — never narrows the caller's
   feature query. Existing `analyze_features` is unchanged — codecs
   opt in by switching call sites.
-- **New public type `DispatchHints`** (`#[non_exhaustive]`) with
-  `target_zq` / `content_hash` fields reserved for Stage 2 +
-  result-cache work. Stage 0 does not consume any hint today; the
-  type ships now so future stages can land additively.
+- **New public type `DispatchHints`** — an empty
+  `#[non_exhaustive]` seat. Stage 0 does not consume any hint, so
+  the type ships with no fields. Future stages add fields
+  additively under 0.1.x without a public-signature change.
 - **Stage 0**: empty-feature requests short-circuit; ≤ 64 K-pixel
   images get the budget bumped to exhaustive (per-call fixed
   overhead dominates per-pixel work below this size, so sampling

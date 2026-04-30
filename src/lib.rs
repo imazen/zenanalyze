@@ -679,12 +679,10 @@ pub(crate) fn analyze_specialized_raw<
 ///
 /// # Hints
 ///
-/// `hints` is advisory; pass `None` for safe defaults. Today the
-/// hint fields ([`DispatchHints::target_zq`],
-/// [`DispatchHints::content_hash`]) are not consumed — they exist
-/// so future stages (corpus#47-validated Stage 2 budget tuning,
-/// content-hash result caching) can land without a public-signature
-/// change.
+/// `hints` is advisory; pass `None` for safe defaults. Today
+/// [`DispatchHints`] has no fields — the `#[non_exhaustive]`
+/// attribute is the seat for future stages to add fields
+/// additively under 0.1.x without a public-signature change.
 ///
 /// # Stability
 ///
