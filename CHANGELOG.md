@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — zenpicker
+
+- **`tools/train_hybrid.py`: codec-agnostic `CATEGORICAL_AXES` + `SCALAR_AXES`.**
+  The trainer was documented as codec-agnostic but had `(color, sub,
+  trellis_on, sa)` and `(chroma_scale, lambda)` hardcoded. New behavior
+  reads `CATEGORICAL_AXES` and `SCALAR_AXES` (and optional
+  `SCALAR_SENTINELS`, `SCALAR_DISPLAY_RANGES`) from the codec config
+  module. zenjpeg metrics reproduce bit-exactly when its config
+  declares the prior shape (now done in
+  `examples/zenjpeg_picker_config.py`). New consumers like zenwebp
+  declare their own (e.g. `["method", "segments"]` ×
+  `["sns_strength", "filter_strength", "filter_sharpness"]`) without
+  forking the trainer. Manifest gains `categorical_axes`,
+  `scalar_axes`, `scalar_sentinels` fields; `lambda_notrellis_sentinel`
+  is preserved as a back-compat alias. Closes the gap surfaced when
+  wiring zenwebp through FOR_NEW_CODECS.md.
+
 ### Added — patch fingerprint cost-efficient sibling + quant-survival signals
 
 - **`PatchFractionFast`** (`patch_fraction_fast`, id 52, experimental).
