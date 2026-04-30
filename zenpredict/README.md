@@ -2,7 +2,7 @@
 
 Zero-copy MLP runtime. Parse a packed binary model (ZNPR v2), run scaler + layer-by-layer forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg / zenwebp / zenavif / zenjxl picker selection and zensim V0.4 perceptual distance.
 
-`#![forbid(unsafe_code)]`. `no_std + alloc` capable. AGPL-3.0-only / Commercial dual license.
+`#![forbid(unsafe_code)]`. `no_std + alloc` capable. MIT / Apache-2.0 dual license — the runtime is intentionally permissive so it can be embedded in any consumer (including MIT/Apache `zensim`). The training pipeline (`zentrain`) and codec dispatch logic (`zenpicker`, `zenanalyze`) remain `AGPL-3.0-only OR LicenseRef-Imazen-Commercial`.
 
 ## Crate boundary
 
@@ -89,4 +89,6 @@ The `argmin` family is generic — it's "argmin over a slice with a boolean filt
 
 ## License
 
-AGPL-3.0-only OR LicenseRef-Imazen-Commercial. See [LICENSE-AGPL3](../LICENSE-AGPL3) and [LICENSE-COMMERCIAL](../LICENSE-COMMERCIAL).
+MIT OR Apache-2.0, at your option. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
+
+zenpredict is the runtime — it loads + scores baked models — and is intentionally licensed permissively so it can be embedded in any consumer (including the MIT/Apache-2.0 [`zensim`](https://github.com/imazen/zensim) perceptual scorer). The training pipeline ([`zentrain`](../zentrain/)) and codec dispatch logic ([`zenpicker`](../zenpicker/), [`zenanalyze`](../)) remain `AGPL-3.0-only OR LicenseRef-Imazen-Commercial` — the IP lives on the bake-time and decision-tree side, not the runtime forward pass.

@@ -2,7 +2,7 @@
 name = "zenpredict"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/imazen/zenanalyze"
 description = "Zero-copy MLP runtime: parse a packed binary model (ZNPR v2), run scaler + forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg/zenwebp/zenavif/zenjxl picker selection and zensim V0.4 perceptual distance."
 keywords = ["mlp", "inference", "zero-copy", "no-std"]
