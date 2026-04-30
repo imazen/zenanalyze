@@ -21,9 +21,11 @@
 //!   in_dim: u32
 //!   out_dim: u32
 //!   activation: u8        (0=Identity, 1=Relu)
-//!   weight_dtype: u8      (0=F32, 1=F16)
+//!   weight_dtype: u8      (0=F32, 1=F16, 2=I8)
 //!   reserved: [u8; 2]
 //!   weights: [W_dtype; in_dim * out_dim]   row-major (in_dim major)
+//!   [pad to 4-byte alignment]              (only for I8 / odd-count F16)
+//!   scales: [f32; out_dim]                 (only when weight_dtype == I8)
 //!   biases: [f32; out_dim]
 //! ```
 //!
@@ -31,6 +33,25 @@
 //! contribution from input `i` to output `o`. This layout lets the
 //! matmul stream `out_dim` outputs in chunks of 8 across each input
 //! row, which is what `magetypes::f32x8` wants.
+//!
+//! ## I8 weight quantization
+//!
+//! When `weight_dtype == I8`, weights are stored as int8 with one
+//! f32 scale per output neuron. The dequantized weight is
+//! `W[i, o] = i8_weights[i, o] as f32 * scales[o]`. Quantization
+//! scheme (bake-side, not enforced at runtime):
+//!
+//! ```text
+//! scales[o]    = max_i |W_f32[i, o]| / 127.0   (or 1.0 if column zero)
+//! i8_weights[i, o] = round(W_f32[i, o] / scales[o]).clamp(-128, 127)
+//! ```
+//!
+//! Per-output (column-wise) scales mean each output neuron has its
+//! own dynamic range — one big-magnitude column doesn't waste i8
+//! resolution on the small-magnitude ones. Round-trip relative RMS
+//! error sits at ~1 %, which is below the picker's training noise
+//! floor — see `i8_quantization_impact_2026-04-30.md` for the impact
+//! study.
 
 use crate::error::PickerError;
 
@@ -58,6 +79,7 @@ impl Activation {
 pub enum WeightDtype {
     F32 = 0,
     F16 = 1,
+    I8 = 2,
 }
 
 impl WeightDtype {
@@ -65,6 +87,7 @@ impl WeightDtype {
         match b {
             0 => Ok(Self::F32),
             1 => Ok(Self::F16),
+            2 => Ok(Self::I8),
             other => Err(PickerError::UnknownWeightDtype { byte: other }),
         }
     }
@@ -74,6 +97,7 @@ impl WeightDtype {
         match self {
             Self::F32 => 4,
             Self::F16 => 2,
+            Self::I8 => 1,
         }
     }
 }
@@ -105,10 +129,18 @@ pub struct LayerView<'a> {
 /// the inference inner loop. We don't depend on the `half` crate —
 /// the conversion is ~15 lines of bit math (see `f16_bits_to_f32`),
 /// and the `core::f16` type will subsume both once it stabilizes.
+///
+/// `I8` carries a signed 8-bit weight per element plus one f32 scale
+/// per output neuron. Dequantization at compute time:
+/// `W[i, o] = weights[i * out_dim + o] as f32 * scales[o]`.
 #[derive(Debug)]
 pub enum WeightStorage<'a> {
     F32(&'a [f32]),
     F16(&'a [u16]),
+    I8 {
+        weights: &'a [i8],
+        scales: &'a [f32],
+    },
 }
 
 impl<'a> Model<'a> {
@@ -201,16 +233,34 @@ impl<'a> Model<'a> {
 
             let weights = match weight_dtype {
                 WeightDtype::F32 => WeightStorage::F32(cur.take_f32_slice(n_weights)?),
-                WeightDtype::F16 => WeightStorage::F16(cur.take_u16_slice(n_weights)?),
+                WeightDtype::F16 => {
+                    let w = WeightStorage::F16(cur.take_u16_slice(n_weights)?);
+                    // f16 weights end at a 2-aligned boundary when
+                    // `n_weights` is odd; bake emits a 2-byte pad in
+                    // that case to restore 4-alignment for the bias
+                    // section. f32 weights are 4-aligned by
+                    // construction.
+                    if n_weights % 2 == 1 {
+                        cur.skip(2)?;
+                    }
+                    w
+                }
+                WeightDtype::I8 => {
+                    let w_bytes = cur.take_i8_slice(n_weights)?;
+                    // i8 weights occupy `n_weights` bytes — pad up to
+                    // 4-byte alignment before reading the f32 scales
+                    // and biases.
+                    let pad = (4 - (n_weights % 4)) % 4;
+                    if pad > 0 {
+                        cur.skip(pad)?;
+                    }
+                    let scales = cur.take_f32_slice(out_dim)?;
+                    WeightStorage::I8 {
+                        weights: w_bytes,
+                        scales,
+                    }
+                }
             };
-            // Pad to keep the f32 biases 4-aligned. f32 weights end at a
-            // 4-aligned boundary by construction (their byte length is a
-            // multiple of 4). f16 weights end at a 2-aligned boundary
-            // when `n_weights` is odd; bake emits a 2-byte pad in that
-            // case to restore 4-alignment for the bias section.
-            if matches!(weight_dtype, WeightDtype::F16) && n_weights % 2 == 1 {
-                cur.skip(2)?;
-            }
             let biases = cur.take_f32_slice(out_dim)?;
 
             layers.push(LayerView {
@@ -378,6 +428,33 @@ impl<'a> Cursor<'a> {
         bytemuck_cast_f32_slice(raw).ok_or(PickerError::Truncated {
             offset: self.pos - byte_len,
             want: byte_len,
+            have: 0,
+        })
+    }
+
+    /// Take a slice of `n` i8 weights. 1-byte alignment so this is
+    /// always a zero-copy reinterpret, no alignment check needed.
+    fn take_i8_slice(&mut self, n: usize) -> Result<&'a [i8], PickerError> {
+        let end = self.pos.checked_add(n).ok_or(PickerError::Truncated {
+            offset: self.pos,
+            want: n,
+            have: self.bytes.len().saturating_sub(self.pos),
+        })?;
+        if end > self.bytes.len() {
+            return Err(PickerError::Truncated {
+                offset: self.pos,
+                want: n,
+                have: self.bytes.len() - self.pos,
+            });
+        }
+        let raw = &self.bytes[self.pos..end];
+        self.pos = end;
+        if n == 0 {
+            return Ok(&[]);
+        }
+        bytemuck::try_cast_slice(raw).map_err(|_| PickerError::Truncated {
+            offset: self.pos - n,
+            want: n,
             have: 0,
         })
     }

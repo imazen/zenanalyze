@@ -88,12 +88,31 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) {
     debug_assert_eq!(dst.len(), out_dim);
     debug_assert_eq!(layer.biases.len(), out_dim);
 
-    // Initialize accumulator with biases.
-    dst.copy_from_slice(layer.biases);
-
     match &layer.weights {
-        WeightStorage::F32(w) => saxpy_matmul_f32(src, w, dst, in_dim, out_dim),
-        WeightStorage::F16(w) => saxpy_matmul_f16(src, w, dst, in_dim, out_dim),
+        WeightStorage::F32(w) => {
+            // Init accumulator with biases, then add `sum_i src[i] * W[i, :]`.
+            dst.copy_from_slice(layer.biases);
+            saxpy_matmul_f32(src, w, dst, in_dim, out_dim);
+        }
+        WeightStorage::F16(w) => {
+            dst.copy_from_slice(layer.biases);
+            saxpy_matmul_f16(src, w, dst, in_dim, out_dim);
+        }
+        WeightStorage::I8 { weights, scales } => {
+            // i8 path inverts the bias-then-accumulate ordering
+            // because the per-output `scales[o]` only applies to the
+            // SAXPY accumulator, not the bias. Accumulate raw
+            // `sum_i src[i] * (W_i8[i, o] as f32)` into dst, then
+            // commit `dst[o] = bias[o] + scales[o] * dst[o]`.
+            for v in dst.iter_mut() {
+                *v = 0.0;
+            }
+            saxpy_matmul_i8(src, weights, dst, in_dim, out_dim);
+            debug_assert_eq!(scales.len(), out_dim);
+            for o in 0..out_dim {
+                dst[o] = layer.biases[o] + scales[o] * dst[o];
+            }
+        }
     }
 
     apply_activation(dst, layer.activation);
@@ -171,6 +190,43 @@ fn saxpy_matmul_f16(src: &[f32], w: &[u16], dst: &mut [f32], in_dim: usize, out_
             let tail_start = chunks * 8;
             for k in 0..tail {
                 let wf = f16_bits_to_f32(row[tail_start + k]);
+                dst[tail_start + k] = s.mul_add(wf, dst[tail_start + k]);
+            }
+        }
+    }
+}
+
+/// `dst[o] += sum_i src[i] * (W_i8[i, o] as f32)` for the i8-stored
+/// case. Per-output scaling is applied by the caller after this
+/// returns — see `layer_forward`. The on-the-fly `i8 → f32` cast is
+/// a single `as` per element; LLVM lowers this to one VPMOVSXBD on
+/// AVX2 / VPMOVSXBD on AVX-512 / SXTL on NEON, so the inner chunk is
+/// the same shape as the f32 path.
+fn saxpy_matmul_i8(src: &[f32], w: &[i8], dst: &mut [f32], in_dim: usize, out_dim: usize) {
+    debug_assert_eq!(w.len(), in_dim * out_dim);
+    let chunks = out_dim / 8;
+    let tail = out_dim % 8;
+
+    for i in 0..in_dim {
+        let s = src[i];
+        if s == 0.0 {
+            continue;
+        }
+        let row = &w[i * out_dim..(i + 1) * out_dim];
+
+        for c in 0..chunks {
+            let base = c * 8;
+            let weight_chunk: &[i8; 8] = row[base..base + 8].try_into().unwrap();
+            let acc_chunk: &mut [f32; 8] = (&mut dst[base..base + 8]).try_into().unwrap();
+            for k in 0..8 {
+                let wf = weight_chunk[k] as f32;
+                acc_chunk[k] = s.mul_add(wf, acc_chunk[k]);
+            }
+        }
+        if tail > 0 {
+            let tail_start = chunks * 8;
+            for k in 0..tail {
+                let wf = row[tail_start + k] as f32;
                 dst[tail_start + k] = s.mul_add(wf, dst[tail_start + k]);
             }
         }

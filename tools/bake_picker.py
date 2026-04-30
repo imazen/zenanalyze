@@ -5,7 +5,14 @@ Bake an sklearn MLPRegressor JSON dump into the zenpicker v1 binary format.
 Inputs:
 - `--model JSON`        : sklearn-side model file (see fields below)
 - `--out FILE.bin`      : output path
-- `--dtype f32|f16`     : weight storage dtype (default f32)
+- `--dtype f32|f16|i8`  : weight storage dtype (default f32). i8 is
+                           per-output-neuron quantized:
+                             scale[o] = max_i |W[i, o]| / 127
+                             q[i, o]  = round(W[i, o] / scale[o])
+                                          .clip(-128, 127)
+                           Empty columns get scale=1.0. Per-output
+                           scales follow the i8 weight block in the
+                           binary; biases stay f32.
 - `--manifest JSON`     : explicit manifest output path; default is
                            `<out>.manifest.json` next to the `.bin`
 - `--allow-unsafe`      : bake even when the model JSON's
@@ -76,19 +83,18 @@ Output binary v1 layout matches `zenpicker::Model::from_bytes`:
       in_dim u32
       out_dim u32
       activation u8     (0=Identity, 1=ReLU)
-      weight_dtype u8   (0=F32, 1=F16)
+      weight_dtype u8   (0=F32, 1=F16, 2=I8)
       reserved u8 u8
       W (row-major, in_dim major), in_dim*out_dim values in dtype
+      [pad to 4-byte alignment]   (i8: pad up; f16 odd-count: 2-byte pad)
+      scales (f32) out_dim values  (only when weight_dtype == I8)
       b (f32) out_dim values
 
 Note on the scaler convention: `scaler_scale` stores sklearn's
-`StandardScaler.scale_` directly (which IS the standard deviation,
-not its inverse). The Rust runtime then *multiplies* by this rather
-than dividing as sklearn's own `transform` does — see
-`zenpicker/src/inference.rs` for the full explanation. The MLP's
-first layer absorbs the discrepancy at training time so end-to-end
-behavior is correct; do not "fix" the direction in isolation —
-every shipped bake depends on this convention.
+`StandardScaler.scale_` directly (which IS the standard deviation).
+The Rust runtime divides by this — matching sklearn's own
+`StandardScaler.transform` step that the MLP was trained on top of.
+See `zenpicker/src/inference.rs` for the full rationale.
 """
 
 import argparse
@@ -108,6 +114,7 @@ ACTIVATION_IDENTITY = 0
 ACTIVATION_RELU = 1
 DTYPE_F32 = 0
 DTYPE_F16 = 1
+DTYPE_I8 = 2
 
 
 def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -> int:
@@ -201,14 +208,47 @@ def encode_dtype(arr: np.ndarray, dtype: str) -> bytes:
     raise ValueError(f"unknown dtype {dtype!r}")
 
 
+def quantize_i8_per_output(W: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-neuron i8 quantization.
+
+    `W` is shape `(in_dim, out_dim)`. For each output column `o`:
+
+        scale[o] = max_i |W[i, o]| / 127        (or 1.0 if column is zero)
+        q[i, o]  = round(W[i, o] / scale[o]).clip(-128, 127).astype(int8)
+
+    Returns `(q, scales)` with `q.dtype == int8`, `scales.dtype == float32`.
+    The dequantized value is `q.astype(f32) * scales[o]`.
+    """
+    in_dim, out_dim = W.shape
+    abs_max = np.abs(W).max(axis=0)  # shape (out_dim,)
+    scales = np.where(abs_max > 0.0, abs_max / 127.0, 1.0).astype(np.float32)
+    q = np.round(W / scales).clip(-128, 127).astype(np.int8)
+    return q, scales
+
+
 def write_layer(out: bytes, W: np.ndarray, b: np.ndarray, activation: int, dtype: str) -> bytes:
     in_dim, out_dim = W.shape
     out += struct.pack("<II", in_dim, out_dim)
-    out += struct.pack("<BBBB", activation, DTYPE_F32 if dtype == "f32" else DTYPE_F16, 0, 0)
+    if dtype == "i8":
+        weight_dtype_byte = DTYPE_I8
+    elif dtype == "f16":
+        weight_dtype_byte = DTYPE_F16
+    else:
+        weight_dtype_byte = DTYPE_F32
+    out += struct.pack("<BBBB", activation, weight_dtype_byte, 0, 0)
+    n_weights = in_dim * out_dim
+    if dtype == "i8":
+        q, scales = quantize_i8_per_output(W)
+        out += q.tobytes()  # n_weights bytes, 1 per element
+        # Pad to 4-byte alignment before f32 scales/biases.
+        pad = (-n_weights) % 4
+        out += b"\x00" * pad
+        out += scales.astype("<f4").tobytes()  # out_dim × f32
+        out += b.astype("<f4").tobytes()
+        return out
     out += encode_dtype(W, dtype)
     # Pad to keep f32 biases 4-aligned. f32 weights are already 4-aligned;
     # f16 weights might end on a 2-aligned boundary if the count is odd.
-    n_weights = in_dim * out_dim
     if dtype == "f16" and n_weights % 2 == 1:
         out += b"\x00\x00"  # 2 bytes pad to reach 4-alignment
     out += encode_dtype(b, "f32")
@@ -374,7 +414,12 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True, type=Path, help="sklearn-side JSON dump")
     ap.add_argument("--out", required=True, type=Path, help="output .bin path")
-    ap.add_argument("--dtype", default="f32", choices=["f32", "f16"], help="weight storage dtype")
+    ap.add_argument(
+        "--dtype",
+        default="f32",
+        choices=["f32", "f16", "i8"],
+        help="weight storage dtype (i8 = per-output-neuron 8-bit quantization)",
+    )
     ap.add_argument("--manifest", type=Path, help="explicit manifest output path (default: <out>.manifest.json)")
     ap.add_argument(
         "--allow-unsafe",

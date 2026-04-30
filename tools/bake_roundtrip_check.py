@@ -42,6 +42,13 @@ RTOL_F32 = 1e-5
 ATOL_F32 = 1e-4
 RTOL_F16 = 5e-3  # f16 quantization budget — ~3 mantissa decimal digits
 ATOL_F16 = 1e-3
+# i8 per-output-neuron quantization gives ~1 % relative RMS per layer;
+# composed across the v2.1 4-layer MLP that's still well under the
+# bytes_log magnitudes the picker emits (~75–80). Be generous with
+# atol because the absolute-magnitude floor matters more here than
+# the relative ratio.
+RTOL_I8 = 2e-2
+ATOL_I8 = 1.0
 
 
 def python_forward(model: dict, features: np.ndarray, dtype: str) -> np.ndarray:
@@ -62,6 +69,14 @@ def python_forward(model: dict, features: np.ndarray, dtype: str) -> np.ndarray:
         if dtype == "f16":
             # Round-trip through f16 to mirror the bake's storage step.
             W = W.astype(np.float16).astype(np.float32)
+        elif dtype == "i8":
+            # Mirror bake_picker's per-output-neuron quantize-then-dequant
+            # so the reference matches the runtime kernel.
+            in_dim, out_dim = W.shape
+            abs_max = np.abs(W).max(axis=0)
+            scales = np.where(abs_max > 0.0, abs_max / 127.0, 1.0).astype(np.float32)
+            q = np.round(W / scales).clip(-128, 127).astype(np.int8)
+            W = q.astype(np.float32) * scales[np.newaxis, :]
         x = x @ W + b
         if i != last_idx:
             x = np.maximum(x, 0.0)  # ReLU
@@ -71,7 +86,7 @@ def python_forward(model: dict, features: np.ndarray, dtype: str) -> np.ndarray:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, type=Path)
-    ap.add_argument("--dtype", default="f32", choices=["f32", "f16"])
+    ap.add_argument("--dtype", default="f32", choices=["f32", "f16", "i8"])
     args = ap.parse_args(argv)
 
     if not BAKE.exists():
@@ -147,8 +162,12 @@ def main(argv: list[str]) -> int:
         sys.exit(f"shape mismatch: rust {rust_out.shape} != python {py_out.shape}")
 
     abs_diff = np.abs(rust_out - py_out)
-    rtol = RTOL_F16 if args.dtype == "f16" else RTOL_F32
-    atol = ATOL_F16 if args.dtype == "f16" else ATOL_F32
+    if args.dtype == "i8":
+        rtol, atol = RTOL_I8, ATOL_I8
+    elif args.dtype == "f16":
+        rtol, atol = RTOL_F16, ATOL_F16
+    else:
+        rtol, atol = RTOL_F32, ATOL_F32
     # Tolerance per element: rtol * max(|rust|, |python|) + atol.
     scale = np.maximum(np.abs(rust_out), np.abs(py_out))
     tol = rtol * scale + atol

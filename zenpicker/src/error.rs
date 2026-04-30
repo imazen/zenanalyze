@@ -16,10 +16,11 @@ pub enum PickerError {
         want: usize,
         have: usize,
     },
-    /// `weight_dtype` was f16. Reserved in the format but not
-    /// implemented in v0.1; bake with `--dtype f32`.
+    /// Reserved error variant — was raised in pre-0.1 builds when
+    /// f16 weights weren't yet supported. Kept for ABI stability;
+    /// never produced by the current parser.
     F16NotSupported,
-    /// `weight_dtype` byte was not 0 (f32) or 1 (f16, reserved).
+    /// `weight_dtype` byte was not 0 (f32), 1 (f16), or 2 (i8).
     UnknownWeightDtype { byte: u8 },
     /// `activation` byte was not a recognized variant.
     UnknownActivation { byte: u8 },
@@ -64,7 +65,7 @@ impl fmt::Display for PickerError {
             ),
             Self::F16NotSupported => write!(
                 f,
-                "zenpicker: model uses f16 weights, which is reserved but not yet supported in v0.1; rebake with --dtype f32"
+                "zenpicker: f16 weights flagged as unsupported (legacy error; current parser handles f16 directly)"
             ),
             Self::UnknownWeightDtype { byte } => {
                 write!(f, "zenpicker: unknown weight dtype byte {byte:#x}")

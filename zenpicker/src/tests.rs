@@ -106,6 +106,88 @@ fn f32_to_f16_bits(f: f32) -> u16 {
 /// Test layer-spec tuple: (in_dim, out_dim, activation_byte, weights, biases).
 type LayerSpec<'a> = (usize, usize, u8, &'a [f32], &'a [f32]);
 
+/// Per-output i8 quantize a row-major f32 weight block of shape
+/// (in_dim, out_dim). Mirrors `tools/bake_picker.py`'s scheme:
+/// `scale[o] = max_i |W[i, o]| / 127`, `q[i, o] = round(W / scale)`.
+/// All-zero columns get `scale = 1.0` to avoid div-by-zero.
+fn quantize_i8_per_output(
+    w: &[f32],
+    in_dim: usize,
+    out_dim: usize,
+) -> (alloc::vec::Vec<i8>, alloc::vec::Vec<f32>) {
+    let mut scales = alloc::vec![0.0f32; out_dim];
+    for o in 0..out_dim {
+        let mut m = 0.0f32;
+        for i in 0..in_dim {
+            let a = w[i * out_dim + o].abs();
+            if a > m {
+                m = a;
+            }
+        }
+        scales[o] = if m == 0.0 { 1.0 } else { m / 127.0 };
+    }
+    let mut q = alloc::vec![0i8; in_dim * out_dim];
+    for i in 0..in_dim {
+        for o in 0..out_dim {
+            let v = w[i * out_dim + o] / scales[o];
+            let r = v.round().clamp(-128.0, 127.0) as i32;
+            q[i * out_dim + o] = r as i8;
+        }
+    }
+    (q, scales)
+}
+
+/// Build a v1 model with i8 weights into `out`. Per-output f32
+/// scales follow the i8 weight block; biases stay f32. Identity
+/// scaler.
+fn write_v1_model_i8(
+    out: &mut alloc::vec::Vec<u8>,
+    n_inputs: usize,
+    layers: &[LayerSpec<'_>],
+    schema_hash: u64,
+) {
+    let n_outputs = layers.last().unwrap().1;
+    let n_layers = layers.len();
+    out.clear();
+    out.extend_from_slice(b"ZNPK");
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&(n_inputs as u32).to_le_bytes());
+    out.extend_from_slice(&(n_outputs as u32).to_le_bytes());
+    out.extend_from_slice(&(n_layers as u32).to_le_bytes());
+    out.extend_from_slice(&schema_hash.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    debug_assert_eq!(out.len(), 32);
+    for _ in 0..n_inputs {
+        out.extend_from_slice(&0.0f32.to_le_bytes());
+    }
+    for _ in 0..n_inputs {
+        out.extend_from_slice(&1.0f32.to_le_bytes());
+    }
+    for &(in_d, out_d, act, w, b) in layers {
+        out.extend_from_slice(&(in_d as u32).to_le_bytes());
+        out.extend_from_slice(&(out_d as u32).to_le_bytes());
+        out.push(act);
+        out.push(2); // weight_dtype = i8
+        out.extend_from_slice(&[0, 0]);
+        let (q, scales) = quantize_i8_per_output(w, in_d, out_d);
+        for &v in &q {
+            out.push(v as u8);
+        }
+        // Pad i8 block to 4-byte alignment for the f32 scales/biases.
+        let pad = (4 - ((in_d * out_d) % 4)) % 4;
+        for _ in 0..pad {
+            out.push(0);
+        }
+        for &s in &scales {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        for &val in b {
+            out.extend_from_slice(&val.to_le_bytes());
+        }
+    }
+}
+
 /// Build a v1 model with f16 weights into `out`. f32 biases.
 fn write_v1_model_f16(
     out: &mut alloc::vec::Vec<u8>,
@@ -613,6 +695,129 @@ fn f16_weights_match_f32_baseline() {
             (a - b).abs()
         );
     }
+}
+
+#[test]
+fn i8_weight_dtype_round_trips() {
+    // Asymmetric per-output scales: column 0 has max-abs 8, column 1
+    // has max-abs 0.5. Per-output i8 quantization gives column 0 a
+    // resolution of 8/127 ≈ 0.063 and column 1 a resolution of
+    // 0.5/127 ≈ 0.0039 — exact behavior at quantization grid points.
+    let mut buf = alloc::vec::Vec::new();
+    let weights = [
+        // in_dim=2, out_dim=2 (input-major):
+        // input 0 contributes (8.0, 0.5)
+        // input 1 contributes (-4.0, -0.25)
+        8.0, 0.5, -4.0, -0.25,
+    ];
+    write_v1_model_i8(
+        &mut buf,
+        2,
+        &[(2, 2, 0, &weights, &[1.0, -0.5])],
+        0x00C0_FFEE_DEAD_BEEF_u64,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    assert!(matches!(
+        model.layers()[0].weights,
+        crate::model::WeightStorage::I8 { .. }
+    ));
+    let mut picker = Picker::new(model);
+    // Hand-compute: q_8 = round(8 / (8/127)) = 127, q_-4 = -64,
+    // dequant col 0 = 127*(8/127) = 8.0, -64*(8/127) ≈ -4.031.
+    // q_0.5 = round(0.5 / (0.5/127)) = 127, q_-0.25 = -64,
+    // dequant col 1 = 127*(0.5/127) = 0.5, -64*(0.5/127) ≈ -0.252.
+    // input (1, 1): out[0] = 1.0 + (8 + -4.031) = 4.969, out[1] = -0.5 + (0.5 + -0.252) = -0.252.
+    let out = picker.predict(&[1.0, 1.0]).unwrap();
+    assert!(
+        (out[0] - 4.969).abs() < 0.01,
+        "i8 col0 out: got {} expected ~4.969",
+        out[0]
+    );
+    assert!(
+        (out[1] - (-0.252)).abs() < 0.01,
+        "i8 col1 out: got {} expected ~-0.252",
+        out[1]
+    );
+}
+
+#[test]
+fn f32_vs_i8_within_tolerance() {
+    // Compare full f32 forward pass against i8-quantized round-trip
+    // on a 4×8×4 ReLU MLP with random-ish weights. Mean abs error
+    // should sit well under 1% of typical output magnitudes thanks
+    // to per-output scaling.
+    let w0: alloc::vec::Vec<f32> = (0..32).map(|i| ((i * 7 + 3) % 17) as f32 * 0.1 - 0.8).collect();
+    let b0 = alloc::vec![0.0f32; 8];
+    let w1: alloc::vec::Vec<f32> = (0..32).map(|i| ((i * 11 + 5) % 13) as f32 * 0.2 - 1.2).collect();
+    let b1 = alloc::vec![0.1f32; 4];
+
+    let mut buf32 = alloc::vec::Vec::new();
+    write_v1_model_f32(
+        &mut buf32,
+        4,
+        &[(4, 8, 1, &w0, &b0), (8, 4, 0, &w1, &b1)],
+        0,
+    );
+    let mut bufi8 = alloc::vec::Vec::new();
+    write_v1_model_i8(
+        &mut bufi8,
+        4,
+        &[(4, 8, 1, &w0, &b0), (8, 4, 0, &w1, &b1)],
+        0,
+    );
+
+    let a32 = AlignedBuf::from_slice(&buf32);
+    let ai8 = AlignedBuf::from_slice(&bufi8);
+    let mut p32 = Picker::new(Model::from_bytes(a32.as_bytes()).unwrap());
+    let mut pi8 = Picker::new(Model::from_bytes(ai8.as_bytes()).unwrap());
+
+    let inputs = [0.7f32, -1.2, 0.3, 1.4];
+    let o32 = p32.predict(&inputs).unwrap().to_vec();
+    let oi8 = pi8.predict(&inputs).unwrap().to_vec();
+
+    for (i, (a, b)) in o32.iter().zip(oi8.iter()).enumerate() {
+        // Per-output i8 quantization gives ~0.4 % relative RMS at
+        // each layer; two layers compose to ≤ 1 % per output. Use a
+        // generous absolute tolerance because the test weights are
+        // small magnitudes.
+        let tol = 0.05 + 0.01 * a.abs();
+        assert!(
+            (a - b).abs() <= tol,
+            "out[{i}] f32={a} i8={b} diff={} tol={tol}",
+            (a - b).abs()
+        );
+    }
+}
+
+#[test]
+fn i8_unknown_dtype_byte_is_rejected() {
+    // Hand-craft a v1 model with weight_dtype = 3 (not f32/f16/i8).
+    // Parser must reject with UnknownWeightDtype.
+    let mut buf = alloc::vec::Vec::new();
+    buf.extend_from_slice(b"ZNPK");
+    buf.extend_from_slice(&1u16.to_le_bytes());
+    buf.extend_from_slice(&32u16.to_le_bytes());
+    buf.extend_from_slice(&1u32.to_le_bytes()); // n_inputs
+    buf.extend_from_slice(&1u32.to_le_bytes()); // n_outputs
+    buf.extend_from_slice(&1u32.to_le_bytes()); // n_layers
+    buf.extend_from_slice(&0u64.to_le_bytes()); // schema_hash
+    buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+    buf.extend_from_slice(&0.0f32.to_le_bytes()); // mean[0]
+    buf.extend_from_slice(&1.0f32.to_le_bytes()); // scale[0]
+    buf.extend_from_slice(&1u32.to_le_bytes()); // in_dim
+    buf.extend_from_slice(&1u32.to_le_bytes()); // out_dim
+    buf.push(0); // activation
+    buf.push(3); // weight_dtype = 3 (unknown)
+    buf.extend_from_slice(&[0, 0]);
+    buf.extend_from_slice(&1.0f32.to_le_bytes()); // 1 weight as f32 (won't be reached)
+    buf.extend_from_slice(&0.0f32.to_le_bytes()); // bias
+    let aligned = AlignedBuf::from_slice(&buf);
+    let result = Model::from_bytes(aligned.as_bytes());
+    assert!(matches!(
+        result,
+        Err(crate::error::PickerError::UnknownWeightDtype { byte: 3 })
+    ));
 }
 
 #[test]

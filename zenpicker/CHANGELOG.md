@@ -9,6 +9,22 @@
 
 (none queued)
 
+### Added
+
+- `WeightDtype::I8` weight-storage variant (per-output-neuron 8-bit
+  quantization with f32 scale-per-column). 26 % of f32 size, 52 %
+  of f16 size — and on the v2.1 corpus a slight *win* on mean
+  overhead (−0.11 pp) and argmin accuracy (+1.0 pp). Bake via
+  `bake_picker.py --dtype i8`. Binary format extension is purely
+  additive: parser rejects unknown dtype bytes with
+  `UnknownWeightDtype`, existing F32/F16 bakes parse unchanged.
+
+### Fixed
+
+- `tools/bake_picker.py` docstring no longer claims the runtime
+  *multiplies* by `scaler_scale` — that was the pre-0.1 convention
+  and was fixed to divide before the first publish.
+
 ## [0.1.0] - 2026-04-30
 
 First public release. Codec-agnostic picker runtime, baked-MLP
@@ -135,10 +151,11 @@ inference, safety machinery, and a canonical training pipeline.
 - `pixel_budget` and `hf_max_blocks` are `#[doc(hidden)]` in
   `zenanalyze`; v2.1 picker generalizes to 2 MP cleanly per the
   budget-research probe but we have no public knob today.
-- i8 weight-storage variant — measured to be a *strict* win on
-  the v2.1 model (mean +0.10pp, argmin acc +1.0pp, 26 % the
-  size of f32) but the v1 binary format only encodes
-  `WeightDtype::F32 / F16` today; binary-format addition is
-  pending.
+- i8 weight-storage variant landed in `[Unreleased]` (per-output
+  scales, additive parser change). Re-baking shipped models with
+  `--dtype i8` gives ~26 % the f32 size with no quality loss;
+  re-bake step deferred to a follow-up so the codec adopters can
+  decide whether to flip the on-disk format on their own
+  release cadence.
 - Generational re-encode picker (round-trip JPEG-source case) is
   on the v0.3 roadmap.
