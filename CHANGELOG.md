@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `analyze_with_dispatch_plan` (issue #53, stages 0 + 1.5)
+
+- **New public entry point `analyze_with_dispatch_plan`** alongside
+  the existing `analyze_features`. Inspects image dimensions and Tier
+  1 + strict-grayscale output to narrow the remaining-tier query
+  before running Tier 2 / Tier 3. Existing `analyze_features` is
+  unchanged — codecs opt in by switching call sites.
+- **New public type `DispatchHints`** (`#[non_exhaustive]`) with
+  `target_zq` / `content_hash` fields reserved for Stage 2 +
+  result-cache work. Stages 0 + 1.5 do not consume any hint today;
+  the type ships now so future stages can land additively.
+- **Stage 0**: empty-feature requests short-circuit; ≤ 64 K-pixel
+  images get the budget bumped to exhaustive; ≥ 8 MP images record
+  an internal extended-pass flag for a future Stage 2 retry.
+- **Stage 1.5**: when the strict-grayscale classifier reports
+  `is_grayscale = true`, the chroma half of Tiers 2 / 3 is dropped
+  (`CHROMA_DROP_FEATURES`); when `uniformity > 0.95`, the saturating
+  Tier 3 percentile columns are dropped (`SATURATING_DROP_FEATURES`).
+  Dropped features come back as `None` from
+  `AnalysisResults::get` — no caller ever sees garbage.
+- **Stage 2** (extended-budget retry on budget-sensitive features
+  when the extended-pass flag is set) is **deferred** until the
+  imazen/zenanalyze#47 corpus sweep validates the threshold values.
+
 ### Added — zenpicker size-invariance discipline
 
 - **Size invariance is a safety property.** The picker is now

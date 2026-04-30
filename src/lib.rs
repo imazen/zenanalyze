@@ -163,6 +163,7 @@
 
 mod alpha;
 mod dimensions;
+pub(crate) mod dispatch;
 pub mod feature;
 mod grayscale;
 pub(crate) mod luma;
@@ -173,6 +174,8 @@ pub(crate) mod tier2_chroma;
 pub(crate) mod tier3;
 #[cfg(feature = "experimental")]
 pub(crate) mod tier_depth;
+
+pub use dispatch::DispatchHints;
 
 use core::fmt;
 
@@ -641,6 +644,67 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     }
 
     Ok((raw, geometry))
+}
+
+/// Adaptive analyzer entry. Inspects image dimensions and the
+/// cheap Tier 1 + strict-grayscale signals, then runs only the
+/// remaining tiers + features the picker actually needs. Layered
+/// on top of [`analyze_features`] — the existing entry stays
+/// available; codecs opt into the dispatch tree by switching call
+/// sites.
+///
+/// See issue [imazen/zenanalyze#53](https://github.com/imazen/zenanalyze/issues/53)
+/// for the full design and per-stage rationale.
+///
+/// # Stages (this PR ships 0 + 1.5)
+///
+/// - **Stage 0** (free, runs in <1 µs): empty-feature requests
+///   short-circuit; ≤ 64 K-pixel images get the budget bumped to
+///   exhaustive; ≥ 8 MP images record an internal flag for a
+///   future Stage 2 retry.
+/// - **Stage 1**: Tier 1 + strict-grayscale + alpha + dimension +
+///   depth features run as today (no change to tier internals).
+/// - **Stage 1.5**: when Tier 1 reports `is_grayscale = true`, the
+///   chroma half of Tiers 2 / 3 is dropped from the remaining
+///   query; when `uniformity > 0.95`, the saturating Tier 3
+///   percentile columns are dropped. Dropped features come back as
+///   `None` from [`feature::AnalysisResults::get`] — the layered
+///   defense in [`feature::RawAnalysis::into_results`] guarantees
+///   no caller ever sees garbage for a dropped feature.
+/// - **Stage 2** (extended-budget retry on budget-sensitive
+///   features) is **deferred** until the imazen/zenanalyze#47
+///   corpus sweep validates the threshold values.
+///
+/// # Hints
+///
+/// `hints` is advisory; pass `None` for safe defaults. Today the
+/// hint fields ([`DispatchHints::target_zq`],
+/// [`DispatchHints::content_hash`]) are not consumed — they exist
+/// so future stages (corpus#47-validated Stage 2 budget tuning,
+/// content-hash result caching) can land without a public-signature
+/// change.
+///
+/// # Stability
+///
+/// Same opaque-results contract as [`analyze_features`]. Output of
+/// [`feature::AnalysisResults::get`] is unchanged for any feature
+/// the dispatch plan didn't drop, modulo the
+/// [crate-level threshold contract](crate#threshold-contract---iterating-during-01x).
+/// Dropped features' values come back as `None`, never as a stale
+/// or zero-default `Some(_)`.
+///
+/// # Errors
+///
+/// Same as [`analyze_features`] — [`AnalyzeError::Convert`] from
+/// [`zenpixels_convert::RowConverter`] when the source descriptor
+/// isn't supported, [`AnalyzeError::Internal`] for unexpected
+/// failures.
+pub fn analyze_with_dispatch_plan(
+    slice: PixelSlice<'_>,
+    query: &feature::AnalysisQuery,
+    hints: Option<&DispatchHints>,
+) -> Result<feature::AnalysisResults, AnalyzeError> {
+    dispatch::run(slice, query, hints)
 }
 
 #[doc(hidden)]
