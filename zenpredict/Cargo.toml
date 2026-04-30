@@ -1,0 +1,45 @@
+[package]
+name = "zenpredict"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+repository = "https://github.com/imazen/zenanalyze"
+description = "Zero-copy MLP runtime: parse a packed binary model (ZNPR v2), run scaler + forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg/zenwebp/zenavif/zenjxl picker selection and zensim V0.4 perceptual distance."
+keywords = ["mlp", "inference", "zero-copy", "no-std"]
+categories = ["multimedia::images", "no-std"]
+authors = ["Lilith River <lilith@imazen.io>"]
+rust-version = "1.93"
+readme = "README.md"
+
+[lib]
+name = "zenpredict"
+
+[features]
+default = ["std", "bake"]
+# `std::error::Error` impls and `f32::exp` for the linear-domain
+# argmin transform. `no_std + alloc` builds drop these — score
+# transforms beyond `Identity` will currently silently degrade (see
+# `argmin::ScoreTransform::Exp` docs).
+std = []
+# Rust-side ZNPR v2 composer for round-trip tests and placeholder
+# weights. Pulls in nothing extra; gated only because consumers
+# loading pre-baked `.bin` blobs from `include_bytes!` don't need
+# the writer code in their binary.
+bake = ["std"]
+
+[dependencies]
+# Zero-copy byte → typed slice reinterpret without `unsafe` in our
+# tree. Tiny, no_std, well-audited.
+bytemuck = { version = "1.23", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "small_rng"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
