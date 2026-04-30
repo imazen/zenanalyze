@@ -1453,6 +1453,32 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::PatchFractionFast);
         s = s.with(AnalysisFeature::QuantSurvivalY);
         s = s.with(AnalysisFeature::QuantSurvivalUv);
+        // Percentile variants (#42 / #49). Same per-block buffers
+        // as the means; dispatch must drag Tier 3 in when only a
+        // percentile is requested, otherwise the per-feature
+        // sample-count floor in `tier3.rs` never fires and the
+        // result-map gets the default 0.0.
+        s = s.with(AnalysisFeature::AqMapP50);
+        s = s.with(AnalysisFeature::AqMapP75);
+        s = s.with(AnalysisFeature::AqMapP90);
+        s = s.with(AnalysisFeature::AqMapP95);
+        s = s.with(AnalysisFeature::AqMapP99);
+        s = s.with(AnalysisFeature::NoiseFloorYP25);
+        s = s.with(AnalysisFeature::NoiseFloorYP50);
+        s = s.with(AnalysisFeature::NoiseFloorYP75);
+        s = s.with(AnalysisFeature::NoiseFloorYP90);
+        s = s.with(AnalysisFeature::NoiseFloorUvP25);
+        s = s.with(AnalysisFeature::NoiseFloorUvP50);
+        s = s.with(AnalysisFeature::NoiseFloorUvP75);
+        s = s.with(AnalysisFeature::NoiseFloorUvP90);
+        s = s.with(AnalysisFeature::QuantSurvivalYP10);
+        s = s.with(AnalysisFeature::QuantSurvivalYP25);
+        s = s.with(AnalysisFeature::QuantSurvivalYP50);
+        s = s.with(AnalysisFeature::QuantSurvivalYP75);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP10);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP25);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP50);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP75);
     }
     #[cfg(feature = "composites")]
     {
@@ -1490,6 +1516,29 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         s = s.with(AnalysisFeature::PatchFractionFast);
         s = s.with(AnalysisFeature::QuantSurvivalY);
         s = s.with(AnalysisFeature::QuantSurvivalUv);
+        // Percentile variants (#49) — same per-block source data
+        // as the means; gate the DCT pass on them too.
+        s = s.with(AnalysisFeature::AqMapP50);
+        s = s.with(AnalysisFeature::AqMapP75);
+        s = s.with(AnalysisFeature::AqMapP90);
+        s = s.with(AnalysisFeature::AqMapP95);
+        s = s.with(AnalysisFeature::AqMapP99);
+        s = s.with(AnalysisFeature::NoiseFloorYP25);
+        s = s.with(AnalysisFeature::NoiseFloorYP50);
+        s = s.with(AnalysisFeature::NoiseFloorYP75);
+        s = s.with(AnalysisFeature::NoiseFloorYP90);
+        s = s.with(AnalysisFeature::NoiseFloorUvP25);
+        s = s.with(AnalysisFeature::NoiseFloorUvP50);
+        s = s.with(AnalysisFeature::NoiseFloorUvP75);
+        s = s.with(AnalysisFeature::NoiseFloorUvP90);
+        s = s.with(AnalysisFeature::QuantSurvivalYP10);
+        s = s.with(AnalysisFeature::QuantSurvivalYP25);
+        s = s.with(AnalysisFeature::QuantSurvivalYP50);
+        s = s.with(AnalysisFeature::QuantSurvivalYP75);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP10);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP25);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP50);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP75);
     }
     // ScreenContentLikelihood reads `patch_fraction` (DCT-derived)
     // when experimental is on; falls back to non-DCT formula otherwise.
@@ -1792,6 +1841,20 @@ impl AnalysisResults {
             return;
         }
         let v = v.into();
+        // Skip the `f32::NAN` sentinel. Tiers emit NaN to signal
+        // "this feature is unreliable for this image" (e.g. percentile
+        // features below their per-feature minimum-sample-count floor;
+        // see issue #49). Keeping NaN out of the public results forces
+        // the codec's OOD-fallback path on those inputs rather than
+        // silently propagating noisy point estimates as if they were
+        // real signal. Picker-side `first_out_of_distribution(...)`
+        // would also catch the NaN, but skipping at the writer level
+        // is the cleaner safety contract: the absence is the signal.
+        if let FeatureValue::F32(x) = v
+            && x.is_nan()
+        {
+            return;
+        }
         // Insertion-sort by id. Up to ~30 entries; binary search +
         // memmove would be the same cost as a linear walk here.
         let mut i = 0;

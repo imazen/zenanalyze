@@ -37,6 +37,26 @@ use archmage::{incant, magetypes};
 /// Re-exported as `AnalyzerConfig::default().hf_max_blocks`.
 pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 1024;
 
+/// Minimum sampled-block count below which percentile features
+/// reading from per-block sorted buffers (`aq_map_p*`,
+/// `noise_floor_y/uv_p*`, `quant_survival_y/uv_p*`) become
+/// statistically meaningless. Below this floor the feature emits
+/// `f32::NAN`, which `AnalysisResults::set` skips, so the entry
+/// drops out of the result map entirely. The picker's OOD-bounds
+/// machinery then routes those images into a known-good rescue
+/// fallback rather than trusting a noisy point estimate.
+///
+/// The floor is per the table in issue #49: 100 blocks ≈ an 80×80
+/// image at the 8×8 block grid. Smaller images (typical thumbnail
+/// territory) fall below and trigger the safety path.
+///
+/// The non-percentile means (`aq_map_mean`, `aq_map_std`,
+/// `noise_floor_y/uv` (which is p10), `quant_survival_y/uv`,
+/// `compressibility_y/uv`, `gradient_fraction`, `patch_fraction*`)
+/// are NOT gated — means stay meaningful at low N where percentile
+/// reads do not.
+pub(crate) const MIN_BLOCKS_FOR_PERCENTILE: u32 = 100;
+
 /// Fill in `high_freq_energy_ratio` and `luma_histogram_entropy`.
 ///
 /// The `run_dct` runtime bool gates the per-block DCT pass — when
@@ -1209,14 +1229,20 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         };
         sort_f32(&mut quant_y_blocks);
         sort_f32(&mut quant_uv_blocks);
-        quant_survival_y_p10 = qs_at(&quant_y_blocks, 0.10);
-        quant_survival_y_p25 = qs_at(&quant_y_blocks, 0.25);
-        quant_survival_y_p50 = qs_at(&quant_y_blocks, 0.50);
-        quant_survival_y_p75 = qs_at(&quant_y_blocks, 0.75);
-        quant_survival_uv_p10 = qs_at(&quant_uv_blocks, 0.10);
-        quant_survival_uv_p25 = qs_at(&quant_uv_blocks, 0.25);
-        quant_survival_uv_p50 = qs_at(&quant_uv_blocks, 0.50);
-        quant_survival_uv_p75 = qs_at(&quant_uv_blocks, 0.75);
+        // Per-feature minimum-sample-count floor (#49). At < 100
+        // blocks the per-block survival distribution is too sparse
+        // for stable p10/p25/p50/p75 reads.
+        let qs_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
+        let qs_or_nan =
+            |arr: &[f32], q: f32| -> f32 { if qs_floor_ok { qs_at(arr, q) } else { f32::NAN } };
+        quant_survival_y_p10 = qs_or_nan(&quant_y_blocks, 0.10);
+        quant_survival_y_p25 = qs_or_nan(&quant_y_blocks, 0.25);
+        quant_survival_y_p50 = qs_or_nan(&quant_y_blocks, 0.50);
+        quant_survival_y_p75 = qs_or_nan(&quant_y_blocks, 0.75);
+        quant_survival_uv_p10 = qs_or_nan(&quant_uv_blocks, 0.10);
+        quant_survival_uv_p25 = qs_or_nan(&quant_uv_blocks, 0.25);
+        quant_survival_uv_p50 = qs_or_nan(&quant_uv_blocks, 0.50);
+        quant_survival_uv_p75 = qs_or_nan(&quant_uv_blocks, 0.75);
     }
 
     // Batched log10(1 + ac) over `block_acs` via magetypes `ln_lowp`,
@@ -1253,11 +1279,37 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             (1.0 + v as f64).log10() as f32
         }
     };
-    let aq_map_p50 = log10_at(&aq_sorted, 0.50);
-    let aq_map_p75 = log10_at(&aq_sorted, 0.75);
-    let aq_map_p90 = log10_at(&aq_sorted, 0.90);
-    let aq_map_p95 = log10_at(&aq_sorted, 0.95);
-    let aq_map_p99 = log10_at(&aq_sorted, 0.99);
+    // Per-feature minimum-sample-count floor (#49). Below the floor
+    // the percentile reads return statistically meaningless values
+    // (e.g. p99 of 4 samples is the second-largest of 4); emitting
+    // `f32::NAN` short-circuits to OOD fallback in the codec rather
+    // than letting the picker train against noise.
+    let aq_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
+    let aq_map_p50 = if aq_floor_ok {
+        log10_at(&aq_sorted, 0.50)
+    } else {
+        f32::NAN
+    };
+    let aq_map_p75 = if aq_floor_ok {
+        log10_at(&aq_sorted, 0.75)
+    } else {
+        f32::NAN
+    };
+    let aq_map_p90 = if aq_floor_ok {
+        log10_at(&aq_sorted, 0.90)
+    } else {
+        f32::NAN
+    };
+    let aq_map_p95 = if aq_floor_ok {
+        log10_at(&aq_sorted, 0.95)
+    } else {
+        f32::NAN
+    };
+    let aq_map_p99 = if aq_floor_ok {
+        log10_at(&aq_sorted, 0.99)
+    } else {
+        f32::NAN
+    };
 
     // Noise-floor estimate via 10th-percentile per-block low-AC-energy.
     // Flat blocks' low-AC is residual noise; the 10th percentile
@@ -1285,21 +1337,29 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     sort_in_place(&mut block_low_cb);
     sort_in_place(&mut block_low_cr);
     let nf_scale = |raw: f32| -> f32 { ((raw / 15.0).sqrt() / 32.0).clamp(0.0, 1.0) };
+    // `noise_floor_y` and `noise_floor_uv` ARE percentile reads (p10),
+    // but they're the original 0.1.0-stable features the picker calls
+    // by name; gating them on `MIN_BLOCKS_FOR_PERCENTILE` would change
+    // shipped behavior. Leave the means-side reads ungated; only the
+    // p25/p50/p75/p90 variants added in #42 take the floor (#49).
     let noise_floor_y = nf_scale(quantile_at(&block_low_y, 0.10));
-    let noise_floor_y_p25 = nf_scale(quantile_at(&block_low_y, 0.25));
-    let noise_floor_y_p50 = nf_scale(quantile_at(&block_low_y, 0.50));
-    let noise_floor_y_p75 = nf_scale(quantile_at(&block_low_y, 0.75));
-    let noise_floor_y_p90 = nf_scale(quantile_at(&block_low_y, 0.90));
+    let nf_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
+    let nf_or_nan = |raw: f32| -> f32 { if nf_floor_ok { nf_scale(raw) } else { f32::NAN } };
+    let noise_floor_y_p25 = nf_or_nan(quantile_at(&block_low_y, 0.25));
+    let noise_floor_y_p50 = nf_or_nan(quantile_at(&block_low_y, 0.50));
+    let noise_floor_y_p75 = nf_or_nan(quantile_at(&block_low_y, 0.75));
+    let noise_floor_y_p90 = nf_or_nan(quantile_at(&block_low_y, 0.90));
     let nf_uv = |q: f32| -> f32 {
         let cb = nf_scale(quantile_at(&block_low_cb, q));
         let cr = nf_scale(quantile_at(&block_low_cr, q));
         cb.max(cr)
     };
+    let nf_uv_or_nan = |q: f32| -> f32 { if nf_floor_ok { nf_uv(q) } else { f32::NAN } };
     let noise_floor_uv = nf_uv(0.10);
-    let noise_floor_uv_p25 = nf_uv(0.25);
-    let noise_floor_uv_p50 = nf_uv(0.50);
-    let noise_floor_uv_p75 = nf_uv(0.75);
-    let noise_floor_uv_p90 = nf_uv(0.90);
+    let noise_floor_uv_p25 = nf_uv_or_nan(0.25);
+    let noise_floor_uv_p50 = nf_uv_or_nan(0.50);
+    let noise_floor_uv_p75 = nf_uv_or_nan(0.75);
+    let noise_floor_uv_p90 = nf_uv_or_nan(0.90);
 
     let gradient_fraction = if blocks_sampled > 0 {
         gradient_blocks as f32 / blocks_sampled as f32

@@ -597,8 +597,23 @@ pub(crate) fn extract_tier1_into_dispatch(
         // count crosses each quantile. Bin index doubles as the
         // feature value (bin width = 1 luma unit). Peak = highest
         // non-empty bin.
+        //
+        // Per-feature minimum-sample-count floor (#49): below
+        // `MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE` (1024 sampled
+        // interior pixels — roughly a 32×32 image at full sampling)
+        // the percentile read is statistically meaningless. Emit
+        // `f32::NAN` for all five fields so `AnalysisResults::set`
+        // drops them out of the result map; codec falls back via
+        // its OOD-bounds machinery.
+        const MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE: u64 = 1024;
         let total: u64 = stats.laplacian_histogram.iter().map(|&c| c as u64).sum();
-        if total > 0 {
+        if total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE {
+            out.laplacian_variance_p50 = f32::NAN;
+            out.laplacian_variance_p75 = f32::NAN;
+            out.laplacian_variance_p90 = f32::NAN;
+            out.laplacian_variance_p99 = f32::NAN;
+            out.laplacian_variance_peak = f32::NAN;
+        } else {
             let mut acc: u64 = 0;
             let mut p50: u32 = 0;
             let mut p75: u32 = 0;

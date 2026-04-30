@@ -389,8 +389,21 @@ pub fn analyze_features(
     // orchestrator-style callers like zenjpeg's ADAPTIVE_FEATURES,
     // which doesn't ask for LaplacianVariance and currently pays
     // the full cost of the separate SIMD row walk anyway.
+    // Trigger the laplacian SIMD pass on the variance feature OR
+    // any of the percentile variants (#42 / #49). Without the P*
+    // additions, requesting only `LaplacianVariancePeak` would skip
+    // the whole histogram pass and leave RawAnalysis at zeros,
+    // bypassing the per-feature minimum-sample-count floor (#49).
     #[cfg(feature = "experimental")]
-    let tier1_wants_laplacian = features.contains(feature::AnalysisFeature::LaplacianVariance);
+    let tier1_wants_laplacian = features.intersects(
+        feature::FeatureSet::new()
+            .with(feature::AnalysisFeature::LaplacianVariance)
+            .with(feature::AnalysisFeature::LaplacianVarianceP50)
+            .with(feature::AnalysisFeature::LaplacianVarianceP75)
+            .with(feature::AnalysisFeature::LaplacianVarianceP90)
+            .with(feature::AnalysisFeature::LaplacianVarianceP99)
+            .with(feature::AnalysisFeature::LaplacianVariancePeak),
+    );
     #[cfg(not(feature = "experimental"))]
     let tier1_wants_laplacian = false;
 

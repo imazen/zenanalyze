@@ -3805,3 +3805,218 @@ mod sanity_matrix {
         }
     }
 }
+
+// =====================================================================
+// Issue #49: per-feature minimum-sample-count floor for percentile
+// features. Below the floor each feature emits `f32::NAN`, which
+// `AnalysisResults::set` skips, so the entry drops out of the public
+// result map and the codec's OOD-fallback path is engaged.
+// =====================================================================
+
+#[cfg(feature = "experimental")]
+#[cfg(test)]
+mod sample_count_floor {
+    use super::*;
+    use crate::PixelSlice;
+    use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet, RawAnalysis};
+    use zenpixels::PixelDescriptor;
+
+    /// All percentile features that #49 gates. Read from this once
+    /// rather than spelling the lists out at every assertion.
+    const PERCENTILE_FEATURES: &[AnalysisFeature] = &[
+        // tier3 — `blocks_sampled` floor (100 blocks)
+        AnalysisFeature::AqMapP50,
+        AnalysisFeature::AqMapP75,
+        AnalysisFeature::AqMapP90,
+        AnalysisFeature::AqMapP95,
+        AnalysisFeature::AqMapP99,
+        AnalysisFeature::NoiseFloorYP25,
+        AnalysisFeature::NoiseFloorYP50,
+        AnalysisFeature::NoiseFloorYP75,
+        AnalysisFeature::NoiseFloorYP90,
+        AnalysisFeature::NoiseFloorUvP25,
+        AnalysisFeature::NoiseFloorUvP50,
+        AnalysisFeature::NoiseFloorUvP75,
+        AnalysisFeature::NoiseFloorUvP90,
+        AnalysisFeature::QuantSurvivalYP10,
+        AnalysisFeature::QuantSurvivalYP25,
+        AnalysisFeature::QuantSurvivalYP50,
+        AnalysisFeature::QuantSurvivalYP75,
+        AnalysisFeature::QuantSurvivalUvP10,
+        AnalysisFeature::QuantSurvivalUvP25,
+        AnalysisFeature::QuantSurvivalUvP50,
+        AnalysisFeature::QuantSurvivalUvP75,
+        // tier1 laplacian — `interior_pixels` floor (1024)
+        AnalysisFeature::LaplacianVarianceP50,
+        AnalysisFeature::LaplacianVarianceP75,
+        AnalysisFeature::LaplacianVarianceP90,
+        AnalysisFeature::LaplacianVarianceP99,
+        AnalysisFeature::LaplacianVariancePeak,
+    ];
+
+    fn percentile_set() -> FeatureSet {
+        let mut s = FeatureSet::new();
+        for f in PERCENTILE_FEATURES {
+            s = s.with(*f);
+        }
+        s
+    }
+
+    fn run_at(w: u32, h: u32, seed: u32) -> crate::feature::AnalysisResults {
+        let rgb = synth_rgb(w, h, seed);
+        let stride = (w as usize) * 3;
+        let slice = PixelSlice::new(&rgb, w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+        let q = AnalysisQuery::new(percentile_set());
+        crate::analyze_features(slice, &q).unwrap()
+    }
+
+    /// Unit-level invariant: a NaN written into a `RawAnalysis` field
+    /// drops out of the converted `AnalysisResults` rather than
+    /// surfacing as `Some(NaN)` for the codec to misinterpret.
+    #[test]
+    fn nan_in_raw_drops_from_results() {
+        // Synthesize a minimal RawAnalysis with a NaN in one
+        // percentile field and a real value in another. The result
+        // map should contain the real one and skip the NaN.
+        let raw = RawAnalysis {
+            aq_map_p50: f32::NAN,
+            aq_map_p99: 0.42,
+            ..RawAnalysis::default()
+        };
+        let requested = FeatureSet::new()
+            .with(AnalysisFeature::AqMapP50)
+            .with(AnalysisFeature::AqMapP99);
+        let geom = crate::feature::ImageGeometry::new(32, 32);
+        let descriptor = PixelDescriptor::RGB8_SRGB;
+        let r = raw.into_results(requested, geom, descriptor);
+        assert!(
+            r.get(AnalysisFeature::AqMapP50).is_none(),
+            "NaN should drop out of results"
+        );
+        assert_eq!(
+            r.get(AnalysisFeature::AqMapP99).and_then(|v| v.as_f32()),
+            Some(0.42),
+            "non-NaN values should survive"
+        );
+    }
+
+    /// Tiny image — well below every percentile floor. Every gated
+    /// feature must drop out of the result map.
+    #[test]
+    fn tiny_image_drops_all_percentile_features() {
+        let r = run_at(32, 32, 0);
+        for f in PERCENTILE_FEATURES {
+            assert!(
+                r.get(*f).is_none(),
+                "32×32 image should drop {f:?} (id={}) below the sample-count floor — got {:?}",
+                f.id(),
+                r.get(*f),
+            );
+        }
+    }
+
+    /// Image just above the tier3 floor. 80×80 → exactly 100 8×8
+    /// blocks, matches `MIN_BLOCKS_FOR_PERCENTILE`. tier1 laplacian
+    /// needs 1024 interior pixels — 80×80 has 78×78 = 6084 interior,
+    /// also well above the 1024 floor — so all features should
+    /// surface.
+    #[test]
+    fn boundary_above_keeps_percentile_features() {
+        let r = run_at(80, 80, 0);
+        // tier3 features should be present at exactly the floor.
+        for f in &[
+            AnalysisFeature::AqMapP50,
+            AnalysisFeature::AqMapP99,
+            AnalysisFeature::NoiseFloorYP50,
+            AnalysisFeature::NoiseFloorUvP50,
+            AnalysisFeature::QuantSurvivalYP50,
+            AnalysisFeature::LaplacianVarianceP50,
+            AnalysisFeature::LaplacianVariancePeak,
+        ] {
+            let got = r.get(*f).and_then(|v| v.as_f32());
+            assert!(
+                got.is_some_and(|x| x.is_finite()),
+                "80×80 should yield finite {f:?} — got {got:?}",
+            );
+        }
+    }
+
+    /// Image just below the tier3 floor. 79×79 → 9×9 = 81 blocks <
+    /// 100. tier3 percentiles should drop; tier1 laplacian (77×77 =
+    /// 5929 interior pixels) stays above 1024 and survives.
+    #[test]
+    fn boundary_below_drops_tier3_keeps_tier1_laplacian() {
+        let r = run_at(79, 79, 0);
+        for f in &[
+            AnalysisFeature::AqMapP50,
+            AnalysisFeature::AqMapP99,
+            AnalysisFeature::NoiseFloorYP50,
+            AnalysisFeature::QuantSurvivalYP50,
+        ] {
+            assert!(
+                r.get(*f).is_none(),
+                "79×79 (81 blocks < 100 floor) should drop {f:?} — got {:?}",
+                r.get(*f),
+            );
+        }
+        // Laplacian percentile floor is on interior-pixel count (1024);
+        // 79×79 → 77×77 = 5929 interior, well above. Should survive.
+        assert!(
+            r.get(AnalysisFeature::LaplacianVarianceP50)
+                .and_then(|v| v.as_f32())
+                .is_some_and(|x| x.is_finite()),
+            "tier1 laplacian floor is per-pixel; 79×79 should survive",
+        );
+    }
+
+    /// Large image: every percentile feature should be present and
+    /// finite. Sanity check that the gates aren't accidentally
+    /// always-on.
+    #[test]
+    fn large_image_keeps_all_percentile_features() {
+        let r = run_at(256, 256, 0);
+        for f in PERCENTILE_FEATURES {
+            let got = r.get(*f).and_then(|v| v.as_f32());
+            assert!(
+                got.is_some_and(|x| x.is_finite()),
+                "256×256 should yield finite {f:?} (id={}) — got {got:?}",
+                f.id(),
+            );
+        }
+    }
+
+    /// Means and the original (0.1.0-stable) p10 reads aren't gated:
+    /// they stay meaningful at low N. Confirm those still surface
+    /// on the tiny image even when their percentile siblings drop.
+    #[test]
+    fn tiny_image_keeps_means_and_p10() {
+        let mut s = FeatureSet::new();
+        s = s.with(AnalysisFeature::AqMapMean);
+        s = s.with(AnalysisFeature::AqMapStd);
+        s = s.with(AnalysisFeature::NoiseFloorY);
+        s = s.with(AnalysisFeature::NoiseFloorUV);
+        s = s.with(AnalysisFeature::QuantSurvivalY);
+        s = s.with(AnalysisFeature::QuantSurvivalUv);
+        s = s.with(AnalysisFeature::LaplacianVariance);
+        let rgb = synth_rgb(32, 32, 0);
+        let slice = PixelSlice::new(&rgb, 32, 32, 32 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+        let q = AnalysisQuery::new(s);
+        let r = crate::analyze_features(slice, &q).unwrap();
+        for f in &[
+            AnalysisFeature::AqMapMean,
+            AnalysisFeature::AqMapStd,
+            AnalysisFeature::NoiseFloorY,
+            AnalysisFeature::NoiseFloorUV,
+            AnalysisFeature::QuantSurvivalY,
+            AnalysisFeature::QuantSurvivalUv,
+            AnalysisFeature::LaplacianVariance,
+        ] {
+            assert!(
+                r.get(*f)
+                    .and_then(|v| v.as_f32())
+                    .is_some_and(|x| x.is_finite()),
+                "{f:?} must survive on tiny image — only the percentile siblings are gated",
+            );
+        }
+    }
+}
