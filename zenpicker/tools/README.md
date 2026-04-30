@@ -18,6 +18,7 @@ config-name parser. Then runs these scripts against that config.
 | `validate_schema.py` | Re-train production HistGB with a chosen feature subset, report held-out metrics |
 | `capacity_sweep.py` | Architecture × cross-term-recipe sweep over the student MLP |
 | `adversarial_probe.py` | Corner-case spot-check for any model JSON: zeros / huge / NaN / Inf / single-feature spike. Asserts no NaN/Inf in output, top-1/top-2 gap ≥ 0, predicted bytes plausible. Exits 1 in `--strict` |
+| `size_invariance_probe.py` | Post-bake size-generalization gate. Resizes fixture images to each of `tiny / small / medium / large` and asserts the picker's argmin cell stays stable across them per `(image, target_zq)`. Counterpart to `train_hybrid.py`'s `PER_SIZE_TAIL` / `DATA_STARVED_SIZE` violations. Exits 1 in `--strict` when stability < threshold (default 90 %). See [SAFETY_PLANE.md](../SAFETY_PLANE.md#size-invariance-is-a-safety-property) |
 | `diagnose_picker.py` | Human-readable health report for any model JSON or .manifest.json. Works on legacy bakes that pre-date `safety_report` (falls back to a static MLP weight scan) |
 
 The [`tools/bake_picker.py`](../../tools/bake_picker.py) script (parent
@@ -101,7 +102,15 @@ python3 <zenanalyze>/tools/bake_roundtrip_check.py \
 #    a) Adversarial probe: zeros / huge / NaN / Inf / single-feature spike.
 python3 <zenanalyze>/zenpicker/tools/adversarial_probe.py --strict \
     --model benchmarks/<bake-base>.json
-#    b) Human-readable health report — review by eye.
+#    b) Size-invariance probe: resize fixture images to all four
+#       size_classes and assert the picker's argmin stays stable.
+#       The post-bake counterpart to train_hybrid.py's PER_SIZE_TAIL
+#       + DATA_STARVED_SIZE violations. See SAFETY_PLANE.md →
+#       "Size invariance is a safety property".
+python3 <zenanalyze>/zenpicker/tools/size_invariance_probe.py --strict \
+    --model        benchmarks/<bake-base>.json \
+    --features-tsv benchmarks/<features>.tsv
+#    c) Human-readable health report — review by eye.
 python3 <zenanalyze>/zenpicker/tools/diagnose_picker.py \
     --model benchmarks/<bake-base>.json
 ```
@@ -204,6 +213,8 @@ is enough at our 7000-row scale.
 | `LOW_ARGMIN` | val argmin accuracy below floor (default 30%) |
 | `HIGH_OVERHEAD` | val mean overhead exceeds ceiling (default 10%) |
 | `PER_ZQ_TAIL` | any single target_zq band's p99 overhead exceeds threshold (default 80%) — catches catastrophic misses concentrated in one quality band |
+| `PER_SIZE_TAIL` | any single `size_class`'s p99 overhead exceeds `max_per_size_p99_overhead_pct` (default 80%). Size invariance is a safety property — see [SAFETY_PLANE.md](../SAFETY_PLANE.md#size-invariance-is-a-safety-property) |
+| `DATA_STARVED_SIZE` | any `(size_class, target_zq)` cell has fewer than `min_train_rows_per_size_zq` training rows (default 50). Catches sweep harnesses that silently skip a size class |
 | `WORST_ROW` | any single (image, size, zq) row exceeds threshold (default 200%) |
 | `DATA_STARVED_CELL` | any cell has fewer member configs than threshold (default 3) |
 | `NAN_WEIGHTS` / `INF_WEIGHTS` / `NAN_PREDICTIONS` | NaN or Inf in MLP weights or val predictions |
@@ -242,6 +253,8 @@ Codec runtime emits a compile-time `FEATURE_BOUNDS: &[zenpicker::FeatureBounds]`
 ### Adversarial probe + diagnose (post-bake spot-check)
 
 `adversarial_probe.py --model <bake>.json --strict` runs ~10 corner inputs (zeros, huge, NaN, Inf, single-feature spike) and asserts no NaN/Inf in output, top-1/top-2 gap ≥ 0, predicted bytes plausible. Cheap CI gate after `bake_picker.py`.
+
+`size_invariance_probe.py --model <bake>.json --features-tsv <features>.tsv --strict` runs the picker against ~10 fixture images at all four `size_class` resizes and asserts the argmin cell stays stable across them per `(image, target_zq)`. The post-bake counterpart to `train_hybrid.py`'s `PER_SIZE_TAIL` / `DATA_STARVED_SIZE` violations — see [SAFETY_PLANE.md → "Size invariance is a safety property"](../SAFETY_PLANE.md#size-invariance-is-a-safety-property) for the rationale.
 
 `diagnose_picker.py --model <bake>.json` (or `--manifest <bake>.manifest.json`) prints a human-readable health report. Useful for reviewing a bake by eye. Falls back gracefully on legacy bakes (pre-`safety_report`) by computing a static MLP weight scan from the JSON layers.
 

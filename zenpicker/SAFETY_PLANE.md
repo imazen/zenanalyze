@@ -2,6 +2,20 @@
 
 Defends against the picker's worst-case failure mode: an out-of-distribution or adversarial image where the MLP confidently picks a config that produces zensim *catastrophically below* the user's `target_zq`. A 5–15% byte overage is acceptable; a 30-point quality miss is a product failure.
 
+## Size invariance is a safety property
+
+The picker MUST be near-optimal at every image `(width, height)` — not just at the four sample sizes (`tiny / small / medium / large`) we bin at training time. `size_class` is a *training-grid axis*, not a runtime axis: the codec resizes user images to whatever pixel count the caller requests, and the picker has to translate any of those into a sensible config. A picker whose argmin cell *flips drastically* when the same image is fed at a different size is encoding size as a categorical decision boundary instead of a smooth interpolation — which means at sizes the training grid didn't sample (e.g. 512×512 between `small=256²` and `medium=1024²`), the pick is whichever side of the boundary the cross-term landed on, and the codec has no idea.
+
+Treat this as a safety property on the same footing as out-of-distribution detection and the verify/rescue path:
+
+1. **In-trainer gate.** `train_hybrid.py` emits `safety_report.diagnostics.by_size` (mean / p99 / max overhead per `size_class`) and `safety_report.diagnostics.train_rows_by_size_zq` (training-row counts per `(size_class, target_zq)` cell). The strict gate fires `PER_SIZE_TAIL` when any single size's p99 exceeds `max_per_size_p99_overhead_pct` (default 80 %) and `DATA_STARVED_SIZE` when any `(size_class, zq)` cell has fewer than `min_train_rows_per_size_zq` (default 50) training rows. Both are structural — the codec's pareto sweep MUST emit rows at all four size classes per image (see `FOR_NEW_CODECS.md` Step 1.5).
+
+2. **Post-bake gate.** `tools/size_invariance_probe.py` resizes a fixture corpus (sampled from `~/work/codec-eval/codec-corpus/`) to each of `(64×64, 256×256, 1024×1024, native)` and asserts that the picker's argmin cell stays stable across the four sizes for each `(image, target_zq)` pair. `--strict` exits 1 when stability drops below `--threshold` (default 90 %). This is the picker's *generalization* test — analogous to `adversarial_probe.py` for out-of-distribution inputs.
+
+3. **Why this matters more than the global mean.** The `by_size` block on the v2.1 bake shows tiny p99 = 41.7 % vs medium = 18.1 % — the global mean overhead (1.92 %) hides a tail that lives almost entirely on small images. SLA-bound deployments that serve thumbnails see the worst of the picker's failure modes; the safety gate fires before the bake ships, not after.
+
+The picker itself stays codec-agnostic — `zenpicker` has no notion of width/height. The discipline lives in the training pipeline (the strict gate) and the bake-side probe (the post-bake check). What the runtime crate guarantees is that *whatever feature vector the codec hands it, including the `size_class` one-hot and `log_pixels` cross-terms, gets a deterministic forward pass*. The size-invariance guarantees come from the gates around that.
+
 ## Existing scaffolding (what we already have)
 
 - `zenjpeg/src/encode/zq.rs` defines a closed-loop `ZqTarget { max_passes, max_undershoot, BlockArtifactBound }` and a public `EncodeMetrics { achieved_score, achieved_max_block_artifact, passes_used, bytes, targets_met }`. `BytesEncoder::finish_with_metrics()` returns it (`encode/byte_encoders.rs:543`).

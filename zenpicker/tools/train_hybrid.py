@@ -489,6 +489,22 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     max_mean_overhead_pct=10.0,
     # No single zq band may have a p99 overhead this bad.
     max_per_zq_p99_overhead_pct=80.0,
+    # No single image-size class may have a p99 overhead this bad.
+    # Size invariance is a *safety property*: the picker must be
+    # near-optimal at every (width, height), not just on average.
+    # Tiny images (≤64×64) historically tail worst — tight per-bin
+    # gates catch a tiny-class blowup that the global mean would
+    # absorb. See SAFETY_PLANE.md → "Size invariance is a safety
+    # property" and the size_invariance_probe.py post-bake gate.
+    max_per_size_p99_overhead_pct=80.0,
+    # Each (size_class, target_zq) training cell must have at least
+    # this many rows. Below this, the teacher fits noise in a
+    # corner of the size×quality grid the picker still has to serve
+    # at inference. The codec's pareto sweep MUST emit rows for
+    # tiny / small / medium / large per image (see
+    # FOR_NEW_CODECS.md Step 1.5); this gate fires when the sweep
+    # silently skips a size class for a chunk of the corpus.
+    min_train_rows_per_size_zq=50,
     # No single (image, size, zq) row may overshoot by more than
     # this. Catches catastrophic individual failures.
     max_single_row_overhead_pct=200.0,
@@ -551,6 +567,28 @@ def compute_feature_bounds(feats, train_keys, feat_cols):
             "std": float(v_finite.std()),
             "n": int(v_finite.size),
         }
+    return out
+
+
+def count_train_rows_by_size_zq(meta_tr, size_classes, zq_targets):
+    """Count training rows per (size_class, zq) cell.
+
+    Size invariance discipline (see SAFETY_PLANE.md): the picker is a
+    feature-vector-in / argmin-out function — it has no notion of
+    image dimensions at runtime, so the codec must populate every
+    (size_class, target_zq) cell with enough training data for the
+    teacher to learn from. A sparsely-sampled cell silently trains
+    noise into a corner of the size × quality grid the picker still
+    has to serve at inference. This counter feeds the
+    `DATA_STARVED_SIZE` safety violation.
+
+    Returns: {size_class: {zq: int}} with every declared
+    `size_classes × zq_targets` combination present (zero when the
+    sweep emitted no rows for that cell)."""
+    out = {sz: {int(zq): 0 for zq in zq_targets} for sz in size_classes}
+    for _img, sz, zq in meta_tr:
+        if sz in out and int(zq) in out[sz]:
+            out[sz][int(zq)] += 1
     return out
 
 
@@ -728,6 +766,45 @@ def safety_check(diag, thresholds, objective: str):
                 f"PER_ZQ_TAIL: zq={zq} p99 overhead {m['p99_pct']:.1f}% "
                 f"> threshold {thresholds['max_per_zq_p99_overhead_pct']:.1f}%"
             )
+
+    # Size invariance: the picker must be near-optimal at every
+    # image (width, height), not just on the global average. Tiny
+    # images historically tail worst (small absolute headers
+    # dominate per-pixel cost) — a per-size p99 ceiling is the
+    # in-trainer counterpart to size_invariance_probe.py's
+    # post-bake stability check.
+    for sz, m in diag.get("by_size", {}).items():
+        if m["p99_pct"] > thresholds["max_per_size_p99_overhead_pct"]:
+            v.append(
+                f"PER_SIZE_TAIL: size_class={sz} p99 overhead {m['p99_pct']:.1f}% "
+                f"> threshold {thresholds['max_per_size_p99_overhead_pct']:.1f}% "
+                f"(picker is not size-invariant — see SAFETY_PLANE.md)"
+            )
+
+    # Data-starvation gate per (size_class, target_zq) training
+    # cell. Catches sweep harnesses that silently skip a size
+    # class for a chunk of the corpus, leaving the picker with
+    # too few examples to learn from at that (size, quality)
+    # corner. Codec's harness MUST emit rows for tiny / small /
+    # medium / large per image (FOR_NEW_CODECS.md Step 1.5).
+    starved = []
+    for sz, by_zq in diag.get("train_rows_by_size_zq", {}).items():
+        for zq, n in by_zq.items():
+            if n < thresholds["min_train_rows_per_size_zq"]:
+                starved.append((sz, zq, n))
+    if starved:
+        # Surface the worst (lowest-n) cells; capping at 6 lines
+        # keeps the log readable when a whole size class is missing.
+        starved.sort(key=lambda t: t[2])
+        examples = ", ".join(
+            f"{sz}/zq{zq}={n}" for (sz, zq, n) in starved[:6]
+        )
+        more = f" (+{len(starved) - 6} more)" if len(starved) > 6 else ""
+        v.append(
+            f"DATA_STARVED_SIZE: {len(starved)} (size_class, zq) cell(s) "
+            f"have train rows < {thresholds['min_train_rows_per_size_zq']}: "
+            f"{examples}{more}"
+        )
 
     if diag["worst_case"]:
         worst = diag["worst_case"][0]
@@ -1150,12 +1227,21 @@ def main():
         bl_tr, rch_tr, meta_tr, n_cells, ZQ_TARGETS, args.reach_threshold
     )
 
+    # Size-invariance discipline: count training rows per
+    # (size_class, zq) so the safety gate can flag a starved sweep
+    # corner before the picker ships a model that can't actually
+    # serve every (width, height) the codec is asked to encode.
+    train_rows_by_size_zq = count_train_rows_by_size_zq(
+        meta_tr, SIZE_CLASSES, ZQ_TARGETS
+    )
+
     # --- Safety report: assemble + check thresholds
     diag = {
         "argmin": {"train": student_argmin_tr, "val": student_argmin},
         "by_zq": by_zq,
         "by_size": by_size,
         "by_zq_size": by_zq_size,
+        "train_rows_by_size_zq": train_rows_by_size_zq,
         "worst_case": worst,
         "per_cell": per_cell,
         "mlp": mlp_health,
