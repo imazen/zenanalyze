@@ -809,6 +809,71 @@ features_table! {
     /// `u32`. Number of color channels in the source descriptor:
     /// 1 (grayscale), 3 (RGB), or 4 (RGBA). Pure descriptor lookup.
     ChannelCount = 67 : u32 => channel_count,
+
+    // ---------------- AqMap percentiles -----------------------------
+    // [`Self::AqMapMean`] / [`Self::AqMapStd`] already buffer
+    // per-block AC energy in `block_acs`. These percentiles sort the
+    // same buffer and read at the listed quantile, in log10 space
+    // matching `aq_map_mean`. Free incremental compute. Issue #42 →
+    // distributional features analysis 2026-04-30.
+    /// `f32`. log10 AC energy at the 50th percentile (median) over
+    /// 8×8 blocks. See [`Self::AqMapMean`] for the underlying
+    /// per-block accumulator.
+    #[cfg(feature = "experimental")]
+    AqMapP50 = 68 : f32 => aq_map_p50,
+    /// `f32`. log10 AC energy p75. Detail-floor signal —
+    /// distinguishes "uniformly busy" (high p75) from "mostly flat
+    /// with a few hard blocks" (low p75) where mean alone collapses
+    /// both into one number.
+    #[cfg(feature = "experimental")]
+    AqMapP75 = 69 : f32 => aq_map_p75,
+    /// `f32`. log10 AC energy p90.
+    #[cfg(feature = "experimental")]
+    AqMapP90 = 70 : f32 => aq_map_p90,
+    /// `f32`. log10 AC energy p95.
+    #[cfg(feature = "experimental")]
+    AqMapP95 = 71 : f32 => aq_map_p95,
+    /// `f32`. log10 AC energy p99 — peak-block detail. Picks up
+    /// localized hard blocks that drive the worst-case JPEG cost.
+    #[cfg(feature = "experimental")]
+    AqMapP99 = 72 : f32 => aq_map_p99,
+
+    // ---------------- NoiseFloor percentiles ------------------------
+    // [`Self::NoiseFloorY`] / [`Self::NoiseFloorUV`] already sort
+    // `block_low_*` buffers and read at p10. Same scaling
+    // (`sqrt(arr[idx]/15) / 32`, clamped to [0,1]) at additional
+    // quantiles surfaces noise *texture* (uniform vs streaky) to
+    // the picker. Zero added compute beyond per-quantile array
+    // index reads.
+    /// `f32`. Noise floor (Y) at the 25th percentile of per-block
+    /// low-AC energy. Same `[0, 1]` scaling as
+    /// [`Self::NoiseFloorY`] (which is p10).
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP25 = 73 : f32 => noise_floor_y_p25,
+    /// `f32`. Noise floor (Y) at the 50th percentile (median).
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP50 = 74 : f32 => noise_floor_y_p50,
+    /// `f32`. Noise floor (Y) at the 75th percentile.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP75 = 75 : f32 => noise_floor_y_p75,
+    /// `f32`. Noise floor (Y) at the 90th percentile — top-quartile
+    /// busy blocks. Higher = noisier in the dirtiest regions of the
+    /// image.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP90 = 76 : f32 => noise_floor_y_p90,
+    /// `f32`. Noise floor (UV) at p25 — `max(noise_floor_cb_p25,
+    /// noise_floor_cr_p25)`, same shape as [`Self::NoiseFloorUV`].
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP25 = 77 : f32 => noise_floor_uv_p25,
+    /// `f32`. Noise floor (UV) at p50.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP50 = 78 : f32 => noise_floor_uv_p50,
+    /// `f32`. Noise floor (UV) at p75.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP75 = 79 : f32 => noise_floor_uv_p75,
+    /// `f32`. Noise floor (UV) at p90.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP90 = 80 : f32 => noise_floor_uv_p90,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1774,8 +1839,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the dimension features (issue #42, ids 56–67).
-        assert!(AnalysisFeature::from_u16(68).is_none());
+        // First unused id past the percentile features (issue #42 +
+        // distributional analysis 2026-04-30, ids 56–80).
+        assert!(AnalysisFeature::from_u16(81).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 

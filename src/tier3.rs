@@ -83,8 +83,21 @@ pub fn populate_tier3(
             out.patch_fraction = dct.patch_fraction;
             out.aq_map_mean = dct.aq_map_mean;
             out.aq_map_std = dct.aq_map_std;
+            out.aq_map_p50 = dct.aq_map_p50;
+            out.aq_map_p75 = dct.aq_map_p75;
+            out.aq_map_p90 = dct.aq_map_p90;
+            out.aq_map_p95 = dct.aq_map_p95;
+            out.aq_map_p99 = dct.aq_map_p99;
             out.noise_floor_y = dct.noise_floor_y;
             out.noise_floor_uv = dct.noise_floor_uv;
+            out.noise_floor_y_p25 = dct.noise_floor_y_p25;
+            out.noise_floor_y_p50 = dct.noise_floor_y_p50;
+            out.noise_floor_y_p75 = dct.noise_floor_y_p75;
+            out.noise_floor_y_p90 = dct.noise_floor_y_p90;
+            out.noise_floor_uv_p25 = dct.noise_floor_uv_p25;
+            out.noise_floor_uv_p50 = dct.noise_floor_uv_p50;
+            out.noise_floor_uv_p75 = dct.noise_floor_uv_p75;
+            out.noise_floor_uv_p90 = dct.noise_floor_uv_p90;
             out.gradient_fraction = dct.gradient_fraction;
             out.patch_fraction_fast = dct.patch_fraction_fast;
             out.quant_survival_y = dct.quant_survival_y;
@@ -145,6 +158,28 @@ struct Tier3DctStats {
     /// AC-energy / 15) on the existing Cb / Cr DCT coefficients,
     /// normalized to `[0, 1]` by dividing by 32.
     noise_floor_uv: f32,
+    /// Distributional companions to `aq_map_mean` / `aq_map_std`.
+    /// Same per-block `block_acs` buffer, sorted, read at the
+    /// listed quantile in log10 space. Set via the `experimental`
+    /// feature gate; zero when disabled.
+    aq_map_p50: f32,
+    aq_map_p75: f32,
+    aq_map_p90: f32,
+    aq_map_p95: f32,
+    aq_map_p99: f32,
+    /// Distributional companions to `noise_floor_y` / `noise_floor_uv`.
+    /// Same per-block `block_low_*` buffers, sorted, read at the
+    /// listed quantile, then put through the same
+    /// `sqrt(arr/15) / 32`-clamped scaling. UV variants emit
+    /// `max(cb_pX, cr_pX)`. Zero when experimental disabled.
+    noise_floor_y_p25: f32,
+    noise_floor_y_p50: f32,
+    noise_floor_y_p75: f32,
+    noise_floor_y_p90: f32,
+    noise_floor_uv_p25: f32,
+    noise_floor_uv_p50: f32,
+    noise_floor_uv_p75: f32,
+    noise_floor_uv_p90: f32,
     /// Fraction `[0, 1]` of sampled luma 8×8 blocks where the
     /// low-zigzag (indices 1–15, the 15 AC positions matched by
     /// the same `zz < 16` predicate as `high_freq_energy_ratio`)
@@ -781,8 +816,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction: 0.0,
             aq_map_mean: 0.0,
             aq_map_std: 0.0,
+            aq_map_p50: 0.0,
+            aq_map_p75: 0.0,
+            aq_map_p90: 0.0,
+            aq_map_p95: 0.0,
+            aq_map_p99: 0.0,
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
+            noise_floor_y_p25: 0.0,
+            noise_floor_y_p50: 0.0,
+            noise_floor_y_p75: 0.0,
+            noise_floor_y_p90: 0.0,
+            noise_floor_uv_p25: 0.0,
+            noise_floor_uv_p50: 0.0,
+            noise_floor_uv_p75: 0.0,
+            noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
@@ -809,8 +857,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction: 0.0,
             aq_map_mean: 0.0,
             aq_map_std: 0.0,
+            aq_map_p50: 0.0,
+            aq_map_p75: 0.0,
+            aq_map_p90: 0.0,
+            aq_map_p95: 0.0,
+            aq_map_p99: 0.0,
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
+            noise_floor_y_p25: 0.0,
+            noise_floor_y_p50: 0.0,
+            noise_floor_y_p75: 0.0,
+            noise_floor_y_p90: 0.0,
+            noise_floor_uv_p25: 0.0,
+            noise_floor_uv_p50: 0.0,
+            noise_floor_uv_p75: 0.0,
+            noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
@@ -1083,6 +1144,31 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     } else {
         (0.0, 0.0)
     };
+    // AqMap percentiles — sort `block_acs` once and read at p50/75/90/95/99
+    // in log10 space (matches `aq_map_mean`'s scale). The sort is amortized
+    // by the per-block work that produced the buffer.
+    let mut aq_sorted = block_acs.clone();
+    aq_sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    let log10_at = |arr: &[f32], q: f32| -> f32 {
+        if arr.is_empty() {
+            return 0.0;
+        }
+        let idx = ((arr.len() as f32 * q) as usize).min(arr.len() - 1);
+        let v = arr[idx];
+        if v <= 0.0 {
+            0.0
+        } else {
+            // log10(1 + v) matches the convention used for aq_map_mean
+            // (`log10_sum_and_sq_sum_dispatch` operates on
+            // `log10(1 + block_ac)`).
+            (1.0 + v as f64).log10() as f32
+        }
+    };
+    let aq_map_p50 = log10_at(&aq_sorted, 0.50);
+    let aq_map_p75 = log10_at(&aq_sorted, 0.75);
+    let aq_map_p90 = log10_at(&aq_sorted, 0.90);
+    let aq_map_p95 = log10_at(&aq_sorted, 0.95);
+    let aq_map_p99 = log10_at(&aq_sorted, 0.99);
 
     // Noise-floor estimate via 10th-percentile per-block low-AC-energy.
     // Flat blocks' low-AC is residual noise; the 10th percentile
@@ -1091,18 +1177,41 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // sqrt(low_ac / 15) (15 low-zigzag coefficients per block, since
     // index 0 = DC). Normalize by 32 to land on `[0, 1]`-ish — scale
     // chosen so a "noisy JPEG" reads ~0.5 and pristine reads <0.1.
-    let p10 = |arr: &mut [f32]| -> f32 {
+    // `quantile_idx`: for an `n`-element sorted array, the linearly
+    // interpolated index for fraction `q` ∈ [0, 1]. We round down
+    // (truncating) for cheap selection — at our sample sizes
+    // (≥ 256 blocks the picker cares about) the difference vs proper
+    // linear interp is below the noise floor.
+    let quantile_at = |arr: &[f32], q: f32| -> f32 {
         if arr.is_empty() {
             return 0.0;
         }
-        arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-        let idx = (arr.len() / 10).min(arr.len() - 1);
+        let idx = ((arr.len() as f32 * q) as usize).min(arr.len() - 1);
         arr[idx]
     };
-    let noise_floor_y = ((p10(&mut block_low_y) / 15.0).sqrt() / 32.0).clamp(0.0, 1.0);
-    let p10_cb = ((p10(&mut block_low_cb) / 15.0).sqrt() / 32.0).clamp(0.0, 1.0);
-    let p10_cr = ((p10(&mut block_low_cr) / 15.0).sqrt() / 32.0).clamp(0.0, 1.0);
-    let noise_floor_uv = p10_cb.max(p10_cr);
+    let sort_in_place = |arr: &mut [f32]| {
+        arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    };
+    sort_in_place(&mut block_low_y);
+    sort_in_place(&mut block_low_cb);
+    sort_in_place(&mut block_low_cr);
+    let nf_scale =
+        |raw: f32| -> f32 { ((raw / 15.0).sqrt() / 32.0).clamp(0.0, 1.0) };
+    let noise_floor_y = nf_scale(quantile_at(&block_low_y, 0.10));
+    let noise_floor_y_p25 = nf_scale(quantile_at(&block_low_y, 0.25));
+    let noise_floor_y_p50 = nf_scale(quantile_at(&block_low_y, 0.50));
+    let noise_floor_y_p75 = nf_scale(quantile_at(&block_low_y, 0.75));
+    let noise_floor_y_p90 = nf_scale(quantile_at(&block_low_y, 0.90));
+    let nf_uv = |q: f32| -> f32 {
+        let cb = nf_scale(quantile_at(&block_low_cb, q));
+        let cr = nf_scale(quantile_at(&block_low_cr, q));
+        cb.max(cr)
+    };
+    let noise_floor_uv = nf_uv(0.10);
+    let noise_floor_uv_p25 = nf_uv(0.25);
+    let noise_floor_uv_p50 = nf_uv(0.50);
+    let noise_floor_uv_p75 = nf_uv(0.75);
+    let noise_floor_uv_p90 = nf_uv(0.90);
 
     let gradient_fraction = if blocks_sampled > 0 {
         gradient_blocks as f32 / blocks_sampled as f32
@@ -1119,8 +1228,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         patch_fraction,
         aq_map_mean,
         aq_map_std,
+        aq_map_p50,
+        aq_map_p75,
+        aq_map_p90,
+        aq_map_p95,
+        aq_map_p99,
         noise_floor_y,
         noise_floor_uv,
+        noise_floor_y_p25,
+        noise_floor_y_p50,
+        noise_floor_y_p75,
+        noise_floor_y_p90,
+        noise_floor_uv_p25,
+        noise_floor_uv_p50,
+        noise_floor_uv_p75,
+        noise_floor_uv_p90,
         gradient_fraction,
         patch_fraction_fast,
         quant_survival_y,
