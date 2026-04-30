@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -34,6 +35,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+
+# 192-wide MLP on 30K rows is a tiny job. Pin to a single thread so
+# torch doesn't burn the whole CPU contending — single-threaded is
+# faster than the 16-way default on a job this small.
+torch.set_num_threads(1)
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -98,8 +106,9 @@ def train_student(
     val_loss_history: list[float] = []
     best_val = float("inf")
     bad_epochs = 0
-    patience = 15
+    patience = 8
     for ep in range(epochs):
+        ep_start = time.time()
         model.train()
         perm = torch.randperm(n_train)
         for i in range(0, n_train, batch_size):
@@ -119,10 +128,17 @@ def train_student(
             bad_epochs = 0
         else:
             bad_epochs += 1
+        if (ep + 1) % 5 == 0 or ep == 0:
+            sys.stderr.write(
+                f"    [{activation}] ep={ep + 1:3d} val_loss={v:.4f} "
+                f"best={best_val:.4f} ({time.time() - ep_start:.1f}s)\n"
+            )
+            sys.stderr.flush()
         if bad_epochs >= patience:
             sys.stderr.write(
                 f"    [{activation}] early stop ep={ep + 1} val_loss={v:.4f}\n"
             )
+            sys.stderr.flush()
             break
     return model, val_loss_history
 

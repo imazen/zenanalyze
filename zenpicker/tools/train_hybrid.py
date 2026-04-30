@@ -61,6 +61,121 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.neural_network import MLPRegressor
+
+
+# --- LeakyReLU student via PyTorch -------------------------------------------
+# sklearn's MLPRegressor only supports {identity, logistic, tanh, relu}, so a
+# leakyrelu run falls through to a small PyTorch student that mimics the
+# sklearn fit / predict / coefs_ / intercepts_ surface. This lets the rest of
+# train_hybrid (safety_check, diagnostics, JSON serialization) work unchanged.
+def _train_torch_leakyrelu_student(
+    X_tr: np.ndarray,
+    Y_tr: np.ndarray,
+    hidden_layer_sizes: tuple,
+    lr: float,
+    batch_size: int,
+    max_iter: int,
+    seed: int,
+    val_frac: float = 0.1,
+    n_iter_no_change: int = 30,
+    tol: float = 1e-6,
+    leaky_slope: float = 0.01,
+):
+    """Drop-in for `MLPRegressor.fit` returning an object that exposes
+    `.coefs_`, `.intercepts_`, `.predict`, `.loss_`, `.n_iter_`. The
+    network shape, init, loss (MSE), optimizer (Adam), and early-stopping
+    schedule mirror sklearn's defaults so the comparison stays apples-to-apples.
+    """
+    import torch  # lazy import — only needed when --activation leakyrelu
+    import torch.nn as nn
+
+    torch.set_num_threads(1)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    # Hold out an internal val slice for early stopping (matches sklearn's
+    # validation_fraction). The split is row-shuffled, not image-aware —
+    # the outer image-level holdout is already separated upstream.
+    n = X_tr.shape[0]
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n)
+    n_val = max(1, int(n * val_frac))
+    val_idx = perm[:n_val]
+    tr_idx = perm[n_val:]
+
+    Xt = torch.from_numpy(X_tr[tr_idx].astype(np.float32))
+    Yt = torch.from_numpy(Y_tr[tr_idx].astype(np.float32))
+    Xv = torch.from_numpy(X_tr[val_idx].astype(np.float32))
+    Yv = torch.from_numpy(Y_tr[val_idx].astype(np.float32))
+
+    n_in = X_tr.shape[1]
+    n_out = Y_tr.shape[1]
+    layers: list[nn.Module] = []
+    prev = n_in
+    for h in hidden_layer_sizes:
+        layers.append(nn.Linear(prev, h))
+        layers.append(nn.LeakyReLU(negative_slope=leaky_slope))
+        prev = h
+    layers.append(nn.Linear(prev, n_out))
+    net = nn.Sequential(*layers)
+
+    opt = torch.optim.Adam(net.parameters(), lr=lr)
+    loss_fn = nn.MSELoss()
+    best_val = float("inf")
+    best_state: dict | None = None
+    bad_epochs = 0
+    last_loss = float("inf")
+    for epoch in range(max_iter):
+        net.train()
+        perm_e = torch.randperm(Xt.shape[0])
+        for i in range(0, Xt.shape[0], batch_size):
+            idx = perm_e[i : i + batch_size]
+            xb, yb = Xt[idx], Yt[idx]
+            opt.zero_grad()
+            loss = loss_fn(net(xb), yb)
+            loss.backward()
+            opt.step()
+        net.eval()
+        with torch.no_grad():
+            v = loss_fn(net(Xv), Yv).item()
+        last_loss = v
+        if v < best_val - tol:
+            best_val = v
+            best_state = {k: t.detach().clone() for k, t in net.state_dict().items()}
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+        if bad_epochs >= n_iter_no_change:
+            break
+
+    if best_state is not None:
+        net.load_state_dict(best_state)
+
+    # Build sklearn-compatible coefs_ / intercepts_ lists.
+    coefs_: list[np.ndarray] = []
+    intercepts_: list[np.ndarray] = []
+    for layer in net:
+        if isinstance(layer, nn.Linear):
+            # PyTorch nn.Linear stores weight as (out_features, in_features);
+            # sklearn's coefs_[i] is (in_features, out_features) — transpose.
+            coefs_.append(layer.weight.detach().cpu().numpy().T.astype(np.float64))
+            intercepts_.append(layer.bias.detach().cpu().numpy().astype(np.float64))
+
+    class _TorchStudent:
+        def __init__(self):
+            self.coefs_ = coefs_
+            self.intercepts_ = intercepts_
+            self.loss_ = best_val
+            self.n_iter_ = epoch + 1
+            self._net = net
+
+        def predict(self, X: np.ndarray) -> np.ndarray:
+            self._net.eval()
+            with torch.no_grad():
+                t = torch.from_numpy(X.astype(np.float32))
+                return self._net(t).cpu().numpy().astype(np.float32)
+
+    return _TorchStudent()
 from sklearn.preprocessing import StandardScaler
 
 SIZE_CLASSES = ["tiny", "small", "medium", "large"]
@@ -403,6 +518,7 @@ def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
         "mean_pct": float(100 * overheads.mean()),
         "p50_pct": float(100 * np.percentile(overheads, 50)),
         "p90_pct": float(100 * np.percentile(overheads, 90)),
+        "p95_pct": float(100 * np.percentile(overheads, 95)),
         "p99_pct": float(100 * np.percentile(overheads, 99)),
         "max_pct": float(100 * overheads.max()),
     }
@@ -612,6 +728,7 @@ def stratify_overheads(per_row):
             "mean_pct": float(100 * a.mean()),
             "p50_pct": float(100 * np.percentile(a, 50)),
             "p90_pct": float(100 * np.percentile(a, 90)),
+            "p95_pct": float(100 * np.percentile(a, 95)),
             "p99_pct": float(100 * np.percentile(a, 99)),
             "max_pct": float(100 * a.max()),
         }
@@ -1038,6 +1155,36 @@ def main():
         "MLP — 128x128 is undersized).",
     )
     parser.add_argument(
+        "--dump-overheads",
+        type=Path,
+        default=None,
+        help="If set, write a per-row val overhead CSV to this path "
+        "(image, size_class, zq, pick, actual_best, overhead). "
+        "Future violin / KDE plots feed off this; safety_report only "
+        "carries summary percentiles.",
+    )
+    parser.add_argument(
+        "--activation",
+        choices=["relu", "leakyrelu"],
+        default="relu",
+        help="Hidden-layer activation. relu (default) trains via "
+        "sklearn MLPRegressor. leakyrelu falls through to a PyTorch "
+        "student with negative_slope=0.01 — same MLP shape, same "
+        "Adam/lr/batch/early-stopping schedule. Both produce a "
+        "`student.coefs_/intercepts_` surface so safety_check, "
+        "diagnostics, and JSON serialization work the same way.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=f"Random seed override (default: {SEED:#x}). The student "
+        "training uses this to seed init + dropout; the train/val "
+        "image-level split also keys off this seed via "
+        "`np.random.default_rng(SEED)`. Multi-seed sweeps for "
+        "experiments like LeakyReLU-vs-ReLU pass --seed N.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit with code 1 when any safety threshold is violated. "
@@ -1056,6 +1203,12 @@ def main():
     hidden_layer_sizes = tuple(int(x) for x in args.hidden.split(","))
     is_ci = bool(os.environ.get("CI"))
     strict = (args.strict or is_ci) and not args.allow_unsafe
+    # Per-run seed override — falls back to the module-level SEED so
+    # default behavior is unchanged.
+    global SEED
+    if args.seed is not None:
+        SEED = args.seed
+        sys.stderr.write(f"  seed override: SEED={SEED:#x}\n")
     load_codec_config(args.codec_config)
 
     # Per-objective output naming. The codec config defines the
@@ -1160,21 +1313,35 @@ def main():
     scaler = StandardScaler()
     Xe_tr_s = scaler.fit_transform(Xe_tr)
     Xe_va_s = scaler.transform(Xe_va)
-    student = MLPRegressor(
-        hidden_layer_sizes=hidden_layer_sizes,
-        activation="relu",
-        solver="adam",
-        learning_rate_init=2e-3,
-        batch_size=512,
-        max_iter=500,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=30,
-        tol=1e-6,
-        random_state=SEED,
-        verbose=False,
-    )
-    student.fit(Xe_tr_s, soft_tr)
+    if args.activation == "leakyrelu":
+        sys.stderr.write("  using PyTorch backend (LeakyReLU(0.01))\n")
+        student = _train_torch_leakyrelu_student(
+            X_tr=Xe_tr_s,
+            Y_tr=soft_tr,
+            hidden_layer_sizes=hidden_layer_sizes,
+            lr=2e-3,
+            batch_size=512,
+            max_iter=500,
+            seed=SEED,
+            n_iter_no_change=30,
+            tol=1e-6,
+        )
+    else:
+        student = MLPRegressor(
+            hidden_layer_sizes=hidden_layer_sizes,
+            activation="relu",
+            solver="adam",
+            learning_rate_init=2e-3,
+            batch_size=512,
+            max_iter=500,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=30,
+            tol=1e-6,
+            random_state=SEED,
+            verbose=False,
+        )
+        student.fit(Xe_tr_s, soft_tr)
     sys.stderr.write(f"  trained, final loss={student.loss_:.4f}, n_iter={student.n_iter_}\n")
 
     Y_va_pred = student.predict(Xe_va_s)
@@ -1213,6 +1380,20 @@ def main():
     )
     by_zq, by_size, by_zq_size = stratify_overheads(val_per_row)
     worst = worst_case_rows(val_per_row, top_pct=1.0, max_n=20)
+
+    if args.dump_overheads is not None:
+        # CSV for downstream plotting. One row per (image, size, zq)
+        # val decision. Overhead is the relative cost vs the per-row
+        # oracle minimum (0.0 = picker matched the optimum).
+        args.dump_overheads.parent.mkdir(parents=True, exist_ok=True)
+        with args.dump_overheads.open("w") as fh:
+            fh.write("image\tsize_class\tzq\tpick\tactual_best\toverhead\n")
+            for r in val_per_row:
+                fh.write(
+                    f"{r['image']}\t{r['size_class']}\t{r['zq']}\t"
+                    f"{r['pick']}\t{r['actual_best']}\t{r['overhead']}\n"
+                )
+        sys.stderr.write(f"  wrote per-row overheads → {args.dump_overheads}\n")
     per_cell = per_cell_diagnostics(cells, pred_bytes, bl_va, rch_va, n_cells)
     mlp_health = scan_mlp_weights(student, Xe_va_s)
 
@@ -1306,7 +1487,7 @@ def main():
             {"W": w.tolist(), "b": b.tolist()}
             for w, b in zip(student.coefs_, student.intercepts_)
         ],
-        "activation": "relu",
+        "activation": args.activation,
         "hybrid_heads_manifest": {
             "n_cells": n_cells,
             "cells": cells,

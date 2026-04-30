@@ -757,6 +757,58 @@ features_table! {
     /// requested. Set both if you want both the binary classifier and
     /// the tolerance fraction.
     IsGrayscale = 55 : bool => is_grayscale,
+
+    // ---------------- Dimension features ----------------------------
+    // Pure descriptor math — no per-pixel work. Computed once per
+    // call from `(width, height, descriptor)`. Always-on, no cargo
+    // feature gate. Issue #42.
+    /// `u32`. Total pixel count `w * h`. Saturates at `u32::MAX` for
+    /// images larger than ~4.29 gigapixels (rare; we don't support
+    /// images that big elsewhere).
+    PixelCount = 56 : u32 => pixel_count,
+    /// `f32`. `ln(w * h)`, natural log. Useful as a smooth
+    /// resolution axis for predictors (vs `size_class` one-hot).
+    LogPixels = 57 : f32 => log_pixels,
+    /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
+    /// a 1024×1 image and a 32×32 image have very different
+    /// per-pixel codec costs but the same `PixelCount`.
+    MinDim = 58 : u32 => min_dim,
+    /// `u32`. `max(w, h)`. Pairs with `MinDim` for shape-aware
+    /// reasoning.
+    MaxDim = 59 : u32 => max_dim,
+    /// `u64`. Uncompressed bitmap byte count: `w * h * channels *
+    /// bytes_per_sample`. The natural reference for "how much could
+    /// compression possibly save" — predictors regress against this.
+    /// Channels and bytes_per_sample come from the source descriptor.
+    BitmapBytes = 60 : u64 => bitmap_bytes,
+    /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
+    /// extreme strip → 0. Bounded and smooth — well-conditioned for
+    /// MLPs and tree models alike.
+    AspectMinOverMax = 61 : f32 => aspect_min_over_max,
+    /// `f32`. `|ln(w / h)|` ∈ `[0, ∞)`. Square = `0`, larger =
+    /// more extreme. Symmetric (no sign ambiguity between landscape
+    /// and portrait) and unbounded above — sensitive to very
+    /// extreme ratios where `AspectMinOverMax` saturates.
+    LogAspectAbs = 62 : f32 => log_aspect_abs,
+    /// `f32`. Fraction of padding pixels needed to round the
+    /// image up to a complete 8×8 grid. `0.0` for images whose
+    /// dimensions are both multiples of 8; positive otherwise. The
+    /// codec's per-block overhead (DCT, prediction, signaling)
+    /// applies to padded blocks too — this captures that "wasted"
+    /// fraction. Hits JPEG 8×8 DCT and WebP/AVIF 8×8 partitions.
+    BlockMisalignment8 = 63 : f32 => block_misalignment_8,
+    /// `f32`. Same as `BlockMisalignment8` but for 16×16 blocks.
+    /// Hits JPEG 4:2:0 MCU and AVIF 16×16 partitions.
+    BlockMisalignment16 = 64 : f32 => block_misalignment_16,
+    /// `f32`. Same as `BlockMisalignment8` but for 32×32 blocks.
+    /// Hits JXL DCT32 and AV1 32×32 partitions.
+    BlockMisalignment32 = 65 : f32 => block_misalignment_32,
+    /// `f32`. Same as `BlockMisalignment8` but for 64×64 blocks.
+    /// Hits JXL DCT64.
+    BlockMisalignment64 = 66 : f32 => block_misalignment_64,
+    /// `u32`. Number of color channels in the source descriptor:
+    /// 1 (grayscale), 3 (RGB), or 4 (RGBA). Pure descriptor lookup.
+    ChannelCount = 67 : u32 => channel_count,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -773,6 +825,12 @@ features_table! {
 pub enum FeatureValue {
     F32(f32),
     U32(u32),
+    /// `u64` for features whose natural domain exceeds `u32::MAX` —
+    /// notably [`AnalysisFeature::BitmapBytes`] which can exceed 4 GB
+    /// on 16K+ HDR (RGBAF32) images. Lossless `to_f32` coercion is
+    /// only exact for `n ≤ 2⁵³`; values beyond are rounded to the
+    /// nearest f64-representable then cast.
+    U64(u64),
     Bool(bool),
 }
 
@@ -796,6 +854,15 @@ impl FeatureValue {
         }
     }
 
+    /// Type-checked accessor for `U64`.
+    #[inline]
+    pub const fn as_u64(self) -> Option<u64> {
+        match self {
+            Self::U64(x) => Some(x),
+            _ => None,
+        }
+    }
+
     /// Type-checked accessor for `Bool`.
     #[inline]
     pub const fn as_bool(self) -> Option<bool> {
@@ -815,6 +882,8 @@ impl FeatureValue {
         match self {
             Self::F32(x) => x,
             Self::U32(x) => x as f32,
+            // u64 → f32 via f64 to keep precision near 2^53 boundary.
+            Self::U64(x) => x as f64 as f32,
             Self::Bool(false) => 0.0,
             Self::Bool(true) => 1.0,
         }
@@ -829,6 +898,11 @@ impl From<f32> for FeatureValue {
 impl From<u32> for FeatureValue {
     fn from(x: u32) -> Self {
         Self::U32(x)
+    }
+}
+impl From<u64> for FeatureValue {
+    fn from(x: u64) -> Self {
+        Self::U64(x)
     }
 }
 impl From<bool> for FeatureValue {
@@ -1700,7 +1774,8 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        assert!(AnalysisFeature::from_u16(64).is_none());
+        // First unused id past the dimension features (issue #42, ids 56–67).
+        assert!(AnalysisFeature::from_u16(68).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -1756,7 +1831,11 @@ mod tests {
         // returns `None` for both kinds of holes, so a single
         // `if let Some(f) = …` walk handles them uniformly.
         let mut active = 0u32;
-        for id in 0..64u16 {
+        // Iterate past the dimension features (max id 67 today). Bump
+        // the upper bound when new ids land — `assert_eq!` below
+        // catches drift between SUPPORTED.len() and this loop's
+        // walked range.
+        for id in 0..96u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }
