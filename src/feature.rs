@@ -776,11 +776,14 @@ features_table! {
     /// `u32`. `max(w, h)`. Pairs with `MinDim` for shape-aware
     /// reasoning.
     MaxDim = 59 : u32 => max_dim,
-    /// `u64`. Uncompressed bitmap byte count: `w * h * channels *
-    /// bytes_per_sample`. The natural reference for "how much could
-    /// compression possibly save" — predictors regress against this.
-    /// Channels and bytes_per_sample come from the source descriptor.
-    BitmapBytes = 60 : u64 => bitmap_bytes,
+    /// `f32`. Uncompressed bitmap byte count: `w * h * channels *
+    /// bytes_per_sample`, cast to f32. The natural reference for
+    /// "how much could compression possibly save" — predictors
+    /// regress against `log(bitmap_bytes)`. f32 is exact for
+    /// values up to 2²⁴ ≈ 16 MB; larger images lose ~ULP-level
+    /// precision per byte but stay correct in log space (≤ 1 ULP
+    /// drift in log10 ≈ 1e-7) — fine for ML features.
+    BitmapBytes = 60 : f32 => bitmap_bytes,
     /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
     /// extreme strip → 0. Bounded and smooth — well-conditioned for
     /// MLPs and tree models alike.

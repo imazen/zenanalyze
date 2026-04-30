@@ -58,7 +58,10 @@ pub(crate) fn populate_dimensions(
     let channels = descriptor.layout().channels() as u64;
     let bytes_per_sample = descriptor.channel_type().byte_size() as u64;
     raw.channel_count = channels as u32;
-    raw.bitmap_bytes = pixels_u64.saturating_mul(channels).saturating_mul(bytes_per_sample);
+    let bytes_u64 = pixels_u64
+        .saturating_mul(channels)
+        .saturating_mul(bytes_per_sample);
+    raw.bitmap_bytes = bytes_u64 as f32;
 
     let (mn, mx) = if width <= height {
         (width as f32, height as f32)
@@ -173,19 +176,19 @@ mod tests {
         let mut raw = RawAnalysis::default();
         // RGB8 = 3 channels × 1 byte/sample.
         populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGB8_SRGB);
-        assert_eq!(raw.bitmap_bytes, 100 * 100 * 3 * 1);
+        assert_eq!(raw.bitmap_bytes, (100 * 100 * 3 * 1) as f32);
         assert_eq!(raw.channel_count, 3);
 
         // RGBA16 = 4 channels × 2 bytes/sample.
         let mut raw = RawAnalysis::default();
         populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGBA16_SRGB);
-        assert_eq!(raw.bitmap_bytes, 100 * 100 * 4 * 2);
+        assert_eq!(raw.bitmap_bytes, (100 * 100 * 4 * 2) as f32);
         assert_eq!(raw.channel_count, 4);
 
         // RGBAF32 = 4 channels × 4 bytes/sample.
         let mut raw = RawAnalysis::default();
         populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGBAF32_LINEAR);
-        assert_eq!(raw.bitmap_bytes, 100 * 100 * 4 * 4);
+        assert_eq!(raw.bitmap_bytes, (100 * 100 * 4 * 4) as f32);
         assert_eq!(raw.channel_count, 4);
     }
 
@@ -215,7 +218,7 @@ mod tests {
         populate_dimensions(&mut raw, 0, 100, rgb8());
         // No panics, no NaN, all zeros.
         assert_eq!(raw.pixel_count, 0);
-        assert_eq!(raw.bitmap_bytes, 0);
+        assert_eq!(raw.bitmap_bytes, 0.0);
         assert_eq!(raw.block_misalignment_8, 0.0);
         assert_eq!(raw.aspect_min_over_max, 0.0);
         assert_eq!(raw.log_aspect_abs, 0.0);
