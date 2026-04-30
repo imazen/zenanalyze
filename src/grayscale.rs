@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn pure_black_and_white_row_is_grayscale() {
-        let mut buf = Vec::with_capacity(8 * 1 * 3);
+        let mut buf = Vec::with_capacity(8 * 3);
         for v in [0u8, 255, 128, 64, 192, 32, 224, 16] {
             buf.extend_from_slice(&[v, v, v]);
         }
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn tiny_colored_under_chunk() {
-        let mut buf = vec![100u8; 5 * 1 * 3];
+        let mut buf = vec![100u8; 5 * 3];
         buf[7] = 99; // pixel 2's G channel
         assert!(!analyze(&buf, 5, 1));
     }
