@@ -521,7 +521,17 @@ def main():
         "the codec config's OUT_JSON for size_optimal, and "
         "<basename>_zensim_strict for zensim_strict.",
     )
+    parser.add_argument(
+        "--hidden",
+        default="128,128",
+        help="Comma-separated hidden layer widths for the student MLP. "
+        "Default '128,128' matches the v2.0 baseline. Try '256,256' or "
+        "'256,256,256' when the input layer grows past ~50 cross-termed "
+        "inputs (e.g. v2.1's 35-feature schema feeds ~80 inputs into the "
+        "MLP — 128x128 is undersized).",
+    )
     args = parser.parse_args()
+    hidden_layer_sizes = tuple(int(x) for x in args.hidden.split(","))
     load_codec_config(args.codec_config)
 
     # Per-objective output naming. The codec config defines the
@@ -609,13 +619,16 @@ def main():
     # --- Student
     # Soft targets: 12 bytes + 12 chroma + 12 lambda = 36 outputs
     soft_tr = np.concatenate([bytes_pred_tr, chroma_pred_tr, lam_pred_tr], axis=1)
-    sys.stderr.write(f"\nTraining MLP student (hidden=128x2, output_dim={soft_tr.shape[1]})...\n")
+    hidden_repr = "x".join(str(x) for x in hidden_layer_sizes)
+    sys.stderr.write(
+        f"\nTraining MLP student (hidden={hidden_repr}, output_dim={soft_tr.shape[1]})...\n"
+    )
 
     scaler = StandardScaler()
     Xe_tr_s = scaler.fit_transform(Xe_tr)
     Xe_va_s = scaler.transform(Xe_va)
     student = MLPRegressor(
-        hidden_layer_sizes=(128, 128),
+        hidden_layer_sizes=hidden_layer_sizes,
         activation="relu",
         solver="adam",
         learning_rate_init=2e-3,
@@ -727,7 +740,10 @@ def main():
         w("  reach gate: none — any reachable cell allowed at inference")
     w(f"Train rows: {len(tr)}, val rows: {len(va)}")
     w(f"n_cells: {n_cells}, output_dim: {3 * n_cells}")
-    w(f"Student: MLP {Xe.shape[1]} -> 128 -> 128 -> {3 * n_cells}, "
+    arch_str = " -> ".join(
+        [str(Xe.shape[1])] + [str(h) for h in hidden_layer_sizes] + [str(3 * n_cells)]
+    )
+    w(f"Student: MLP {arch_str}, "
       f"{n_params} params (~{n_params*2/1024:.1f} KB f16)")
     w("")
     w("## Categorical cells")

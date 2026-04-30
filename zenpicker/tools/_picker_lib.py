@@ -61,6 +61,24 @@ import numpy as np
 from joblib import Parallel, delayed
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+
+def _make_teacher(params: dict):
+    """Construct a teacher GBM.
+
+    Benchmarked on this workload (1388 images × 12 cells × 3 heads,
+    ~4000 rows / 80 inputs per per-cell fit): sklearn's
+    HistGradientBoostingRegressor is ~2× faster than lightgbm
+    (lightgbm's per-fit overhead dominates on small fits and our
+    many-small-fits hot path). lightgbm wins on huge single-shot
+    training matrices, but the picker's per-cell decomposition keeps
+    each individual fit tiny — exactly where sklearn HistGB excels.
+
+    Wrapper kept so the dispatch can flip if a future workload (e.g.
+    a single-shot cross-cell fit) makes lightgbm a win. Today: always
+    sklearn HistGB.
+    """
+    return HistGradientBoostingRegressor(**params)
+
 ZQ_TARGETS_DEFAULT = list(range(0, 70, 5)) + list(range(70, 101, 2))
 SIZE_CLASSES = ["tiny", "small", "medium", "large"]
 SIZE_INDEX = {s: i for i, s in enumerate(SIZE_CLASSES)}
@@ -287,7 +305,7 @@ def _fit_one_teacher(
     mask = ~np.isnan(y_col)
     if mask.sum() < 50:
         return cfg, None
-    gbm = HistGradientBoostingRegressor(**params)
+    gbm = _make_teacher(params)
     gbm.fit(X_tr[mask], y_col[mask])
     return cfg, gbm
 
@@ -354,7 +372,7 @@ def _fit_one_cell_target(
     Returns (cell_idx, fitted estimator or None)."""
     if mask.sum() < 50:
         return cell, None
-    gbm = HistGradientBoostingRegressor(**params)
+    gbm = _make_teacher(params)
     gbm.fit(X_tr[mask], y_col[mask])
     return cell, gbm
 
