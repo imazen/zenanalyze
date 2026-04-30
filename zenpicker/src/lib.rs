@@ -55,8 +55,8 @@ pub mod rescue;
 
 pub use error::PickerError;
 pub use mask::{
-    AllowedMask, FeatureBounds, argmin_masked, argmin_masked_top_k,
-    first_out_of_distribution, reach_gate_mask,
+    AllowedMask, FeatureBounds, argmin_masked, argmin_masked_top_k, first_out_of_distribution,
+    reach_gate_mask,
 };
 pub use model::{Activation, LayerView, Model, WeightDtype};
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};

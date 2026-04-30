@@ -205,10 +205,7 @@ impl FeatureBounds {
 /// NaN / Inf in the feature vector trigger a hit just as out-of-
 /// range values do — those features can't be modeled and should
 /// always force fallback.
-pub fn first_out_of_distribution(
-    features: &[f32],
-    bounds: &[FeatureBounds],
-) -> Option<usize> {
+pub fn first_out_of_distribution(features: &[f32], bounds: &[FeatureBounds]) -> Option<usize> {
     debug_assert_eq!(
         features.len(),
         bounds.len(),
