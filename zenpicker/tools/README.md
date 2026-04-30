@@ -13,10 +13,12 @@ config-name parser. Then runs these scripts against that config.
 | `train_hybrid.py` | **Recommended.** Hybrid-heads training: N categorical cells + K scalar prediction heads per cell. Codec supplies the cell taxonomy via `parse_config_name`. Flags: `--objective {size_optimal, zensim_strict}`, `--bytes-quantile`, `--reach-threshold`, `--hidden 192,192,192`, `--out-suffix` |
 | `train_distill.py` | Categorical-only distillation (legacy v1.x picker shape). Per-config HistGB teacher → small shared MLP student |
 | `train_distill_reduced.py` | Same as `train_distill.py` but with a reduced feature subset declared in the codec config |
-| `feature_ablation.py` | Per-feature importance ranking. **`--method permutation`** (default) — train once, shuffle each column, ~50× faster than LOO. `--method loo` retrains the model with each feature dropped (legacy ground truth) |
+| `feature_ablation.py` | Per-feature importance ranking. **`--method permutation`** (default) — train once, shuffle each column, ~50× faster than LOO. `--method loo` retrains the model with each feature dropped (legacy ground truth). `--strict` exits 1 on features whose Δ is below `--max-negative-delta-pp` (overfit-on-noise signal) |
 | `feature_group_ablation.py` | Group ablation (drop entire tier-aligned groups) |
 | `validate_schema.py` | Re-train production HistGB with a chosen feature subset, report held-out metrics |
 | `capacity_sweep.py` | Architecture × cross-term-recipe sweep over the student MLP |
+| `adversarial_probe.py` | Corner-case spot-check for any model JSON: zeros / huge / NaN / Inf / single-feature spike. Asserts no NaN/Inf in output, top-1/top-2 gap ≥ 0, predicted bytes plausible. Exits 1 in `--strict` |
+| `diagnose_picker.py` | Human-readable health report for any model JSON or .manifest.json. Works on legacy bakes that pre-date `safety_report` (falls back to a static MLP weight scan) |
 
 The [`tools/bake_picker.py`](../../tools/bake_picker.py) script (parent
 directory, not this one) consumes the JSON output of any of the
@@ -170,6 +172,26 @@ SAFETY_THRESHOLDS = dict(
 **The strict gate** (`--strict`, also auto-enabled when the `CI` environment variable is set) makes `train_hybrid.py` exit 1 on any violation. JSON + log are still written so reviewers can inspect; only the exit code signals failure. **CI should always run with `--strict`** so a regressed bake fails the workflow before it gets near `bake_picker.py`.
 
 `bake_picker.py` reads `safety_report.passed` and **refuses to bake** an unsafe model JSON unless `--allow-unsafe` is passed (only when the violation is intentional and reviewed). Defense in depth: the `safety_report` is also forwarded into the `.manifest.json`, so codec runtime can refuse to load too.
+
+### OOD detection (runtime gate)
+
+`train_hybrid.py` also computes per-feature distribution stats — `{min, p01, p25, p50, p75, p99, max, mean, std}` over the **training** image set — and ships them in `safety_report.diagnostics.feature_bounds`. `bake_picker.py` lifts the `(p01, p99)` pair into a top-level `manifest.feature_bounds_p01_p99` array aligned 1:1 with `feat_cols`.
+
+Codec runtime emits a compile-time `FEATURE_BOUNDS: &[zenpicker::FeatureBounds]` table from the manifest, then calls `zenpicker::first_out_of_distribution(&features, FEATURE_BOUNDS)` before `argmin_masked`. On `Some(idx)`, fall through to `RescueStrategy::KnownGoodFallback` instead of trusting an MLP extrapolation. NaN / Inf inputs always trigger the gate.
+
+### Pick confidence (runtime metric)
+
+`Picker::pick_with_confidence(features, mask, adjust)` returns `(best_idx, log_bytes_gap_to_2nd)`. A small `gap` (< ~0.1 in log space, i.e. < ~10% bytes) means the picker barely chose top-1 over top-2 — a strong signal the rescue path should verify even before encoding. Codec exposes the gap on `EncodeMetrics`; imageflow / proxy operators scrape per-request to detect drift.
+
+### Permutation-importance gate (schema cleanliness)
+
+`feature_ablation.py --strict` (auto in CI) exits 1 on any feature with `Δ < --max-negative-delta-pp` (default −0.05pp). A feature whose mean overhead *drops* when the column is shuffled is noise the model overfit on — 100% drop signal. CI should run the ablation on the same `--codec-config` that `train_hybrid.py` did and treat negative-Δ findings as a `KEEP_FEATURES` regression.
+
+### Adversarial probe + diagnose (post-bake spot-check)
+
+`adversarial_probe.py --model <bake>.json --strict` runs ~10 corner inputs (zeros, huge, NaN, Inf, single-feature spike) and asserts no NaN/Inf in output, top-1/top-2 gap ≥ 0, predicted bytes plausible. Cheap CI gate after `bake_picker.py`.
+
+`diagnose_picker.py --model <bake>.json` (or `--manifest <bake>.manifest.json`) prints a human-readable health report. Useful for reviewing a bake by eye. Falls back gracefully on legacy bakes (pre-`safety_report`) by computing a static MLP weight scan from the JSON layers.
 
 ### GBM backend choice
 

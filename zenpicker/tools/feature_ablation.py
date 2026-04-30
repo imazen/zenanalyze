@@ -33,6 +33,7 @@ import csv
 import importlib
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -323,7 +324,32 @@ def main():
         help="Permutation repeats per feature (averaged). Default 3 — high "
         "enough to denoise small datasets without inflating wall-time.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with code 1 when any feature has Δ < --max-negative-delta-pp. "
+        "Auto-enabled when the CI environment variable is set. A feature whose "
+        "Δ is *negative* under permutation importance — i.e., shuffling that "
+        "feature *improves* the picker — is noise the model overfit; ranking "
+        "negatives indicates schema needs pruning before ship.",
+    )
+    parser.add_argument(
+        "--allow-unsafe",
+        action="store_true",
+        help="Override --strict / CI for intentionally noisy features.",
+    )
+    parser.add_argument(
+        "--max-negative-delta-pp",
+        type=float,
+        default=-0.05,
+        help="Threshold (in pp) below which a Δ counts as a strict-mode "
+        "violation. Default -0.05pp — features that improve the picker by "
+        "more than 0.05pp when shuffled are flagged. Set to e.g. -0.20 for "
+        "looser tolerance.",
+    )
     args = parser.parse_args()
+    is_ci = bool(os.environ.get("CI"))
+    strict = (args.strict or is_ci) and not args.allow_unsafe
     if args.codec_config:
         load_codec_config(args.codec_config)
     sys.stderr.write(f"Loading {PARETO}...\n")
@@ -424,6 +450,33 @@ def main():
     for name, m in loo_sorted[-5:]:
         sys.stderr.write(f"    {name}: drop → {m['mean_pct']:.2f}% (Δ {m['mean_pct'] - baseline['mean_pct']:+.2f}pp)\n")
 
+    # ============ Strict-gate: flag negative-Δ features ============
+    # A feature whose permutation Δ is negative is *noise the model
+    # overfit*. Listing them is a 100% should-be-dropped signal that
+    # the schema needs pruning before ship.
+    negatives = []
+    for name, m in loo_sorted:
+        delta = m["mean_pct"] - baseline["mean_pct"]
+        if delta < args.max_negative_delta_pp:
+            negatives.append({"feature": name, "delta_pp": delta})
+    if negatives:
+        sys.stderr.write(
+            "\n" + "=" * 70 + "\n"
+            f"  ⚠ {len(negatives)} FEATURE(S) IMPROVE THE PICKER WHEN SHUFFLED — overfit signal\n"
+            + "=" * 70 + "\n"
+        )
+        for n in negatives:
+            sys.stderr.write(
+                f"  • {n['feature']:35s} Δ {n['delta_pp']:+.2f}pp\n"
+            )
+        sys.stderr.write(
+            "=" * 70 + "\n"
+            "  Drop these from KEEP_FEATURES and retrain. Threshold: "
+            f"{args.max_negative_delta_pp:+.2f}pp.\n"
+        )
+    else:
+        sys.stderr.write("\n✓ No features improve the picker when shuffled.\n")
+
     # ============ Phase 3: forward greedy (optional) ============
     greedy_curve = []
     if SKIP_GREEDY:
@@ -514,6 +567,15 @@ def main():
         w(f"{entry['k']:>3d} {m['mean_pct']:>9.2f}%  {m['argmin_acc']:>10.1%}   +{added}")
 
     OUT_LOG.write_text("\n".join(lines))
+
+    # Strict-gate exit. Logs already written for inspection; only the
+    # exit code signals failure.
+    if negatives and strict:
+        sys.stderr.write(
+            f"\nstrict mode: exiting 1 with {len(negatives)} negative-Δ feature(s). "
+            "Re-run with --allow-unsafe to override.\n"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
