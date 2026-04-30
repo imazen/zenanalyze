@@ -10,6 +10,15 @@ categories = ["multimedia::images", "no-std"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
 readme = "README.md"
+# Don't ship the heavy test fixture or the Python training pipeline
+# in the published crate. zenpicker is runtime-only — codecs ship
+# their own baked `.bin` via `include_bytes!` behind a compile-time
+# feature flag (see FOR_NEW_CODECS.md → Step 6). The fixture under
+# `testdata/` is for the in-repo round-trip + size-invariance probes.
+exclude = [
+    "testdata/**",
+    "tools/**",
+]
 
 [lib]
 name = "zenpicker"

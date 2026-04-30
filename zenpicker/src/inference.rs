@@ -11,7 +11,7 @@
 //! the output axis. archmage tokens at the outer-layer boundary
 //! prevent LLVM from un-inlining the per-tier dispatch.
 
-use crate::model::{Activation, LayerView, Model, WeightStorage};
+use crate::model::{Activation, LEAKY_RELU_ALPHA, LayerView, Model, WeightStorage};
 
 /// Run the full forward pass: scale inputs, then layer-by-layer.
 ///
@@ -29,27 +29,29 @@ pub fn forward(
     debug_assert_eq!(features.len(), n_inputs);
     debug_assert_eq!(output.len(), model.n_outputs());
 
-    // Scale inputs: x' = (x - mean) * scale.
+    // Scale inputs: x' = (x - mean) / scale.
     //
-    // **Wire-format convention.** `scale` here is the value baked into
-    // the model from the Python side, where the emitter writes
-    // sklearn's `StandardScaler.scale_` (= **standard deviation**, not
-    // its inverse) into the `scaler_scale` JSON field. sklearn's own
-    // transform divides by `scale_` (giving `(x - mean) / std`), so
-    // mathematically this multiplies by `std` instead of dividing —
-    // the formal opposite of standardization.
+    // The `scaler_scale` field in the bake stores sklearn's
+    // `StandardScaler.scale_` directly — that attribute IS the
+    // standard deviation (`np.sqrt(var_)`). sklearn's own
+    // `transform` divides by it (`(x - mean) / std`), and the MLP
+    // is trained on `scaler.fit_transform(X_tr)` outputs, so this
+    // kernel must divide too — anything else feeds the network
+    // inputs scaled differently than what it learned from.
     //
-    // It works because the trained MLP's first layer has absorbed
-    // whichever direction the Python pipeline used; end-to-end the
-    // function is still correct. **Do not "fix" the direction in
-    // isolation** — that would silently miscalibrate every shipped
-    // v1.x / v2.x bake. If a future format ever flips the convention,
-    // bump the bake version and migrate.
+    // (Pre-0.1.0 history: an earlier draft of this kernel
+    // multiplied by `scale_`, which silently miscalibrated the
+    // forward pass relative to training-time evaluation. Fixed
+    // before the first publish; no shipped artifacts depend on
+    // the multiply convention. Division-by-near-zero isn't a
+    // hazard because sklearn refuses to fit StandardScaler when
+    // any feature has zero variance — the picker won't have a
+    // bake to load in that case.)
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     let cur = &mut scratch_a[..n_inputs];
     for i in 0..n_inputs {
-        cur[i] = (features[i] - mean[i]) * scale[i];
+        cur[i] = (features[i] - mean[i]) / scale[i];
     }
 
     let mut input_buf: &mut [f32] = scratch_a;
@@ -86,12 +88,31 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) {
     debug_assert_eq!(dst.len(), out_dim);
     debug_assert_eq!(layer.biases.len(), out_dim);
 
-    // Initialize accumulator with biases.
-    dst.copy_from_slice(layer.biases);
-
     match &layer.weights {
-        WeightStorage::F32(w) => saxpy_matmul_f32(src, w, dst, in_dim, out_dim),
-        WeightStorage::F16(w) => saxpy_matmul_f16(src, w, dst, in_dim, out_dim),
+        WeightStorage::F32(w) => {
+            // Init accumulator with biases, then add `sum_i src[i] * W[i, :]`.
+            dst.copy_from_slice(layer.biases);
+            saxpy_matmul_f32(src, w, dst, in_dim, out_dim);
+        }
+        WeightStorage::F16(w) => {
+            dst.copy_from_slice(layer.biases);
+            saxpy_matmul_f16(src, w, dst, in_dim, out_dim);
+        }
+        WeightStorage::I8 { weights, scales } => {
+            // i8 path inverts the bias-then-accumulate ordering
+            // because the per-output `scales[o]` only applies to the
+            // SAXPY accumulator, not the bias. Accumulate raw
+            // `sum_i src[i] * (W_i8[i, o] as f32)` into dst, then
+            // commit `dst[o] = bias[o] + scales[o] * dst[o]`.
+            for v in dst.iter_mut() {
+                *v = 0.0;
+            }
+            saxpy_matmul_i8(src, weights, dst, in_dim, out_dim);
+            debug_assert_eq!(scales.len(), out_dim);
+            for o in 0..out_dim {
+                dst[o] = layer.biases[o] + scales[o] * dst[o];
+            }
+        }
     }
 
     apply_activation(dst, layer.activation);
@@ -175,6 +196,43 @@ fn saxpy_matmul_f16(src: &[f32], w: &[u16], dst: &mut [f32], in_dim: usize, out_
     }
 }
 
+/// `dst[o] += sum_i src[i] * (W_i8[i, o] as f32)` for the i8-stored
+/// case. Per-output scaling is applied by the caller after this
+/// returns — see `layer_forward`. The on-the-fly `i8 → f32` cast is
+/// a single `as` per element; LLVM lowers this to one VPMOVSXBD on
+/// AVX2 / VPMOVSXBD on AVX-512 / SXTL on NEON, so the inner chunk is
+/// the same shape as the f32 path.
+fn saxpy_matmul_i8(src: &[f32], w: &[i8], dst: &mut [f32], in_dim: usize, out_dim: usize) {
+    debug_assert_eq!(w.len(), in_dim * out_dim);
+    let chunks = out_dim / 8;
+    let tail = out_dim % 8;
+
+    for i in 0..in_dim {
+        let s = src[i];
+        if s == 0.0 {
+            continue;
+        }
+        let row = &w[i * out_dim..(i + 1) * out_dim];
+
+        for c in 0..chunks {
+            let base = c * 8;
+            let weight_chunk: &[i8; 8] = row[base..base + 8].try_into().unwrap();
+            let acc_chunk: &mut [f32; 8] = (&mut dst[base..base + 8]).try_into().unwrap();
+            for k in 0..8 {
+                let wf = weight_chunk[k] as f32;
+                acc_chunk[k] = s.mul_add(wf, acc_chunk[k]);
+            }
+        }
+        if tail > 0 {
+            let tail_start = chunks * 8;
+            for k in 0..tail {
+                let wf = row[tail_start + k] as f32;
+                dst[tail_start + k] = s.mul_add(wf, dst[tail_start + k]);
+            }
+        }
+    }
+}
+
 /// IEEE-754 half-precision (binary16) → single-precision (binary32)
 /// converter. Handles all classes (zero, subnormal, normal, inf, NaN)
 /// without relying on any FP intrinsic. Pure integer bit-twiddling so
@@ -221,6 +279,16 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
             for v in buf.iter_mut() {
                 if *v < 0.0 {
                     *v = 0.0;
+                }
+            }
+        }
+        Activation::LeakyRelu => {
+            // f(x) = x if x >= 0 else alpha * x. Branchless via
+            // mul_add of a per-element factor would be marginal here;
+            // the simple branch lets LLVM emit a vectorized blend.
+            for v in buf.iter_mut() {
+                if *v < 0.0 {
+                    *v *= LEAKY_RELU_ALPHA;
                 }
             }
         }

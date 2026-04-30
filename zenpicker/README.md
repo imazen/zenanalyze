@@ -250,10 +250,12 @@ Same architecture, same input schema, same output layout. Differences are entire
 ```rust,ignore
 pub enum PickerProfile { SizeOptimal, ZensimStrict }
 
-const PICKER_SIZE_OPTIMAL: &[u8]  = include_bytes!("zenjpeg_picker_v2.1_full.bin");
-const PICKER_ZENSIM_STRICT: &[u8] = include_bytes!("zenjpeg_picker_v2.0_zensim_strict.bin");
-// (v2.1's wider schema confused the pinball-loss teacher; v2.0 strict
-//  ships until the strict variant is retrained on a pruned schema.)
+const PICKER_SIZE_OPTIMAL: &[u8] = include_bytes!("zenjpeg_picker_v2.1_full.bin");
+// PICKER_ZENSIM_STRICT is intentionally not shipped — the strict
+// variant of v2.1 fails the safety_report PER_ZQ_TAIL gate at zq=94
+// and we don't ship bakes that fail the gate. Re-run training with a
+// pruned schema (see FOR_NEW_CODECS.md Step 8) and a tightened
+// SAFETY_THRESHOLDS.max_per_zq_p99_overhead_pct to land it.
 
 pub fn load_picker(profile: PickerProfile) -> Result<Picker<'static>, PickerError> {
     let bytes = match profile {
@@ -485,21 +487,15 @@ Memory: 30 KB (f16) or 60 KB (f32) embedded; one prediction call allocates nothi
 
 The format header has reserved fields for future expansion. New `weight_dtype` values, new activations, and new layer types are all additive — bakes against future versions still load on older runtimes (with the unsupported field flagged) until the format major-version bumps.
 
-### Shipped zenjpeg models
+### Shipped zenjpeg model
 
-Same architecture, same input schema, different training objectives. Codec links all three at compile time and picks per request:
-
-| Bake | Size | Mean overhead | Argmin acc | Profile | Recommended |
+| Bake | Size | Mean overhead | Argmin acc | Profile | Notes |
 |---|---:|---:|---:|---|---|
-| `zenjpeg_picker_v1.0_19feat.bin` | 31 KB | 7.20 % | 13.8 % | size_optimal | legacy / broadest 19-feature schema |
-| `zenjpeg_picker_v1.1_8feat.bin` | 28 KB | 8.20 % | 10.5 % | size_optimal | legacy / reduced 8-feature schema |
-| `zenjpeg_picker_v2.0_hybrid.bin` | 50 KB | 2.76 % | 52.0 % | size_optimal | hybrid heads, 8-feature schema (post-ablation reduced); good fallback if codec wants the smaller analyzer hot path |
-| `zenjpeg_picker_v2.0_zensim_strict.bin` | 50 KB | 6.11 % | 41.7 % | zensim_strict | SLA-bound traffic — pinball-q99 bytes head + per-zq reach gate. See [Safety profiles](#safety-profiles-size_optimal-vs-zensim_strict) |
-| **`zenjpeg_picker_v2.1_full.bin`** | **195 KB** | **2.33 %** | **56.3 %** | size_optimal | **default** — 35-feature schema (incl. new `patch_fraction_fast`, `quant_survival_y/uv`, `aq_map_*`, `laplacian_variance`), 192³ MLP |
+| **`zenjpeg_picker_v2.1_full.bin`** | **195 KB** (f16) | **2.33 %** | **56.3 %** | size_optimal | 35-feature schema (`patch_fraction_fast`, `quant_survival_y/uv`, `aq_map_*`, `laplacian_variance`, …), 192³ MLP, hybrid heads (12 categorical cells × 3 scalar heads), `safety_report` + `feature_bounds_p01_p99` + `reach_safety` populated. Built via the canonical 6-stage pipeline in [tools/README.md](tools/README.md#canonical-end-to-end-command-sequence) |
 
-Codec consumers default to v2.1 `size_optimal`; v2.0 stays as the smaller-schema option (when analyzer hot-path cost outranks picker accuracy by 0.43pp). v1.x bakes are deep-legacy. The v2.0 `zensim_strict` bake remains the recommended strict-profile model — v2.1's wider schema confused the pinball-loss teacher, so the v2.1 strict variant is not shipped (pending feature pruning, see [tools/README.md](tools/README.md#permutation-feature-ranking) and [FOR_NEW_CODECS.md Step 8](FOR_NEW_CODECS.md#step-8--tune-capacity--prune-the-schema)).
+Single shipped bake. Earlier variants (v1.x distill-based bakes, v2.0 hybrid, v2.0/v2.1 zensim_strict) are intentionally *not* shipped — no external consumers depend on them, and one well-validated default beats N partially-validated alternatives. A `zensim_strict` companion will ship once feature pruning closes the strict-mode regression at zq ≥ 94 (`safety_report.passed=false` on v2.1 strict — see PER_ZQ_TAIL violation).
 
-The zensim_strict overhead (6.11% mean) is roughly 2.2× size_optimal because the pinball-q99 bytes head biases toward worst-case-safe configs and the reach gate masks low-confidence cells. The reach gate is *very* strict: at `target_zq ≥ 96`, fewer than 2 cells survive `reach_rate ≥ 0.99` because the underlying configs simply don't reach that threshold reliably across the corpus. Codec consumers should pair zensim_strict with the [two-shot rescue](SAFETY_PLANE.md) so requests above the gate budget fall through to a `KnownGoodFallback` rather than failing loudly.
+The bake is a starting point, not a contract. Codec consumers can rebake against their own corpus / safety thresholds via the documented training pipeline; the `safety_report` block in the manifest is enough for an automated regression gate to refuse a worse-than-shipped bake.
 
 ### What's not blocking lock-in
 

@@ -162,6 +162,7 @@
 #![allow(dead_code)]
 
 mod alpha;
+mod dimensions;
 pub mod feature;
 mod grayscale;
 pub(crate) mod luma;
@@ -489,6 +490,8 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     let width = slice.width();
     let height = slice.rows();
     let geometry = feature::ImageGeometry::new(width, height);
+    // Snapshot descriptor before `slice` is moved into RowStream.
+    let descriptor = slice.descriptor();
 
     let alpha_stats = if ALPHA {
         alpha::scan_alpha(&slice, pixel_budget)
@@ -530,6 +533,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     };
 
     let mut raw = feature::RawAnalysis::default();
+
+    // Dimension features — pure descriptor math, no per-pixel work,
+    // always populated. The `into_results` filter drops them if the
+    // caller didn't ask. Costs ~10 ns per call.
+    dimensions::populate_dimensions(&mut raw, width, height, descriptor);
 
     if width >= 2 && height >= 2 {
         // Tier 1 dispatch knobs — currently just `wants_laplacian`,

@@ -3,22 +3,67 @@
 Bake an sklearn MLPRegressor JSON dump into the zenpicker v1 binary format.
 
 Inputs:
-- `--model JSON`    : sklearn-side model file (see fields below)
-- `--manifest JSON` : optional companion file describing per-output
-                      config metadata. When present, gets re-emitted
-                      into a separate `<base>.manifest.json` next to
-                      the `.bin`. The codec crate compares its
-                      compile-time CONFIGS table against this.
-- `--out FILE.bin`  : output path
-- `--dtype f32|f16` : weight storage dtype (default f32)
+- `--model JSON`        : sklearn-side model file (see fields below)
+- `--out FILE.bin`      : output path
+- `--dtype f32|f16|i8`  : weight storage dtype (default f32). i8 is
+                           per-output-neuron quantized:
+                             scale[o] = max_i |W[i, o]| / 127
+                             q[i, o]  = round(W[i, o] / scale[o])
+                                          .clip(-128, 127)
+                           Empty columns get scale=1.0. Per-output
+                           scales follow the i8 weight block in the
+                           binary; biases stay f32.
+- `--manifest JSON`     : explicit manifest output path; default is
+                           `<out>.manifest.json` next to the `.bin`
+- `--allow-unsafe`      : bake even when the model JSON's
+                           `safety_report.passed = false`. Use only
+                           when the violation is intentional and
+                           reviewed (the runtime gate is defense-in-
+                           depth — the codec can still refuse to load
+                           a bake whose `safety_report.passed = false`)
 
 Required model JSON fields:
   n_inputs, n_outputs, scaler_mean, scaler_scale, layers,
   feat_cols (used for schema_hash), activation (string: "relu")
 
-Each `layers[i]` has `W` (shape [in_dim, out_dim]) and `b` (length out_dim).
-The first n_layers-1 layers use the model's `activation`; the final layer
-is identity (regression head).
+Optional model JSON fields (recommended for shipping bakes):
+  schema_version_tag       — bumps the schema_hash so a layout change
+                             forces a clean re-bake on consumers.
+  extra_axes               — explicit names for engineered input axes
+                             past `feat_cols`. Without it bake_picker
+                             falls back to the legacy zenjpeg layout
+                             match, then to `aux_<i>` placeholders.
+  config_names             — `{config_id: name}` per-output metadata
+                             that gets re-emitted into the manifest.
+  hybrid_heads_manifest    — `n_cells`, `cells`, `output_layout`,
+                             `categorical_axes`, `scalar_axes`,
+                             `scalar_sentinels`. Required if the
+                             codec uses the hybrid-heads layout
+                             (recommended for all new codecs).
+  safety_report            — full diagnostics + violations (see
+                             train_hybrid.py). bake_picker refuses to
+                             bake when `passed=false` unless
+                             `--allow-unsafe`.
+  safety_profile           — "size_optimal" | "zensim_strict".
+  training_objective       — `{name, bytes_quantile, reach_threshold}`.
+  reach_safety             — per-target_zq cell-safety table for the
+                             zensim_strict profile.
+
+Manifest output (`<out>.manifest.json`) contains the lifted form
+codec-side compile-time tables read:
+
+  schema_hash, schema_version_tag, feat_cols, extra_axes,
+  n_inputs, n_outputs, configs (config_id → name),
+  hybrid_heads (when present in the model JSON),
+  safety_profile, training_objective, reach_safety,
+  safety_report — full block forwarded so codec runtime can refuse
+                  to load a bake whose `passed=false`,
+  feature_bounds_p01_p99 — `[{feat, low, high}]` aligned to
+                  feat_cols, lifted from
+                  `safety_report.diagnostics.feature_bounds[col]`'s
+                  `(p01, p99)` pair. Codec runtime feeds this into
+                  `zenpicker::first_out_of_distribution(features,
+                  &FEATURE_BOUNDS)` before argmin.
 
 Output binary v1 layout matches `zenpicker::Model::from_bytes`:
 
@@ -38,10 +83,18 @@ Output binary v1 layout matches `zenpicker::Model::from_bytes`:
       in_dim u32
       out_dim u32
       activation u8     (0=Identity, 1=ReLU)
-      weight_dtype u8   (0=F32, 1=F16)
+      weight_dtype u8   (0=F32, 1=F16, 2=I8)
       reserved u8 u8
       W (row-major, in_dim major), in_dim*out_dim values in dtype
+      [pad to 4-byte alignment]   (i8: pad up; f16 odd-count: 2-byte pad)
+      scales (f32) out_dim values  (only when weight_dtype == I8)
       b (f32) out_dim values
+
+Note on the scaler convention: `scaler_scale` stores sklearn's
+`StandardScaler.scale_` directly (which IS the standard deviation).
+The Rust runtime divides by this — matching sklearn's own
+`StandardScaler.transform` step that the MLP was trained on top of.
+See `zenpicker/src/inference.rs` for the full rationale.
 """
 
 import argparse
@@ -59,8 +112,17 @@ HEADER_SIZE = 32
 
 ACTIVATION_IDENTITY = 0
 ACTIVATION_RELU = 1
+ACTIVATION_LEAKY_RELU = 2  # alpha = 0.01, see zenpicker::model::LEAKY_RELU_ALPHA
+
+ACTIVATION_BY_NAME = {
+    "identity": ACTIVATION_IDENTITY,
+    "relu": ACTIVATION_RELU,
+    "leakyrelu": ACTIVATION_LEAKY_RELU,
+    "leaky_relu": ACTIVATION_LEAKY_RELU,
+}
 DTYPE_F32 = 0
 DTYPE_F16 = 1
+DTYPE_I8 = 2
 
 
 def schema_hash(feat_cols: list[str], extra_axes: list[str], version_tag: str) -> int:
@@ -154,14 +216,47 @@ def encode_dtype(arr: np.ndarray, dtype: str) -> bytes:
     raise ValueError(f"unknown dtype {dtype!r}")
 
 
+def quantize_i8_per_output(W: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-neuron i8 quantization.
+
+    `W` is shape `(in_dim, out_dim)`. For each output column `o`:
+
+        scale[o] = max_i |W[i, o]| / 127        (or 1.0 if column is zero)
+        q[i, o]  = round(W[i, o] / scale[o]).clip(-128, 127).astype(int8)
+
+    Returns `(q, scales)` with `q.dtype == int8`, `scales.dtype == float32`.
+    The dequantized value is `q.astype(f32) * scales[o]`.
+    """
+    in_dim, out_dim = W.shape
+    abs_max = np.abs(W).max(axis=0)  # shape (out_dim,)
+    scales = np.where(abs_max > 0.0, abs_max / 127.0, 1.0).astype(np.float32)
+    q = np.round(W / scales).clip(-128, 127).astype(np.int8)
+    return q, scales
+
+
 def write_layer(out: bytes, W: np.ndarray, b: np.ndarray, activation: int, dtype: str) -> bytes:
     in_dim, out_dim = W.shape
     out += struct.pack("<II", in_dim, out_dim)
-    out += struct.pack("<BBBB", activation, DTYPE_F32 if dtype == "f32" else DTYPE_F16, 0, 0)
+    if dtype == "i8":
+        weight_dtype_byte = DTYPE_I8
+    elif dtype == "f16":
+        weight_dtype_byte = DTYPE_F16
+    else:
+        weight_dtype_byte = DTYPE_F32
+    out += struct.pack("<BBBB", activation, weight_dtype_byte, 0, 0)
+    n_weights = in_dim * out_dim
+    if dtype == "i8":
+        q, scales = quantize_i8_per_output(W)
+        out += q.tobytes()  # n_weights bytes, 1 per element
+        # Pad to 4-byte alignment before f32 scales/biases.
+        pad = (-n_weights) % 4
+        out += b"\x00" * pad
+        out += scales.astype("<f4").tobytes()  # out_dim × f32
+        out += b.astype("<f4").tobytes()
+        return out
     out += encode_dtype(W, dtype)
     # Pad to keep f32 biases 4-aligned. f32 weights are already 4-aligned;
     # f16 weights might end on a 2-aligned boundary if the count is odd.
-    n_weights = in_dim * out_dim
     if dtype == "f16" and n_weights % 2 == 1:
         out += b"\x00\x00"  # 2 bytes pad to reach 4-alignment
     out += encode_dtype(b, "f32")
@@ -209,6 +304,14 @@ def bake(
     n_layers = len(layers)
     feat_cols = list(model["feat_cols"])
     activation = model.get("activation", "relu")
+    activation_key = activation.replace("-", "_").replace(" ", "_").lower()
+    if activation_key not in ACTIVATION_BY_NAME or activation_key == "identity":
+        # Identity-only models don't make sense; bail loudly.
+        raise SystemExit(
+            f"unsupported activation {activation!r}; expected one of "
+            f"{sorted(k for k in ACTIVATION_BY_NAME if k != 'identity')}"
+        )
+    hidden_activation_byte = ACTIVATION_BY_NAME[activation_key]
     # Tolerate both "n_outputs" (shared-MLP fit) and "n_configs"
     # (distill fit; same meaning, different field name in the JSON).
     n_outputs = int(
@@ -216,8 +319,7 @@ def bake(
         if model.get("n_outputs") is not None
         else model.get("n_configs", len(layers[-1]["b"]))
     )
-    if activation != "relu":
-        raise SystemExit(f"unsupported activation {activation!r}; only relu is wired today")
+    # `hidden_activation_byte` already validated above.
 
     extra_axes = derive_extra_axes(n_inputs, feat_cols, model)
     sh = schema_hash(feat_cols, extra_axes, schema_version_tag(model))
@@ -249,7 +351,7 @@ def bake(
             raise SystemExit(f"final layer out_dim {out_dim} != header n_outputs {n_outputs}")
         if b.shape != (out_dim,):
             raise SystemExit(f"layer {i} bias shape {b.shape} != (out_dim={out_dim},)")
-        act = ACTIVATION_IDENTITY if i == last_idx else ACTIVATION_RELU
+        act = ACTIVATION_IDENTITY if i == last_idx else hidden_activation_byte
         blob = write_layer(blob, W, b, act, dtype)
 
     out_path.write_bytes(blob)
@@ -327,7 +429,12 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True, type=Path, help="sklearn-side JSON dump")
     ap.add_argument("--out", required=True, type=Path, help="output .bin path")
-    ap.add_argument("--dtype", default="f32", choices=["f32", "f16"], help="weight storage dtype")
+    ap.add_argument(
+        "--dtype",
+        default="f32",
+        choices=["f32", "f16", "i8"],
+        help="weight storage dtype (i8 = per-output-neuron 8-bit quantization)",
+    )
     ap.add_argument("--manifest", type=Path, help="explicit manifest output path (default: <out>.manifest.json)")
     ap.add_argument(
         "--allow-unsafe",

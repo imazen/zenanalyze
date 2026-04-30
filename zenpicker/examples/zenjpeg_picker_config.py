@@ -36,11 +36,16 @@ from pathlib import Path
 # the wider analyzer feature set from the features-only
 # `..._v2_1.tsv` re-extraction.
 PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
-FEATURES = Path("benchmarks/zq_pareto_features_2026-04-29_v2_1.tsv")
+# v2.2 features: same pareto, but re-extracted with the post-#42
+# zenanalyze (12 dimension features + 26 percentile features added on
+# top of v2.1's 35 raw features). Total 73-feature TSV.
+# `_subset100` is the fast-iteration subset (100 of 347 images). For
+# the final v2.2 bake, point at `_v2_2.tsv` (full corpus).
+FEATURES = Path("benchmarks/zq_pareto_features_2026-04-30_v2_2_subset100.tsv")
 
 # Where to write the trained model + summary:
-OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_1.json")
-OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_1.log")
+OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_2_clean.json")
+OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_2_clean.log")
 
 
 # ---------- Schema ----------
@@ -63,8 +68,50 @@ OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_1.log")
 #   - skin_tone_fraction — too narrow for codec-config picking
 #   - alpha_present (bool) — usually constant per partition
 #   - effective_bit_depth — corpus-wide constant 8
+# v2.2-clean schema. Tighter than v2.2-pruned (60 features). Built by:
+#
+#   1. Starting from v2.1 (35 features). Drop `feat_distinct_color_bins`
+#      (palette-codec feature, structurally irrelevant for zenjpeg).
+#   2. Add only ablation-top-rated dimension features (5):
+#      pixel_count (#1 ablation, +4.89pp), log_pixels, aspect_min_over_max,
+#      log_padded_pixels_8 (encoded surface area), channel_count.
+#      Drop the rest of the 12 dimension features and all 11 log
+#      derivatives — Spearman correlation showed redundancy and
+#      ablation showed only the above are load-bearing.
+#   3. Add only ablation-top-rated percentiles (~10):
+#      laplacian_variance p50/75/99/peak (p50 was #4 in entire schema),
+#      aq_map p75/90/95/99 (drop p50 — Spearman ρ=0.962 with mean,
+#      redundant), noise_floor_y p50/90 (drop p25 — Spearman ρ=0.956
+#      with parent), quant_survival_y p10 (worst-block survival → trellis ROI).
+#   4. Drop UV-side percentiles entirely — parent quant_survival_uv and
+#      noise_floor_uv both had negative ablation Δ on subset100.
+#   5. Drop other negatives that are zenjpeg-relevant but small-corpus
+#      noisy (high_freq_energy_ratio, flat_color_block_ratio,
+#      grayscale_score). On full 347-image retrain these likely become
+#      weak-positive; revisit then.
+#
+# Original v2.2-pruned dropped too aggressively (val 4.55% vs 3.25%
+# baseline). v2.2-clean keeps the load-bearing redundancy.
+# v2.2-pruned schema. Built by:
+#   1. Starting from v2.2 (v2.1 + 12 dimension features + 26 percentile
+#      features + 11 log/padded variants — see zenanalyze#42).
+#   2. Dropping 7 negative-ablation features: distinct_color_bins,
+#      high_freq_energy_ratio, flat_color_block_ratio, quant_survival_uv,
+#      noise_floor_uv, noise_floor_uv_p50, grayscale_score
+#      (each had Δ ≤ −0.05pp under permutation importance — model
+#      overfit on noise from these inputs).
+#   3. Dropping 9 redundant log/derivative variants (log2_pixels,
+#      log10_pixels, log_pixels_rounded, sqrt_pixels, log_bitmap_bytes,
+#      log_min_dim, log_max_dim, log_padded_pixels_16/32/64) — the
+#      logs-only retrain showed the MLP performs worse without
+#      `pixel_count`, so the linear dims carry the load and the extra
+#      log scales are noise. Keep only `log_pixels` + `log_padded_pixels_8`
+#      as cushion for extreme out-of-distribution sizes.
+#   4. Keeping all 4 linear dimension features (pixel_count, min_dim,
+#      max_dim, bitmap_bytes) — pixel_count alone was +4.89pp ablation
+#      impact, the dominant signal in the schema.
 KEEP_FEATURES = [
-    # Tier 1 (stable)
+    # ---------- v2.1 inheritance (34 of 35 — drop palette-only feature) ----------
     "feat_variance",
     "feat_edge_density",
     "feat_uniformity",
@@ -76,14 +123,12 @@ KEEP_FEATURES = [
     "feat_laplacian_variance",
     "feat_variance_spread",
     "feat_grayscale_score",
-    # Tier 2 (per-axis chroma sharpness)
     "feat_cb_horiz_sharpness",
     "feat_cb_vert_sharpness",
     "feat_cb_peak_sharpness",
     "feat_cr_horiz_sharpness",
     "feat_cr_vert_sharpness",
     "feat_cr_peak_sharpness",
-    # Tier 3 (sampled DCT)
     "feat_high_freq_energy_ratio",
     "feat_luma_histogram_entropy",
     "feat_dct_compressibility_y",
@@ -98,12 +143,49 @@ KEEP_FEATURES = [
     "feat_edge_slope_stdev",
     "feat_gradient_fraction",
     "feat_line_art_score",
-    # Palette
-    "feat_distinct_color_bins",
+    # DROPPED: feat_distinct_color_bins — palette codec only, structurally
+    # irrelevant for zenjpeg (true-color JPEG doesn't care about palette
+    # fits-in-N).
     "feat_palette_density",
-    # Alpha (kept for completeness; corpus has some RGBA)
     "feat_alpha_used_fraction",
     "feat_alpha_bimodal_score",
+    # ---------- v2.2 dimension features (5 of 12 — ablation-validated only) ----------
+    "feat_pixel_count",            # #1 ablation impact (+4.89pp)
+    "feat_log_pixels",             # smooth resolution axis
+    "feat_aspect_min_over_max",    # bounded strip detection
+    "feat_log_padded_pixels_8",    # encoded surface area at JPEG 8×8 grid
+    "feat_channel_count",          # discrete RGB/RGBA distinction
+    # DROPPED: min_dim/max_dim/bitmap_bytes/log_aspect_abs/block_misalignment{8,16,32,64}
+    # — redundant with the above per Spearman + ablation.
+    # DROPPED: 11 log derivatives (log2/log10/log_pixels_rounded/sqrt/
+    #   log_bitmap_bytes/log_min_dim/log_max_dim/log_padded_pixels_{16,32,64})
+    # — logs-only retrain (4.10% val) confirmed pixel_count carries the
+    # MLP signal; logs are redundant for tree teachers and noise for MLP students.
+    # ---------- v2.2 percentile features (~10, ablation-validated) ----------
+    # AqMap: drop p50 (Spearman ρ=0.962 with mean, redundant). p75/90/95/99
+    # all clear ≥0.05pp ablation.
+    "feat_aq_map_p75",
+    "feat_aq_map_p90",
+    "feat_aq_map_p95",
+    "feat_aq_map_p99",
+    # NoiseFloorY: drop p25 (Spearman ρ=0.956 with parent). p50 was #9 in
+    # ablation; p90 captures top-tail noise.
+    "feat_noise_floor_y_p50",
+    "feat_noise_floor_y_p90",
+    # Laplacian: keep all 5. Spearman showed no redundancy. p50 was #4 in
+    # ablation, p75 was #7. peak captures rare extreme edges.
+    "feat_laplacian_variance_p50",
+    "feat_laplacian_variance_p75",
+    "feat_laplacian_variance_p90",
+    "feat_laplacian_variance_p99",
+    "feat_laplacian_variance_peak",
+    # QuantSurvivalY: keep p10 only — "worst-block survival" → trellis ROI.
+    # Parent + p25/50/75 are tightly correlated (ρ > 0.85); p10 is the
+    # one quantile that adds new information.
+    "feat_quant_survival_y_p10",
+    # DROPPED: all noise_floor_uv and quant_survival_uv percentiles —
+    # parents were negative-Δ ablation; UV signal handled by chroma
+    # sharpness features instead.
 ]
 
 # Zq target grid: step 5 from 0..70 + step 2 from 70..100 (the

@@ -757,6 +757,228 @@ features_table! {
     /// requested. Set both if you want both the binary classifier and
     /// the tolerance fraction.
     IsGrayscale = 55 : bool => is_grayscale,
+
+    // ---------------- Dimension features ----------------------------
+    // Pure descriptor math — no per-pixel work. Computed once per
+    // call from `(width, height, descriptor)`. Always-on, no cargo
+    // feature gate. Issue #42.
+    /// `u32`. Total pixel count `w * h`. Saturates at `u32::MAX` for
+    /// images larger than ~4.29 gigapixels (rare; we don't support
+    /// images that big elsewhere).
+    PixelCount = 56 : u32 => pixel_count,
+    /// `f32`. `ln(w * h)`, natural log. Useful as a smooth
+    /// resolution axis for predictors (vs `size_class` one-hot).
+    LogPixels = 57 : f32 => log_pixels,
+    /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
+    /// a 1024×1 image and a 32×32 image have very different
+    /// per-pixel codec costs but the same `PixelCount`.
+    MinDim = 58 : u32 => min_dim,
+    /// `u32`. `max(w, h)`. Pairs with `MinDim` for shape-aware
+    /// reasoning.
+    MaxDim = 59 : u32 => max_dim,
+    /// `f32`. Uncompressed bitmap byte count: `w * h * channels *
+    /// bytes_per_sample`, cast to f32. The natural reference for
+    /// "how much could compression possibly save" — predictors
+    /// regress against `log(bitmap_bytes)`. f32 is exact for
+    /// values up to 2²⁴ ≈ 16 MB; larger images lose ~ULP-level
+    /// precision per byte but stay correct in log space (≤ 1 ULP
+    /// drift in log10 ≈ 1e-7) — fine for ML features.
+    BitmapBytes = 60 : f32 => bitmap_bytes,
+    /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
+    /// extreme strip → 0. Bounded and smooth — well-conditioned for
+    /// MLPs and tree models alike.
+    AspectMinOverMax = 61 : f32 => aspect_min_over_max,
+    /// `f32`. `|ln(w / h)|` ∈ `[0, ∞)`. Square = `0`, larger =
+    /// more extreme. Symmetric (no sign ambiguity between landscape
+    /// and portrait) and unbounded above — sensitive to very
+    /// extreme ratios where `AspectMinOverMax` saturates.
+    LogAspectAbs = 62 : f32 => log_aspect_abs,
+    /// `f32`. Fraction of padding pixels needed to round the
+    /// image up to a complete 8×8 grid. `0.0` for images whose
+    /// dimensions are both multiples of 8; positive otherwise. The
+    /// codec's per-block overhead (DCT, prediction, signaling)
+    /// applies to padded blocks too — this captures that "wasted"
+    /// fraction. Hits JPEG 8×8 DCT and WebP/AVIF 8×8 partitions.
+    BlockMisalignment8 = 63 : f32 => block_misalignment_8,
+    /// `f32`. Same as `BlockMisalignment8` but for 16×16 blocks.
+    /// Hits JPEG 4:2:0 MCU and AVIF 16×16 partitions.
+    BlockMisalignment16 = 64 : f32 => block_misalignment_16,
+    /// `f32`. Same as `BlockMisalignment8` but for 32×32 blocks.
+    /// Hits JXL DCT32 and AV1 32×32 partitions.
+    BlockMisalignment32 = 65 : f32 => block_misalignment_32,
+    /// `f32`. Same as `BlockMisalignment8` but for 64×64 blocks.
+    /// Hits JXL DCT64.
+    BlockMisalignment64 = 66 : f32 => block_misalignment_64,
+    /// `u32`. Number of color channels in the source descriptor:
+    /// 1 (grayscale), 3 (RGB), or 4 (RGBA). Pure descriptor lookup.
+    ChannelCount = 67 : u32 => channel_count,
+
+    // ---------------- AqMap percentiles -----------------------------
+    // [`Self::AqMapMean`] / [`Self::AqMapStd`] already buffer
+    // per-block AC energy in `block_acs`. These percentiles sort the
+    // same buffer and read at the listed quantile, in log10 space
+    // matching `aq_map_mean`. Free incremental compute. Issue #42 →
+    // distributional features analysis 2026-04-30.
+    /// `f32`. log10 AC energy at the 50th percentile (median) over
+    /// 8×8 blocks. See [`Self::AqMapMean`] for the underlying
+    /// per-block accumulator.
+    #[cfg(feature = "experimental")]
+    AqMapP50 = 68 : f32 => aq_map_p50,
+    /// `f32`. log10 AC energy p75. Detail-floor signal —
+    /// distinguishes "uniformly busy" (high p75) from "mostly flat
+    /// with a few hard blocks" (low p75) where mean alone collapses
+    /// both into one number.
+    #[cfg(feature = "experimental")]
+    AqMapP75 = 69 : f32 => aq_map_p75,
+    /// `f32`. log10 AC energy p90.
+    #[cfg(feature = "experimental")]
+    AqMapP90 = 70 : f32 => aq_map_p90,
+    /// `f32`. log10 AC energy p95.
+    #[cfg(feature = "experimental")]
+    AqMapP95 = 71 : f32 => aq_map_p95,
+    /// `f32`. log10 AC energy p99 — peak-block detail. Picks up
+    /// localized hard blocks that drive the worst-case JPEG cost.
+    #[cfg(feature = "experimental")]
+    AqMapP99 = 72 : f32 => aq_map_p99,
+
+    // ---------------- NoiseFloor percentiles ------------------------
+    // [`Self::NoiseFloorY`] / [`Self::NoiseFloorUV`] already sort
+    // `block_low_*` buffers and read at p10. Same scaling
+    // (`sqrt(arr[idx]/15) / 32`, clamped to [0,1]) at additional
+    // quantiles surfaces noise *texture* (uniform vs streaky) to
+    // the picker. Zero added compute beyond per-quantile array
+    // index reads.
+    /// `f32`. Noise floor (Y) at the 25th percentile of per-block
+    /// low-AC energy. Same `[0, 1]` scaling as
+    /// [`Self::NoiseFloorY`] (which is p10).
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP25 = 73 : f32 => noise_floor_y_p25,
+    /// `f32`. Noise floor (Y) at the 50th percentile (median).
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP50 = 74 : f32 => noise_floor_y_p50,
+    /// `f32`. Noise floor (Y) at the 75th percentile.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP75 = 75 : f32 => noise_floor_y_p75,
+    /// `f32`. Noise floor (Y) at the 90th percentile — top-quartile
+    /// busy blocks. Higher = noisier in the dirtiest regions of the
+    /// image.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP90 = 76 : f32 => noise_floor_y_p90,
+    /// `f32`. Noise floor (UV) at p25 — `max(noise_floor_cb_p25,
+    /// noise_floor_cr_p25)`, same shape as [`Self::NoiseFloorUV`].
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP25 = 77 : f32 => noise_floor_uv_p25,
+    /// `f32`. Noise floor (UV) at p50.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP50 = 78 : f32 => noise_floor_uv_p50,
+    /// `f32`. Noise floor (UV) at p75.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP75 = 79 : f32 => noise_floor_uv_p75,
+    /// `f32`. Noise floor (UV) at p90.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP90 = 80 : f32 => noise_floor_uv_p90,
+
+    // ---------------- LaplacianVariance percentiles -----------------
+    // Tier 1 piggyback. Driven by a 256-bin histogram over `|∇²L|`
+    // (clamped to `[0, 255]`) accumulated alongside the existing
+    // Laplacian variance pass — see
+    // `src/tier1.rs::accumulate_laplacian_simd`. The histogram lives
+    // in `PixelStats` and adds 8 scalar adds per SIMD iter (lane
+    // scatter); no per-pixel branching, no allocation.
+    /// `f32`. `|∇²L|` at the 50th percentile (median) over interior
+    /// pixels. Range `[0, 255]` (saturated at the ceiling).
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP50 = 81 : f32 => laplacian_variance_p50,
+    /// `f32`. `|∇²L|` p75. Sharpness floor — distinguishes "single
+    /// sharp edge in a smooth image" (low p75 + high p99) from
+    /// "uniformly textured" (high p75) where the variance alone
+    /// can't tell them apart.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP75 = 82 : f32 => laplacian_variance_p75,
+    /// `f32`. `|∇²L|` p90.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP90 = 83 : f32 => laplacian_variance_p90,
+    /// `f32`. `|∇²L|` p99 — peak-edge magnitude. Picks up the
+    /// rare-but-loud sharpness events that drive the codec's
+    /// per-block trellis decision.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP99 = 84 : f32 => laplacian_variance_p99,
+    /// `f32`. Highest histogram bin (`0`–`255`) with at least one
+    /// observation. Saturates at `255` when any pixel hit the
+    /// histogram-clamp ceiling — flag value for "extreme edge
+    /// present somewhere in the image". Size-dependent (larger
+    /// images roll more chances at extremes); see issue #42 size
+    /// features for cross-term cushioning.
+    #[cfg(feature = "experimental")]
+    LaplacianVariancePeak = 85 : f32 => laplacian_variance_peak,
+
+    // ---------------- QuantSurvival percentiles ---------------------
+    // Per-block buffer of `quant_survival(...)` values is collected
+    // alongside the existing streaming mean (one f32 per block, ≤4096
+    // entries on a 4 MP image, ≤16 KB transient per channel). Sorted
+    // once at end of pass, indexed at fixed quantiles. p10 ⇒
+    // worst-block survival ⇒ trellis ROI proxy; p75 ⇒ best-block
+    // survival ⇒ compression ceiling.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP10 = 86 : f32 => quant_survival_y_p10,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP25 = 87 : f32 => quant_survival_y_p25,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP50 = 88 : f32 => quant_survival_y_p50,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP75 = 89 : f32 => quant_survival_y_p75,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP10 = 90 : f32 => quant_survival_uv_p10,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP25 = 91 : f32 => quant_survival_uv_p25,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP50 = 92 : f32 => quant_survival_uv_p50,
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
+
+    // ---------------- Dimension log/derivative variants -------------
+    // Companions to PixelCount/LogPixels (#42). Different bases give
+    // the network different numerical handles for the same underlying
+    // resolution signal — and let ablation tell us whether
+    // PixelCount's dominance is real signal or memorization. The
+    // block-padded variants reflect the *encoded* surface area: for
+    // a 257×257 image the codec actually encodes 264×264 (block-8
+    // grid), 272×272 (block-16), etc. These correlate with bytes
+    // spent more directly than the visible pixel count does.
+    /// `f32`. `log2(w * h)`. Range ~12 → 24 for typical images.
+    /// Power-of-2 friendly, integer-clean for power-of-2 sizes.
+    Log2Pixels = 94 : f32 => log2_pixels,
+    /// `f32`. `log10(w * h)`. Range ~3.6 → 7.2 for typical images.
+    Log10Pixels = 95 : f32 => log10_pixels,
+    /// `f32`. `ln(w * h)` rounded to the nearest 0.5 — bucket-
+    /// aligned smooth signal that gives the network a quantized
+    /// "size class" handle without the 4-bucket cliff of the
+    /// engineered `size_*` one-hot.
+    LogPixelsRounded = 96 : f32 => log_pixels_rounded,
+    /// `f32`. `sqrt(w * h)` — geometric mean linear dimension.
+    /// Useful when the network wants a linear (not log) size axis
+    /// that doesn't blow up the dynamic range like raw `PixelCount`.
+    SqrtPixels = 97 : f32 => sqrt_pixels,
+    /// `f32`. `ln(bitmap_bytes)`. Compressed-vs-uncompressed-
+    /// reference signal in log space — `BitmapBytes` itself has the
+    /// same wide-dynamic-range memorization risk as `PixelCount`.
+    LogBitmapBytes = 98 : f32 => log_bitmap_bytes,
+    /// `f32`. `ln(min(w, h))` — log of the shorter dimension.
+    /// Captures strips and thumbnails where one dim is dominant.
+    LogMinDim = 99 : f32 => log_min_dim,
+    /// `f32`. `ln(max(w, h))` — log of the longer dimension.
+    LogMaxDim = 100 : f32 => log_max_dim,
+    /// `f32`. `ln(ceil(w/8)*8 × ceil(h/8)*8)`. Log of the block-
+    /// padded encoded surface area at the JPEG 8×8 / WebP/AVIF 8×8
+    /// grid. For aligned images equals `LogPixels`; for
+    /// off-by-one sizes is slightly larger by `ln(1 + alignment_loss)`.
+    LogPaddedPixels8 = 101 : f32 => log_padded_pixels_8,
+    /// `f32`. Same for 16×16 (JPEG 4:2:0 MCU, AVIF 16×16).
+    LogPaddedPixels16 = 102 : f32 => log_padded_pixels_16,
+    /// `f32`. Same for 32×32 (JXL DCT32, AV1 32×32).
+    LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
+    /// `f32`. Same for 64×64 (JXL DCT64).
+    LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -773,6 +995,12 @@ features_table! {
 pub enum FeatureValue {
     F32(f32),
     U32(u32),
+    /// `u64` for features whose natural domain exceeds `u32::MAX` —
+    /// notably [`AnalysisFeature::BitmapBytes`] which can exceed 4 GB
+    /// on 16K+ HDR (RGBAF32) images. Lossless `to_f32` coercion is
+    /// only exact for `n ≤ 2⁵³`; values beyond are rounded to the
+    /// nearest f64-representable then cast.
+    U64(u64),
     Bool(bool),
 }
 
@@ -796,6 +1024,15 @@ impl FeatureValue {
         }
     }
 
+    /// Type-checked accessor for `U64`.
+    #[inline]
+    pub const fn as_u64(self) -> Option<u64> {
+        match self {
+            Self::U64(x) => Some(x),
+            _ => None,
+        }
+    }
+
     /// Type-checked accessor for `Bool`.
     #[inline]
     pub const fn as_bool(self) -> Option<bool> {
@@ -815,6 +1052,8 @@ impl FeatureValue {
         match self {
             Self::F32(x) => x,
             Self::U32(x) => x as f32,
+            // u64 → f32 via f64 to keep precision near 2^53 boundary.
+            Self::U64(x) => x as f64 as f32,
             Self::Bool(false) => 0.0,
             Self::Bool(true) => 1.0,
         }
@@ -829,6 +1068,11 @@ impl From<f32> for FeatureValue {
 impl From<u32> for FeatureValue {
     fn from(x: u32) -> Self {
         Self::U32(x)
+    }
+}
+impl From<u64> for FeatureValue {
+    fn from(x: u64) -> Self {
+        Self::U64(x)
     }
 }
 impl From<bool> for FeatureValue {
@@ -1700,7 +1944,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        assert!(AnalysisFeature::from_u16(64).is_none());
+        // First unused id past the dimension log/derivative variants
+        // (issue #42, ids 56–104).
+        assert!(AnalysisFeature::from_u16(105).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -1756,7 +2002,11 @@ mod tests {
         // returns `None` for both kinds of holes, so a single
         // `if let Some(f) = …` walk handles them uniformly.
         let mut active = 0u32;
-        for id in 0..64u16 {
+        // Iterate past the dimension features (max id 67 today). Bump
+        // the upper bound when new ids land — `assert_eq!` below
+        // catches drift between SUPPORTED.len() and this loop's
+        // walked range.
+        for id in 0..120u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }

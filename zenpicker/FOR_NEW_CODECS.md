@@ -94,7 +94,31 @@ If you're using zenanalyze, declare a `FeatureSet` and walk `FeatureSet::SUPPORT
 
 **Add a `--features-only` flag to your harness.** The Pareto encode loop is the expensive step (~hours on a typical corpus). When zenanalyze ships new features, you want to extend the existing TSV without re-running the encode pass — `--features-only` skips encoding and emits just the per-image feature rows. Re-extraction takes ~1 second on 1000-image corpora; without it iteration is gated on the encode loop. zenjpeg's harness has this; copy the pattern.
 
+**One TSV writer pitfall to design around.** If your harness opens the features TSV in append mode (the typical zenjpeg pattern), the column header is only written when the file is *new*. After expanding `KEEP_FEATURES`, an append-mode re-run would write rows with the new column count under the old header and the trainer silently misaligns. Two safe ways to avoid this:
+
+1. **Date-stamp the output path** — `zq_pareto_features_2026-04-30_v2_2.tsv`, `..._v2_3.tsv`, etc. Each schema version gets its own file; old runs are preserved as historical record. This is what zenjpeg does in practice.
+2. **Have your harness validate the header before appending.** If the existing first line's tab-count doesn't match `column_count + 1`, abort with a loud error rather than appending. Truncate-and-rewrite is a fine alternative when the harness *knows* it has the latest schema.
+
+**Don't suggest "delete the TSV first" as standard procedure** — it's a destructive op for what should be a deterministic pipeline. If your harness silently corrupts on schema mismatch, fix the harness.
+
 Cost rule: every feature costs hot-path zenanalyze time on every encode decision. Run a permutation-importance ablation (Step 8 below) to drop features that don't pay for themselves before locking in your schema.
+
+### Codec-relevance gating: not every analyzer feature belongs in your picker
+
+zenanalyze's `FeatureSet::SUPPORTED` is the **union** of every signal any codec might want. Your picker should consume the **intersection** of (a) features that earn signal on ablation and (b) features that are mechanistically meaningful for your codec.
+
+Concrete example: `feat_distinct_color_bins` is load-bearing for PNG / GIF / WebP-lossless / indexed-codec pickers (when an image fits in N colors, the indexed-palette path wins on size). For zenjpeg — a true-color JPEG codec that doesn't care about palette fits — the count is structurally meaningless and the ablation correctly scored it −0.35pp on val (worse than zero — the model overfits noise from a feature that carries no signal for this codec).
+
+| Likely irrelevant to JPEG | Likely irrelevant to WebP-lossy | Likely irrelevant to all-but-JXL |
+|---|---|---|
+| feat_distinct_color_bins | feat_distinct_color_bins | feat_gradient_fraction (DCT16/32 selection) |
+| feat_palette_density | feat_palette_density | feat_log_padded_pixels_64 (DCT64 alignment) |
+| | feat_alpha_* (lossy WebP rarely shipped with alpha) | |
+| HDR/wide-gamut features (until you encode HDR sources) | HDR features | |
+
+Filter aggressively when assembling your `KEEP_FEATURES`. The picker's bake size and runtime cost both scale linearly with the input count — a 50-feature picker is meaningfully smaller and faster than a 90-feature one with no accuracy loss.
+
+The cross-codec inventory at [imazen/zenanalyze#41](https://github.com/imazen/zenanalyze/issues/41) tracks which features each shipping picker consumes. Add your codec to that issue once you have a v0.1 candidate.
 
 ---
 
@@ -377,6 +401,87 @@ Output: `benchmarks/<codec>_hybrid_<date>_ablation.json` (machine-readable) and 
 - Keep the top 10-20 by `Δ` and retrain — typical result: same or better held-out metrics with a smaller, faster analyzer hot path.
 
 The ranking is stable between `HISTGB_FAST` and `HISTGB_FULL` so use FAST for the ablation pass; absolute numbers will shift but the ordering won't.
+
+### Schema discipline — don't bloat the input vector
+
+The biggest mistake when adding features speculatively is to keep them all. Permutation-importance ablation tells you what's load-bearing **for the tree teacher** — but trees are scale-invariant and pick one feature from any redundant cluster. The *MLP student*'s sensitivity to redundant features can mask the truth in either direction.
+
+**Empirical evidence from zenjpeg's v2.2 schema search (2026-04-30):**
+
+| Variant | features | teacher mean overhead | student val | argmin_acc |
+|---|---:|---:|---:|---:|
+| v2.1 production (35 features, full 347 corpus) | 35 | 2.30% | 2.30% | ~52% |
+| v2.2 kitchen-sink (every new feature added) | 92 | 1.84% | 3.25% | 48.4% |
+| v2.2 + 11 log/derivative variants | 103 | 1.84% | 3.33% | 45.9% |
+| v2.2 logs-only (drop linear dims) | 92 | 1.84% | 4.10% | 41.0% |
+| v2.2-pruned (drop everything ablation flagged) | 60 | 1.92% | 4.55% | 43.5% |
+| **v2.2-clean (this commit)** | **51** | **1.82%** | **2.74%** | **53.0%** |
+
+51 features beats 92 by 0.51pp val mean overhead and 4.6pp argmin accuracy. The kitchen-sink schema actively hurt the student MLP — too many redundant inputs add noise without information. The aggressive prune dropped too much — some "negative-Δ" features turn out to be MLP-side smoothers that the tree-side ablation didn't capture.
+
+**Rule of thumb:** target ~50 features for a hybrid-heads picker on a 5K-row training set. Below 30 you're under-cushioning the MLP; past 75 you're paying inference cost for noise.
+
+### Step 8.5 — Spearman correlation pruning (cheap, ~2 minutes)
+
+Before retraining a candidate schema, run a Spearman correlation pass on your features TSV. Any pair with `ρ > 0.95` carries near-identical information; only one of them is worth keeping. The cheaper diagnostic before re-training.
+
+```python
+import csv, numpy as np
+from itertools import combinations
+
+with open("benchmarks/<your_codec>_features.tsv") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    rows = list(reader)
+
+# Group your candidate percentile/log/derivative families.
+groups = {
+    "AqMap": ["feat_aq_map_mean", "feat_aq_map_p50", "feat_aq_map_p75",
+              "feat_aq_map_p90", "feat_aq_map_p95", "feat_aq_map_p99"],
+    "NoiseFloorY": ["feat_noise_floor_y", "feat_noise_floor_y_p25",
+                    "feat_noise_floor_y_p50", "feat_noise_floor_y_p90"],
+    # ... your families
+}
+
+def spearman(a, b):
+    mask = np.isfinite(a) & np.isfinite(b)
+    a, b = a[mask], b[mask]
+    return float(np.corrcoef(np.argsort(np.argsort(a)),
+                             np.argsort(np.argsort(b)))[0, 1])
+
+data = {c: np.array([float(r[c]) for r in rows], dtype=np.float64)
+        for c in rows[0] if c.startswith("feat_")}
+
+for name, members in groups.items():
+    for m1, m2 in combinations(members, 2):
+        r = spearman(data[m1], data[m2])
+        if r > 0.95:
+            print(f"redundant: {m1} ↔ {m2}  ρ={r:.3f}")
+```
+
+**zenjpeg v2.2 result** (60 percentile/dimension candidates):
+- `aq_map mean ↔ p50` — ρ=0.962 (drop p50)
+- `noise_floor_y ↔ p25` — ρ=0.956 (drop p25)
+- `noise_floor_uv ↔ p25` — ρ=0.966 (drop p25 — UV branch dropped entirely)
+- `quant_survival_y ↔ p75` — ρ=0.968 (drop p75)
+- LaplacianVariance percentiles: **none** redundant — the |∇²L| distribution is the most informative signal in zenjpeg's schema, and its p50/p75/p90/p99/peak each carry distinct information.
+
+Drop the redundant member from each pair *before* re-training. The MLP can't separate signal from noise that's already encoded in another input; reducing input dimensionality at this step is pure win.
+
+### Step 8.75 — dimension features need empirical justification, not log-scale variety
+
+zenanalyze ships ~12 dimension features (PixelCount, MinDim, MaxDim, BitmapBytes, AspectMinOverMax, LogPixels, BlockMisalignment{8,16,32,64}, ChannelCount, etc.) plus 11 log/derivative variants (Log2Pixels, Log10Pixels, Sqrt, LogPaddedPixels{8,16,32,64}, etc.). **Don't include all of them by default.**
+
+zenjpeg v2.2-clean keeps just **5** dimension features:
+
+- `feat_pixel_count` — the #1 ablation impact in the entire schema (+4.89pp). This is the dominant size signal.
+- `feat_log_pixels` — smooth resolution axis, complements the linear pixel_count.
+- `feat_aspect_min_over_max` — bounded `(0, 1]`, captures strips and thumbnails.
+- `feat_log_padded_pixels_8` — log of encoded surface area at the JPEG 8×8 block grid. The codec actually pays for these padded pixels.
+- `feat_channel_count` — discrete grayscale/RGB/RGBA distinction.
+
+The other 18 dimension features (linear `min_dim`, `max_dim`, `bitmap_bytes`; `log2_pixels`, `log10_pixels`, `sqrt_pixels`, `log_pixels_rounded`; `log_min_dim`, `log_max_dim`, `log_bitmap_bytes`; `block_misalignment_{8,16,32,64}`; `log_padded_pixels_{16,32,64}`) added noise without signal in ablation. Different codecs may lean on different subsets — JXL DCT64 alignment is more relevant for `log_padded_pixels_64`, AVIF for `block_misalignment_16` — but **only include them when their ablation Δ is positive on your codec's corpus**.
+
+The "logs-only" experiment confirmed `pixel_count` carries the MLP signal the logs alone can't replace (val 4.10% without it vs 2.74% with it). Don't drop it — it's the load-bearing signal even though trees are scale-invariant about the choice.
 
 ### Mandatory: ship the safety gate in CI
 
