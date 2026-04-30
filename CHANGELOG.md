@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `analyze_with_dispatch_plan` (issue #53, stage 0)
+
+- **New public entry point `analyze_with_dispatch_plan`** alongside
+  the existing `analyze_features`. Adjusts **sampling budget** based
+  on image dimensions before any scan — never narrows the caller's
+  feature query. Existing `analyze_features` is unchanged — codecs
+  opt in by switching call sites.
+- **New public type `DispatchHints`** — an empty
+  `#[non_exhaustive]` seat. Stage 0 does not consume any hint, so
+  the type ships with no fields. Future stages add fields
+  additively under 0.1.x without a public-signature change.
+- **Stage 0**: empty-feature requests short-circuit; ≤ 64 K-pixel
+  images get the budget bumped to exhaustive (per-call fixed
+  overhead dominates per-pixel work below this size, so sampling
+  buys nothing); ≥ 8 MP images record an internal extended-pass
+  flag for a future Stage 2 retry.
+- **Contract preserved for fixed-shape consumers**: for every
+  requested feature, the dispatch plan returns the same
+  `Some(_)` / `None` shape `analyze_features` would have returned
+  with the same query. The picker MLP and other consumers that
+  fill fixed-shape input vectors keep their training distribution
+  intact — no `None` substituted for a requested feature.
+- **Stages 2+ (extended-budget retry, selective Tier 3, derived
+  likelihoods)** are deferred to follow-up PRs gated on the
+  imazen/zenanalyze#47 corpus sweep. None will skip caller-requested
+  features either — the dispatch tree only ever adds compute, never
+  drops it.
+
 ### Added — zenpicker size-invariance discipline
 
 - **Size invariance is a safety property.** The picker is now

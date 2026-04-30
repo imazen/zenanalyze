@@ -3805,3 +3805,182 @@ mod sanity_matrix {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// Stage 0 dispatch plan tests (issue #53). The dispatch plan is
+// purely additive — it adjusts sampling budgets, never narrows the
+// caller's feature query. Parity with `analyze_features` is the
+// strongest test we can write; below-threshold tiny-image override
+// is the one observable Stage 0 effect (caller sees the same
+// numerics, just computed exhaustively).
+// ---------------------------------------------------------------------
+
+#[cfg(test)]
+mod dispatch_plan {
+    use super::*;
+    use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+    use crate::{DispatchHints, analyze_features, analyze_with_dispatch_plan};
+
+    fn rgb_slice(buf: &[u8], w: u32, h: u32) -> PixelSlice<'_> {
+        let stride = (w as usize) * 3;
+        PixelSlice::new(buf, w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap()
+    }
+
+    /// Stage 0: empty feature request short-circuits without panicking
+    /// and returns an [`AnalysisResults`] whose `requested` set is
+    /// empty. No tier work runs (verified indirectly by the absence of
+    /// any `get(_)` returning `Some`).
+    #[test]
+    fn stage0_empty_query_short_circuits() {
+        let buf = vec![128u8; 32 * 32 * 3];
+        let slice = rgb_slice(&buf, 32, 32);
+        let q = AnalysisQuery::new(FeatureSet::new());
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        assert!(r.requested().is_empty(), "empty query → empty requested");
+        // Sample a few features the analyzer would otherwise compute —
+        // none should be present.
+        assert!(r.get(AnalysisFeature::Variance).is_none());
+        assert!(r.get(AnalysisFeature::Uniformity).is_none());
+        assert!(r.get(AnalysisFeature::HighFreqEnergyRatio).is_none());
+    }
+
+    /// On any image (above the exhaustive-budget threshold) the
+    /// dispatch plan produces the same numerics as `analyze_features`
+    /// for every requested feature — same budgets, same code path,
+    /// purely additive front. This is the load-bearing parity test.
+    #[test]
+    fn stage0_above_threshold_matches_analyze_features_exactly() {
+        // 256 × 256 = 65 536 pixels > MIN_EXHAUSTIVE_THRESHOLD (64 000),
+        // so Stage 0 leaves the budget alone.
+        let buf = synth_rgb(256, 256, 7);
+        let slice = rgb_slice(&buf, 256, 256);
+
+        // Request a wide mix: Tier 1 luma + chroma, Tier 2, Tier 3,
+        // dimensions, alpha-irrelevant (RGB8). Use SUPPORTED so we
+        // exercise every cfg-enabled feature.
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, 256, 256), &q).unwrap();
+        let plan = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        // Every feature the baseline produced must be present in the
+        // dispatch-plan output, with bit-identical numerics.
+        for f in FeatureSet::SUPPORTED.iter() {
+            let b = baseline.get_f32(f);
+            let p = plan.get_f32(f);
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for {f:?}: baseline={b:?} plan={p:?}",
+            );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "value mismatch for {f:?}: baseline={bv} plan={pv}",
+                );
+            }
+        }
+    }
+
+    /// Grayscale parity: a true grayscale image gets every requested
+    /// chroma feature populated (with the cheap algorithm running on
+    /// flat-chroma input), not dropped. Picker MLPs were trained on
+    /// grayscale samples seeing those columns — the dispatch plan
+    /// must not change that distribution.
+    #[test]
+    fn stage0_grayscale_keeps_all_requested_features() {
+        let w = 32;
+        let h = 32;
+        let mut buf = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 3) as usize;
+                let v = (((x + y) * 4) % 256) as u8;
+                buf[i] = v;
+                buf[i + 1] = v;
+                buf[i + 2] = v;
+            }
+        }
+        let slice = rgb_slice(&buf, w, h);
+
+        let requested = FeatureSet::new()
+            .with(AnalysisFeature::Variance)
+            .with(AnalysisFeature::EdgeDensity)
+            .with(AnalysisFeature::Uniformity)
+            .with(AnalysisFeature::CbSharpness)
+            .with(AnalysisFeature::CrSharpness)
+            .with(AnalysisFeature::ChromaComplexity)
+            .with(AnalysisFeature::CbHorizSharpness)
+            .with(AnalysisFeature::CrHorizSharpness)
+            .with(AnalysisFeature::IsGrayscale);
+        let q = AnalysisQuery::new(requested);
+
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        // Strict-grayscale gate fired.
+        let is_gray = r
+            .get(AnalysisFeature::IsGrayscale)
+            .and_then(|v| v.as_bool())
+            .unwrap();
+        assert!(is_gray, "diagonal R==G==B ramp must be is_grayscale=true");
+
+        // Every requested feature populated — including the chroma
+        // ones, which compute the (near-zero) values on flat chroma
+        // and ship them so consumer MLPs see the in-distribution
+        // numerics they were trained on.
+        for f in [
+            AnalysisFeature::Variance,
+            AnalysisFeature::EdgeDensity,
+            AnalysisFeature::Uniformity,
+            AnalysisFeature::CbSharpness,
+            AnalysisFeature::CrSharpness,
+            AnalysisFeature::ChromaComplexity,
+            AnalysisFeature::CbHorizSharpness,
+            AnalysisFeature::CrHorizSharpness,
+        ] {
+            assert!(
+                r.get(f).is_some(),
+                "{f:?} must be populated on grayscale input — dispatch plan never drops",
+            );
+        }
+    }
+
+    /// Stage 0: a 64 × 64 image is below [`MIN_EXHAUSTIVE_THRESHOLD`]
+    /// (4096 ≤ 64 000), so the dispatch plan promotes the budget to
+    /// exhaustive. Smoke test: full-feature surface runs without
+    /// panicking, hints are accepted in `Some` and `None` form.
+    #[test]
+    fn stage0_tiny_image_exhaustive_budget() {
+        let buf = synth_rgb(64, 64, 99);
+        let slice = rgb_slice(&buf, 64, 64);
+
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+        let hints = DispatchHints::empty();
+        let r = analyze_with_dispatch_plan(slice, &q, Some(&hints)).unwrap();
+
+        assert!(r.get(AnalysisFeature::Variance).is_some());
+        assert!(r.get(AnalysisFeature::EdgeDensity).is_some());
+        assert!(r.get(AnalysisFeature::Uniformity).is_some());
+        assert_eq!(r.geometry().width(), 64);
+        assert_eq!(r.geometry().height(), 64);
+    }
+
+    /// Stage 0: ≥ 8 MP image still produces results (the
+    /// extended-pass flag is recorded but Stage 2 is deferred).
+    #[test]
+    fn stage0_large_image_smoke() {
+        let w = 4000u32;
+        let h = 2001u32;
+        let buf = vec![64u8; (w as usize) * (h as usize) * 3];
+        let slice = rgb_slice(&buf, w, h);
+        let q = AnalysisQuery::new(
+            FeatureSet::new()
+                .with(AnalysisFeature::Variance)
+                .with(AnalysisFeature::Uniformity),
+        );
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        assert!(r.get(AnalysisFeature::Variance).is_some());
+        assert!(r.get(AnalysisFeature::Uniformity).is_some());
+    }
+}
