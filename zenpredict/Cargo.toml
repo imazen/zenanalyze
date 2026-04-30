@@ -32,6 +32,11 @@ name = "zenpredict-bake"
 path = "src/bin/zenpredict_bake.rs"
 required-features = ["bake"]
 
+[[bin]]
+name = "zenpredict-inspect"
+path = "src/bin/zenpredict_inspect.rs"
+required-features = ["bake"]    # serde_json comes from the bake feature
+
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.

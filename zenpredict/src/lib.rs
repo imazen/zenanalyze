@@ -149,6 +149,7 @@ pub use argmin::{
 };
 pub use bounds::{FeatureBound, first_out_of_distribution};
 pub use error::PredictError;
+pub use inference::f16_bits_to_f32;
 pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
