@@ -53,6 +53,7 @@ import csv
 import importlib
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -391,8 +392,29 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
 
 def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
     """Categorical argmin over allowed reachable cells."""
+    rows = evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask)
+    if not rows:
+        return {"n": 0, "argmin_acc": 0.0, "mean_pct": 0.0, "p50_pct": 0.0, "p90_pct": 0.0}
+    overheads = np.array([r["overhead"] for r in rows], dtype=np.float64)
+    correct = sum(1 for r in rows if r["pick"] == r["actual_best"])
+    return {
+        "n": int(len(overheads)),
+        "argmin_acc": correct / len(overheads),
+        "mean_pct": float(100 * overheads.mean()),
+        "p50_pct": float(100 * np.percentile(overheads, 50)),
+        "p90_pct": float(100 * np.percentile(overheads, 90)),
+        "p99_pct": float(100 * np.percentile(overheads, 99)),
+        "max_pct": float(100 * overheads.max()),
+    }
+
+
+def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask):
+    """Like `evaluate_argmin` but returns the per-row breakdown so the
+    safety-report code can stratify by zq / size_class and surface
+    worst-case images. Each entry: image, size_class, zq, pick,
+    actual_best, overhead, predicted_bytes, actual_bytes."""
     n_rows = pred_bytes_log.shape[0]
-    overheads, correct = [], 0
+    out = []
     for i in range(n_rows):
         actual = actual_bytes_log[i]
         pred = pred_bytes_log[i]
@@ -403,17 +425,17 @@ def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
         pb = np.where(m, np.exp(np.clip(pred, -30, 30)), np.inf)
         a = int(np.argmin(ab))
         p = int(np.argmin(pb))
-        if p == a:
-            correct += 1
-        overheads.append((ab[p] - ab[a]) / ab[a])
-    arr = np.array(overheads)
-    return {
-        "n": int(len(arr)),
-        "argmin_acc": correct / len(arr),
-        "mean_pct": float(100 * arr.mean()),
-        "p50_pct": float(100 * np.percentile(arr, 50)),
-        "p90_pct": float(100 * np.percentile(arr, 90)),
-    }
+        out.append({
+            "image": meta[i][0],
+            "size_class": meta[i][1],
+            "zq": int(meta[i][2]),
+            "pick": p,
+            "actual_best": a,
+            "overhead": float((ab[p] - ab[a]) / ab[a]),
+            "predicted_bytes": float(ab[p]),
+            "actual_best_bytes": float(ab[a]),
+        })
+    return out
 
 
 def evaluate_scalars(pred_scalars, actual_scalars, reach):
@@ -449,6 +471,271 @@ def evaluate_scalars(pred_scalars, actual_scalars, reach):
         out[axis] = float(np.sqrt((arr ** 2).mean()))
         out[axis + "_mae"] = float(np.abs(arr).mean())
     return out
+
+
+# ---------- Diagnostics + safety report ----------
+
+# Default thresholds. Codec configs override by exporting
+# `SAFETY_THRESHOLDS = {...}`. Values are conservative — defaults that
+# would have caught the v2.1 384³ overfit and the wide-schema strict
+# regression seen during the 2026-04-29 retrain.
+DEFAULT_SAFETY_THRESHOLDS = dict(
+    # Train/val gap > X pp ⇒ overfit. Pick smaller than typical
+    # production gap; the v2.0 baseline trains at ~2pp gap.
+    max_train_val_gap_pp=2.0,
+    # Held-out argmin accuracy must clear this floor.
+    min_argmin_acc=0.30,
+    # Held-out mean overhead ceiling.
+    max_mean_overhead_pct=10.0,
+    # No single zq band may have a p99 overhead this bad.
+    max_per_zq_p99_overhead_pct=80.0,
+    # No single (image, size, zq) row may overshoot by more than
+    # this. Catches catastrophic individual failures.
+    max_single_row_overhead_pct=200.0,
+    # Each cell must have at least this many member configs in the
+    # training data; below this the teacher fits noise.
+    min_cell_member_configs=3,
+    # Each cell must have at least this many train rows AFTER the
+    # reach mask. Below this the teacher returns None and the
+    # student falls back to a constant — picker can't actually pick
+    # this cell with confidence.
+    min_cell_reach_train_rows=50,
+    # MLP weight sanity. Beyond these, training is broken.
+    max_dead_neuron_fraction=0.30,
+    max_layer_weight_ratio=1000.0,
+    # zensim_strict-only: at least one cell must remain safe at the
+    # top of the zq grid (so the picker isn't always falling through
+    # to KnownGoodFallback).
+    min_safe_cells_at_top_zq=1,
+)
+
+
+def stratify_overheads(per_row):
+    """Group per-row overhead entries by (zq, size_class). Returns
+    {zq: {size_class: stats_dict}} and a flat per-zq aggregate."""
+    by_zq = {}
+    by_size = {}
+    by_zq_size = {}
+    for r in per_row:
+        zq = r["zq"]
+        sz = r["size_class"]
+        by_zq.setdefault(zq, []).append(r["overhead"])
+        by_size.setdefault(sz, []).append(r["overhead"])
+        by_zq_size.setdefault((zq, sz), []).append(r["overhead"])
+
+    def stats(arr):
+        a = np.array(arr, dtype=np.float64)
+        return {
+            "n": int(len(a)),
+            "mean_pct": float(100 * a.mean()),
+            "p50_pct": float(100 * np.percentile(a, 50)),
+            "p90_pct": float(100 * np.percentile(a, 90)),
+            "p99_pct": float(100 * np.percentile(a, 99)),
+            "max_pct": float(100 * a.max()),
+        }
+
+    return (
+        {zq: stats(v) for zq, v in by_zq.items()},
+        {sz: stats(v) for sz, v in by_size.items()},
+        {f"{zq}/{sz}": stats(v) for (zq, sz), v in by_zq_size.items()},
+    )
+
+
+def worst_case_rows(per_row, top_pct=1.0, max_n=20):
+    """Top-`top_pct`% rows by overhead, capped at `max_n` for the log."""
+    if not per_row:
+        return []
+    threshold = np.percentile([r["overhead"] for r in per_row], 100 - top_pct)
+    bad = sorted(
+        (r for r in per_row if r["overhead"] >= threshold),
+        key=lambda r: -r["overhead"],
+    )
+    out = []
+    for r in bad[:max_n]:
+        out.append({
+            "image": r["image"],
+            "size_class": r["size_class"],
+            "zq": r["zq"],
+            "pick": r["pick"],
+            "actual_best": r["actual_best"],
+            "overhead_pct": float(100 * r["overhead"]),
+        })
+    return out
+
+
+def per_cell_diagnostics(
+    cells, pred_bytes_log_va, actual_bytes_log_va, reach_va, n_cells
+):
+    """For each cell: training-time row count, member config count,
+    calibration delta (predicted mean vs actual mean log-bytes on val
+    rows where the cell was reachable). Big delta ⇒ systematic bias."""
+    out = []
+    for c in range(n_cells):
+        mask = reach_va[:, c]
+        if not mask.any():
+            out.append({
+                "cell": c,
+                "label": cells[c]["label"],
+                "n_member_configs": len(cells[c]["member_config_ids"]),
+                "n_val_reach_rows": 0,
+                "predicted_mean_log_bytes": None,
+                "actual_mean_log_bytes": None,
+                "calibration_delta": None,
+            })
+            continue
+        pmean = float(np.nanmean(pred_bytes_log_va[mask, c]))
+        amean = float(np.nanmean(actual_bytes_log_va[mask, c]))
+        out.append({
+            "cell": c,
+            "label": cells[c]["label"],
+            "n_member_configs": len(cells[c]["member_config_ids"]),
+            "n_val_reach_rows": int(mask.sum()),
+            "predicted_mean_log_bytes": pmean,
+            "actual_mean_log_bytes": amean,
+            "calibration_delta": pmean - amean,
+        })
+    return out
+
+
+def scan_mlp_weights(student, X_va):
+    """Static + dynamic checks on the student MLP. Returns dict.
+
+    Static (from coefs_): NaN/Inf, max-to-median weight ratio per
+    layer.
+
+    Dynamic (forward pass on val): dead-neuron fraction (output
+    variance ~0 across val rows) — catches collapsed neurons that
+    never contribute to predictions."""
+    nan_in_weights = False
+    inf_in_weights = False
+    layer_ratios = []
+    for layer_w in student.coefs_:
+        if not np.isfinite(layer_w).all():
+            nan_in_weights = nan_in_weights or bool(np.isnan(layer_w).any())
+            inf_in_weights = inf_in_weights or bool(np.isinf(layer_w).any())
+        absw = np.abs(layer_w)
+        med = float(np.median(absw)) if absw.size else 0.0
+        mx = float(absw.max()) if absw.size else 0.0
+        layer_ratios.append({"max": mx, "median": med, "ratio": mx / max(med, 1e-12)})
+
+    # Dynamic: forward each hidden layer up to (but not including)
+    # the regression head and find neurons whose output variance is ~0.
+    activations = X_va.copy()
+    dead_total = 0
+    n_total = 0
+    for li, (W, b) in enumerate(zip(student.coefs_, student.intercepts_)):
+        z = activations @ W + b
+        is_hidden = li < len(student.coefs_) - 1
+        if is_hidden:
+            # ReLU activation
+            a = np.maximum(z, 0.0)
+            var = a.var(axis=0)
+            dead_total += int((var < 1e-10).sum())
+            n_total += a.shape[1]
+            activations = a
+        else:
+            activations = z
+    dead_frac = (dead_total / n_total) if n_total else 0.0
+
+    nan_in_predictions = bool(np.isnan(activations).any() or np.isinf(activations).any())
+
+    return {
+        "nan_in_weights": nan_in_weights,
+        "inf_in_weights": inf_in_weights,
+        "nan_in_predictions": nan_in_predictions,
+        "dead_neuron_fraction": float(dead_frac),
+        "n_dead_neurons": int(dead_total),
+        "n_total_hidden_neurons": int(n_total),
+        "per_layer_weight_ratio": layer_ratios,
+        "max_layer_weight_ratio": max((r["ratio"] for r in layer_ratios), default=0.0),
+    }
+
+
+def safety_check(diag, thresholds, objective: str):
+    """Compile violations from the diagnostics dict against the
+    threshold dict. Returns (passed, violations_list)."""
+    v = []
+
+    val = diag["argmin"]["val"]
+    train = diag["argmin"]["train"]
+    gap = val["mean_pct"] - train["mean_pct"]
+    if gap > thresholds["max_train_val_gap_pp"]:
+        v.append(
+            f"OVERFIT: train→val mean gap {gap:+.2f}pp "
+            f"(train {train['mean_pct']:.2f}% vs val {val['mean_pct']:.2f}%) "
+            f"> threshold {thresholds['max_train_val_gap_pp']:.2f}pp"
+        )
+
+    if val["argmin_acc"] < thresholds["min_argmin_acc"]:
+        v.append(
+            f"LOW_ARGMIN: val argmin_acc {val['argmin_acc']:.1%} "
+            f"< threshold {thresholds['min_argmin_acc']:.1%}"
+        )
+
+    if val["mean_pct"] > thresholds["max_mean_overhead_pct"]:
+        v.append(
+            f"HIGH_OVERHEAD: val mean overhead {val['mean_pct']:.2f}% "
+            f"> threshold {thresholds['max_mean_overhead_pct']:.2f}%"
+        )
+
+    for zq, m in diag["by_zq"].items():
+        if m["p99_pct"] > thresholds["max_per_zq_p99_overhead_pct"]:
+            v.append(
+                f"PER_ZQ_TAIL: zq={zq} p99 overhead {m['p99_pct']:.1f}% "
+                f"> threshold {thresholds['max_per_zq_p99_overhead_pct']:.1f}%"
+            )
+
+    if diag["worst_case"]:
+        worst = diag["worst_case"][0]
+        if worst["overhead_pct"] > thresholds["max_single_row_overhead_pct"]:
+            v.append(
+                f"WORST_ROW: {worst['image']} @ {worst['size_class']}/zq{worst['zq']} "
+                f"overhead {worst['overhead_pct']:.1f}% "
+                f"> threshold {thresholds['max_single_row_overhead_pct']:.1f}%"
+            )
+
+    for c in diag["per_cell"]:
+        if c["n_member_configs"] < thresholds["min_cell_member_configs"]:
+            v.append(
+                f"DATA_STARVED_CELL: cell {c['cell']} ({c['label']}) has "
+                f"{c['n_member_configs']} member configs "
+                f"< threshold {thresholds['min_cell_member_configs']}"
+            )
+
+    mlp = diag["mlp"]
+    if mlp["nan_in_weights"]:
+        v.append("NAN_WEIGHTS: student MLP layer weights contain NaN")
+    if mlp["inf_in_weights"]:
+        v.append("INF_WEIGHTS: student MLP layer weights contain Inf")
+    if mlp["nan_in_predictions"]:
+        v.append("NAN_PREDICTIONS: student MLP produced NaN/Inf on val")
+    if mlp["dead_neuron_fraction"] > thresholds["max_dead_neuron_fraction"]:
+        v.append(
+            f"DEAD_NEURONS: {mlp['dead_neuron_fraction']:.1%} of hidden neurons "
+            f"have ~0 variance on val "
+            f"> threshold {thresholds['max_dead_neuron_fraction']:.1%}"
+        )
+    if mlp["max_layer_weight_ratio"] > thresholds["max_layer_weight_ratio"]:
+        v.append(
+            f"WEIGHT_BLOWUP: max/median weight ratio {mlp['max_layer_weight_ratio']:.0f} "
+            f"> threshold {thresholds['max_layer_weight_ratio']:.0f}"
+        )
+
+    if objective == "zensim_strict" and "reach_safety" in diag:
+        # Highest zq band must have at least one safe cell, otherwise
+        # zensim_strict callers above that band always fall through.
+        top_zq = max((int(z) for z in diag["reach_safety"]["by_zq"].keys()), default=0)
+        if top_zq:
+            top = diag["reach_safety"]["by_zq"][str(top_zq)]
+            n_safe = sum(1 for s in top["safe"] if s)
+            if n_safe < thresholds["min_safe_cells_at_top_zq"]:
+                v.append(
+                    f"NO_SAFE_CELL_AT_TOP_ZQ: zq={top_zq} has {n_safe} safe cells "
+                    f"< threshold {thresholds['min_safe_cells_at_top_zq']} — "
+                    "zensim_strict picker can't reach the top of the zq grid"
+                )
+
+    return (len(v) == 0, v)
 
 
 # ---------- Train ----------
@@ -629,8 +916,25 @@ def main():
         "inputs (e.g. v2.1's 35-feature schema feeds ~80 inputs into the "
         "MLP — 128x128 is undersized).",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with code 1 when any safety threshold is violated. "
+        "Auto-enabled when the CI environment variable is set. The "
+        "JSON output is still written (with safety_report.passed=false) "
+        "so reviewers can inspect; bake_picker.py then refuses to bake "
+        "unless --allow-unsafe is also passed there.",
+    )
+    parser.add_argument(
+        "--allow-unsafe",
+        action="store_true",
+        help="Override the strict gate even when --strict / CI is set. "
+        "Use only when a violation is intentional and reviewed.",
+    )
     args = parser.parse_args()
     hidden_layer_sizes = tuple(int(x) for x in args.hidden.split(","))
+    is_ci = bool(os.environ.get("CI"))
+    strict = (args.strict or is_ci) and not args.allow_unsafe
     load_codec_config(args.codec_config)
 
     # Per-objective output naming. The codec config defines the
@@ -771,12 +1075,69 @@ def main():
         ) + "\n"
     )
 
+    # --- Diagnostics: also evaluate student on TRAIN to detect overfit
+    Y_tr_pred = student.predict(Xe_tr_s)
+    pred_bytes_tr = Y_tr_pred[:, :n_cells]
+    meta_tr = [meta[i] for i in tr]
+    student_argmin_tr = evaluate_argmin(pred_bytes_tr, bl_tr, rch_tr, meta_tr, all_mask)
+    sys.stderr.write(
+        f"  train: mean overhead {student_argmin_tr['mean_pct']:.2f}% "
+        f"argmin_acc {student_argmin_tr['argmin_acc']:.1%} "
+        f"(gap to val: {student_argmin['mean_pct'] - student_argmin_tr['mean_pct']:+.2f}pp)\n"
+    )
+
+    # Per-row val breakdown for stratification
+    val_per_row = evaluate_argmin_per_row(
+        pred_bytes, bl_va, rch_va, meta_va, all_mask
+    )
+    by_zq, by_size, by_zq_size = stratify_overheads(val_per_row)
+    worst = worst_case_rows(val_per_row, top_pct=1.0, max_n=20)
+    per_cell = per_cell_diagnostics(cells, pred_bytes, bl_va, rch_va, n_cells)
+    mlp_health = scan_mlp_weights(student, Xe_va_s)
+
     # --- Per-zq reach-rate gate (zensim_strict only; recorded
     # always so the manifest is shape-stable across profiles)
-    meta_tr = [meta[i] for i in tr]
     reach_safety = compute_reach_safe_cells(
         bl_tr, rch_tr, meta_tr, n_cells, ZQ_TARGETS, args.reach_threshold
     )
+
+    # --- Safety report: assemble + check thresholds
+    diag = {
+        "argmin": {"train": student_argmin_tr, "val": student_argmin},
+        "by_zq": by_zq,
+        "by_size": by_size,
+        "by_zq_size": by_zq_size,
+        "worst_case": worst,
+        "per_cell": per_cell,
+        "mlp": mlp_health,
+        "reach_safety": reach_safety,
+    }
+    thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)
+    codec_thresholds = getattr(
+        sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
+        "SAFETY_THRESHOLDS",
+        None,
+    )
+    if codec_thresholds:
+        thresholds.update(codec_thresholds)
+    passed, violations = safety_check(diag, thresholds, args.objective)
+    safety_report = {
+        "passed": passed,
+        "violations": violations,
+        "thresholds": thresholds,
+        "diagnostics": diag,
+    }
+    if violations:
+        sys.stderr.write(
+            "\n" + "=" * 70 + "\n"
+            "  ⚠ SAFETY VIOLATIONS DETECTED — picker may produce dangerous results\n"
+            + "=" * 70 + "\n"
+        )
+        for v in violations:
+            sys.stderr.write(f"  • {v}\n")
+        sys.stderr.write("=" * 70 + "\n")
+    else:
+        sys.stderr.write("\n✓ All safety thresholds passed.\n")
 
     # --- Persist
     n_params = sum(c.size + i.size for c, i in zip(student.coefs_, student.intercepts_))
@@ -832,6 +1193,7 @@ def main():
         "reach_safety": reach_safety,
         "teacher_metrics": {"argmin": teacher_argmin, "scalars": teacher_scalars},
         "student_metrics": {"argmin": student_argmin, "scalars": student_scalars},
+        "safety_report": safety_report,
     }
     OUT_JSON.write_text(json.dumps(out, indent=2))
     sys.stderr.write(
@@ -891,6 +1253,16 @@ def main():
               f"(MAE {student_scalars[axis + '_mae']:.4f})")
 
     OUT_LOG.write_text("\n".join(lines))
+
+    # --- Strict-gate exit. We've already written the JSON + log
+    # so reviewers can inspect; only the *exit code* signals the
+    # failure. This shape keeps CI red without blocking diagnosis.
+    if violations and strict:
+        sys.stderr.write(
+            f"\nstrict mode: exiting 1 with {len(violations)} unresolved safety "
+            f"violation(s). Re-run with --allow-unsafe to override.\n"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

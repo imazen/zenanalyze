@@ -140,6 +140,37 @@ Workflow when starting from the broadest possible feature set:
 Use `--n-repeats 5` if held-out validation set is small; default 3
 is enough at our 7000-row scale.
 
+### Safety gates (mandatory before shipping any bake)
+
+`train_hybrid.py` runs a battery of diagnostics on every fit and emits a `safety_report` block into the model JSON. The report includes:
+
+| Check | What it catches |
+|---|---|
+| `OVERFIT` | train→val mean-overhead gap exceeds threshold (default 2.0pp) |
+| `LOW_ARGMIN` | val argmin accuracy below floor (default 30%) |
+| `HIGH_OVERHEAD` | val mean overhead exceeds ceiling (default 10%) |
+| `PER_ZQ_TAIL` | any single target_zq band's p99 overhead exceeds threshold (default 80%) — catches catastrophic misses concentrated in one quality band |
+| `WORST_ROW` | any single (image, size, zq) row exceeds threshold (default 200%) |
+| `DATA_STARVED_CELL` | any cell has fewer member configs than threshold (default 3) |
+| `NAN_WEIGHTS` / `INF_WEIGHTS` / `NAN_PREDICTIONS` | NaN or Inf in MLP weights or val predictions |
+| `DEAD_NEURONS` | hidden neurons with ~0 output variance on val (default 30%) |
+| `WEIGHT_BLOWUP` | max-to-median weight ratio per layer (default 1000×) |
+| `NO_SAFE_CELL_AT_TOP_ZQ` | (zensim_strict only) reach gate empty at the highest zq band |
+
+Override defaults in your codec config:
+
+```python
+SAFETY_THRESHOLDS = dict(
+    max_per_zq_p99_overhead_pct=50.0,   # tighter than the default 80
+    min_argmin_acc=0.40,                 # require better-than-default
+    # ... any subset of DEFAULT_SAFETY_THRESHOLDS keys
+)
+```
+
+**The strict gate** (`--strict`, also auto-enabled when the `CI` environment variable is set) makes `train_hybrid.py` exit 1 on any violation. JSON + log are still written so reviewers can inspect; only the exit code signals failure. **CI should always run with `--strict`** so a regressed bake fails the workflow before it gets near `bake_picker.py`.
+
+`bake_picker.py` reads `safety_report.passed` and **refuses to bake** an unsafe model JSON unless `--allow-unsafe` is passed (only when the violation is intentional and reviewed). Defense in depth: the `safety_report` is also forwarded into the `.manifest.json`, so codec runtime can refuse to load too.
+
 ### GBM backend choice
 
 `_picker_lib._make_teacher(params)` returns the GBM. Today: always

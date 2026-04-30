@@ -168,8 +168,42 @@ def write_layer(out: bytes, W: np.ndarray, b: np.ndarray, activation: int, dtype
     return out
 
 
-def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | None) -> None:
+def bake(
+    model_path: Path,
+    out_path: Path,
+    dtype: str,
+    manifest_path: Path | None,
+    allow_unsafe: bool = False,
+) -> None:
     model = json.loads(model_path.read_text())
+    # Safety gate — refuse to bake a model whose training-side
+    # diagnostics flagged a danger. Reviewers can still inspect the
+    # JSON (we don't delete it); --allow-unsafe overrides for
+    # intentional violations. Bakes without `safety_report` (older
+    # JSONs) are tolerated with a warning so legacy data still works.
+    sr = model.get("safety_report")
+    if sr is None:
+        sys.stderr.write(
+            "WARNING: model JSON has no `safety_report` block. Re-train "
+            "with the current train_hybrid.py to get safety diagnostics.\n"
+        )
+    elif not sr.get("passed", True):
+        violations = sr.get("violations") or []
+        sys.stderr.write(
+            "\n" + "=" * 70 + "\n"
+            f"  ⚠ BAKE REFUSED — model has {len(violations)} unresolved safety violation(s)\n"
+            + "=" * 70 + "\n"
+        )
+        for v in violations:
+            sys.stderr.write(f"  • {v}\n")
+        sys.stderr.write("=" * 70 + "\n")
+        if not allow_unsafe:
+            sys.stderr.write(
+                "Pass --allow-unsafe to bake anyway (only when the violation "
+                "is intentional and reviewed).\n"
+            )
+            raise SystemExit(2)
+        sys.stderr.write("--allow-unsafe set — baking despite violations.\n")
     n_inputs = int(model["n_inputs"])
     layers = model["layers"]
     n_layers = len(layers)
@@ -256,6 +290,11 @@ def bake(model_path: Path, out_path: Path, dtype: str, manifest_path: Path | Non
         for key in ("safety_profile", "training_objective", "reach_safety"):
             if key in model:
                 manifest[key] = model[key]
+        # Safety-report passthrough — codec runtime can refuse to load
+        # a bake whose `safety_report.passed` is false even after the
+        # bake-time --allow-unsafe override (defense in depth).
+        if "safety_report" in model:
+            manifest["safety_report"] = model["safety_report"]
         manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         sys.stderr.write(f"wrote manifest {manifest_out}\n")
 
@@ -266,8 +305,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", required=True, type=Path, help="output .bin path")
     ap.add_argument("--dtype", default="f32", choices=["f32", "f16"], help="weight storage dtype")
     ap.add_argument("--manifest", type=Path, help="explicit manifest output path (default: <out>.manifest.json)")
+    ap.add_argument(
+        "--allow-unsafe",
+        action="store_true",
+        help="Bake even when the model JSON's safety_report.passed is false. "
+        "Use only when the violation is intentional and reviewed.",
+    )
     args = ap.parse_args(argv)
-    bake(args.model, args.out, args.dtype, args.manifest)
+    bake(args.model, args.out, args.dtype, args.manifest, allow_unsafe=args.allow_unsafe)
     return 0
 
 
