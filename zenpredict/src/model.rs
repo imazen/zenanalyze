@@ -480,6 +480,14 @@ impl<'a> Model<'a> {
         self.header.n_outputs as usize
     }
 
+    /// Number of dense layers (linear + activation) in the network.
+    /// Always equals `self.layers().len()`; exposed as a separate
+    /// accessor so consumers can size buffers / log diagnostics
+    /// without holding a `&[LayerView]`.
+    pub fn n_layers(&self) -> usize {
+        self.header.n_layers as usize
+    }
+
     pub fn schema_hash(&self) -> u64 {
         self.header.schema_hash
     }
@@ -505,8 +513,12 @@ impl<'a> Model<'a> {
     }
 
     /// Length of the scratch buffers (`scratch_a`, `scratch_b`,
-    /// `output`) needed to call [`crate::inference::forward`] —
-    /// `max(n_inputs, max_layer_out_dim)`.
+    /// `output`) needed by the forward-pass kernel —
+    /// `max(n_inputs, max_layer_out_dim)`. [`Predictor`] reads this
+    /// to size its internal buffers in [`Predictor::new`].
+    ///
+    /// [`Predictor`]: crate::Predictor
+    /// [`Predictor::new`]: crate::Predictor::new
     pub fn scratch_len(&self) -> usize {
         let max_out = self.layers.iter().map(|l| l.out_dim).max().unwrap_or(0);
         max_out.max(self.n_inputs())

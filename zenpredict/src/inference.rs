@@ -271,3 +271,73 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
         }
     }
 }
+
+#[cfg(test)]
+mod f16_tests {
+    use super::f16_bits_to_f32;
+
+    fn check(bits: u16, expected: f32, what: &str) {
+        let got = f16_bits_to_f32(bits);
+        if expected.is_nan() {
+            assert!(
+                got.is_nan(),
+                "{what}: bits=0x{bits:04x} expected NaN, got {got}"
+            );
+        } else {
+            assert_eq!(
+                got.to_bits(),
+                expected.to_bits(),
+                "{what}: bits=0x{bits:04x} got {got} ({:08x}), expected {expected} ({:08x})",
+                got.to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn zeros_and_signs() {
+        check(0x0000, 0.0, "+0");
+        check(0x8000, -0.0, "-0");
+    }
+
+    #[test]
+    fn ones() {
+        check(0x3c00, 1.0, "+1.0");
+        check(0xbc00, -1.0, "-1.0");
+        check(0x4000, 2.0, "+2.0");
+        check(0xc000, -2.0, "-2.0");
+    }
+
+    #[test]
+    fn fractions() {
+        // 0.5 = exp=14 (bias-15 → -1), mant=0
+        check(0x3800, 0.5, "0.5");
+        // 1/3 representable: 0x3555 = 0.333251953125
+        check(0x3555, 0.333_251_95, "approx 1/3");
+    }
+
+    #[test]
+    fn subnormals() {
+        // Smallest positive subnormal: 0x0001 = 2^-24 ≈ 5.96e-8
+        check(0x0001, 5.960_464_5e-8, "smallest +subnormal");
+        // Largest subnormal: 0x03ff
+        check(0x03ff, 6.097_555e-5, "largest +subnormal");
+        check(0x8001, -5.960_464_5e-8, "smallest -subnormal");
+    }
+
+    #[test]
+    fn extremes() {
+        // Smallest positive normal: 0x0400 = 2^-14 ≈ 6.10e-5
+        check(0x0400, 6.103_515_6e-5, "smallest +normal");
+        // Largest normal: 0x7bff = 65504.0
+        check(0x7bff, 65504.0, "largest +normal");
+    }
+
+    #[test]
+    fn inf_nan() {
+        check(0x7c00, f32::INFINITY, "+inf");
+        check(0xfc00, f32::NEG_INFINITY, "-inf");
+        let nan = f16_bits_to_f32(0x7e00);
+        assert!(nan.is_nan(), "0x7e00 should be NaN");
+    }
+}

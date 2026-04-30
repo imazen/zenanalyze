@@ -73,6 +73,20 @@ pub enum RescueDecision {
 /// Predicate the codec calls after pass-0 verify to decide whether
 /// to run a rescue pass. Non-finite `achieved` is treated as
 /// verify-failed and forces rescue.
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::{RescueDecision, RescuePolicy, should_rescue};
+///
+/// let policy = RescuePolicy::default();   // 3.0 pp threshold
+/// // achieved 83 vs target 85 (gap 2 pp) → ship.
+/// assert_eq!(should_rescue(83.0, 85.0, &policy), RescueDecision::Ship);
+/// // achieved 81 vs target 85 (gap 4 pp) → rescue.
+/// assert_eq!(should_rescue(81.0, 85.0, &policy), RescueDecision::Rescue);
+/// // verify failed (NaN) → rescue.
+/// assert_eq!(should_rescue(f32::NAN, 85.0, &policy), RescueDecision::Rescue);
+/// ```
 pub fn should_rescue(achieved: f32, target: f32, policy: &RescuePolicy) -> RescueDecision {
     if !achieved.is_finite() {
         return RescueDecision::Rescue;

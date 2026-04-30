@@ -20,13 +20,16 @@
 //!
 //! ## Lifecycle
 //!
+//! Real consumers `include_bytes!` a baked `.bin`:
+//!
 //! ```ignore
 //! let bytes: &'static [u8] = include_bytes!("zenjpeg_picker_v2.2.bin");
 //! let model = zenpredict::Model::from_bytes(bytes)?;
 //! let mut predictor = zenpredict::Predictor::new(model);
 //!
 //! let features = my_codec::extract_features(&analysis, target_zq);
-//! let mask = my_codec::allowed_configs(&caller_constraints);
+//! let mask_data = my_codec::allowed_configs(&caller_constraints);
+//! let mask = zenpredict::AllowedMask::new(&mask_data);
 //! let pick = predictor.argmin_masked(
 //!     &features,
 //!     &mask,
@@ -35,13 +38,70 @@
 //! )?;
 //! ```
 //!
+//! Self-contained working example using the [`bake`] module:
+//!
+//! ```rust
+//! use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
+//! use zenpredict::{Activation, Model, Predictor, WeightDtype};
+//!
+//! // Bake a 2-input → 3-output identity-ish model.
+//! let scaler_mean = [0.0f32, 0.0];
+//! let scaler_scale = [1.0f32, 1.0];
+//! let weights = [
+//!     1.0f32, 0.0, 0.0, // input 0 → outs
+//!     0.0, 1.0, 0.0,    // input 1 → outs
+//! ];
+//! let biases = [0.0f32, 0.0, 5.0];
+//! let layers = [BakeLayer {
+//!     in_dim: 2,
+//!     out_dim: 3,
+//!     activation: Activation::Identity,
+//!     dtype: WeightDtype::F32,
+//!     weights: &weights,
+//!     biases: &biases,
+//! }];
+//! let bytes = bake_v2(&BakeRequest {
+//!     schema_hash: 0,
+//!     flags: 0,
+//!     scaler_mean: &scaler_mean,
+//!     scaler_scale: &scaler_scale,
+//!     layers: &layers,
+//!     feature_bounds: &[],
+//!     metadata: &[],
+//! }).unwrap();
+//!
+//! // Load and predict. Real consumers wrap the bytes in
+//! // `#[repr(C, align(16))]` to guarantee zero-copy alignment;
+//! // the `bake_v2` output is 16-aligned by virtue of being a
+//! // freshly-allocated `Vec` (heap allocations are at least
+//! // 8-aligned on every supported target — usually 16).
+//! let model = Model::from_bytes(&bytes).unwrap();
+//! let mut p = Predictor::new(model);
+//! let out = p.predict(&[3.0, 4.0]).unwrap();
+//! assert_eq!(out, &[3.0, 4.0, 5.0]);
+//! ```
+//!
+//! ## Depth and size are unconstrained
+//!
+//! The format puts no fixed limits on the network's shape. Number
+//! of layers, layer widths, and input / output dimensions are all
+//! `u32` in the binary header — the practical limit is whatever the
+//! `n_inputs * out_dim` multiplications in `usize` can handle. Tests
+//! exercise single-layer, ten-layer, 1024-wide-hidden, and
+//! mixed-dtype-per-layer (i8 → f16 → f32) shapes.
+//!
+//! Scratch buffers are sized to `max(n_inputs, max_layer_out_dim) *
+//! sizeof(f32)`, computed by [`Model::scratch_len`]. A 64-input
+//! 1024-hidden model needs 4 KB of scratch — trivially small.
+//!
 //! ## Format stability
 //!
 //! ZNPR v2 — fixed `#[repr(C)]` header + offset table + zero-copy
-//! data sections + a TLV metadata blob. See [`model`] for the byte
-//! layout. v1 (the original 32-byte-header positional layout) is
-//! not supported by this crate; older bakes need to be rebaked
-//! through the v2 baker.
+//! data sections + a TLV metadata blob. See [`Header`] and
+//! [`LayerEntry`] for the wire layout, and the source of `model.rs`
+//! for the documented byte offsets. v1 (the original 32-byte-header
+//! positional layout) is not supported by this crate; older bakes
+//! need to be rebaked through the v2 baker.
 //!
 //! ## Storage
 //!

@@ -36,6 +36,20 @@ impl FeatureBound {
 /// be modelled and should always force fallback. `bounds.len()`
 /// must equal `features.len()`; mismatched lengths panic in debug
 /// builds and short-circuit at the shorter length in release.
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::{FeatureBound, first_out_of_distribution};
+///
+/// let bounds = [
+///     FeatureBound::new(0.0, 1.0),
+///     FeatureBound::new(-1.0, 1.0),
+/// ];
+/// assert_eq!(first_out_of_distribution(&[0.5, 0.0], &bounds), None);
+/// assert_eq!(first_out_of_distribution(&[2.0, 0.0], &bounds), Some(0));
+/// assert_eq!(first_out_of_distribution(&[0.5, f32::NAN], &bounds), Some(1));
+/// ```
 pub fn first_out_of_distribution(features: &[f32], bounds: &[FeatureBound]) -> Option<usize> {
     debug_assert_eq!(
         features.len(),

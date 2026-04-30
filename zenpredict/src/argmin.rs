@@ -119,6 +119,18 @@ impl<'a> ArgminOffsets<'a> {
 /// Argmin in `Identity` space without offsets reduces to a simple
 /// `f32::min` linear scan — the offsets / transform branches are
 /// only walked when the caller actually opts in.
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::{AllowedMask, ScoreTransform, argmin};
+///
+/// let scores = [3.0_f32, 1.0, 4.0, 1.5, 9.0];
+/// let mask_data = [true, false, true, true, true];
+/// let mask = AllowedMask::new(&mask_data);
+/// let pick = argmin::argmin_masked(&scores, &mask, ScoreTransform::Identity, None);
+/// assert_eq!(pick, Some(3)); // index 1's 1.0 is masked out, next-lowest is 3 (1.5)
+/// ```
 pub fn argmin_masked(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
@@ -275,6 +287,18 @@ pub(crate) fn pick_confidence_from_top_k(
 /// calling [`argmin_masked`].
 ///
 /// `out.len()` must equal `rates.len()`.
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::argmin::threshold_mask;
+///
+/// // Per-cell reach rates from the bake. NaN means "missing data."
+/// let rates = [0.99, 0.5, f32::NAN, 0.95];
+/// let mut gate = [false; 4];
+/// threshold_mask(&rates, 0.95, &mut gate);
+/// assert_eq!(gate, [true, false, false, true]);
+/// ```
 pub fn threshold_mask(rates: &[f32], threshold: f32, out: &mut [bool]) {
     debug_assert_eq!(rates.len(), out.len());
     for (i, &r) in rates.iter().enumerate() {
