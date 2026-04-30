@@ -159,6 +159,25 @@ fn write_v1_model_f32(
     layers: &[LayerSpec<'_>],
     schema_hash: u64,
 ) {
+    write_v1_model_f32_with_scaler(out, n_inputs, &alloc::vec![0.0; n_inputs], &alloc::vec![1.0; n_inputs], layers, schema_hash);
+}
+
+/// Variant that takes explicit `(mean, scale)` for the input scaler
+/// instead of the default identity (mean=0, scale=1). Lets tests
+/// exercise the standardize step with realistic non-trivial values
+/// — important for the `(x - mean) / scale` regression — and is
+/// also handy for synthesizing models that mimic
+/// `train_hybrid.py`'s emit shape.
+fn write_v1_model_f32_with_scaler(
+    out: &mut alloc::vec::Vec<u8>,
+    n_inputs: usize,
+    scaler_mean: &[f32],
+    scaler_scale: &[f32],
+    layers: &[LayerSpec<'_>],
+    schema_hash: u64,
+) {
+    debug_assert_eq!(scaler_mean.len(), n_inputs);
+    debug_assert_eq!(scaler_scale.len(), n_inputs);
     let n_outputs = layers.last().unwrap().1;
     let n_layers = layers.len();
     out.clear();
@@ -171,11 +190,11 @@ fn write_v1_model_f32(
     out.extend_from_slice(&schema_hash.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     debug_assert_eq!(out.len(), 32);
-    for _ in 0..n_inputs {
-        out.extend_from_slice(&0.0f32.to_le_bytes());
+    for &m in scaler_mean {
+        out.extend_from_slice(&m.to_le_bytes());
     }
-    for _ in 0..n_inputs {
-        out.extend_from_slice(&1.0f32.to_le_bytes());
+    for &s in scaler_scale {
+        out.extend_from_slice(&s.to_le_bytes());
     }
     for &(in_d, out_d, act, w, b) in layers {
         out.extend_from_slice(&(in_d as u32).to_le_bytes());
@@ -391,6 +410,48 @@ fn reach_gate_mask_thresholds_correctly() {
     // NaN never passes regardless of threshold.
     reach_gate_mask(&[f32::NAN; 3], 0.0, &mut out[..3]);
     assert_eq!(&out[..3], &[false, false, false]);
+}
+
+#[test]
+fn scaler_divides_by_std_not_multiplies() {
+    // Regression test for the "divide vs multiply" runtime kernel
+    // bug fixed before 0.1.0. The bake stores sklearn's
+    // `StandardScaler.scale_` directly (= std). The Rust runtime
+    // must DIVIDE by scale to match the sklearn-trained MLP's
+    // expected input — a multiply silently miscalibrates the
+    // forward pass.
+    //
+    // Synthesize a 1-input, identity 1×1 MLP with mean=10, scale=4.
+    // For input x=14, the correctly-standardized value is
+    // (14 - 10) / 4 = 1.0. A multiply would give (14 - 10) * 4 = 16.0
+    // — the values differ by 16×, more than enough that any future
+    // accidental flip back to multiply will fail this assertion
+    // loudly.
+    let mut buf = alloc::vec::Vec::new();
+    write_v1_model_f32_with_scaler(
+        &mut buf,
+        1,
+        &[10.0],
+        &[4.0],
+        &[(1, 1, 0, &[1.0], &[0.0])], // y = 1 * x'  (identity)
+        0,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+
+    let out = picker.predict(&[14.0_f32]).unwrap();
+    assert_eq!(out.len(), 1);
+    let want = 1.0_f32; // (14 - 10) / 4
+    assert!(
+        (out[0] - want).abs() < 1e-6,
+        "scaler kernel produced {} for x=14 (mean=10, scale=4); \
+         expected {} = (x - mean) / scale. If you see ~16.0 here, \
+         the runtime regressed back to multiply-by-std — see \
+         inference.rs comment for full context.",
+        out[0],
+        want,
+    );
 }
 
 #[test]

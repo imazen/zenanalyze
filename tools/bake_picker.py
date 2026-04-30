@@ -3,22 +3,60 @@
 Bake an sklearn MLPRegressor JSON dump into the zenpicker v1 binary format.
 
 Inputs:
-- `--model JSON`    : sklearn-side model file (see fields below)
-- `--manifest JSON` : optional companion file describing per-output
-                      config metadata. When present, gets re-emitted
-                      into a separate `<base>.manifest.json` next to
-                      the `.bin`. The codec crate compares its
-                      compile-time CONFIGS table against this.
-- `--out FILE.bin`  : output path
-- `--dtype f32|f16` : weight storage dtype (default f32)
+- `--model JSON`        : sklearn-side model file (see fields below)
+- `--out FILE.bin`      : output path
+- `--dtype f32|f16`     : weight storage dtype (default f32)
+- `--manifest JSON`     : explicit manifest output path; default is
+                           `<out>.manifest.json` next to the `.bin`
+- `--allow-unsafe`      : bake even when the model JSON's
+                           `safety_report.passed = false`. Use only
+                           when the violation is intentional and
+                           reviewed (the runtime gate is defense-in-
+                           depth — the codec can still refuse to load
+                           a bake whose `safety_report.passed = false`)
 
 Required model JSON fields:
   n_inputs, n_outputs, scaler_mean, scaler_scale, layers,
   feat_cols (used for schema_hash), activation (string: "relu")
 
-Each `layers[i]` has `W` (shape [in_dim, out_dim]) and `b` (length out_dim).
-The first n_layers-1 layers use the model's `activation`; the final layer
-is identity (regression head).
+Optional model JSON fields (recommended for shipping bakes):
+  schema_version_tag       — bumps the schema_hash so a layout change
+                             forces a clean re-bake on consumers.
+  extra_axes               — explicit names for engineered input axes
+                             past `feat_cols`. Without it bake_picker
+                             falls back to the legacy zenjpeg layout
+                             match, then to `aux_<i>` placeholders.
+  config_names             — `{config_id: name}` per-output metadata
+                             that gets re-emitted into the manifest.
+  hybrid_heads_manifest    — `n_cells`, `cells`, `output_layout`,
+                             `categorical_axes`, `scalar_axes`,
+                             `scalar_sentinels`. Required if the
+                             codec uses the hybrid-heads layout
+                             (recommended for all new codecs).
+  safety_report            — full diagnostics + violations (see
+                             train_hybrid.py). bake_picker refuses to
+                             bake when `passed=false` unless
+                             `--allow-unsafe`.
+  safety_profile           — "size_optimal" | "zensim_strict".
+  training_objective       — `{name, bytes_quantile, reach_threshold}`.
+  reach_safety             — per-target_zq cell-safety table for the
+                             zensim_strict profile.
+
+Manifest output (`<out>.manifest.json`) contains the lifted form
+codec-side compile-time tables read:
+
+  schema_hash, schema_version_tag, feat_cols, extra_axes,
+  n_inputs, n_outputs, configs (config_id → name),
+  hybrid_heads (when present in the model JSON),
+  safety_profile, training_objective, reach_safety,
+  safety_report — full block forwarded so codec runtime can refuse
+                  to load a bake whose `passed=false`,
+  feature_bounds_p01_p99 — `[{feat, low, high}]` aligned to
+                  feat_cols, lifted from
+                  `safety_report.diagnostics.feature_bounds[col]`'s
+                  `(p01, p99)` pair. Codec runtime feeds this into
+                  `zenpicker::first_out_of_distribution(features,
+                  &FEATURE_BOUNDS)` before argmin.
 
 Output binary v1 layout matches `zenpicker::Model::from_bytes`:
 
@@ -42,6 +80,15 @@ Output binary v1 layout matches `zenpicker::Model::from_bytes`:
       reserved u8 u8
       W (row-major, in_dim major), in_dim*out_dim values in dtype
       b (f32) out_dim values
+
+Note on the scaler convention: `scaler_scale` stores sklearn's
+`StandardScaler.scale_` directly (which IS the standard deviation,
+not its inverse). The Rust runtime then *multiplies* by this rather
+than dividing as sklearn's own `transform` does — see
+`zenpicker/src/inference.rs` for the full explanation. The MLP's
+first layer absorbs the discrepancy at training time so end-to-end
+behavior is correct; do not "fix" the direction in isolation —
+every shipped bake depends on this convention.
 """
 
 import argparse

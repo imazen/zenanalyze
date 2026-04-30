@@ -1294,16 +1294,13 @@ def main():
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
         "scaler_mean": scaler.mean_.tolist(),
-        # NOTE: `scaler_scale` stores sklearn's `StandardScaler.scale_`
-        # directly — that attribute IS the standard deviation, not its
-        # inverse. `zenpicker::inference` then *multiplies* by this at
-        # runtime (rather than dividing as sklearn's own `transform`
-        # does), so mathematically the picker scales by std instead of
-        # normalizing. The MLP's first layer absorbs the discrepancy
-        # at training time so end-to-end behavior is correct. See
-        # `zenpicker/src/inference.rs` for the full explanation. Do
-        # not "fix" the direction in isolation — every shipped v1.x /
-        # v2.x bake depends on this convention.
+        # `scaler_scale` stores sklearn's `StandardScaler.scale_`
+        # directly — that attribute IS the standard deviation
+        # (`np.sqrt(var_)`). The Rust runtime in
+        # `zenpicker::inference` divides by this on every forward
+        # pass — same operation sklearn's `transform` applies, same
+        # operation `scaler.fit_transform(X_tr)` applied to produce
+        # the standardized inputs the MLP was trained on.
         "scaler_scale": scaler.scale_.tolist(),
         "layers": [
             {"W": w.tolist(), "b": b.tolist()}

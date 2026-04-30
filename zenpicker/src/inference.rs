@@ -29,27 +29,29 @@ pub fn forward(
     debug_assert_eq!(features.len(), n_inputs);
     debug_assert_eq!(output.len(), model.n_outputs());
 
-    // Scale inputs: x' = (x - mean) * scale.
+    // Scale inputs: x' = (x - mean) / scale.
     //
-    // **Wire-format convention.** `scale` here is the value baked into
-    // the model from the Python side, where the emitter writes
-    // sklearn's `StandardScaler.scale_` (= **standard deviation**, not
-    // its inverse) into the `scaler_scale` JSON field. sklearn's own
-    // transform divides by `scale_` (giving `(x - mean) / std`), so
-    // mathematically this multiplies by `std` instead of dividing —
-    // the formal opposite of standardization.
+    // The `scaler_scale` field in the bake stores sklearn's
+    // `StandardScaler.scale_` directly — that attribute IS the
+    // standard deviation (`np.sqrt(var_)`). sklearn's own
+    // `transform` divides by it (`(x - mean) / std`), and the MLP
+    // is trained on `scaler.fit_transform(X_tr)` outputs, so this
+    // kernel must divide too — anything else feeds the network
+    // inputs scaled differently than what it learned from.
     //
-    // It works because the trained MLP's first layer has absorbed
-    // whichever direction the Python pipeline used; end-to-end the
-    // function is still correct. **Do not "fix" the direction in
-    // isolation** — that would silently miscalibrate every shipped
-    // v1.x / v2.x bake. If a future format ever flips the convention,
-    // bump the bake version and migrate.
+    // (Pre-0.1.0 history: an earlier draft of this kernel
+    // multiplied by `scale_`, which silently miscalibrated the
+    // forward pass relative to training-time evaluation. Fixed
+    // before the first publish; no shipped artifacts depend on
+    // the multiply convention. Division-by-near-zero isn't a
+    // hazard because sklearn refuses to fit StandardScaler when
+    // any feature has zero variance — the picker won't have a
+    // bake to load in that case.)
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     let cur = &mut scratch_a[..n_inputs];
     for i in 0..n_inputs {
-        cur[i] = (features[i] - mean[i]) * scale[i];
+        cur[i] = (features[i] - mean[i]) / scale[i];
     }
 
     let mut input_buf: &mut [f32] = scratch_a;

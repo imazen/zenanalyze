@@ -48,7 +48,11 @@ def python_forward(model: dict, features: np.ndarray, dtype: str) -> np.ndarray:
     """Reference forward pass — must match Rust output exactly."""
     mean = np.array(model["scaler_mean"], dtype=np.float32)
     scale = np.array(model["scaler_scale"], dtype=np.float32)
-    x = (features - mean) * scale
+    # Match sklearn's StandardScaler.transform: divide by std.
+    # `scaler_scale` is sklearn's `scale_` (= std) per the bake
+    # convention; the runtime kernel in `zenpicker::inference`
+    # divides too. See inference.rs for the full explanation.
+    x = (features - mean) / scale
 
     layers = model["layers"]
     last_idx = len(layers) - 1
@@ -88,6 +92,12 @@ def main(argv: list[str]) -> int:
                 str(out),
                 "--dtype",
                 args.dtype,
+                # Round-trip is a math check, not a publish gate.
+                # If the model JSON's safety_report.passed is false,
+                # bake_picker would refuse without this. The runtime
+                # is still correct to test even when the bake itself
+                # is flagged.
+                "--allow-unsafe",
             ],
             check=True,
         )
