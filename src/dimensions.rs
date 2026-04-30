@@ -221,7 +221,7 @@ mod tests {
         let mut raw = RawAnalysis::default();
         // RGB8 = 3 channels × 1 byte/sample.
         populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGB8_SRGB);
-        assert_eq!(raw.bitmap_bytes, (100 * 100 * 3 * 1) as f32);
+        assert_eq!(raw.bitmap_bytes, (100 * 100 * 3) as f32);
         assert_eq!(raw.channel_count, 3);
 
         // RGBA16 = 4 channels × 2 bytes/sample.
