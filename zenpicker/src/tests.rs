@@ -394,6 +394,73 @@ fn reach_gate_mask_thresholds_correctly() {
 }
 
 #[test]
+fn first_out_of_distribution_finds_first_violator() {
+    use crate::{FeatureBounds, first_out_of_distribution};
+
+    let bounds = [
+        FeatureBounds::new(0.0, 1.0),
+        FeatureBounds::new(-1.0, 1.0),
+        FeatureBounds::new(0.5, 1.5),
+    ];
+    assert_eq!(first_out_of_distribution(&[0.5, 0.0, 1.0], &bounds), None);
+    assert_eq!(first_out_of_distribution(&[0.0, -1.0, 1.5], &bounds), None);
+    assert_eq!(
+        first_out_of_distribution(&[0.5, -2.0, 1.0], &bounds),
+        Some(1)
+    );
+    assert_eq!(
+        first_out_of_distribution(&[2.0, 0.0, 100.0], &bounds),
+        Some(0)
+    );
+    assert_eq!(
+        first_out_of_distribution(&[f32::NAN, 0.0, 1.0], &bounds),
+        Some(0)
+    );
+    assert_eq!(
+        first_out_of_distribution(&[0.5, f32::INFINITY, 1.0], &bounds),
+        Some(1)
+    );
+}
+
+#[test]
+fn pick_with_confidence_returns_gap() {
+    let mut buf = alloc::vec::Vec::new();
+    write_v1_model_f32(
+        &mut buf,
+        1,
+        &[(1, 4, 0, &[0.0, 0.0, 0.0, 0.0], &[3.0, 1.0, 2.0, 0.5])],
+        0,
+    );
+    let aligned = AlignedBuf::from_slice(&buf);
+    let model = Model::from_bytes(aligned.as_bytes()).unwrap();
+    let mut picker = Picker::new(model);
+
+    let mask_all = AllowedMask::new(&[true, true, true, true]);
+    let (best, gap) = picker
+        .pick_with_confidence(&[0.0], &mask_all, None)
+        .unwrap()
+        .expect("non-empty mask");
+    assert_eq!(best, 3);
+    assert!((gap - 0.5).abs() < 1e-5, "gap={gap}");
+
+    let mask_one = AllowedMask::new(&[false, false, false, true]);
+    let (best, gap) = picker
+        .pick_with_confidence(&[0.0], &mask_one, None)
+        .unwrap()
+        .expect("one allowed entry");
+    assert_eq!(best, 3);
+    assert!(gap.is_infinite() && gap > 0.0);
+
+    let mask_none = AllowedMask::new(&[false, false, false, false]);
+    assert!(
+        picker
+            .pick_with_confidence(&[0.0], &mask_none, None)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn rejects_bad_magic() {
     let mut buf = alloc::vec::Vec::new();
     write_v1_model_f32(&mut buf, 1, &[(1, 1, 0, &[1.0], &[0.0])], 0);

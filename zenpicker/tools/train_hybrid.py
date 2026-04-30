@@ -510,6 +510,50 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
 )
 
 
+def compute_feature_bounds(feats, train_keys, feat_cols):
+    """Per-feature distribution stats over the **training** image set.
+
+    Computed once at bake time and shipped in the manifest so codecs
+    can detect out-of-distribution inputs at runtime and fall through
+    to a `KnownGoodFallback` rescue rather than letting the MLP
+    extrapolate silently.
+
+    Each entry is a dict with `min, p01, p25, p50, p75, p99, max,
+    mean, std` — codec picks which pair to compile into its
+    `FEATURE_BOUNDS` const. Default recommendation: `(p01, p99)` so
+    the gate fires only on truly extreme inputs (≈2% miss rate at
+    train-distribution boundaries by construction).
+    """
+    keys_seen = [k for k in train_keys if k in feats]
+    if not keys_seen:
+        return {}
+    arr = np.stack([feats[k] for k in keys_seen]).astype(np.float64)
+    out = {}
+    for i, col in enumerate(feat_cols):
+        v = arr[:, i]
+        v_finite = v[np.isfinite(v)]
+        if v_finite.size == 0:
+            out[col] = {
+                "min": None, "p01": None, "p25": None, "p50": None,
+                "p75": None, "p99": None, "max": None,
+                "mean": None, "std": None, "n": 0,
+            }
+            continue
+        out[col] = {
+            "min": float(v_finite.min()),
+            "p01": float(np.percentile(v_finite, 1)),
+            "p25": float(np.percentile(v_finite, 25)),
+            "p50": float(np.percentile(v_finite, 50)),
+            "p75": float(np.percentile(v_finite, 75)),
+            "p99": float(np.percentile(v_finite, 99)),
+            "max": float(v_finite.max()),
+            "mean": float(v_finite.mean()),
+            "std": float(v_finite.std()),
+            "n": int(v_finite.size),
+        }
+    return out
+
+
 def stratify_overheads(per_row):
     """Group per-row overhead entries by (zq, size_class). Returns
     {zq: {size_class: stats_dict}} and a flat per-zq aggregate."""
@@ -1095,6 +1139,11 @@ def main():
     per_cell = per_cell_diagnostics(cells, pred_bytes, bl_va, rch_va, n_cells)
     mlp_health = scan_mlp_weights(student, Xe_va_s)
 
+    # Per-feature distribution bounds over the train split — shipped
+    # in the manifest so codecs can do runtime OOD checks.
+    train_keys = {(meta[i][0], meta[i][1]) for i in tr}
+    feature_bounds = compute_feature_bounds(feats, train_keys, feat_cols)
+
     # --- Per-zq reach-rate gate (zensim_strict only; recorded
     # always so the manifest is shape-stable across profiles)
     reach_safety = compute_reach_safe_cells(
@@ -1110,6 +1159,7 @@ def main():
         "worst_case": worst,
         "per_cell": per_cell,
         "mlp": mlp_health,
+        "feature_bounds": feature_bounds,
         "reach_safety": reach_safety,
     }
     thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)

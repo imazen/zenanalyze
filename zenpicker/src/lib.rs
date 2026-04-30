@@ -54,7 +54,10 @@ mod model;
 pub mod rescue;
 
 pub use error::PickerError;
-pub use mask::{AllowedMask, argmin_masked, argmin_masked_top_k, reach_gate_mask};
+pub use mask::{
+    AllowedMask, FeatureBounds, argmin_masked, argmin_masked_top_k,
+    first_out_of_distribution, reach_gate_mask,
+};
 pub use model::{Activation, LayerView, Model, WeightDtype};
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
 
@@ -241,6 +244,97 @@ impl<'a> Picker<'a> {
             adjust,
         ))
     }
+
+    /// Pick the argmin and report a *confidence* signal: the
+    /// log-bytes gap to the second-best mask-allowed entry.
+    ///
+    /// Returns `(best_idx, gap)` where `gap` is in the same units
+    /// the model emits — log-bytes for a regressor. A small `gap`
+    /// (< ~0.1, i.e. < ~10% byte difference) means the picker is
+    /// barely choosing top-1 over top-2; if your codec runs the
+    /// two-shot rescue path, a low-confidence pick is a strong
+    /// signal to verify and prepare the rescue. Codecs typically
+    /// surface `gap` on `EncodeMetrics` so imageflow / proxy
+    /// operators can scrape per-request and detect drift.
+    ///
+    /// `gap = +∞` when only one mask entry is allowed (no
+    /// second-best to compare to), `0.0` if every score ties at
+    /// the top.
+    ///
+    /// Returns `None` when the mask permits zero entries.
+    pub fn pick_with_confidence(
+        &mut self,
+        features: &[f32],
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<Option<(usize, f32)>, PickerError> {
+        self.predict(features)?;
+        let top = mask::argmin_masked_top_k::<2>(&self.output, mask, adjust);
+        Ok(pick_confidence_from_top_k(&self.output, mask, adjust, top))
+    }
+
+    /// Like [`pick_with_confidence`] but operating on the bytes-log
+    /// sub-range of the hybrid-heads layout.
+    pub fn pick_with_confidence_in_range(
+        &mut self,
+        features: &[f32],
+        range: (usize, usize),
+        mask: &AllowedMask<'_>,
+        adjust: Option<CostAdjust<'_>>,
+    ) -> Result<Option<(usize, f32)>, PickerError> {
+        self.predict(features)?;
+        let (start, end) = range;
+        if end > self.output.len() || start > end {
+            return Err(PickerError::FeatureLenMismatch {
+                expected: self.output.len(),
+                got: end,
+            });
+        }
+        let slice = &self.output[start..end];
+        let top = mask::argmin_masked_top_k::<2>(slice, mask, adjust);
+        Ok(pick_confidence_from_top_k(slice, mask, adjust, top))
+    }
+}
+
+/// Convert a top-2 result into `(best_idx, gap_to_second)`.
+///
+/// `gap` is computed in the same score space `argmin_masked_top_k`
+/// used: log-space when `adjust` is `None`, raw-byte space when
+/// `adjust` is `Some` (matching what the picker's argmin actually
+/// compared). Codecs surfacing the gap to operators thus get a
+/// signal in the same units the picker chose against.
+fn pick_confidence_from_top_k(
+    scores: &[f32],
+    mask: &AllowedMask<'_>,
+    adjust: Option<CostAdjust<'_>>,
+    top: [Option<usize>; 2],
+) -> Option<(usize, f32)> {
+    let best = top[0]?;
+    let Some(second) = top[1] else {
+        // Only one mask-allowed entry — no comparison to make.
+        return Some((best, f32::INFINITY));
+    };
+    let score_at = |i: usize| -> f32 {
+        let raw = scores[i];
+        match adjust {
+            None => raw,
+            Some(CostAdjust {
+                additive_bytes,
+                per_output_offset,
+            }) => {
+                let mut bytes = mask::clamped_exp_pub(raw) + additive_bytes;
+                if let Some(off) = per_output_offset.and_then(|o| o.get(i)) {
+                    bytes += *off;
+                }
+                bytes
+            }
+        }
+    };
+    // Use mask hint to keep miri-style debug builds happy if
+    // `argmin_masked_top_k` ever returns indices outside the mask.
+    let _ = mask;
+    let gap = (score_at(second) - score_at(best)).max(0.0);
+    Some((best, gap))
 }
 
 #[cfg(test)]

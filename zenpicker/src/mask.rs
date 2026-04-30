@@ -167,6 +167,61 @@ pub fn argmin_masked_top_k<const K: usize>(
     out
 }
 
+/// Inclusive low/high bounds for one input feature.
+///
+/// Codec emits a compile-time `FEATURE_BOUNDS: &[FeatureBounds]`
+/// table aligned 1:1 with the input feature vector, sourced from
+/// the bake manifest's `feature_bounds_p01_p99` field. Picker
+/// runtime calls [`first_out_of_distribution`] before
+/// [`argmin_masked`] to detect inputs the model wasn't trained on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FeatureBounds {
+    pub low: f32,
+    pub high: f32,
+}
+
+impl FeatureBounds {
+    pub const fn new(low: f32, high: f32) -> Self {
+        Self { low, high }
+    }
+
+    /// `true` when `value` is finite and inside `[low, high]`.
+    #[inline]
+    pub fn contains(&self, value: f32) -> bool {
+        value.is_finite() && value >= self.low && value <= self.high
+    }
+}
+
+/// Index of the first feature outside its bounds, or `None` when
+/// the entire vector is in-distribution.
+///
+/// Codec calls this before [`argmin_masked`]. On `Some(i)` the
+/// caller should fall through to a known-good rescue strategy
+/// (see [`crate::RescueStrategy::KnownGoodFallback`]) rather than
+/// trust an MLP extrapolation. `bounds.len()` must equal
+/// `features.len()`; mismatched lengths panic in debug builds and
+/// short-circuit at the shorter length in release.
+///
+/// NaN / Inf in the feature vector trigger a hit just as out-of-
+/// range values do — those features can't be modeled and should
+/// always force fallback.
+pub fn first_out_of_distribution(
+    features: &[f32],
+    bounds: &[FeatureBounds],
+) -> Option<usize> {
+    debug_assert_eq!(
+        features.len(),
+        bounds.len(),
+        "feature vector length must match bounds length",
+    );
+    for (i, (f, b)) in features.iter().zip(bounds.iter()).enumerate() {
+        if !b.contains(*f) {
+            return Some(i);
+        }
+    }
+    None
+}
+
 /// Fill `out` with the per-cell allow flags derived from a row of
 /// `reach_rate` values and a runtime threshold.
 ///
@@ -203,6 +258,10 @@ pub fn reach_gate_mask(reach_rates: &[f32], threshold: f32, out: &mut [bool]) {
 
 /// `exp` with input clamped to [-30, 30] to keep training-time
 /// out-of-range predictions from producing NaN/Inf at inference.
+pub(crate) fn clamped_exp_pub(x: f32) -> f32 {
+    clamped_exp(x)
+}
+
 fn clamped_exp(x: f32) -> f32 {
     libm_exp_f32(x.clamp(-30.0, 30.0))
 }

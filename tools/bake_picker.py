@@ -295,6 +295,30 @@ def bake(
         # bake-time --allow-unsafe override (defense in depth).
         if "safety_report" in model:
             manifest["safety_report"] = model["safety_report"]
+            # Lift feature_bounds to the top-level of the manifest so
+            # codecs can compile a `FEATURE_BOUNDS: &[(f32, f32)]` const
+            # from a stable path. The full per-percentile dict stays
+            # inside safety_report.diagnostics; the lifted form is a
+            # compact list aligned to feat_cols, picking (p01, p99) by
+            # default. Codecs that want different bounds can read the
+            # full dict instead.
+            fb = (
+                model["safety_report"]
+                .get("diagnostics", {})
+                .get("feature_bounds")
+            )
+            if fb:
+                lifted = []
+                for col in feat_cols:
+                    s = fb.get(col)
+                    if s and s.get("p01") is not None and s.get("p99") is not None:
+                        lifted.append({"feat": col, "low": s["p01"], "high": s["p99"]})
+                    else:
+                        # If we have no usable percentiles, fall back
+                        # to (-inf, +inf) so the runtime gate doesn't
+                        # spuriously reject this column.
+                        lifted.append({"feat": col, "low": float("-inf"), "high": float("inf")})
+                manifest["feature_bounds_p01_p99"] = lifted
         manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         sys.stderr.write(f"wrote manifest {manifest_out}\n")
 
