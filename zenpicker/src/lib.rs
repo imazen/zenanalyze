@@ -71,7 +71,7 @@
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 
 use zenpredict::{AllowedMask, ArgminOffsets, Model, PredictError, Predictor, ScoreTransform};
 
@@ -207,8 +207,23 @@ pub const ALL_LABELS_CSV: &str = "jpeg,webp,jxl,avif,png,gif";
 /// Owns a [`zenpredict::Predictor`] (mutable scratch for one forward
 /// pass at a time). Construction is cheap; reuse a single instance
 /// across many encode requests.
+///
+/// At construction the picker reads the bake's
+/// [`FAMILY_ORDER_KEY`] metadata and caches the resulting
+/// `output_index → CodecFamily` mapping. Bakes that cover only a
+/// subset of [`CodecFamily::ALL`] (e.g. an early bake without any
+/// gif training data) work transparently: [`MetaPicker::pick`] uses
+/// the bake's order directly when masking and decoding the argmin
+/// result. If the metadata is missing or unparseable the cache is
+/// `None` and the picker assumes [`CodecFamily::ALL`] order — call
+/// [`MetaPicker::validate_family_order`] at startup to fail loudly
+/// in that case.
 pub struct MetaPicker<'b> {
     predictor: Predictor<'b>,
+    /// Parsed mapping from bake output index to CodecFamily.
+    /// `None` when the bake is missing or has unparseable
+    /// `zenpicker.family_order` metadata.
+    family_at_output: Option<alloc::vec::Vec<CodecFamily>>,
 }
 
 impl<'b> MetaPicker<'b> {
@@ -217,9 +232,13 @@ impl<'b> MetaPicker<'b> {
     /// [`zenpredict::Model::from_bytes_with_schema`] or by reading
     /// the model's metadata.
     ///
-    /// Call [`MetaPicker::validate_family_order`] right after
-    /// construction to confirm bake-time and runtime agree on the
-    /// family enum layout.
+    /// Reads the bake's [`FAMILY_ORDER_KEY`] once and caches the
+    /// `output_index → CodecFamily` mapping. Call
+    /// [`MetaPicker::validate_family_order`] right after
+    /// construction to confirm the metadata was present and
+    /// well-formed (subset-of-[`CodecFamily::ALL`] is OK, but any
+    /// label not in the enum or a length mismatch with `n_outputs`
+    /// will surface there).
     ///
     /// Takes `&'b Model` — the Model is the long-lived parsed bake
     /// (typically inside a `static OnceLock<Model>`); the borrow
@@ -227,8 +246,15 @@ impl<'b> MetaPicker<'b> {
     /// `MetaPicker<'b>`. zenpredict 0.2.0+ made Model own its
     /// reference-data rather than carry a lifetime parameter.
     pub fn new(model: &'b Model) -> Self {
+        let family_at_output = model
+            .metadata()
+            .get_utf8(FAMILY_ORDER_KEY)
+            .ok()
+            .and_then(parse_family_csv)
+            .filter(|v| v.len() == model.n_outputs());
         Self {
             predictor: Predictor::new(model),
+            family_at_output,
         }
     }
 
@@ -256,7 +282,17 @@ impl<'b> MetaPicker<'b> {
         if !allowed.any() {
             return Ok(None);
         }
-        let mask = AllowedMask::new(allowed.as_slice());
+        // Build the mask in the bake's output order — *not*
+        // `allowed.as_slice()`. The bake may cover a subset of
+        // [`CodecFamily::ALL`] in any order, so the i-th bake output
+        // doesn't necessarily map to the i-th `AllowedFamilies` slot.
+        let order: &[CodecFamily] = self
+            .family_at_output
+            .as_deref()
+            .unwrap_or(&CodecFamily::ALL[..]);
+        let bake_mask: alloc::vec::Vec<bool> =
+            order.iter().map(|f| allowed.is_allowed(*f)).collect();
+        let mask = AllowedMask::new(&bake_mask);
         let pick = self
             .predictor
             .argmin_masked(
@@ -266,16 +302,87 @@ impl<'b> MetaPicker<'b> {
                 None::<&ArgminOffsets>,
             )
             .map_err(MetaPickerError::Predict)?;
-        Ok(pick.map(|idx| CodecFamily::ALL[idx]))
+        Ok(pick.map(|idx| order[idx]))
     }
 
-    /// Read the [`FAMILY_ORDER_KEY`] (`zenpicker.family_order`)
-    /// metadata key from the bake and confirm it matches
-    /// [`ALL_LABELS_CSV`]. Returns `Ok(())` if the order matches,
-    /// `Err` on mismatch (caller should refuse to use the picker —
-    /// the bake was made against a different enum layout).
+    /// Pick under a runtime size/speed tradeoff.
     ///
-    /// Best practice: call once at startup, fail loudly on mismatch.
+    /// `predicted_encode_ms_per_family` is a [`CodecFamily::COUNT`]-
+    /// sized table of caller-provided per-family encode-time
+    /// estimates **at the source's resolution** (typically computed
+    /// from `α + β·MPx` models calibrated from a sweep). The caller's
+    /// `bytes_per_ms` weight expresses willingness to pay file-size
+    /// for encode time:
+    ///
+    /// - `0.0` → pure size-optimal (equivalent to [`Self::pick`])
+    /// - `1.0` → 1 ms saved is worth 1 byte (almost always
+    ///   size-optimal in practice)
+    /// - `100.0` → 1 ms saved is worth 100 bytes (typical for
+    ///   client-side encodes where time is precious)
+    /// - `f32::INFINITY` → pure time-optimal (always picks the
+    ///   fastest family in the allowed set)
+    ///
+    /// Internally this builds an [`ArgminOffsets`] in linear-byte
+    /// space (`time_cost = predicted_ms × bytes_per_ms`), maps it
+    /// into the bake's output order, and runs argmin under
+    /// [`ScoreTransform::Exp`] (which converts the trainer's
+    /// log-bytes outputs to the linear-bytes the offset is in).
+    ///
+    /// Behavioural contract: identical to [`Self::pick`] when
+    /// `bytes_per_ms == 0.0`. Different when `> 0`.
+    pub fn pick_with_time_cost(
+        &mut self,
+        features: &[f32],
+        allowed: &AllowedFamilies,
+        predicted_encode_ms_per_family: &[f32; CodecFamily::COUNT],
+        bytes_per_ms: f32,
+    ) -> Result<Option<CodecFamily>, MetaPickerError> {
+        if !allowed.any() {
+            return Ok(None);
+        }
+        let order: &[CodecFamily] = self
+            .family_at_output
+            .as_deref()
+            .unwrap_or(&CodecFamily::ALL[..]);
+
+        let bake_mask: alloc::vec::Vec<bool> =
+            order.iter().map(|f| allowed.is_allowed(*f)).collect();
+        let mask = AllowedMask::new(&bake_mask);
+
+        // Re-index the per-family ms table into the bake's actual
+        // output order. Multiply by bytes_per_ms to produce the
+        // additive byte-equivalent offset.
+        let per_output_offset: alloc::vec::Vec<f32> = order
+            .iter()
+            .map(|f| predicted_encode_ms_per_family[f.index()] * bytes_per_ms)
+            .collect();
+        let offsets = ArgminOffsets {
+            uniform: 0.0,
+            per_output: Some(&per_output_offset),
+        };
+
+        let pick = self
+            .predictor
+            .argmin_masked(features, &mask, ScoreTransform::Exp, Some(&offsets))
+            .map_err(MetaPickerError::Predict)?;
+        Ok(pick.map(|idx| order[idx]))
+    }
+
+    /// Confirm the bake's [`FAMILY_ORDER_KEY`] metadata was present,
+    /// parseable as a CSV of [`CodecFamily`] labels, and length-
+    /// equal to `n_outputs`.
+    ///
+    /// **Subset is OK.** A bake whose order is `"avif,jpeg,jxl,png,webp"`
+    /// (no gif — substrate had no gif data) passes this check. The
+    /// picker's [`pick`](Self::pick) method uses the bake's actual
+    /// order to map output indices to [`CodecFamily`]; callers can
+    /// inspect [`Self::family_at_output`] to learn which families
+    /// the bake can pick.
+    ///
+    /// Returns `Err(MetaPickerError::Metadata(_))` when the metadata
+    /// was missing, malformed, contains an unrecognised label, or
+    /// the parsed length disagrees with `n_outputs`. Best practice:
+    /// call once at startup, fail loudly on mismatch.
     pub fn validate_family_order(&mut self) -> Result<(), MetaPickerError> {
         let raw = self
             .predictor
@@ -284,15 +391,48 @@ impl<'b> MetaPicker<'b> {
             .get_utf8(FAMILY_ORDER_KEY)
             .map_err(|e| MetaPickerError::Metadata(format!("metadata: {:?}", e)))?;
 
-        if raw == ALL_LABELS_CSV {
-            Ok(())
-        } else {
-            Err(MetaPickerError::FamilyOrderMismatch {
-                expected: ALL_LABELS_CSV.to_string(),
-                actual: raw.to_string(),
-            })
+        let parsed = parse_family_csv(raw).ok_or_else(|| {
+            MetaPickerError::Metadata(format!("unparseable family_order CSV: {:?}", raw))
+        })?;
+
+        let n_out = self.predictor.n_outputs();
+        if parsed.len() != n_out {
+            return Err(MetaPickerError::Metadata(format!(
+                "family_order length {} != n_outputs {}",
+                parsed.len(),
+                n_out
+            )));
         }
+        // Cache (replacing whatever was set at construction).
+        self.family_at_output = Some(parsed);
+        Ok(())
     }
+
+    /// The bake's `output_index → CodecFamily` mapping, parsed once
+    /// from the [`FAMILY_ORDER_KEY`] metadata at construction.
+    /// `None` when the metadata was missing or unparseable. Callers
+    /// can use this to enumerate which families this bake can pick
+    /// (e.g. for surfacing UI / honouring caller-supplied
+    /// allow-lists).
+    pub fn family_at_output(&self) -> Option<&[CodecFamily]> {
+        self.family_at_output.as_deref()
+    }
+}
+
+/// Parse `"jpeg,webp,avif,…"` into a vector of [`CodecFamily`].
+/// Returns `None` if any label isn't recognised.
+fn parse_family_csv(csv: &str) -> Option<alloc::vec::Vec<CodecFamily>> {
+    csv.split(',')
+        .map(|tok| match tok.trim() {
+            "jpeg" => Some(CodecFamily::Jpeg),
+            "webp" => Some(CodecFamily::Webp),
+            "jxl" => Some(CodecFamily::Jxl),
+            "avif" => Some(CodecFamily::Avif),
+            "png" => Some(CodecFamily::Png),
+            "gif" => Some(CodecFamily::Gif),
+            _ => None,
+        })
+        .collect::<Option<alloc::vec::Vec<_>>>()
 }
 
 #[derive(Debug)]
@@ -360,6 +500,61 @@ mod tests {
         for (i, fam) in CodecFamily::ALL.iter().enumerate() {
             assert_eq!(fam.index(), i);
         }
+    }
+
+    #[test]
+    fn parse_family_csv_full() {
+        let parsed = parse_family_csv(ALL_LABELS_CSV).unwrap();
+        assert_eq!(parsed, CodecFamily::ALL.to_vec());
+    }
+
+    #[test]
+    fn parse_family_csv_subset_no_gif() {
+        let parsed = parse_family_csv("avif,jpeg,jxl,png,webp").unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                CodecFamily::Avif,
+                CodecFamily::Jpeg,
+                CodecFamily::Jxl,
+                CodecFamily::Png,
+                CodecFamily::Webp,
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_family_csv_unknown_label_returns_none() {
+        assert!(parse_family_csv("jpeg,unknown,webp").is_none());
+    }
+
+    #[test]
+    fn parse_family_csv_handles_whitespace() {
+        let parsed = parse_family_csv(" jpeg , webp ").unwrap();
+        assert_eq!(parsed, vec![CodecFamily::Jpeg, CodecFamily::Webp]);
+    }
+
+    #[test]
+    fn time_cost_table_uses_codec_family_index() {
+        // Assert the synthetic ms-table layout my docstring claims:
+        // index = CodecFamily::ALL position, NOT bake order. The
+        // `pick_with_time_cost` impl re-indexes into bake order
+        // internally — this test fixes the contract.
+        let mut table = [0.0_f32; CodecFamily::COUNT];
+        table[CodecFamily::Jpeg.index()] = 50.0;
+        table[CodecFamily::Webp.index()] = 80.0;
+        table[CodecFamily::Jxl.index()] = 800.0;
+
+        // CodecFamily::Jpeg is index 0, Webp is 1, Jxl is 2.
+        assert_eq!(table[0], 50.0);
+        assert_eq!(table[1], 80.0);
+        assert_eq!(table[2], 800.0);
+
+        // A bake-order CSV like "avif,jpeg,jxl" should re-index to
+        // [Avif, Jpeg, Jxl] — Avif is index 3, so table[3]=0.0.
+        let bake_order = parse_family_csv("avif,jpeg,jxl").unwrap();
+        let reindexed: alloc::vec::Vec<f32> = bake_order.iter().map(|f| table[f.index()]).collect();
+        assert_eq!(reindexed, vec![0.0, 50.0, 800.0]);
     }
 
     #[test]
