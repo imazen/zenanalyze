@@ -110,13 +110,20 @@ ZQ_TARGETS = list(range(30, 70, 5)) + list(range(70, 96, 2))
 # ---------- Axis schema (v0.2) ----------
 #
 # Cells: method × segments × cost_model = 3 × 2 × 2 = 12 cells.
+#
 # Scalar heads: sns_strength + filter_strength + filter_sharpness +
-#               partition_limit + multi_pass_stats. multi_pass_stats
-#               is binary (0/1); only m4 cells have meaningful training
-#               signal for it (m5/m6 don't honor the flag — see
-#               LossyConfig::with_multi_pass_stats docstring).
-#               Picker output for that head on m5/m6 cells is ignored
-#               at runtime via the codec's `--method` gating.
+#               partition_limit. All four heads have similar 0..100
+#               (or 0..7) ranges so the multi-output MSE loss balances
+#               cleanly during student MLP fit.
+#
+# multi_pass_stats was tried as a 5th head in the first v0.2 attempt
+# and **broke** the student MLP — its 0..1 range was 100× tighter
+# than the other heads, the unweighted MSE loss was dominated by the
+# wide-range heads, and ALL scalar heads exploded their RMSE
+# (filter_sharpness student RMSE went from 2.2 teacher → 40.7 student
+# on a 0..7 range). Dropped until train_hybrid.py learns to
+# normalize per-head loss scales (tracked separately).
+#
 # cost_model encoded as bool: 0 = ZenwebpDefault, 1 = StrictLibwebpParity.
 CATEGORICAL_AXES = ["method", "segments", "cost_model_strict"]
 SCALAR_AXES = [
@@ -124,7 +131,6 @@ SCALAR_AXES = [
     "filter_strength",
     "filter_sharpness",
     "partition_limit",
-    "multi_pass_stats",
 ]
 SCALAR_SENTINELS: dict = {}
 SCALAR_DISPLAY_RANGES = {
@@ -132,7 +138,6 @@ SCALAR_DISPLAY_RANGES = {
     "filter_strength": (0, 100),
     "filter_sharpness": (0, 7),
     "partition_limit": (0, 100),
-    "multi_pass_stats": (0, 1),
 }
 
 
