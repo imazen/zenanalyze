@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — picker training principles + cross-codec defaults
+> **Note on cross-crate releases:** the workspace publishes its
+> member crates independently. The zenpredict 0.1.0 entries that
+> were under `[Unreleased]` during development are now in the dated
+> [`## [zenpredict 0.1.0] - 2026-05-01`](#zenpredict-010---2026-05-01)
+> section below. Items remaining under `[Unreleased]` belong to the
+> next zenanalyze release (size-invariance discipline, patch
+> fingerprint, threshold recalibration).
+
+### Added — picker training principles + cross-codec defaults (will ship with next zenanalyze release)
 
 - **`zentrain/PRINCIPLES.md`** — single source of truth for what's
   invariant across codec pickers (zenjpeg / zenwebp / zenavif /
@@ -114,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`README.md`** — "Companion crates in this repo" table now lists
   `zenpredict`, `zenpicker`, and `zentrain`.
 
-### Added — zenpicker size-invariance discipline (legacy training-pipeline notes)
+### Added — zenpicker size-invariance discipline (legacy training-pipeline notes; will ship with next zenanalyze release)
 
 - **Size invariance is a safety property.** The picker is now
   *required* to be near-optimal at every image `(width, height)`, not
@@ -229,6 +237,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Callers requesting only `ScreenContentLikelihood` will see the analysis pay an
   extra Tier 3 pass; callers already requesting any other Tier 3 feature pay
   nothing extra.
+
+## [zenpredict 0.1.0] - 2026-05-01
+
+First crates.io release of `zenpredict`. The runtime, format, and
+public API were described above under `[Unreleased]` (kept there for
+narrative continuity with the rest of the workspace); this section
+enumerates the prepublish hardening on top of that work.
+
+### Hardened (prepublish audit)
+
+- **Format-parse safety.** `Model::from_bytes` now uses `checked_mul`
+  + a typed `PredictError::DimensionOverflow` for every dimension
+  multiplication that previously could wrap on i686 / wasm32 (n_inputs
+  * 2 for feature_bounds, expected_count * 4 for f32 sections,
+  expected_count * 2 for f16). `from_bytes_with_schema` checks the
+  header's `schema_hash` BEFORE walking the layer table — adversarial
+  bakes with a wrong schema and giant `n_layers` bail in O(1) instead
+  of allocating.
+- **Scaler /0 guard.** `inference::forward` mirrors sklearn's
+  `_handle_zeros_in_scale`: a `scaler_scale[i] == 0.0` (zero-variance
+  column) is treated as `1.0`, so the column passes through as
+  `(x - mean)` instead of producing NaN/inf. Cost is one branch per
+  input dim per predict.
+- **argmin contract tightened.** `argmin_masked` /
+  `argmin_masked_top_k` / `_with_scorer` / `threshold_mask` now
+  **panic on `mask.len() < predictions.len()`** in both debug AND
+  release. Short masks used to silently deny high-index cells, which
+  hid real bugs. Documented NaN-skip semantics, lowest-index tie-break,
+  and the `ScoreTransform::Exp` no_std fallthrough behavior.
+- **`scratch buffer` reuse documented.** `Predictor::predict` does
+  not zero scratch between calls; every layer's matmul writes biases
+  before accumulating, so stale data never leaks. Calling `predict`
+  twice with the same features is deterministic.
+- **Reserved fields documented.** Header `_pad0` / `reserved[14]` /
+  `flags`, LayerEntry `reserved[3]` / `flags` are ignored on read
+  (forward-compat) and bakers MUST zero them. `value_type=3..=15` in
+  the metadata TLV is reserved for future compressed payloads.
+
+### CI / packaging
+
+- **CI matrix expanded** to build + test zenpredict on
+  `ubuntu-latest`, `windows-11-arm`, `macos-15-intel`, `macos-latest`
+  with three feature combos (`""`, `"std"`, `"std,bake"`). Cross job
+  also runs zenpredict on `i686-unknown-linux-gnu` (32-bit overflow
+  guards needed live-fire validation) and `aarch64-unknown-linux-gnu`.
+- **`zenpredict/deny.toml`** — cargo-deny configuration enforcing
+  permissive licenses on transitive deps (MIT / Apache / BSD / ISC /
+  Zlib / Unicode / 0BSD / CC0). First-party AGPL workspace crates
+  are exempted via per-name exception. Yanked crates and unknown
+  registries / git sources are denied.
+- **Dependency versions pinned** to full triplets per CLAUDE.md:
+  bytemuck 1.25.0, serde 1.0.228, serde_json 1.0.149, rand 0.9.2.
+
+### Tests
+
+- 91 lib tests (was 80 at original landing), +5 NaN/tie/short-mask
+  argmin regressions, +3 schema-early-bail / scaler /0 / from_bytes
+  agreement tests.
+- 8 integration tests (json_bake), 7 lifecycle tests, 7 doc tests.
+
+### Bake side
+
+- **`tools/bake_picker.py --dtype` default flipped from `f32` to
+  `i8`**. Typical bake size: ~30 KB f32 → ~15 KB f16 → ~8 KB i8;
+  most consuming binaries (codec wasm, mobile builds) don't want
+  > 80 KB of weights. Held-out argmin-acc delta from f32→i8 is < 0.5
+  pp on every bake shipped, well inside calibration-noise.
+- **`zentrain/examples/zenwebp_picker_config.py`** — reference codec
+  config for hybrid-heads training (PR #57 follow-up).
+- Docs lead with `--activation leakyrelu` as the fast trainer path
+  (10–20× wall-clock vs sklearn-relu default).
 
 ## [0.1.0] - 2026-04-28
 
