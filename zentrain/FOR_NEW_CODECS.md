@@ -492,12 +492,12 @@ Drop the redundant member from each pair *before* re-training. The MLP can't sep
 
 zenanalyze ships ~12 dimension features (PixelCount, MinDim, MaxDim, BitmapBytes, AspectMinOverMax, LogPixels, BlockMisalignment{8,16,32,64}, ChannelCount, etc.) plus 11 log/derivative variants (Log2Pixels, Log10Pixels, Sqrt, LogPaddedPixels{8,16,32,64}, etc.). **Don't include all of them by default.**
 
-zenjpeg v2.2-clean keeps just **5** dimension features:
+zenjpeg v2.2-clean keeps **3** dimension features after the
+2026-05-02 cull retired `feat_log_pixels` / `feat_log_padded_pixels_8`
+(Spearman 1.0 with `feat_pixel_count`, no LOO impact):
 
 - `feat_pixel_count` — the #1 ablation impact in the entire schema (+4.89pp). This is the dominant size signal.
-- `feat_log_pixels` — smooth resolution axis, complements the linear pixel_count.
 - `feat_aspect_min_over_max` — bounded `(0, 1]`, captures strips and thumbnails.
-- `feat_log_padded_pixels_8` — log of encoded surface area at the JPEG 8×8 block grid. The codec actually pays for these padded pixels.
 - `feat_channel_count` — discrete grayscale/RGB/RGBA distinction.
 
 The other 18 dimension features (linear `min_dim`, `max_dim`, `bitmap_bytes`; `log2_pixels`, `log10_pixels`, `sqrt_pixels`, `log_pixels_rounded`; `log_min_dim`, `log_max_dim`, `log_bitmap_bytes`; `block_misalignment_{8,16,32,64}`; `log_padded_pixels_{16,32,64}`) added noise without signal in ablation. Different codecs may lean on different subsets — JXL DCT64 alignment is more relevant for `log_padded_pixels_64`, AVIF for `block_misalignment_16` — but **only include them when their ablation Δ is positive on your codec's corpus**.

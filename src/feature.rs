@@ -384,12 +384,11 @@ features_table! {
     ///
     /// **Empirical AUC = 0.880** for screen-vs-photo on a 219-image
     /// labeled corpus (cid22 + clic2025 + gb82 + gb82-sc + imageflow
-    /// + kadid10k + qoi-benchmark) — higher than every other shipped
-    /// feature, including the derived [`Self::ScreenContentLikelihood`]
-    /// (AUC 0.83). Photos: p50 = 0.002, p90 = 0.037. Screens: p50 =
-    /// 0.726, p90 = 0.906. **Recommended operating threshold:
-    /// `patch_fraction >= 0.27`** (F1 = 0.769, P = 0.91, R = 0.67)
-    /// for screen-like classification.
+    /// + kadid10k + qoi-benchmark) — higher than the now-retired
+    /// `ScreenContentLikelihood` composite (AUC 0.83) was. Photos:
+    /// p50 = 0.002, p90 = 0.037. Screens: p50 = 0.726, p90 = 0.906.
+    /// **Recommended operating threshold: `patch_fraction >= 0.27`**
+    /// (F1 = 0.769, P = 0.91, R = 0.67) for screen-like classification.
     ///
     /// Originally validated on a smaller 50-photo / 10-screen pilot
     /// corpus where the default-budget classifier scored ROC-AUC =
@@ -583,7 +582,7 @@ features_table! {
     /// - `illustration`:    p10 = 0.001, p50 = 0.081, p90 = 0.323
     ///
     /// AUC = `0.799` for photo-vs-other classification — comparable
-    /// to [`Self::NaturalLikelihood`] (0.814).
+    /// to the now-retired `NaturalLikelihood` composite (0.814).
     ///
     /// **Operating threshold:** `skin_tone_fraction >= 0.05` gives
     /// `P = 0.89, R = 0.76, F1 = 0.82` for photo classification.
@@ -611,8 +610,8 @@ features_table! {
     /// aliased by lens MTF + sensor pixel pitch — gradient magnitudes
     /// cluster tightly around the optical cutoff (typical stddev
     /// ~`8–18` on 0–255 luma). Digital artwork has either no edges
-    /// (smooth gradients), single-pixel edges (line art — already
-    /// caught by [`Self::LineArtScore`]), or **bimodal** gradients
+    /// (smooth gradients), single-pixel edges (line art — flagged by
+    /// the now-retired `LineArtScore` composite), or **bimodal** gradients
     /// from variable-pressure brushwork or stylization (typical
     /// stddev `> 25`). JPEG-roundtripped artwork's blocking artifacts
     /// also widen this stddev relative to a pristine PNG photograph.
@@ -707,9 +706,10 @@ features_table! {
     /// images larger than ~4.29 gigapixels (rare; we don't support
     /// images that big elsewhere).
     PixelCount = 56 : u32 => pixel_count,
-    /// `f32`. `ln(w * h)`, natural log. Useful as a smooth
-    /// resolution axis for predictors (vs `size_class` one-hot).
-    LogPixels = 57 : f32 => log_pixels,
+    // ids 57 + 60 retired 2026-05-02: `LogPixels` (Spearman 1.0 with
+    // `PixelCount`) and `BitmapBytes` (Spearman 1.0 with `PixelCount`
+    // for fixed-channel sources) confirmed redundant on all 4 codecs
+    // in the cross-codec ablation. Stable ids reserved.
     /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
     /// a 1024×1 image and a 32×32 image have very different
     /// per-pixel codec costs but the same `PixelCount`.
@@ -717,14 +717,6 @@ features_table! {
     /// `u32`. `max(w, h)`. Pairs with `MinDim` for shape-aware
     /// reasoning.
     MaxDim = 59 : u32 => max_dim,
-    /// `f32`. Uncompressed bitmap byte count: `w * h * channels *
-    /// bytes_per_sample`, cast to f32. The natural reference for
-    /// "how much could compression possibly save" — predictors
-    /// regress against `log(bitmap_bytes)`. f32 is exact for
-    /// values up to 2²⁴ ≈ 16 MB; larger images lose ~ULP-level
-    /// precision per byte but stay correct in log space (≤ 1 ULP
-    /// drift in log10 ≈ 1e-7) — fine for ML features.
-    BitmapBytes = 60 : f32 => bitmap_bytes,
     /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
     /// extreme strip → 0. Bounded and smooth — well-conditioned for
     /// MLPs and tree models alike.
@@ -872,14 +864,13 @@ features_table! {
     QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
 
     // ---------------- Dimension log/derivative variants -------------
-    // Companions to PixelCount/LogPixels (#42). Different bases give
-    // the network different numerical handles for the same underlying
-    // resolution signal — and let ablation tell us whether
-    // PixelCount's dominance is real signal or memorization. The
-    // block-padded variants reflect the *encoded* surface area: for
-    // a 257×257 image the codec actually encodes 264×264 (block-8
-    // grid), 272×272 (block-16), etc. These correlate with bytes
-    // spent more directly than the visible pixel count does.
+    // (Section retired 2026-05-02. The 11 mathematical transforms of
+    // `feat_pixel_count` at ids 94..104 — log2_pixels / log10_pixels /
+    // log_pixels_rounded / sqrt_pixels / log_bitmap_bytes / log_min_dim /
+    // log_max_dim / log_padded_pixels_{8,16,32,64} — were Spearman 1.0
+    // with `PixelCount` by construction and contributed nothing in
+    // cross-codec ablation. `LogPixels` (id 57) and `BitmapBytes`
+    // (id 60) followed in the 2026-05-02 cull. All ids reserved.)
 
     // ---------------- Low-tail percentile companions ---------------
     // Adds P1/P5/P10 to LaplacianVariance / AqMap / NoiseFloorY (and
@@ -1038,11 +1029,12 @@ features_table! {
 pub enum FeatureValue {
     F32(f32),
     U32(u32),
-    /// `u64` for features whose natural domain exceeds `u32::MAX` —
-    /// notably [`AnalysisFeature::BitmapBytes`] which can exceed 4 GB
-    /// on 16K+ HDR (RGBAF32) images. Lossless `to_f32` coercion is
-    /// only exact for `n ≤ 2⁵³`; values beyond are rounded to the
-    /// nearest f64-representable then cast.
+    /// `u64` for features whose natural domain exceeds `u32::MAX`.
+    /// (No 0.1.0 variant currently emits `U64` — the slot is reserved
+    /// for future features whose domain genuinely needs it, e.g.,
+    /// pixel-byte counts on 16K+ HDR images.) Lossless `to_f32`
+    /// coercion is only exact for `n ≤ 2⁵³`; values beyond are
+    /// rounded to the nearest f64-representable then cast.
     U64(u64),
     Bool(bool),
 }
@@ -1535,9 +1527,9 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
 
 /// Subset of [`TIER3_FEATURES`] whose computation requires the full
 /// per-block DCT pass (`tier3::dct_stats`). Excludes
-/// [`AnalysisFeature::LumaHistogramEntropy`] and
-/// [`AnalysisFeature::LineArtScore`] which both come from the cheap
-/// luma-histogram pass alone.
+/// [`AnalysisFeature::LumaHistogramEntropy`] which comes from the
+/// cheap luma-histogram pass alone (the previously co-cheap
+/// `LineArtScore` was retired with the `composites` feature pre-cull).
 ///
 /// The dispatcher uses this to set the `DCT` const-bool gate on
 /// `populate_tier3<const DCT: bool>` — when false, the
@@ -1978,6 +1970,11 @@ mod tests {
         // `feat_pixel_count` (log2/log10/log_padded/sqrt/etc.) — pure
         // collinearity per #59.
         94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104,
+        // ids 57 + 60 were `LogPixels` / `BitmapBytes`, retired
+        // 2026-05-02 after the cross-codec ablation showed Spearman
+        // 1.0 with `feat_pixel_count` on all 4 codecs at min |r|
+        // 0.9656–1.0000. Stable ids reserved.
+        57, 60,
         // ids 117, 118, 119 were `ChromaKurtosis` /
         // `UniformitySmooth` / `FlatColorSmooth` — Tier-0 redundant
         // with existing features on ≥3/4 codecs in the 2026-05-01
