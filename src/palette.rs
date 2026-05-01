@@ -49,13 +49,18 @@ pub(crate) struct PaletteStats {
     /// — that path doesn't compute the exact count, only the
     /// fits-in-256 signal.
     pub distinct: u32,
-    /// Smallest power-of-2 indexed-palette bit-width that fits the
-    /// distinct-bin count. `2` ⇒ ≤ 4 colours, `4` ⇒ ≤ 16, `8` ⇒ ≤ 256,
-    /// `0` ⇒ truecolor (> 256). Always populated by both scan paths.
-    /// `u32`-typed to match the [`crate::feature::FeatureValue::U32`]
-    /// variant the analyzer's `RawAnalysis` field expects.
-    pub indexed_width: u32,
-    /// Convenience: `indexed_width != 0`.
+    /// `ceil(log2(distinct))` clamped to `[1, 15]`, with `0`
+    /// reserved for "truecolor" (> 32 768 distinct bins, which
+    /// saturates the 5-bit-per-channel bin storage). Drives PNG /
+    /// GIF / JXL palette-mode breakpoints.
+    ///
+    /// Computed exactly by `scan_palette` (full path). The
+    /// `scan_palette_quick` path early-exits at 257 distinct bins
+    /// and so produces values in `[1, 8]` or `0` only — JXL's
+    /// 9..15 breakpoints require a full-path consumer
+    /// (`DistinctColorBins`) to be co-requested.
+    pub palette_log2_size: u32,
+    /// Convenience: `distinct ≤ 256`.
     pub fits_in_256: bool,
     /// Total pixels walked by the scan (`width × height`). Used to
     /// compute fractions like `GrayscaleScore` from `non_grayscale`.
@@ -74,18 +79,24 @@ pub(crate) struct PaletteStats {
     pub non_grayscale: u64,
 }
 
-/// Map a distinct-colour count to the smallest power-of-2 palette
-/// bit-width that contains it. Returns `0` for "doesn't fit in 256".
+/// Map a distinct-colour count to `ceil(log2(count))`, clamped to
+/// `[1, 15]`. Returns `0` for "doesn't fit in the 32 768-bin storage"
+/// (truecolor — never indexed-profitable).
+///
+/// Encoding rules:
+/// - `count == 0` (empty image, edge case) → `0`.
+/// - `count == 1` (solid colour) → `1` — 1 BPP indexed still encodes it.
+/// - `count == 2..=32768` → `ceil(log2(count))` ∈ `[1, 15]`.
+///   `(count - 1).leading_zeros()` gives `32 - ceil_log2`; subtract
+///   from 32 and clamp 0 → 1 for the solid-colour case.
+/// - `count > 32768` → `0`.
 #[inline]
-fn width_for_count(count: u32) -> u32 {
-    if count <= 4 {
-        2
-    } else if count <= 16 {
-        4
-    } else if count <= 256 {
-        8
-    } else {
+fn palette_log2_size_from_count(count: u32) -> u32 {
+    if count == 0 || count > 32_768 {
         0
+    } else {
+        let v = 32 - (count - 1).leading_zeros();
+        v.max(1)
     }
 }
 
@@ -120,7 +131,7 @@ pub(crate) fn scan_palette(stream: &mut RowStream<'_>, want_grayscale: bool) -> 
     let (distinct, non_grayscale) = scan_and_count(stream, &mut flags, want_grayscale);
     PaletteStats {
         distinct,
-        indexed_width: width_for_count(distinct),
+        palette_log2_size: palette_log2_size_from_count(distinct),
         fits_in_256: distinct <= 256,
         total_pixels: if want_grayscale {
             (width as u64) * (height as u64)
@@ -133,7 +144,7 @@ pub(crate) fn scan_palette(stream: &mut RowStream<'_>, want_grayscale: bool) -> 
 
 /// Early-exit palette scan: walks pixels with a running distinct-count
 /// and bails as soon as the count exceeds 256. Produces only the
-/// quick-path signals (`indexed_width`, `fits_in_256`); the exact
+/// quick-path signals (`palette_log2_size`, `fits_in_256`); the exact
 /// distinct count is left at 0 because the scan stopped before the
 /// final tally.
 ///
@@ -148,9 +159,12 @@ pub(crate) fn scan_palette(stream: &mut RowStream<'_>, want_grayscale: bool) -> 
 /// that to a 2.4× win.
 ///
 /// Used when the caller's [`crate::feature::FeatureSet`] requests
-/// only the quick-path features ([`crate::feature::AnalysisFeature::IndexedPaletteWidth`]
+/// only the quick-path features ([`crate::feature::AnalysisFeature::PaletteLog2Size`]
 /// or [`crate::feature::AnalysisFeature::PaletteFitsIn256`]) and not
-/// the exact-count features. Any overlap with the full-path features
+/// the exact-count features. Note that `PaletteLog2Size` from the
+/// quick path saturates at `8` (≤ 256 colours); JXL's 9..15
+/// breakpoints require co-requesting `DistinctColorBins` to force
+/// the full-scan path. Any overlap with the full-path features
 /// (`DistinctColorBins` / `PaletteDensity`) routes through
 /// `scan_palette` instead, which produces both signal classes from a
 /// single pass.
@@ -173,7 +187,11 @@ pub(crate) fn scan_palette_quick(stream: &mut RowStream<'_>) -> PaletteStats {
     // is in `PALETTE_FULL_FEATURES`.
     PaletteStats {
         distinct: 0,
-        indexed_width: if exceeded { 0 } else { width_for_count(count) },
+        palette_log2_size: if exceeded {
+            0
+        } else {
+            palette_log2_size_from_count(count)
+        },
         fits_in_256: !exceeded,
         total_pixels: 0,
         non_grayscale: 0,
@@ -352,4 +370,45 @@ fn scan_quick_inner(stream: &mut RowStream<'_>, flags: &mut [u8; 32_768]) -> (u3
         }
     }
     (count, false)
+}
+
+#[cfg(test)]
+mod log2_size_tests {
+    use super::palette_log2_size_from_count;
+
+    #[test]
+    fn codomain_matches_indexed_bpp_breakpoints() {
+        // Edge cases.
+        assert_eq!(palette_log2_size_from_count(0), 0, "empty");
+        assert_eq!(palette_log2_size_from_count(1), 1, "solid color → 1 BPP");
+
+        // PNG-indexed bit-widths.
+        assert_eq!(palette_log2_size_from_count(2), 1, "PNG-1");
+        assert_eq!(palette_log2_size_from_count(3), 2, "GIF BPP=2 / PNG-2");
+        assert_eq!(palette_log2_size_from_count(4), 2, "PNG-2 boundary");
+        assert_eq!(palette_log2_size_from_count(5), 3, "GIF BPP=3");
+        assert_eq!(palette_log2_size_from_count(8), 3, "GIF BPP=3 boundary");
+        assert_eq!(palette_log2_size_from_count(9), 4, "PNG-4");
+        assert_eq!(palette_log2_size_from_count(16), 4, "PNG-4 boundary");
+        assert_eq!(palette_log2_size_from_count(17), 5, "GIF BPP=5");
+        assert_eq!(palette_log2_size_from_count(32), 5);
+        assert_eq!(palette_log2_size_from_count(33), 6, "GIF BPP=6");
+        assert_eq!(palette_log2_size_from_count(64), 6);
+        assert_eq!(palette_log2_size_from_count(65), 7, "GIF BPP=7");
+        assert_eq!(palette_log2_size_from_count(128), 7);
+        assert_eq!(palette_log2_size_from_count(129), 8);
+        assert_eq!(palette_log2_size_from_count(256), 8, "PNG-8 / GIF-8 boundary");
+
+        // JXL palette breakpoints (full-scan path only).
+        assert_eq!(palette_log2_size_from_count(257), 9);
+        assert_eq!(palette_log2_size_from_count(512), 9);
+        assert_eq!(palette_log2_size_from_count(513), 10);
+        assert_eq!(palette_log2_size_from_count(1024), 10, "JXL 1024 break");
+        assert_eq!(palette_log2_size_from_count(4096), 12, "JXL 4096 break");
+        assert_eq!(palette_log2_size_from_count(32_768), 15, "bin-storage cap");
+
+        // Truecolor sentinel.
+        assert_eq!(palette_log2_size_from_count(32_769), 0);
+        assert_eq!(palette_log2_size_from_count(u32::MAX), 0);
+    }
 }

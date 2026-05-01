@@ -55,7 +55,7 @@ OUT_LOG = Path("/home/lilith/work/zen/zenjpeg--ablate-overnight-2026-05-02/bench
 # Skipped intentionally:
 #   - HDR-specific features (peak/p99 luminance, hdr_*, wide_gamut_*,
 #     gamut_coverage_*) — corpus is SDR-only; signals collapse to 0
-#   - palette_fits_in_256 / indexed_palette_width — bool/int gating
+#   - palette_fits_in_256 / palette_log2_size — bool/int gating
 #     features that are nearly redundant with distinct_color_bins
 #   - patch_fraction (slow exact form) — superseded by patch_fraction_fast
 #   - composite likelihoods (text/screen/natural_likelihood) — derived

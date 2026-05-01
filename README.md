@@ -164,7 +164,7 @@ SDR source would otherwise produce byte-identical RGB8 streams.
 
 `Colourfulness`, `LaplacianVariance`, `VarianceSpread`, `PaletteDensity`,
 `DctCompressibilityY`, `DctCompressibilityUV`, `PatchFraction`,
-`IndexedPaletteWidth`, `PaletteFitsIn256`. Numeric scale or definition may
+`PaletteLog2Size`, `PaletteFitsIn256`. Numeric scale or definition may
 change in 0.1.x patches.
 
 ## Descriptor-gap detection

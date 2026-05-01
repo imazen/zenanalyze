@@ -43,16 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   even when `feat_pixel_count` is available. Both groups are gated
   by `#[deprecated(since = "0.1.0")]` in 0.1.x to give downstream
   consumers warning.
-- **`feat_indexed_palette_width` queued for cull pending corpus
-  densification.** 2026-05-02 cross-codec ablation showed it Tier 0
-  redundant against `feat_palette_fits_in_256` on all 4 codecs (min
-  |r| 0.9680–0.9972; zenavif fell into the low-variance pre-filter
-  before clustering, same underlying finding) — but every codec's
-  corpus only sampled `n_unique = 4` for the column, so the
-  redundancy claim is contingent on that 4-bin distribution. **Do
-  not ship this cull until the corpus has ≥ 100 indexed-palette
-  samples spanning palette widths {2, 4, 8, 16, 32, 64, 128, 256}
-  and Tier 0 has been re-run.** Stable feature id reserved.
+- **`feat_indexed_palette_width` (id 30) replaced by
+  `feat_palette_log2_size` (id 121).** The 2026-05-02 cross-codec
+  ablation flagged `IndexedPaletteWidth` as Tier 0 redundant against
+  `PaletteFitsIn256` on all 4 codecs (min |r| 0.9680–0.9972,
+  `n_unique = 4` everywhere) — but the n_unique=4 was the feature's
+  full codomain, not a corpus gap. The old codomain `{0, 2, 4, 8}`
+  also lacked the 1-BPP case for binary content (PNG-1 saves a
+  measurable bit/pixel vs PNG-2 on monochrome scans) and didn't
+  surface JXL Modular palette breakpoints at 9..15 (≤512..32768
+  colours). The replacement emits `ceil(log2(distinct))` clamped to
+  `[1, 15]` with `0` for truecolor, free-of-cost when any
+  full-precision palette feature is co-requested (single
+  `leading_zeros` instruction off the existing `distinct_color_bins`
+  count; the early-exit quick-path saturates at 8 by construction).
+  Stable feature id 30 is reserved retired; both old and new
+  variants are `#[cfg(feature = "experimental")]` with no in-tree
+  consumer at the time of the swap.
 - **Remove 3 redundant new shape/smoothness features**
   (`AnalysisFeature::ChromaKurtosis` = 117,
   `AnalysisFeature::UniformitySmooth` = 118,

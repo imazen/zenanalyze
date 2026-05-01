@@ -395,51 +395,13 @@ features_table! {
     // ---------------- Derived likelihoods ----------------------------
 
     // ---------------- Quick-path palette signals --------------------
-    /// `u32`. Smallest power-of-2 indexed-palette **bit-width** that
-    /// fits the source's distinct 5-bit-per-channel RGB bins, encoded
-    /// as the bit count:
-    ///
-    /// - `2`  ⇒ ≤ 4 colours      (1 BPP indexed, 2 BPP file)
-    /// - `4`  ⇒ ≤ 16 colours     (4 BPP indexed)
-    /// - `8`  ⇒ ≤ 256 colours    (8 BPP indexed — GIF, PNG-PLTE, WebP-lossless)
-    /// - `0`  ⇒ > 256 colours    (truecolor required)
-    ///
-    /// `u32`-typed for storage compatibility with the [`FeatureValue`]
-    /// enum's existing `U32` variant; the value range is `{0, 2, 4, 8}`.
-    ///
-    /// Computed via an early-exit scan that bails as soon as the
-    /// running distinct-count exceeds 256. The scan reuses the same
-    /// `#[autoversion]` + `chunks_exact(24)` skeleton as the full
-    /// `DistinctColorBins` scan, plus a per-pixel running-count check.
-    ///
-    /// **Net win for paletteable detection in mixed workloads.**
-    /// Measured at 8 MP, Ryzen 9 7950X, runtime archmage dispatch,
-    /// in-context through `analyze_features_rgb8`:
-    ///
-    /// | Image | `DistinctColorBins` (full) | This (quick) | Ratio |
-    /// |-------|---------------------------:|-------------:|------:|
-    /// | Truecolor (>22 K bins) | 6.65 ms | **3.23 ms** | **2.06×** |
-    /// | Small palette (16 colours) | 6.08 ms | 6.44 ms | 0.94× |
-    /// | Solid (1 colour) | 6.40 ms | 7.08 ms | 0.90× |
-    ///
-    /// The remaining 6–10 % loss on small-palette content is per-pixel
-    /// branch overhead the unconditional full scan doesn't pay; on
-    /// truecolor content the early-exit at the 257th distinct bin
-    /// dwarfs that. For codec orchestrators that don't know the
-    /// content class up front, this is a net win because web-typical
-    /// traffic skews truecolor.
-    ///
-    /// Drives GIF / PNG-indexed / WebP-lossless palette-mode decisions.
-    /// Gated behind `experimental` for 0.1.0 because no in-tree
-    /// indexed-codec consumer exists yet.
-    #[cfg(feature = "experimental")]
-    IndexedPaletteWidth = 30 : u32 => indexed_palette_width,
-
-    /// `bool`. Convenience shorthand: `IndexedPaletteWidth != 0` —
-    /// the source fits in 256 colours and an indexed-mode codec can
-    /// represent it without quantization. Drives the binary
-    /// "encode as indexed?" decision when the caller doesn't care
-    /// about the exact width. Gated behind `experimental`.
+    /// `bool`. Source fits in 256 distinct 5-bit-per-channel RGB
+    /// bins — an indexed-mode codec can represent it without
+    /// colour quantization. Drives the binary "encode as indexed?"
+    /// decision when the caller doesn't care about palette size.
+    /// Computed via an early-exit scan that bails at the 257th
+    /// distinct bin (~half-image walk on truecolor, full walk on
+    /// indexed-class content). Gated behind `experimental`.
     #[cfg(feature = "experimental")]
     PaletteFitsIn256 = 31 : bool => palette_fits_in_256,
 
@@ -966,6 +928,46 @@ features_table! {
     /// signal — drives JXL DCT16/DCT32 enable decisions.
     #[cfg(feature = "experimental")]
     GradientFractionSmooth = 120 : f32 => gradient_fraction_smooth,
+
+    // ---------------- Palette: ceiling-log2 of distinct-bin count ----
+    /// `u32`. `ceil(log2(distinct_color_bins))`, clamped to `[1, 15]`,
+    /// with `0` reserved for "truecolor required" (more than 32 768
+    /// distinct 5-bit-per-channel bins — saturates the analyzer's bin
+    /// storage). The value is the smallest indexed-palette
+    /// **bits-per-pixel** that contains the source:
+    ///
+    /// - `1`  ⇒ ≤ 2 colours          (PNG-1, true monochrome)
+    /// - `2`  ⇒ ≤ 4 colours          (PNG-2)
+    /// - `3`  ⇒ ≤ 8 colours          (GIF BPP=3 — PNG rounds to 4)
+    /// - `4`  ⇒ ≤ 16 colours         (PNG-4)
+    /// - `5..7` ⇒ ≤ 32..128 colours  (GIF BPP, PNG rounds to 8)
+    /// - `8`  ⇒ ≤ 256 colours        (PNG-8, GIF, WebP-lossless palette)
+    /// - `9..15` ⇒ ≤ 512..32768      (JXL Modular palette transform tiers)
+    /// - `0`  ⇒ > 32 768 colours     (truecolor; never indexed-profitable)
+    ///
+    /// **Cost.** When the caller already requested any full-precision
+    /// palette feature (`DistinctColorBins`, `PaletteDensity`,
+    /// `GrayscaleScore`), this value is computed for free from the
+    /// existing distinct-count via a single `leading_zeros`
+    /// instruction. When only the quick-path features are requested
+    /// (`PaletteFitsIn256`, this feature), the early-exit scan still
+    /// bails at 257 distinct bins; in that case the value is in
+    /// `[1, 8]` or `0`, with the upper-end resolution lost. Callers
+    /// who need the high-cap signal (JXL palette breakpoints at
+    /// 1024 / 4096) should also request `DistinctColorBins` so the
+    /// full-scan path runs.
+    ///
+    /// Drives PNG-indexed bit-width choice (round up to {1, 2, 4, 8}),
+    /// GIF LZW initial-code-size (matches BPP exactly), JXL Modular
+    /// palette/delta-palette enable decisions. Gated behind
+    /// `experimental` for 0.1.0; promote when a consumer wires up.
+    ///
+    /// Replaces the pre-2026-05-02 `IndexedPaletteWidth` (id 30, codomain
+    /// `{0, 2, 4, 8}`) which lacked the 1-BPP case for binary content
+    /// and didn't surface JXL's high-cap breakpoints. That id is
+    /// reserved retired.
+    #[cfg(feature = "experimental")]
+    PaletteLog2Size = 121 : u32 => palette_log2_size,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1338,8 +1340,8 @@ pub(crate) const PALETTE_QUICK_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     #[cfg(feature = "experimental")]
     {
-        s = s.with(AnalysisFeature::IndexedPaletteWidth);
         s = s.with(AnalysisFeature::PaletteFitsIn256);
+        s = s.with(AnalysisFeature::PaletteLog2Size);
     }
     s
 };
@@ -1920,6 +1922,11 @@ mod tests {
         // with existing features on ≥3/4 codecs in the 2026-05-01
         // cross-codec ablation. Stable ids reserved.
         117, 118, 119,
+        // id 30 was `IndexedPaletteWidth` (codomain {0, 2, 4, 8}).
+        // Replaced 2026-05-02 by `PaletteLog2Size` (id 121, codomain
+        // {0, 1..15}) which adds the 1-BPP case for binary content
+        // and surfaces JXL palette breakpoints at 9..15.
+        30,
     ];
 
     #[test]
@@ -1944,9 +1951,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the kurtosis + smooth-replacement
-        // additions (ids 116–120).
-        assert!(AnalysisFeature::from_u16(121).is_none());
+        // First unused id past the palette redefinition (id 121
+        // is now `PaletteLog2Size`).
+        assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 

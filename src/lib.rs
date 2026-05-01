@@ -531,7 +531,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     // Palette routing: if any "full-precision" palette feature was
     // requested (DistinctColorBins / Chao1 / PaletteDensity), run
     // the full scan. Otherwise — when only quick-path features
-    // (IndexedPaletteWidth / PaletteFitsIn256) are asked — use the
+    // (PaletteFitsIn256 / PaletteLog2Size) are asked — use the
     // early-exit scan that bails as soon as the running count
     // exceeds 256. On photos this typically returns within ~10
     // image rows.
@@ -602,7 +602,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         // no in-tree codec consumes them yet.
         #[cfg(feature = "experimental")]
         {
-            raw.indexed_palette_width = palette_stats.indexed_width;
+            raw.palette_log2_size = palette_stats.palette_log2_size;
             raw.palette_fits_in_256 = palette_stats.fits_in_256;
         }
         // Full-path-only signals — quick-path leaves these at 0; the
