@@ -48,12 +48,17 @@ from pathlib import Path
 # ---------- Paths ----------
 
 # zenavif/benchmarks/dev/rav1e_phase1a_pareto.rs writes here. Bump
-# dates when re-running the sweep.
+# dates when re-running the sweep. The 2026-04-30 pareto is unchanged
+# (encode results still valid); the features file was re-extracted on
+# 2026-05-01 against the post-cull zenanalyze 0.1.0 schema (97 → 102
+# features: dropped 17 culled features, added 5 new shape/smoothness
+# features — luma_kurtosis, chroma_kurtosis, uniformity_smooth,
+# flat_color_smooth, gradient_fraction_smooth).
 PARETO = Path("benchmarks/rav1e_phase1a_2026-04-30.tsv")
-FEATURES = Path("benchmarks/rav1e_phase1a_features_2026-04-30.tsv")
+FEATURES = Path("benchmarks/rav1e_phase1a_features_2026-05-01.tsv")
 
-OUT_JSON = Path("benchmarks/rav1e_phase1a_hybrid_2026-04-30.json")
-OUT_LOG = Path("benchmarks/rav1e_phase1a_hybrid_2026-04-30.log")
+OUT_JSON = Path("benchmarks/rav1e_phase1a_hybrid_2026-05-01.json")
+OUT_LOG = Path("benchmarks/rav1e_phase1a_hybrid_2026-05-01.log")
 
 
 # ---------- Schema ----------
@@ -122,6 +127,15 @@ KEEP_FEATURES = [
     "feat_gradient_fraction",
     "feat_grayscale_score",
     "feat_edge_slope_stdev",
+    # New experimental shape / smoothness features (post-cull addition,
+    # zenanalyze 0.1.0 — 5 features added 2026-04-30; this corpus has
+    # aspect-varying images and non-power-of-2 sizes that should give
+    # these features room to differentiate from the existing set).
+    "feat_luma_kurtosis",
+    "feat_chroma_kurtosis",
+    "feat_uniformity_smooth",
+    "feat_flat_color_smooth",
+    "feat_gradient_fraction_smooth",
     # Dimension / shape
     "feat_pixel_count",
     "feat_min_dim",

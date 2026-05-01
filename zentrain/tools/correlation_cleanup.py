@@ -92,8 +92,33 @@ def load_features(path: Path):
         rdr = csv.DictReader(f, delimiter="\t")
         all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
         feat_cols = all_cols
+        n_dropped = 0
         for r in rdr:
-            rows.append([float(r[c]) for c in feat_cols])
+            row_vals = []
+            has_nan = False
+            for c in feat_cols:
+                v = r[c]
+                if v == "" or v is None:
+                    row_vals.append(float("nan"))
+                    has_nan = True
+                else:
+                    fv = float(v)
+                    if fv != fv:  # NaN sentinel from analyzer
+                        has_nan = True
+                    row_vals.append(fv)
+            if has_nan:
+                # Percentile features emit NaN when an image is too small
+                # to satisfy the per-feature minimum-sample-count floor
+                # (zenanalyze #49). For correlation analysis we want a
+                # dense feature matrix, so drop those rows.
+                n_dropped += 1
+                continue
+            rows.append(row_vals)
+    if n_dropped:
+        sys.stderr.write(
+            f"Dropped {n_dropped} rows with NaN feature values "
+            f"(tiny images skipping percentile features).\n"
+        )
     return np.asarray(rows, dtype=np.float32), feat_cols, len(rows)
 
 

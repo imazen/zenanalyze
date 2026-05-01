@@ -391,9 +391,38 @@ def load_features(path):
         rdr = csv.DictReader(f, delimiter="\t")
         all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
         cols = [c for c in KEEP_FEATURES if c in all_cols]
+        n_dropped = 0
         for r in rdr:
+            vals = []
+            has_nan = False
+            for c in cols:
+                v = r[c]
+                if v == "" or v is None:
+                    has_nan = True
+                    vals.append(float("nan"))
+                else:
+                    fv = float(v)
+                    if fv != fv:
+                        has_nan = True
+                    vals.append(fv)
+            if has_nan:
+                # Percentile features emit "" / NaN when the image is too
+                # small to satisfy the per-feature minimum-sample-count
+                # floor (zenanalyze #49). Drop those (image, size) keys
+                # from training — at inference the codec routes those
+                # tiny cells to the known-good fallback via the picker's
+                # OOD-bounds machinery, so they never need a trained
+                # picker decision.
+                n_dropped += 1
+                continue
             feats[(r["image_path"], r["size_class"])] = np.array(
-                [float(r[c]) for c in cols], dtype=np.float32
+                vals, dtype=np.float32
+            )
+        if n_dropped:
+            sys.stderr.write(
+                f"Dropped {n_dropped} (image, size) keys with NaN "
+                f"feature values (tiny images skipping percentile "
+                f"features — handled by OOD fallback at inference).\n"
             )
     return feats, cols
 

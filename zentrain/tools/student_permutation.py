@@ -96,9 +96,34 @@ def load_features(path: Path) -> tuple[dict, list[str]]:
         rdr = csv.DictReader(f, delimiter="\t")
         all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
         cols = [c for c in KEEP_FEATURES if c in all_cols]
+        n_dropped = 0
         for r in rdr:
+            vals = []
+            has_nan = False
+            for c in cols:
+                v = r[c]
+                if v == "" or v is None:
+                    has_nan = True
+                    vals.append(float("nan"))
+                else:
+                    fv = float(v)
+                    if fv != fv:
+                        has_nan = True
+                    vals.append(fv)
+            if has_nan:
+                # Tiny images skip percentile features (zenanalyze #49).
+                # At inference these go through the OOD-bounds fallback;
+                # the student MLP was never trained on them. Drop them
+                # from the permutation eval set too.
+                n_dropped += 1
+                continue
             feats[(r["image_path"], r["size_class"])] = np.array(
-                [float(r[c]) for c in cols], dtype=np.float32
+                vals, dtype=np.float32
+            )
+        if n_dropped:
+            sys.stderr.write(
+                f"Dropped {n_dropped} (image, size) keys with NaN "
+                f"feature values.\n"
             )
     return feats, cols
 
