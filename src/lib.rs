@@ -171,7 +171,7 @@ pub(crate) mod row_stream;
 pub(crate) mod tier1;
 pub(crate) mod tier2_chroma;
 pub(crate) mod tier3;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "hdr")]
 pub(crate) mod tier_depth;
 
 use core::fmt;
@@ -514,16 +514,16 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
 
     // Source-direct depth tier — no RowStream / RowConverter; reads
     // descriptor samples and decodes through the transfer function.
-    // Behind the `experimental` cargo feature; gated off entirely
-    // when the feature is disabled (then `run_depth` is dead-code-
-    // eliminated since DEPTH_FEATURES is empty in that build).
-    #[cfg(feature = "experimental")]
+    // Behind the `hdr` cargo feature; gated off entirely when the
+    // feature is disabled (then `run_depth` is dead-code-eliminated
+    // since DEPTH_FEATURES is empty in that build).
+    #[cfg(feature = "hdr")]
     let depth_stats = if run_depth {
         tier_depth::scan_depth(&slice, pixel_budget)
     } else {
         Default::default()
     };
-    // Suppress unused-var warning when experimental is off.
+    // Suppress unused-var warning when hdr is off.
     let _ = run_depth;
 
     let mut stream = RowStream::new(slice).map_err(AnalyzeError::Convert)?;
@@ -587,7 +587,6 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
         // the dispatch axes decided.
-        #[allow(deprecated)] // composites slated for removal next major; internal call OK
         tier3::compute_derived_likelihoods::<T3, PAL>(&mut raw);
     }
 
@@ -638,9 +637,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         let _ = palette_stats; // silence unused on the all-experimental-off path
     }
 
-    // Depth tier writeback (experimental only — the fields and the
-    // `tier_depth` module are both `cfg(feature = "experimental")`).
-    #[cfg(feature = "experimental")]
+    // Depth tier writeback. Fields + `tier_depth` module live behind
+    // `cfg(feature = "hdr")` (HDR / wide-gamut / depth features —
+    // off by default, opt-in for codecs that handle PQ / HLG /
+    // 10-bit / wide-gamut content).
+    #[cfg(feature = "hdr")]
     if run_depth {
         raw.peak_luminance_nits = depth_stats.peak_nits;
         raw.p99_luminance_nits = depth_stats.p99_nits;

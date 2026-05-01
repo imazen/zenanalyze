@@ -24,28 +24,12 @@ default = []
 # for *structural* uncertainty (no consumer pinned the meaning yet,
 # or the metric is research-stage).
 experimental = []
-# DEPRECATED. Will be removed in the next major release.
-#
-# Hand-tuned weighted-sum composite scores
-# (`TextLikelihood`, `ScreenContentLikelihood`, `NaturalLikelihood`,
-# `LineArtScore`) over stable raw signals. The composite coefficients
-# turned out to drift faster than is practical to maintain as a
-# stable API surface. `PatchFraction` (AUC = 0.88) outperforms
-# `ScreenContentLikelihood` as a single discriminator; for the
-# others, a learned classifier shipped via zenpredict produces
-# calibrated probabilities cheaper than maintaining hand-tuned
-# coefficients.
-#
-# Migration: consume the raw signals directly
-# (`LumaHistogramEntropy`, `EdgeDensity`, `ChromaComplexity`,
-# `PatchFraction`, `FlatColorBlockRatio`, `DistinctColorBins`) and
-# apply your own weights, OR train a small zenpredict model on a
-# labeled corpus and ship the `.bin` alongside your codec.
-#
-# This flag still works in 0.1.x; the variants emit a `deprecated`
-# warning. The next major bump removes the variants entirely
-# (their stable feature ids 27, 28, 29, 45 stay reserved).
-composites = []
+# Opt-in to HDR / wide-gamut / depth features (10 features, ids
+# 32–39, 46, 47). Off by default — every default sweep corpus is
+# SDR-only so the analyzer hot path skips the source-direct depth
+# tier entirely. Codecs that handle PQ / HLG / 10-bit / wide-gamut
+# content opt in. See `tier_depth` for the implementation.
+hdr = []
 
 [dependencies]
 zenpixels = { version = "0.2.11", default-features = false, features = ["imgref"] }
@@ -66,7 +50,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 
 [[example]]
 name = "corpus_eval"
-required-features = ["experimental", "composites"]
+required-features = ["experimental"]
 
 [[example]]
 name = "edge_skin_bench"
@@ -74,7 +58,7 @@ required-features = ["experimental"]
 
 [[example]]
 name = "tier1_bench"
-required-features = ["experimental", "composites"]
+required-features = ["experimental"]
 
 [[example]]
 name = "tier3_fingerprint_bench"
@@ -82,7 +66,7 @@ required-features = ["experimental"]
 
 [[example]]
 name = "per_feature_cost"
-required-features = ["experimental", "composites"]
+required-features = ["experimental"]
 
 [[example]]
 name = "grayscale_perf"

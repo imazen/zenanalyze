@@ -393,74 +393,6 @@ features_table! {
     AlphaBimodalScore = 26 : f32 => alpha_bimodal_score,
 
     // ---------------- Derived likelihoods ----------------------------
-    /// `f32`. Soft score: rendered text / document content.
-    ///
-    /// Theoretical range `[0, 1]`. **Empirical max on a 219-image
-    /// labeled corpus: 0.71** — the formula's three sub-components
-    /// (low entropy + high edge density + low chroma) don't all max
-    /// simultaneously on real content. **Stretched to `[0, 1]`**
-    /// post-2026-04-28 — multiply old thresholds by `1 / 0.71` to
-    /// translate. Recommended operating threshold (post-stretch):
-    /// `text_likelihood >= 0.35` (F1 = 0.585, P = 0.50, R = 0.71,
-    /// AUC = 0.713 vs `has_text` ground truth on the 219-image
-    /// labeled corpus). Do not threshold at `>= 0.7` — almost nothing
-    /// fires there. See `docs/calibration-corpus-2026-04-27.md`.
-    #[cfg(feature = "composites")]
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "the `composites` flag is being retired in the next major release. \
-                Compute from raw signals (LumaHistogramEntropy, EdgeDensity, ChromaComplexity, \
-                FlatColorBlockRatio) directly, or pin a learned classifier via zenpredict."
-    )]
-    TextLikelihood = 27 : f32 => text_likelihood,
-    /// `f32`. Soft score: UI / chart / synthetic content.
-    ///
-    /// Theoretical range `[0, 1]`. **Empirical max on a 219-image
-    /// labeled corpus: 0.70** — typical screen content has flat
-    /// blocks and low chroma (which drive the formula's 0.6 + 0.1
-    /// weights to 1) but a moderate distinct-color count (>= 4000
-    /// bins) which forces the `palette_small` term to 0, capping the
-    /// total at ~0.70. **Reformulated and stretched 2026-04-28** — the
-    /// `palette_small` term has been replaced with `patch_fraction`
-    /// (when `experimental` is on; legacy formula otherwise) and the
-    /// post-clamp value is divided by 0.70 so the composite reaches
-    /// `[0, 1]` cleanly. Recommended operating threshold (post-stretch):
-    /// `screen_content_likelihood >= 0.80` (F1 = **0.779**, P = 0.94,
-    /// R = 0.67, AUC = **0.845**). For the strongest single screen-vs-
-    /// photo discriminator, see [`Self::PatchFraction`] (AUC = 0.88)
-    /// which still outperforms this derived likelihood — but the new
-    /// composite F1 (0.779) is now competitive with PatchFraction's
-    /// F1 (0.769) at its own optimal operating point. See
-    /// `docs/calibration-corpus-2026-04-27.md`.
-    #[cfg(feature = "composites")]
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "the `composites` flag is being retired in the next major release. \
-                `PatchFraction` (AUC = 0.88) is a stronger single screen-vs-photo \
-                discriminator. Combine raw signals directly or pin a learned classifier \
-                via zenpredict."
-    )]
-    ScreenContentLikelihood = 28 : f32 => screen_content_likelihood,
-    /// `f32`. Soft score: natural photographic content.
-    ///
-    /// Theoretical range `[0, 1]`. **Empirical max on a 219-image
-    /// labeled corpus: 0.69 → stretched to 1.0 post-2026-04-28**.
-    /// Photos cleanly separate from screens at a low threshold:
-    /// **`natural_likelihood >= 0.10`** (post-stretch) gives F1 =
-    /// **0.923**, P = 0.88, R = 0.97, AUC = 0.814 for photo
-    /// classification. Equivalent to a probability — high values
-    /// reliably mean photo. (Pre-stretch threshold was `>= 0.06`;
-    /// multiply old thresholds by `1 / 0.69` to translate.) See
-    /// `docs/calibration-corpus-2026-04-27.md`.
-    #[cfg(feature = "composites")]
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "the `composites` flag is being retired in the next major release. \
-                Compute photo-vs-screen discrimination from raw signals \
-                (LumaHistogramEntropy, EdgeDensity, ChromaComplexity, PatchFraction) \
-                directly, or pin a learned classifier via zenpredict."
-    )]
-    NaturalLikelihood = 29 : f32 => natural_likelihood,
 
     // ---------------- Quick-path palette signals --------------------
     /// `u32`. Smallest power-of-2 indexed-palette **bit-width** that
@@ -516,40 +448,40 @@ features_table! {
     /// against source samples directly (no `RowConverter` tonemap),
     /// honoring the descriptor's transfer function. SDR sources hit
     /// ~80 nits; PQ ~10 000; HLG ~1 000.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     PeakLuminanceNits = 32 : f32 => peak_luminance_nits,
     /// `f32`. 99th-percentile luminance in nits (robust against single
     /// hot pixels).
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     P99LuminanceNits = 33 : f32 => p99_luminance_nits,
     /// `f32`. HDR headroom in stops: `log2(peak_nits / 80)`. SDR ⇒ 0;
     /// 1 000-nit HLG ⇒ ~3.6; 10 000-nit PQ ⇒ ~6.97.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     HdrHeadroomStops = 34 : f32 => hdr_headroom_stops,
     /// `f32`. Fraction `[0, 1]` of sampled pixels above 100 nits.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     HdrPixelFraction = 35 : f32 => hdr_pixel_fraction,
     /// `f32`. Largest single-channel linear value across sampled
     /// pixels. `> 1.0` ⇒ source carries above-sRGB values that would
     /// clip if narrowed to sRGB primaries.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     WideGamutPeak = 36 : f32 => wide_gamut_peak,
     /// `f32`. Fraction `[0, 1]` of sampled pixels with at least one
     /// channel above 1.0 in linear light.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     WideGamutFraction = 37 : f32 => wide_gamut_fraction,
     /// `u32`. Effective bit depth: smallest power-of-2 quantization
     /// grid the sampled values populate. `{8, 10, 12, 14, 16, 32}`.
     /// For u8 sources always 8; u8-promoted u16 detected as 8 via the
     /// low-byte distinct-count probe.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     EffectiveBitDepth = 38 : u32 => effective_bit_depth,
     /// `bool`. `true` iff peak luminance well exceeds the SDR threshold
     /// AND the source transfer function can carry HDR
     /// (`Pq` / `Hlg` / `Linear`). Catches the hard case the standard
     /// tiers miss: PQ-encoded content whose tonemapped rendition looks
     /// like SDR but whose source carries far more dynamic range.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     HdrPresent = 39 : bool => hdr_present,
     /// `f32`. Fraction `[0, 1]` of sampled pixels whose linear-RGB,
     /// projected from the source primaries into BT.709 / sRGB, has
@@ -560,14 +492,14 @@ features_table! {
     /// the colour-metadata + drop the gamut-extended encoder modes.
     /// For sRGB-declared sources this is trivially `1.0`. Threshold
     /// of `≥ 0.99` is a reasonable "downcast safe" cutoff.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     GamutCoverageSrgb = 46 : f32 => gamut_coverage_srgb,
     /// `f32`. Same shape, projecting into Display P3. **Descriptor-
     /// gap signal:** for a Rec.2020-declared source, `1.0` here means
     /// the content is encodable in P3 (smaller container than
     /// Rec.2020). Useful as a middle tier when the image isn't sRGB-
     /// safe but doesn't actually use the full Rec.2020 gamut either.
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     GamutCoverageP3 = 47 : f32 => gamut_coverage_p3,
     /// `f32`. Fraction `[0, 1]` of sampled luma 8×8 blocks where
     /// ≥ 90 % of AC energy lives in the lowest-zigzag positions —
@@ -611,24 +543,6 @@ features_table! {
     /// channel denoise scheduling.
     #[cfg(feature = "experimental")]
     NoiseFloorUV = 44 : f32 => noise_floor_uv,
-    /// `f32`. Soft `[0, 1]` score: rendered line art / engineering
-    /// drawings / two-tone diagrams. Combines Otsu bimodality of the
-    /// 32-bin luma histogram, top-2-bin coverage, and low-entropy
-    /// gate via a conservative `min` combinator. Drives webp
-    /// `Preset::Drawing`, jxl modular path selection, png palette
-    /// preference. Distinct from `ScreenContentLikelihood` (which is
-    /// driven by palette and high-frequency energy).
-    ///
-    /// Behind the `composites` cargo feature: the combinator
-    /// coefficients are calibration-driven and may drift in 0.1.x.
-    #[cfg(feature = "composites")]
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "the `composites` flag is being retired in the next major release. \
-                Combine raw signals (LumaHistogramEntropy + Otsu-bimodality from a \
-                histogram you compute) directly, or pin a learned classifier via zenpredict."
-    )]
-    LineArtScore = 45 : f32 => line_art_score,
 
     /// `f32`. Fraction `[0, 1]` of sampled pixels in the canonical
     /// chrominance-only skin-tone region. The chroma gates are
@@ -797,14 +711,6 @@ features_table! {
     PixelCount = 56 : u32 => pixel_count,
     /// `f32`. `ln(w * h)`, natural log. Useful as a smooth
     /// resolution axis for predictors (vs `size_class` one-hot).
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
     LogPixels = 57 : f32 => log_pixels,
     /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
     /// a 1024×1 image and a 32×32 image have very different
@@ -820,14 +726,6 @@ features_table! {
     /// values up to 2²⁴ ≈ 16 MB; larger images lose ~ULP-level
     /// precision per byte but stay correct in log space (≤ 1 ULP
     /// drift in log10 ≈ 1e-7) — fine for ML features.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
     BitmapBytes = 60 : f32 => bitmap_bytes,
     /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
     /// extreme strip → 0. Bounded and smooth — well-conditioned for
@@ -845,15 +743,9 @@ features_table! {
     /// applies to padded blocks too — this captures that "wasted"
     /// fraction. Hits JPEG 8×8 DCT and WebP/AVIF 8×8 partitions.
     BlockMisalignment8 = 63 : f32 => block_misalignment_8,
-    /// `f32`. Same as `BlockMisalignment8` but for 16×16 blocks.
-    /// Hits JPEG 4:2:0 MCU and AVIF 16×16 partitions.
-    BlockMisalignment16 = 64 : f32 => block_misalignment_16,
     /// `f32`. Same as `BlockMisalignment8` but for 32×32 blocks.
     /// Hits JXL DCT32 and AV1 32×32 partitions.
     BlockMisalignment32 = 65 : f32 => block_misalignment_32,
-    /// `f32`. Same as `BlockMisalignment8` but for 64×64 blocks.
-    /// Hits JXL DCT64.
-    BlockMisalignment64 = 66 : f32 => block_misalignment_64,
     /// `u32`. Number of color channels in the source descriptor:
     /// 1 (grayscale), 3 (RGB), or 4 (RGBA). Pure descriptor lookup.
     ChannelCount = 67 : u32 => channel_count,
@@ -990,128 +882,6 @@ features_table! {
     // a 257×257 image the codec actually encodes 264×264 (block-8
     // grid), 272×272 (block-16), etc. These correlate with bytes
     // spent more directly than the visible pixel count does.
-    /// `f32`. `log2(w * h)`. Range ~12 → 24 for typical images.
-    /// Power-of-2 friendly, integer-clean for power-of-2 sizes.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    Log2Pixels = 94 : f32 => log2_pixels,
-    /// `f32`. `log10(w * h)`. Range ~3.6 → 7.2 for typical images.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    Log10Pixels = 95 : f32 => log10_pixels,
-    /// `f32`. `ln(w * h)` rounded to the nearest 0.5 — bucket-
-    /// aligned smooth signal that gives the network a quantized
-    /// "size class" handle without the 4-bucket cliff of the
-    /// engineered `size_*` one-hot.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogPixelsRounded = 96 : f32 => log_pixels_rounded,
-    /// `f32`. `sqrt(w * h)` — geometric mean linear dimension.
-    /// Useful when the network wants a linear (not log) size axis
-    /// that doesn't blow up the dynamic range like raw `PixelCount`.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    SqrtPixels = 97 : f32 => sqrt_pixels,
-    /// `f32`. `ln(bitmap_bytes)`. Compressed-vs-uncompressed-
-    /// reference signal in log space — `BitmapBytes` itself has the
-    /// same wide-dynamic-range memorization risk as `PixelCount`.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogBitmapBytes = 98 : f32 => log_bitmap_bytes,
-    /// `f32`. `ln(min(w, h))` — log of the shorter dimension.
-    /// Captures strips and thumbnails where one dim is dominant.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogMinDim = 99 : f32 => log_min_dim,
-    /// `f32`. `ln(max(w, h))` — log of the longer dimension.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogMaxDim = 100 : f32 => log_max_dim,
-    /// `f32`. `ln(ceil(w/8)*8 × ceil(h/8)*8)`. Log of the block-
-    /// padded encoded surface area at the JPEG 8×8 / WebP/AVIF 8×8
-    /// grid. For aligned images equals `LogPixels`; for
-    /// off-by-one sizes is slightly larger by `ln(1 + alignment_loss)`.
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogPaddedPixels8 = 101 : f32 => log_padded_pixels_8,
-    /// `f32`. Same for 16×16 (JPEG 4:2:0 MCU, AVIF 16×16).
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogPaddedPixels16 = 102 : f32 => log_padded_pixels_16,
-    /// `f32`. Same for 32×32 (JXL DCT32, AV1 32×32).
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
-    /// `f32`. Same for 64×64 (JXL DCT64).
-    @decl[deprecated(
-        since = "0.1.0",
-        note = "redundant transform of feat_pixel_count; identical Spearman rank \
-                across the corpus, zero LOO and permutation-importance Δ — see #59. \
-                Stable id stays reserved (never recycled). For tree learners, consume \
-                feat_pixel_count directly; for linear learners, compute the transform \
-                in your training pipeline."
-    )]
-    LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
 
     // ---------------- Low-tail percentile companions ---------------
     // Adds P1/P5/P10 to LaplacianVariance / AqMap / NoiseFloorY (and
@@ -1664,11 +1434,6 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
     }
-    #[cfg(feature = "composites")]
-    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
-    {
-        s = s.with(AnalysisFeature::LineArtScore);
-    }
     s
 };
 
@@ -1725,13 +1490,6 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
     }
-    // ScreenContentLikelihood reads `patch_fraction` (DCT-derived)
-    // when experimental is on; falls back to non-DCT formula otherwise.
-    #[cfg(all(feature = "composites", feature = "experimental"))]
-    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
-    {
-        s = s.with(AnalysisFeature::ScreenContentLikelihood);
-    }
     s
 };
 
@@ -1748,7 +1506,7 @@ pub(crate) const ALPHA_FEATURES: FeatureSet = FeatureSet::new()
 #[allow(unused_mut, unused_assignments)]
 pub(crate) const DEPTH_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
-    #[cfg(feature = "experimental")]
+    #[cfg(feature = "hdr")]
     {
         s = s.with(AnalysisFeature::PeakLuminanceNits);
         s = s.with(AnalysisFeature::P99LuminanceNits);
@@ -1765,78 +1523,20 @@ pub(crate) const DEPTH_FEATURES: FeatureSet = {
 };
 
 #[allow(unused_mut, unused_assignments)]
-pub(crate) const DERIVED_FEATURES: FeatureSet = {
-    let mut s = FeatureSet::new();
-    #[cfg(feature = "composites")]
-    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
-    {
-        s = s.with(AnalysisFeature::TextLikelihood);
-        s = s.with(AnalysisFeature::ScreenContentLikelihood);
-        s = s.with(AnalysisFeature::NaturalLikelihood);
-    }
-    s
-};
+// DERIVED_FEATURES is empty after the composite-likelihood deletion
+// (#6, #59). Kept for now so the dispatch wiring compiles; eligible
+// for full removal once the derived-likelihood call site in
+// `tier3::compute_derived_likelihoods` is collapsed away.
+pub(crate) const DERIVED_FEATURES: FeatureSet = FeatureSet::new();
 
 // --- Derived-feature dependency closures ----------------------------
 //
-// Derived likelihoods are computed from leaf features in other tiers.
-// The dispatch axes use these supersets to ensure the *correct*
-// dependencies run, not the over-approximation "any DERIVED triggers
-// every tier".
-//
-// `compute_derived_likelihoods` is independently gated by const bools
-// so an axis-table mistake here can't escape — a likelihood whose deps
-// weren't computed is left at the field's default and dropped by
-// `into_results`. Layered defense: caller sees `None`, never garbage.
+// After the composite-likelihood deletion these collapse to their
+// underlying tier supersets. Kept as named aliases so the dispatch
+// axes don't need a second sweep.
 
-/// Features whose computation reads from Tier 3 outputs
-/// (`luma_histogram_entropy`). Includes:
-/// - All [`TIER3_FEATURES`] proper.
-/// - [`AnalysisFeature::TextLikelihood`] (uses `luma_histogram_entropy`).
-/// - [`AnalysisFeature::NaturalLikelihood`] (uses `luma_histogram_entropy`).
-///
-/// `ScreenContentLikelihood` is **not** here — it's palette + T1 only.
-#[allow(unused_mut, unused_assignments)]
-pub(crate) const T3_NEEDED_BY: FeatureSet = {
-    let mut s = TIER3_FEATURES;
-    #[cfg(feature = "composites")]
-    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
-    {
-        s = s.with(AnalysisFeature::TextLikelihood);
-        s = s.with(AnalysisFeature::NaturalLikelihood);
-        // Post-2026-04-28: `screen_content_likelihood` reads
-        // `patch_fraction` (when `experimental` is on; legacy formula
-        // otherwise). `patch_fraction` is a Tier 3 output, so
-        // requesting `ScreenContentLikelihood` must trigger Tier 3
-        // even when no other Tier 3 feature was requested. Without
-        // this, the composite reads zero-initialized `patch_fraction`
-        // and silently produces 0.
-        #[cfg(feature = "experimental")]
-        {
-            s = s.with(AnalysisFeature::ScreenContentLikelihood);
-        }
-    }
-    s
-};
-
-/// Features whose computation reads from palette outputs
-/// (`distinct_color_bins`). Includes:
-/// - All [`PALETTE_FEATURES`] proper.
-/// - [`AnalysisFeature::ScreenContentLikelihood`] (uses `distinct_color_bins`).
-/// - [`AnalysisFeature::NaturalLikelihood`] (uses `distinct_color_bins`).
-///
-/// `TextLikelihood` is **not** here — it's T3-entropy + T1 only.
-#[allow(unused_mut, unused_assignments)]
-pub(crate) const PAL_NEEDED_BY: FeatureSet = {
-    let mut s = PALETTE_FEATURES;
-    #[cfg(feature = "composites")]
-    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
-    {
-        s = s.with(AnalysisFeature::ScreenContentLikelihood);
-        s = s.with(AnalysisFeature::NaturalLikelihood);
-    }
-    s
-};
+pub(crate) const T3_NEEDED_BY: FeatureSet = TIER3_FEATURES;
+pub(crate) const PAL_NEEDED_BY: FeatureSet = PALETTE_FEATURES;
 
 // `RawAnalysis` and `into_results` are generated by the
 // `features_table!` invocation at the top of this file.

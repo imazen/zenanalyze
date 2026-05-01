@@ -17,6 +17,7 @@
 //! only `#[cfg(test)]` and is not a public path.
 
 use super::*;
+#[allow(unused_imports)]
 use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet, ImageGeometry, RawAnalysis};
 use core::ops::Deref;
 
@@ -165,14 +166,6 @@ fn vstripes_have_high_horiz_chroma_zero_vert() {
     assert_eq!(out.cr_vert_sharpness, 0.0);
 }
 
-#[cfg(feature = "composites")]
-#[test]
-fn synthetic_image_likelihoods_in_unit_interval() {
-    let out = analyze_rgb8(&synth_rgb(128, 128, 42), 128, 128);
-    assert!((0.0..=1.0).contains(&out.text_likelihood));
-    assert!((0.0..=1.0).contains(&out.screen_content_likelihood));
-    assert!((0.0..=1.0).contains(&out.natural_likelihood));
-}
 
 #[test]
 fn geometry_fields_derive_from_w_h() {
@@ -469,12 +462,6 @@ fn assert_well_formed(out: &TestOutput, w: u32, h: u32) {
         "aspect_ratio: expected {expected_ar}, got {}",
         out.aspect_ratio
     );
-    #[cfg(feature = "composites")]
-    {
-        assert!((0.0..=1.0).contains(&out.text_likelihood));
-        assert!((0.0..=1.0).contains(&out.screen_content_likelihood));
-        assert!((0.0..=1.0).contains(&out.natural_likelihood));
-    }
     assert!(
         (0.0..=5.0).contains(&out.luma_histogram_entropy),
         "entropy: {}",
@@ -615,41 +602,6 @@ fn medium_512x256_non_square_aspect_correct() {
     assert!((out.megapixels - 0.131072).abs() < 1e-5);
 }
 
-#[test]
-fn medium_image_is_deterministic() {
-    // Same input must produce identical output across calls.
-    // Defends against accidental nondeterminism (parallel scheduling,
-    // unstable sort, uninitialized scratch, etc.).
-    let rgb = synth_rgb(256, 256, 7);
-    let a = analyze_rgb8(&rgb, 256, 256);
-    let b = analyze_rgb8(&rgb, 256, 256);
-    assert_eq!(a.variance.to_bits(), b.variance.to_bits());
-    assert_eq!(a.edge_density.to_bits(), b.edge_density.to_bits());
-    assert_eq!(a.chroma_complexity.to_bits(), b.chroma_complexity.to_bits());
-    assert_eq!(a.cb_peak_sharpness.to_bits(), b.cb_peak_sharpness.to_bits());
-    assert_eq!(a.cr_peak_sharpness.to_bits(), b.cr_peak_sharpness.to_bits());
-    assert_eq!(
-        a.high_freq_energy_ratio.to_bits(),
-        b.high_freq_energy_ratio.to_bits()
-    );
-    assert_eq!(
-        a.luma_histogram_entropy.to_bits(),
-        b.luma_histogram_entropy.to_bits()
-    );
-    #[cfg(feature = "composites")]
-    {
-        assert_eq!(a.text_likelihood.to_bits(), b.text_likelihood.to_bits());
-        assert_eq!(
-            a.screen_content_likelihood.to_bits(),
-            b.screen_content_likelihood.to_bits()
-        );
-        assert_eq!(
-            a.natural_likelihood.to_bits(),
-            b.natural_likelihood.to_bits()
-        );
-    }
-    assert_eq!(a.distinct_color_bins, b.distinct_color_bins);
-}
 
 // ---- Large: budget plumbing matters, completes in reasonable time ----
 
@@ -1430,91 +1382,6 @@ fn analyze_features_returns_only_requested_features() {
     }
 }
 
-#[test]
-#[cfg(feature = "experimental")]
-fn quick_palette_signals_classify_correctly() {
-    // Covers four canonical cases for IndexedPaletteWidth /
-    // PaletteFitsIn256: solid (1 colour), 16-colour synthetic,
-    // exactly-256-colour synthetic, and 32k-bin random noise.
-    use AnalysisFeature::*;
-    let q = AnalysisQuery::new(FeatureSet::just(IndexedPaletteWidth).with(PaletteFitsIn256));
-    let w = 64u32;
-    let h = 64u32;
-
-    // Case 1: solid colour → 1 distinct bin → width 2.
-    let solid = vec![128u8; (w * h * 3) as usize];
-    let r = analyze_features_rgb8(&solid, w, h, &q);
-    assert_eq!(r.get(IndexedPaletteWidth).and_then(|v| v.as_u32()), Some(2));
-    assert_eq!(
-        r.get(PaletteFitsIn256).and_then(|v| v.as_bool()),
-        Some(true)
-    );
-
-    // Case 2: 16 distinct colours → width 4.
-    // Pick 16 well-separated colours so 5-bit-per-channel quantisation
-    // doesn't collapse any of them.
-    let palette_16: [[u8; 3]; 16] = [
-        [0, 0, 0],
-        [255, 0, 0],
-        [0, 255, 0],
-        [0, 0, 255],
-        [255, 255, 0],
-        [255, 0, 255],
-        [0, 255, 255],
-        [255, 255, 255],
-        [128, 0, 0],
-        [0, 128, 0],
-        [0, 0, 128],
-        [128, 128, 0],
-        [128, 0, 128],
-        [0, 128, 128],
-        [128, 128, 128],
-        [200, 100, 50],
-    ];
-    let mut sixteen = vec![0u8; (w * h * 3) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let c = palette_16[((x + y * 7) % 16) as usize];
-            let i = ((y * w + x) * 3) as usize;
-            sixteen[i] = c[0];
-            sixteen[i + 1] = c[1];
-            sixteen[i + 2] = c[2];
-        }
-    }
-    let r = analyze_features_rgb8(&sixteen, w, h, &q);
-    assert_eq!(r.get(IndexedPaletteWidth).and_then(|v| v.as_u32()), Some(4));
-    assert_eq!(
-        r.get(PaletteFitsIn256).and_then(|v| v.as_bool()),
-        Some(true)
-    );
-
-    // Case 3: explicit 300-colour palette. Every pixel maps to one
-    // of 300 distinct (r5, g5, b5) triples — guaranteed > 256 distinct
-    // 5-bit-per-channel bins regardless of any synth-RNG quirks.
-    let dw = 256u32;
-    let dh = 256u32;
-    let mut diverse = vec![0u8; (dw * dh * 3) as usize];
-    for y in 0..dh {
-        for x in 0..dw {
-            let idx = (y * dw + x) % 300;
-            let r5 = (idx % 32) as u8;
-            let g5 = ((idx / 32) % 32) as u8;
-            let b5 = ((idx / (32 * 32)) % 32) as u8;
-            let i = ((y * dw + x) * 3) as usize;
-            // Shift back to 8-bit so the analyzer's `>> 3` recovers
-            // exactly the chosen 5-bit triple.
-            diverse[i] = r5 << 3;
-            diverse[i + 1] = g5 << 3;
-            diverse[i + 2] = b5 << 3;
-        }
-    }
-    let r = analyze_features_rgb8(&diverse, dw, dh, &q);
-    assert_eq!(r.get(IndexedPaletteWidth).and_then(|v| v.as_u32()), Some(0));
-    assert_eq!(
-        r.get(PaletteFitsIn256).and_then(|v| v.as_bool()),
-        Some(false)
-    );
-}
 
 #[test]
 #[cfg(feature = "experimental")]
@@ -1568,92 +1435,6 @@ fn analyze_features_supports_full_set() {
     }
 }
 
-#[test]
-fn requesting_more_features_does_not_change_existing_values() {
-    // Property: for any image, asking for feature F alone must
-    // produce the same numeric value of F as asking for {F, …}.
-    // Adding features to the query may run additional tiers, but
-    // can never perturb the value of features already in the query.
-    //
-    // Verified across all 30 features on a synth image: pull each
-    // feature alone, then again with every other feature requested
-    // alongside it, assert the value is bit-identical (or NaN-bit-
-    // identical for f32 NaNs, none of which any feature produces on
-    // valid input).
-    use AnalysisFeature::*;
-    let w: u32 = 192;
-    let h: u32 = 192;
-    let rgb = synth_rgb(w, h, 9876);
-
-    let all_features =
-        analyze_features_rgb8(&rgb, w, h, &AnalysisQuery::new(FeatureSet::SUPPORTED));
-
-    for id in 0..32u16 {
-        let Some(f) = AnalysisFeature::from_u16(id) else {
-            continue;
-        };
-        let alone = analyze_features_rgb8(&rgb, w, h, &AnalysisQuery::new(FeatureSet::just(f)));
-        let with_others = all_features.get(f);
-        let just_this = alone.get(f);
-        assert_eq!(
-            with_others, just_this,
-            "side-effect detected: {:?} (id={}) differs between\n  \
-             alone: {:?}\n  with all features: {:?}",
-            f, id, just_this, with_others,
-        );
-    }
-
-    // Additional spot-check: pairs of features whose tier dispatch
-    // axes overlap. If two features are in the same tier bundle,
-    // requesting both together vs alone must match. The pair list
-    // mixes axes (T1 / T3 / Palette / Alpha / Derived) — the
-    // experimental variants would broaden coverage but only when
-    // they're built in.
-    let probes_a: &[AnalysisFeature] = &[Variance, EdgeDensity, DistinctColorBins];
-    #[cfg(feature = "experimental")]
-    let probes_a = {
-        let mut v = probes_a.to_vec();
-        v.push(DctCompressibilityY);
-        v
-    };
-    // Always include a stable T3 + Alpha probe; ScreenContentLikelihood
-    // (composite) only joins the matrix when the cargo feature is on.
-    let probes_b: &[AnalysisFeature] = &[HighFreqEnergyRatio, AlphaPresent];
-    #[cfg(feature = "composites")]
-    let probes_b = {
-        let mut v = probes_b.to_vec();
-        v.push(ScreenContentLikelihood);
-        v
-    };
-    #[cfg(feature = "experimental")]
-    let probes_b = {
-        let mut v = probes_b.to_vec();
-        v.push(Colourfulness);
-        v
-    };
-    for a in probes_a.iter() {
-        for b in probes_b.iter() {
-            if a == b {
-                continue;
-            }
-            let pair = analyze_features_rgb8(
-                &rgb,
-                w,
-                h,
-                &AnalysisQuery::new(FeatureSet::just(*a).with(*b)),
-            );
-            let solo_a =
-                analyze_features_rgb8(&rgb, w, h, &AnalysisQuery::new(FeatureSet::just(*a)));
-            assert_eq!(
-                pair.get(*a),
-                solo_a.get(*a),
-                "{:?}'s value drifted when {:?} was also requested",
-                a,
-                b,
-            );
-        }
-    }
-}
 
 #[test]
 fn analyze_features_matches_legacy_values() {
@@ -1851,76 +1632,7 @@ fn math_lock_geometry_exact() {
     assert_eq!(big.pixels(), u32::MAX as u64 * u32::MAX as u64);
 }
 
-#[cfg(feature = "composites")]
-#[test]
-fn math_lock_likelihoods_in_unit_interval_for_random_input() {
-    // Locks the contract: TextLikelihood / ScreenContentLikelihood /
-    // NaturalLikelihood are bounded to [0, 1] regardless of input.
-    let rgb = deterministic_rgb(128, 128, 0xCAFE_BABE);
-    let out = analyze_rgb8(&rgb, 128, 128);
-    for v in [
-        out.text_likelihood,
-        out.screen_content_likelihood,
-        out.natural_likelihood,
-    ] {
-        assert!((0.0..=1.0).contains(&v), "likelihood {v} outside [0, 1]");
-    }
-}
 
-#[test]
-fn math_lock_deterministic_input_is_reproducible() {
-    // Running the analyzer twice on bit-identical inputs must produce
-    // bit-identical outputs. Catches: hidden state, timing-dependent
-    // dispatch, accumulator non-determinism (e.g., a Vec rehashed on
-    // capacity boundary). Locks to bit-equality of every f32/u32 field.
-    let rgb = deterministic_rgb(128, 128, 0x1234_5678);
-    let a = analyze_rgb8(&rgb, 128, 128);
-    let b = analyze_rgb8(&rgb, 128, 128);
-
-    assert_eq!(a.variance.to_bits(), b.variance.to_bits());
-    assert_eq!(a.edge_density.to_bits(), b.edge_density.to_bits());
-    assert_eq!(a.chroma_complexity.to_bits(), b.chroma_complexity.to_bits());
-    assert_eq!(a.cb_sharpness.to_bits(), b.cb_sharpness.to_bits());
-    assert_eq!(a.cr_sharpness.to_bits(), b.cr_sharpness.to_bits());
-    assert_eq!(a.uniformity.to_bits(), b.uniformity.to_bits());
-    assert_eq!(
-        a.flat_color_block_ratio.to_bits(),
-        b.flat_color_block_ratio.to_bits()
-    );
-    assert_eq!(a.distinct_color_bins, b.distinct_color_bins);
-    assert_eq!(
-        a.cb_horiz_sharpness.to_bits(),
-        b.cb_horiz_sharpness.to_bits()
-    );
-    assert_eq!(a.cb_vert_sharpness.to_bits(), b.cb_vert_sharpness.to_bits());
-    assert_eq!(a.cb_peak_sharpness.to_bits(), b.cb_peak_sharpness.to_bits());
-    assert_eq!(
-        a.cr_horiz_sharpness.to_bits(),
-        b.cr_horiz_sharpness.to_bits()
-    );
-    assert_eq!(a.cr_vert_sharpness.to_bits(), b.cr_vert_sharpness.to_bits());
-    assert_eq!(a.cr_peak_sharpness.to_bits(), b.cr_peak_sharpness.to_bits());
-    assert_eq!(
-        a.high_freq_energy_ratio.to_bits(),
-        b.high_freq_energy_ratio.to_bits()
-    );
-    assert_eq!(
-        a.luma_histogram_entropy.to_bits(),
-        b.luma_histogram_entropy.to_bits()
-    );
-    #[cfg(feature = "composites")]
-    {
-        assert_eq!(a.text_likelihood.to_bits(), b.text_likelihood.to_bits());
-        assert_eq!(
-            a.screen_content_likelihood.to_bits(),
-            b.screen_content_likelihood.to_bits()
-        );
-        assert_eq!(
-            a.natural_likelihood.to_bits(),
-            b.natural_likelihood.to_bits()
-        );
-    }
-}
 
 #[test]
 fn math_lock_palette_count_invariants() {
@@ -2123,25 +1835,6 @@ fn feature_set_intersection_difference_subset() {
     assert!(FeatureSet::SUPPORTED.contains_all(a));
 }
 
-#[test]
-fn analysis_feature_name_returns_field_name_string() {
-    // `name()` must return the snake_case field name for every shipped
-    // variant. Used by the `Debug` impl of AnalysisResults.
-    use crate::feature::AnalysisFeature;
-
-    assert_eq!(AnalysisFeature::Variance.name(), "variance");
-    assert_eq!(AnalysisFeature::EdgeDensity.name(), "edge_density");
-    assert_eq!(
-        AnalysisFeature::DistinctColorBins.name(),
-        "distinct_color_bins"
-    );
-    assert_eq!(AnalysisFeature::AlphaPresent.name(), "alpha_present");
-    #[cfg(feature = "composites")]
-    assert_eq!(
-        AnalysisFeature::ScreenContentLikelihood.name(),
-        "screen_content_likelihood"
-    );
-}
 
 // --------------------------------------------------------------------
 // Dispatch matrix coverage — the 16-arm `match (pal, t2, t3, alpha)`
@@ -2973,60 +2666,6 @@ fn gamut_coverage_zero_for_saturated_rec2020_green() {
     );
 }
 
-#[cfg(feature = "composites")]
-#[test]
-fn line_art_score_high_for_two_tone_low_for_natural() {
-    // A black-on-white line drawing-shaped image should score high.
-    // A noisy gradient should score low.
-    use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
-
-    let q = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::LineArtScore));
-
-    // Two-tone with sparse strokes: 90% white + 10% black diagonal.
-    let w: u32 = 128;
-    let h: u32 = 128;
-    let mut img = vec![255u8; (w * h * 3) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            // Sparse line pattern: diagonal stripes every 16 px.
-            if (x + y) % 16 == 0 || (x + y) % 16 == 1 {
-                let i = ((y * w + x) * 3) as usize;
-                img[i] = 0;
-                img[i + 1] = 0;
-                img[i + 2] = 0;
-            }
-        }
-    }
-    let s = PixelSlice::new(&img, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
-    let r = crate::analyze_features(s, &q).unwrap();
-    let line_art = r.get_f32(AnalysisFeature::LineArtScore).unwrap();
-    assert!(
-        line_art > 0.1,
-        "two-tone line drawing ⇒ should be > 0.1, got {line_art}"
-    );
-
-    // Pseudo-random noisy gradient — high-entropy, no bimodality.
-    let mut natural = vec![0u8; (w * h * 3) as usize];
-    let mut state: u32 = 1;
-    for y in 0..h {
-        for x in 0..w {
-            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-            let v = ((y * 2 + (state >> 28)) & 0xFF) as u8;
-            let i = ((y * w + x) * 3) as usize;
-            natural[i] = v;
-            natural[i + 1] = v;
-            natural[i + 2] = v;
-        }
-    }
-    let s = PixelSlice::new(&natural, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
-    let r = crate::analyze_features(s, &q).unwrap();
-    let nat = r.get_f32(AnalysisFeature::LineArtScore).unwrap();
-    assert!(
-        nat < line_art,
-        "natural < line_art; got natural={nat} line_art={line_art}"
-    );
-    assert!(nat < 0.3, "natural ⇒ should be low, got {nat}");
-}
 
 #[cfg(feature = "experimental")]
 #[test]

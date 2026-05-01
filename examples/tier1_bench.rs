@@ -42,9 +42,6 @@ fn main() {
     zj = zj.with(AnalysisFeature::FlatColorBlockRatio);
     zj = zj.with(AnalysisFeature::EdgeDensity);
     zj = zj.with(AnalysisFeature::HighFreqEnergyRatio);
-    zj = zj.with(AnalysisFeature::TextLikelihood);
-    zj = zj.with(AnalysisFeature::ScreenContentLikelihood);
-    zj = zj.with(AnalysisFeature::NaturalLikelihood);
     let q_zj = AnalysisQuery::new(zj);
 
     for (label, w, h) in [

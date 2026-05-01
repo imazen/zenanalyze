@@ -85,11 +85,6 @@ pub fn populate_tier3(
 ) {
     let h_stats = luma_histogram_stats(stream);
     out.luma_histogram_entropy = h_stats.entropy;
-    #[cfg(feature = "composites")]
-    #[allow(deprecated)]
-    {
-        out.line_art_score = h_stats.line_art_score;
-    }
     let _ = h_stats;
     if run_dct {
         let dct = dct_stats(stream, hf_max_blocks);
@@ -1634,80 +1629,11 @@ fn dct2d_8_three_planes_simd(
 /// [`text_likelihood`]: crate::feature::AnalysisFeature::TextLikelihood
 /// [`natural_likelihood`]: crate::feature::AnalysisFeature::NaturalLikelihood
 /// [`screen_content_likelihood`]: crate::feature::AnalysisFeature::ScreenContentLikelihood
-#[cfg(feature = "composites")]
-#[deprecated(
-    since = "0.1.0",
-    note = "the `composites` flag is being retired in the next major release. \
-            Compute these from the raw signals directly or via a learned classifier \
-            shipped through zenpredict."
-)]
-#[allow(deprecated)]
-pub fn compute_derived_likelihoods<const T3: bool, const PAL: bool>(out: &mut RawAnalysis) {
-    let chroma_sh = out.cb_sharpness + out.cr_sharpness;
-    let chroma_lo = (0.005 - chroma_sh).clamp(0.0, 0.005) / 0.005;
-    let edge_hi = (out.edge_density / 0.25).min(1.0);
-    let flat_high = (out.flat_color_block_ratio / 0.5).min(1.0);
-
-    // Empirically-derived re-stretch divisors (see module-level docstring).
-    // `clamp(0, 1.0)` after the stretch since some inputs (mostly synthetic
-    // pathological cases) can briefly exceed the corpus max.
-    const TEXT_MAX: f32 = 0.71;
-    const SCREEN_MAX: f32 = 0.70;
-    const NATURAL_MAX: f32 = 0.69;
-
-    if T3 {
-        let entropy_low = (4.0 - out.luma_histogram_entropy).clamp(0.0, 4.0) / 4.0;
-        let raw = (entropy_low * 0.4 + edge_hi * 0.3 + chroma_lo * 0.3).clamp(0.0, 1.0);
-        out.text_likelihood = (raw / TEXT_MAX).clamp(0.0, 1.0);
-    }
-    if PAL {
-        // Post-2026-04-28 reformulation: the previous formula combined
-        // `flat_high * 0.6 + palette_small * 0.3 + chroma_lo * 0.1`. The
-        // `palette_small` weight was dragging the AUC down: real screen
-        // content (charts, anti-aliased UIs) routinely has > 4000 distinct
-        // colour bins, so `palette_small` collapsed to 0 on most positive
-        // examples. Replacing it with `patch_fraction` (when available)
-        // lifts AUC from 0.83 to 0.85 on the 219-image labeled corpus.
-        // (`patch_fraction` alone hits 0.88 — the residual 0.03 the
-        // composite gives up vs the raw feature is the price of combining
-        // inputs at all.)
-        //
-        // `patch_fraction` lives behind `experimental`; when that feature
-        // is off the field doesn't exist on `RawAnalysis`, so fall back
-        // to the previous formula. Both branches stretch by `SCREEN_MAX`.
-        #[cfg(feature = "experimental")]
-        let raw = (out.patch_fraction * 0.6 + flat_high * 0.4).clamp(0.0, 1.0);
-        #[cfg(not(feature = "experimental"))]
-        let raw = {
-            let palette_small = if out.distinct_color_bins == 0 {
-                0.0
-            } else {
-                (1.0 - (out.distinct_color_bins as f32 / 4000.0).min(1.0)).clamp(0.0, 1.0)
-            };
-            (flat_high * 0.6 + palette_small * 0.3 + chroma_lo * 0.1).clamp(0.0, 1.0)
-        };
-        out.screen_content_likelihood = (raw / SCREEN_MAX).clamp(0.0, 1.0);
-    }
-    if T3 && PAL {
-        let entropy_hi = (out.luma_histogram_entropy - 3.5).clamp(0.0, 1.5) / 1.5;
-        let palette_large = if out.distinct_color_bins < 2000 {
-            0.0
-        } else {
-            ((out.distinct_color_bins as f32 - 2000.0) / 8000.0).clamp(0.0, 1.0)
-        };
-        let chroma_moderate = (chroma_sh / 0.012).min(1.0);
-        let not_flat = (1.0 - (out.flat_color_block_ratio / 0.3).min(1.0)).clamp(0.0, 1.0);
-        let raw =
-            (entropy_hi * 0.3 + palette_large * 0.25 + chroma_moderate * 0.2 + not_flat * 0.25)
-                .clamp(0.0, 1.0);
-        out.natural_likelihood = (raw / NATURAL_MAX).clamp(0.0, 1.0);
-    }
-}
-
-/// `composites`-disabled stub — keeps the call site in `lib.rs`
-/// unconditional. With `composites` off, no likelihood fields exist
-/// on `RawAnalysis`, so the body collapses to a no-op.
-#[cfg(not(feature = "composites"))]
+/// The 4 composite variants (`TextLikelihood`,
+/// `ScreenContentLikelihood`, `NaturalLikelihood`, `LineArtScore`)
+/// were deleted (#6, #59). This stub stays so the `lib.rs` analyze
+/// loop has an unconditional call site; removed entirely in a
+/// follow-up alongside the broader analyzer-loop simplification.
 pub fn compute_derived_likelihoods<const T3: bool, const PAL: bool>(_out: &mut RawAnalysis) {}
 
 /// Dispatcher for the batched `log10(1 + ac)` reduction over the
