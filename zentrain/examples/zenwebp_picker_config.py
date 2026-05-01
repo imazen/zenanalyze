@@ -40,14 +40,15 @@ from pathlib import Path
 
 # ---------- Paths ----------
 
-# zenwebp/dev/zenwebp_pareto.rs writes here. The v0.2 expansion adds
-# partition_limit, multi_pass_stats, and cost_model to the encode grid
-# (576 configs × 30 q × ~1264 image-instances = ~22M cells).
-PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.tsv")
-FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_post_cull.tsv")
+# v0.2 sweep (2026-05-01): 576-config grid (12 cells × variable scalar
+# combos) on 1046 unique (image, size_class) instances drawn from the
+# combined original-250×4 + size-dense-264 corpus. 21.8M Pareto rows;
+# 114 zenanalyze features per (image, size_class).
+PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01_combined.tsv")
+FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_combined.tsv")
 
-OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01.json")
-OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01.log")
+OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.json")
+OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.log")
 
 
 # ---------- Schema ----------
