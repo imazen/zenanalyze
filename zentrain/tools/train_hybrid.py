@@ -336,9 +336,31 @@ def _render_axis_value(axis: str, value) -> str:
 
 
 def load_pareto(path):
+    """Load the Pareto sweep TSV.
+
+    Returns `(rows, ceilings, has_ceiling_column)` where:
+      - rows: `{(image_path, size_class, w, h) -> [{"config_id", "bytes",
+        "zensim"}]}`.
+      - ceilings: `{(image_path, size_class) -> effective_max_zensim}` —
+        only populated if the sweep TSV declares the
+        `effective_max_zensim` column. The value is the max zensim score
+        physically achievable for that image at that size, computed by
+        the sweep harness as a byproduct (typically `max(zensim)` across
+        all configs at the highest q values).
+      - has_ceiling_column: True iff the sweep TSV declared
+        `effective_max_zensim`. Used by the trainer to gate the
+        UNCAPPED_ZQ_GRID safety check.
+
+    See imazen/zenanalyze#51 for the cross-codec design context.
+    """
     rows = defaultdict(list)
+    ceilings: dict = {}
+    has_ceiling_column = False
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
+        has_ceiling_column = (
+            rdr.fieldnames is not None and "effective_max_zensim" in rdr.fieldnames
+        )
         for r in rdr:
             try:
                 cid = int(r["config_id"])
@@ -349,7 +371,18 @@ def load_pareto(path):
             CONFIG_NAMES.setdefault(cid, r["config_name"])
             key = (r["image_path"], r["size_class"], int(r["width"]), int(r["height"]))
             rows[key].append({"config_id": cid, "bytes": bytes_v, "zensim": zensim_v})
-    return rows
+            if has_ceiling_column:
+                cv = r.get("effective_max_zensim", "")
+                if cv:
+                    try:
+                        # Per-(image, size) — value is identical across
+                        # all (config, q) rows of that key. Take first.
+                        ceil_key = (r["image_path"], r["size_class"])
+                        if ceil_key not in ceilings:
+                            ceilings[ceil_key] = float(cv)
+                    except ValueError:
+                        pass
+    return rows, ceilings, has_ceiling_column
 
 
 def load_features(path):
@@ -407,11 +440,19 @@ def build_cell_index():
 # ---------- Build training dataset ----------
 
 
-def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
+def build_dataset(
+    pareto, feats, feat_cols, cells, config_to_cell, parsed_all, ceilings=None
+):
     """Per (image, size, zq) row, compute within-cell optimal:
        bytes_log[c]    = log(min bytes in cell c over configs that reach zq)
        scalars[axis][c] = scalar value of the within-cell optimal for axis
        reachable[c]    = 1 if any config in cell c reached zq, 0 otherwise
+
+    `ceilings`: optional `{(image, size_class) -> effective_max_zensim}`.
+    When provided, skips `target_zq > effective_max_zensim[image, size]
+    + CEILING_MARGIN` cells — those targets are physically unreachable
+    for that (image, size) and produce only data-starvation noise. See
+    imazen/zenanalyze#51.
 
     Returns (Xs, Xe, bytes_log, scalars, reach, meta) where `scalars` is
     a `dict[axis_name -> ndarray(n_rows, n_cells)]` keyed by SCALAR_AXES.
@@ -421,6 +462,11 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
     bytes_log_rows, reach_rows = [], []
     scalar_rows = {axis: [] for axis in SCALAR_AXES}
     meta = []
+    # Drop zq targets above ceiling - this margin. The margin lets
+    # the picker still see borderline cells where some images do reach
+    # the target and others don't.
+    CEILING_MARGIN = 0.0
+    skipped_above_ceiling = 0
 
     for (image, size, w, h), samples in pareto.items():
         feat_key = (image, size)
@@ -431,6 +477,11 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
         size_oh = np.zeros(len(SIZE_CLASSES), dtype=np.float32)
         size_oh[SIZE_INDEX[size]] = 1.0
 
+        # Per-image zensim ceiling (only when sweep TSV declared it).
+        ceiling = None
+        if ceilings:
+            ceiling = ceilings.get((image, size))
+
         # Group samples by config to track per-config best.
         # (one config can have multiple q values; pareto-best for each
         # cell at each zq target is the cheapest config that crosses zq.)
@@ -439,6 +490,13 @@ def build_dataset(pareto, feats, feat_cols, cells, config_to_cell, parsed_all):
             by_cfg[s["config_id"]].append(s)
 
         for zq in ZQ_TARGETS:
+            # Ceiling-aware skip: targets above the per-image achievable
+            # max are physically unreachable (every cell will fail) —
+            # skip them so the picker doesn't waste capacity on
+            # impossible rows. See imazen/zenanalyze#51.
+            if ceiling is not None and zq > ceiling + CEILING_MARGIN:
+                skipped_above_ceiling += 1
+                continue
             cell_bytes = [math.inf] * n_cells
             cell_scalars = {axis: [math.nan] * n_cells for axis in SCALAR_AXES}
             cell_reach = [False] * n_cells
@@ -639,6 +697,14 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     # top of the zq grid (so the picker isn't always falling through
     # to KnownGoodFallback).
     min_safe_cells_at_top_zq=1,
+    # The sweep TSV must declare per-(image, size_class) zensim
+    # ceilings (`effective_max_zensim` column) when the codec's
+    # ZQ_TARGETS grid extends above this threshold. Without ceilings,
+    # the trainer can't tell DATA_STARVED_SIZE (sweep harness skipped
+    # cells) apart from physically-unreachable rows (perceptual
+    # metric saturated below target). Set to None to disable. See
+    # imazen/zenanalyze#51 for the cross-codec design context.
+    require_ceiling_above_zq=85,
 )
 
 
@@ -922,6 +988,32 @@ def safety_check(diag, thresholds, objective: str):
             f"have train rows < {thresholds['min_train_rows_per_size_zq']}: "
             f"{examples}{more}"
         )
+
+    # Sweep-side ceiling discipline. When the codec's ZQ_TARGETS grid
+    # extends above `require_ceiling_above_zq`, the sweep TSV MUST
+    # declare per-(image, size_class) zensim ceilings so the trainer
+    # can tell DATA_STARVED_SIZE (sweep harness gap) apart from
+    # physically-unreachable rows (perceptual metric saturated below
+    # target). Without this, every codec re-discovers the same lesson
+    # the hard way — silent miscalibration at small+high-zq corners.
+    # See imazen/zenanalyze#51.
+    require_ceiling_above_zq = thresholds.get("require_ceiling_above_zq")
+    sweep_ceilings = diag.get("sweep_ceilings", {})
+    if require_ceiling_above_zq is not None and sweep_ceilings:
+        max_target_zq = sweep_ceilings.get("max_target_zq", 0)
+        if max_target_zq > require_ceiling_above_zq and not sweep_ceilings.get(
+            "has_effective_max_zensim", False
+        ):
+            v.append(
+                f"UNCAPPED_ZQ_GRID: ZQ_TARGETS includes zq={max_target_zq} > "
+                f"{require_ceiling_above_zq} but Pareto TSV has no "
+                f"`effective_max_zensim` column. Trainer can't tell physically-"
+                f"unreachable cells apart from sweep gaps; DATA_STARVED_SIZE "
+                f"warnings cannot be diagnosed honestly. Either lower "
+                f"max(ZQ_TARGETS) below {require_ceiling_above_zq + 1} or have "
+                f"the codec sweep harness emit `effective_max_zensim` per "
+                f"(image, size_class). See imazen/zenanalyze#51."
+            )
 
     if diag["worst_case"]:
         worst = diag["worst_case"][0]
@@ -1244,9 +1336,19 @@ def main():
     )
 
     sys.stderr.write(f"Loading {PARETO}...\n")
-    pareto = load_pareto(PARETO)
+    pareto, ceilings, has_ceiling_column = load_pareto(PARETO)
     feats, feat_cols = load_features(FEATURES)
-    sys.stderr.write(f"Loaded {len(pareto)} cells × {len(feat_cols)} features\n")
+    if has_ceiling_column:
+        n_with_ceiling = sum(1 for v in ceilings.values() if v is not None)
+        sys.stderr.write(
+            f"Loaded {len(pareto)} cells × {len(feat_cols)} features  "
+            f"({n_with_ceiling} (image, size_class) pairs declare effective_max_zensim)\n"
+        )
+    else:
+        sys.stderr.write(
+            f"Loaded {len(pareto)} cells × {len(feat_cols)} features  "
+            f"(sweep TSV has NO effective_max_zensim column — see imazen/zenanalyze#51)\n"
+        )
 
     cells, cell_id_by_key, config_to_cell, parsed_all = build_cell_index()
     n_cells = len(cells)
@@ -1255,7 +1357,8 @@ def main():
         sys.stderr.write(f"  {c['id']:>2d}: {c['label']:30s}  ({len(c['member_config_ids'])} configs)\n")
 
     Xs, Xe, bytes_log, scalars, reach, meta = build_dataset(
-        pareto, feats, feat_cols, cells, config_to_cell, parsed_all
+        pareto, feats, feat_cols, cells, config_to_cell, parsed_all,
+        ceilings=(ceilings if has_ceiling_column else None),
     )
     sys.stderr.write(
         f"\nDecision rows: {len(Xs)}; Xs={Xs.shape[1]}, Xe={Xe.shape[1]}, n_cells={n_cells}\n"
@@ -1438,6 +1541,16 @@ def main():
         "mlp": mlp_health,
         "feature_bounds": feature_bounds,
         "reach_safety": reach_safety,
+        # Sweep ceilings: did the codec's harness emit
+        # `effective_max_zensim` in the Pareto TSV? Drives the
+        # UNCAPPED_ZQ_GRID safety gate. See imazen/zenanalyze#51.
+        "sweep_ceilings": {
+            "has_effective_max_zensim": bool(has_ceiling_column),
+            "n_with_ceiling": int(
+                sum(1 for v in ceilings.values() if v is not None)
+            ) if has_ceiling_column else 0,
+            "max_target_zq": int(max(ZQ_TARGETS)) if ZQ_TARGETS else 0,
+        },
     }
     thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)
     codec_thresholds = getattr(

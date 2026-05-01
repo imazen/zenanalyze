@@ -22,7 +22,7 @@ The example throughout uses a hypothetical "zenwidget" codec with two scalar con
 Your codec runs every config × every quality value over a corpus and emits one row per `(image, size, config, quality)` cell:
 
 ```
-image_path<TAB>size_class<TAB>width<TAB>height<TAB>config_id<TAB>config_name<TAB>q<TAB>bytes<TAB>zensim<TAB>encode_ms<TAB>total_ms
+image_path<TAB>size_class<TAB>width<TAB>height<TAB>config_id<TAB>config_name<TAB>q<TAB>bytes<TAB>zensim<TAB>encode_ms<TAB>total_ms<TAB>effective_max_zensim
 ```
 
 | Column | Type | Notes |
@@ -35,6 +35,9 @@ image_path<TAB>size_class<TAB>width<TAB>height<TAB>config_id<TAB>config_name<TAB
 | `q` | int | 0..100 quality value swept |
 | `bytes` | int | Encoded byte count |
 | `zensim` | float | Achieved perceptual quality (zensim or compatible) |
+| `effective_max_zensim` | float | **Per `(image, size_class)`** — max zensim physically achievable for this image at this size. Identical across every `(config, q)` row of the same `(image, size_class)`. Computed by the sweep harness as a byproduct: `max(zensim across all configs at the highest q values)`. Required when `max(ZQ_TARGETS) > 85` — the trainer fails the `UNCAPPED_ZQ_GRID` safety gate without it. See imazen/zenanalyze#51 for cross-codec design context. |
+
+**Why `effective_max_zensim` is mandatory at high zq.** Tiny / complex images can't reach zensim 94+ regardless of encoder quality — q=100 max-method saturates well below that ceiling for sizes ≤ 48 px long-edge, with content-dependent transitions around 64. Without per-image ceilings the trainer treats unreachable cells as data-starved, when in fact they're physically impossible. With the column populated, the trainer skips out-of-reach `target_zq` rows for each `(image, size)` automatically — no silent miscalibration in the small+high-zq corner. The codec runtime should also accept an `UnreachableAction` enum on its target-zq API (`Error / ReturnClosest / Lossless`) so applications get a typed error rather than a silent under-shoot.
 
 For zenjpeg this is `zenjpeg/examples/zq_pareto_calibrate.rs`. Yours can be a one-shot binary — it just needs to enumerate configs and emit the rows.
 
