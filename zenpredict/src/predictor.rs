@@ -51,6 +51,12 @@ impl<'a> Predictor<'a> {
     /// Run forward pass. Returns the output vector — for log-bytes
     /// regressors, this is `n_outputs` log-bytes-per-config; for
     /// zensim's V0_4 scorer, this is `[distance]`.
+    ///
+    /// Scratch buffers (`scratch_a`, `scratch_b`) are reused across
+    /// calls without zeroing — every layer's matmul writes biases
+    /// into the destination buffer **before** accumulating, so stale
+    /// data from a prior call never leaks into the result. Calling
+    /// `predict` twice with the same `features` is deterministic.
     pub fn predict(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
         forward(
             &self.model,

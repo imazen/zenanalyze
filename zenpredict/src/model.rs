@@ -340,11 +340,12 @@ impl<'a> Model<'a> {
 
         // Layer table.
         let layer_bytes = header.layer_table.slice("layer_table", bytes)?;
-        let expected_layer_bytes = n_layers.checked_mul(LAYER_ENTRY_SIZE).ok_or(
-            PredictError::DimensionOverflow {
-                what: "n_layers * sizeof(LayerEntry)",
-            },
-        )?;
+        let expected_layer_bytes =
+            n_layers
+                .checked_mul(LAYER_ENTRY_SIZE)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "n_layers * sizeof(LayerEntry)",
+                })?;
         if layer_bytes.len() != expected_layer_bytes {
             return Err(PredictError::SectionOutOfRange {
                 what: "layer_table",
@@ -388,12 +389,11 @@ impl<'a> Model<'a> {
             let activation = Activation::from_byte(entry.activation)?;
             let weight_dtype = WeightDtype::from_byte(entry.weight_dtype)?;
 
-            let n_weights =
-                in_dim
-                    .checked_mul(out_dim)
-                    .ok_or(PredictError::DimensionOverflow {
-                        what: "layer.in_dim * layer.out_dim",
-                    })?;
+            let n_weights = in_dim
+                .checked_mul(out_dim)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "layer.in_dim * layer.out_dim",
+                })?;
             let weights = match weight_dtype {
                 WeightDtype::F32 => WeightStorage::F32(cast_f32_section(
                     "layer.weights[f32]",
@@ -449,12 +449,11 @@ impl<'a> Model<'a> {
         let feature_bounds = if header.feature_bounds.is_empty() {
             &[][..]
         } else {
-            let n_bound_f32s =
-                n_inputs
-                    .checked_mul(2)
-                    .ok_or(PredictError::DimensionOverflow {
-                        what: "feature_bounds = n_inputs * 2",
-                    })?;
+            let n_bound_f32s = n_inputs
+                .checked_mul(2)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "feature_bounds = n_inputs * 2",
+                })?;
             let raw =
                 cast_f32_section("feature_bounds", header.feature_bounds, bytes, n_bound_f32s)?;
             // Reinterpret pairs of f32 as `[FeatureBound]`. They are

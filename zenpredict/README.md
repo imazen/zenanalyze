@@ -59,7 +59,7 @@ Fixed-shape `#[repr(C)]` header (128 bytes) + offset-table `LayerEntry[n_layers]
 Three weight dtypes:
 
 - **F32** — full precision.
-- **F16** — half the size at ~no accuracy cost. Conversion is built in (no `half` dep) — ~15 lines of integer bit math, see [`f16_bits_to_f32`](src/inference.rs).
+- **F16** — half the size at ~no accuracy cost. Conversion is built in (no `half` dep) — compact integer bit math, see [`f16_bits_to_f32`](src/inference.rs).
 - **I8** — `1/4` size with one f32 scale per output neuron. Per-output (column-wise) scaling — each output has its own dynamic range so one big-magnitude column doesn't waste i8 resolution on the small-magnitude ones.
 
 Three activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`.

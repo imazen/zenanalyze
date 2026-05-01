@@ -13,6 +13,13 @@ use crate::error::PredictError;
 /// Boolean filter over a score slice. `true` means "this index may
 /// be picked." Bit-packing isn't worth the API complexity for the
 /// 10s–100s of outputs real bakes have.
+///
+/// All argmin entry points require `mask.len() >= predictions.len()`
+/// (or `>= n` for the `_with_scorer` family). Mismatched lengths
+/// **panic** in debug AND release — short masks used to silently
+/// deny high-index cells, which masked real bugs. Use
+/// [`AllowedMask::all_allowed`] when you want to admit every cell
+/// of a known length.
 #[derive(Clone, Copy, Debug)]
 pub struct AllowedMask<'a> {
     pub allowed: &'a [bool],
@@ -23,6 +30,10 @@ impl<'a> AllowedMask<'a> {
         Self { allowed }
     }
 
+    /// `true` only when `idx < self.len()` AND the mask entry is
+    /// `true`. Out-of-range indices return `false`; argmin entries
+    /// reject mismatched lengths up front, so this only fires in
+    /// hand-constructed call paths that bypass the assert.
     pub fn is_allowed(&self, idx: usize) -> bool {
         self.allowed.get(idx).copied().unwrap_or(false)
     }
@@ -53,8 +64,16 @@ pub enum ScoreTransform {
     /// Apply `exp` (clamped to [-30, 30] input range to keep
     /// numerics finite) before adding offsets and running argmin.
     /// Lets log-domain regressors mix with linear-domain offsets.
-    /// `no_std` builds without `f32::exp` produce ties; enable the
-    /// `std` feature for correct linear-space argmin.
+    ///
+    /// **`no_std` build behavior:** without `f32::exp` (which lives
+    /// in `std`), this fallthrough returns the **clamped log-domain
+    /// score**, NOT a constant. Argmin still picks the smallest
+    /// `score` value because `exp` is monotonic — but `ArgminOffsets`
+    /// added in linear-byte space will be combined with log-domain
+    /// scores, mixing units. **Enable the `std` feature** for
+    /// correct linear-space argmin when using `Exp` with offsets.
+    /// Anchored without offsets, the log-vs-linear pick is
+    /// equivalent.
     Exp,
 }
 
@@ -120,6 +139,21 @@ impl<'a> ArgminOffsets<'a> {
 /// `f32::min` linear scan — the offsets / transform branches are
 /// only walked when the caller actually opts in.
 ///
+/// # Contract
+///
+/// - **Mask length:** `mask.len() >= predictions.len()` is required.
+///   Violating this panics in both debug and release; passing a
+///   shorter mask used to silently deny high-index cells, which
+///   masked real bugs.
+/// - **NaN scores:** any prediction that yields NaN after transform
+///   (or the closure in `_with_scorer`) is **silently skipped**.
+///   `NaN < x` is false in IEEE-754, so NaN cells are never picked.
+///   If every allowed cell scores NaN, the function returns `None`
+///   indistinguishably from "no allowed cells" — callers needing
+///   that distinction should pre-validate predictions.
+/// - **Tie-breaking:** when two cells have identical post-offset
+///   scores, the **lower index wins** (deterministic, first-encountered).
+///
 /// # Examples
 ///
 /// ```
@@ -137,7 +171,12 @@ pub fn argmin_masked(
     transform: ScoreTransform,
     offsets: Option<&ArgminOffsets<'_>>,
 ) -> Option<usize> {
-    debug_assert!(mask.len() >= predictions.len());
+    assert!(
+        mask.len() >= predictions.len(),
+        "argmin_masked: mask.len() ({}) < predictions.len() ({}) — short masks used to silently deny high-index cells",
+        mask.len(),
+        predictions.len(),
+    );
     let mut best_idx: Option<usize> = None;
     let mut best_score: f32 = f32::INFINITY;
 
@@ -159,13 +198,21 @@ pub fn argmin_masked(
 /// allowed entries are `None`. `K` is generic to keep the call
 /// site allocation-free; in practice `K = 2` is what codec rescue
 /// logic wants (cached second-best).
+///
+/// Same NaN, tie-breaking, and mask-length contract as
+/// [`argmin_masked`].
 pub fn argmin_masked_top_k<const K: usize>(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
     transform: ScoreTransform,
     offsets: Option<&ArgminOffsets<'_>>,
 ) -> [Option<usize>; K] {
-    debug_assert!(mask.len() >= predictions.len());
+    assert!(
+        mask.len() >= predictions.len(),
+        "argmin_masked_top_k: mask.len() ({}) < predictions.len() ({})",
+        mask.len(),
+        predictions.len(),
+    );
 
     let mut top: [(f32, usize); K] = [(f32::INFINITY, usize::MAX); K];
     let mut count: usize = 0;
@@ -245,9 +292,18 @@ pub fn argmin_masked_top_k_in_range<const K: usize>(
 /// or codec-specific saturating clamps.
 ///
 /// `n` is the number of candidate indices; the caller binds the
-/// model output (or any other source) inside the closure. `mask.len()`
-/// must be ≥ `n`; mismatched lengths panic in debug builds and
-/// short-circuit at the shorter length in release.
+/// model output (or any other source) inside the closure.
+///
+/// # Contract
+///
+/// - `mask.len() >= n` is required; violation panics (debug + release).
+/// - The closure is invoked **once per allowed index**, in ascending
+///   index order. Side effects fire that many times.
+/// - **NaN scores are silently skipped** (NaN never compares less
+///   than any finite value). If every allowed cell scores NaN, `None`
+///   is returned indistinguishably from "no allowed cells."
+/// - **Tie-breaking:** lowest index wins (deterministic).
+/// - Closure panics propagate; no unwinding protection.
 ///
 /// # Examples
 ///
@@ -276,7 +332,12 @@ pub fn argmin_masked_with_scorer<F>(n: usize, mask: &AllowedMask<'_>, scorer: F)
 where
     F: Fn(usize) -> f32,
 {
-    debug_assert!(mask.len() >= n);
+    assert!(
+        mask.len() >= n,
+        "argmin_masked_with_scorer: mask.len() ({}) < n ({})",
+        mask.len(),
+        n,
+    );
     let mut best_idx: Option<usize> = None;
     let mut best_score: f32 = f32::INFINITY;
     for i in 0..n {
@@ -296,6 +357,9 @@ where
 /// [`argmin_masked_top_k`] but with a closure replacing the
 /// `transform + offsets` score-derivation. Slots beyond the number
 /// of mask-allowed entries are `None`.
+///
+/// Same NaN, tie-breaking, mask-length, and closure-panic contract
+/// as [`argmin_masked_with_scorer`].
 pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
     n: usize,
     mask: &AllowedMask<'_>,
@@ -304,7 +368,12 @@ pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
 where
     F: Fn(usize) -> f32,
 {
-    debug_assert!(mask.len() >= n);
+    assert!(
+        mask.len() >= n,
+        "argmin_masked_top_k_with_scorer: mask.len() ({}) < n ({})",
+        mask.len(),
+        n,
+    );
     let mut top: [(f32, usize); K] = [(f32::INFINITY, usize::MAX); K];
     let mut count: usize = 0;
 
@@ -405,8 +474,18 @@ pub(crate) fn pick_confidence_from_top_k(
 /// assert_eq!(gate, [true, false, false, true]);
 /// ```
 pub fn threshold_mask(rates: &[f32], threshold: f32, out: &mut [bool]) {
-    debug_assert_eq!(rates.len(), out.len());
+    assert_eq!(
+        rates.len(),
+        out.len(),
+        "threshold_mask: rates.len() ({}) != out.len() ({})",
+        rates.len(),
+        out.len(),
+    );
     for (i, &r) in rates.iter().enumerate() {
+        // NaN rates fail the threshold (is_finite() is false). Used
+        // for "missing data" sentinel — see `tier3_floor` percentile
+        // features that emit NaN when the per-feature sample count
+        // floor isn't met.
         out[i] = r.is_finite() && r >= threshold;
     }
 }

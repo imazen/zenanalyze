@@ -118,6 +118,56 @@ fn metadata_empty_blob_yields_empty() {
 }
 
 #[test]
+fn argmin_nan_score_is_silently_skipped() {
+    // NaN never compares less than a finite value, so a cell with
+    // NaN score is never picked. Documented contract.
+    let pred = [3.0_f32, f32::NAN, 1.0];
+    let m = AllowedMask::new(&[true, true, true]);
+    let pick = argmin::argmin_masked(&pred, &m, ScoreTransform::Identity, None);
+    assert_eq!(pick, Some(2));
+}
+
+#[test]
+fn argmin_all_nan_returns_none() {
+    // If every allowed cell scores NaN, returns None — same as no
+    // allowed cells. Callers needing the distinction must
+    // pre-validate.
+    let pred = [f32::NAN, f32::NAN, f32::NAN];
+    let m = AllowedMask::new(&[true, true, true]);
+    let pick = argmin::argmin_masked(&pred, &m, ScoreTransform::Identity, None);
+    assert_eq!(pick, None);
+}
+
+#[test]
+fn argmin_ties_prefer_lowest_index() {
+    // Documented tie-break: lowest index wins (uses `<`, not `<=`).
+    let pred = [5.0_f32, 5.0, 5.0];
+    let m = AllowedMask::new(&[true, true, true]);
+    assert_eq!(
+        argmin::argmin_masked(&pred, &m, ScoreTransform::Identity, None),
+        Some(0)
+    );
+}
+
+#[test]
+#[should_panic(expected = "mask.len()")]
+fn argmin_short_mask_panics() {
+    // mask.len() < predictions.len() panics in both debug and
+    // release. Used to silently deny high-index cells, which masked
+    // bugs.
+    let pred = [3.0_f32, 1.0, 4.0];
+    let m = AllowedMask::new(&[true, true]); // len 2 < 3
+    let _ = argmin::argmin_masked(&pred, &m, ScoreTransform::Identity, None);
+}
+
+#[test]
+#[should_panic(expected = "mask.len()")]
+fn argmin_with_scorer_short_mask_panics() {
+    let m = AllowedMask::new(&[true, true]); // len 2 < n=3
+    let _ = argmin::argmin_masked_with_scorer(3, &m, |i| i as f32);
+}
+
+#[test]
 fn rescue_default_threshold_three_pp() {
     let policy = RescuePolicy::default();
     assert!((policy.rescue_threshold - 3.0).abs() < f32::EPSILON);
@@ -437,9 +487,7 @@ mod bake_roundtrip {
         // Mid column has zero scale — would divide by zero without
         // the guard.
         let scaler_scale = [1.0f32, 0.0, 1.0];
-        let w0 = [
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-        ];
+        let w0 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let b0 = [0.0f32, 0.0, 0.0, 0.0];
         let w1 = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
         let b1 = [10.0f32, 20.0];
