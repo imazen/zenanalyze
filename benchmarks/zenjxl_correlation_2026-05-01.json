@@ -1,0 +1,133 @@
+{
+  "source": "/home/lilith/work/zen/zenjxl/benchmarks/zenjxl_lossy_features_2026-05-01.tsv",
+  "threshold": 0.99,
+  "n_rows": 300,
+  "n_features_in": 92,
+  "n_features_dropped": 7,
+  "n_constant": 6,
+  "n_low_variance": 6,
+  "constant_columns": [
+    {
+      "name": "feat_alpha_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_used_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_bimodal_score",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_is_grayscale",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_channel_count",
+      "n_unique": 1,
+      "value": 3.0
+    },
+    {
+      "name": "feat_laplacian_variance_p1",
+      "n_unique": 1,
+      "value": 0.0
+    }
+  ],
+  "low_variance_columns": [
+    {
+      "name": "feat_indexed_palette_width",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_palette_fits_in_256",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_quant_survival_uv_p10",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_quant_survival_uv_p25",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_laplacian_variance_p5",
+      "n_unique": 4
+    },
+    {
+      "name": "feat_quant_survival_y_p1",
+      "n_unique": 3
+    }
+  ],
+  "clusters": [
+    {
+      "anchor": "feat_aq_map_p50",
+      "anchor_n_unique": 194,
+      "dropped": [
+        "feat_noise_floor_y_p50"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9937883754263939
+    },
+    {
+      "anchor": "feat_distinct_color_bins",
+      "anchor_n_unique": 212,
+      "dropped": [
+        "feat_palette_density"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9999937777086413
+    },
+    {
+      "anchor": "feat_flat_color_smooth",
+      "anchor_n_unique": 206,
+      "dropped": [
+        "feat_flat_color_block_ratio"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9921483572039689
+    },
+    {
+      "anchor": "feat_noise_floor_y",
+      "anchor_n_unique": 163,
+      "dropped": [
+        "feat_noise_floor_y_p10"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 1.0
+    },
+    {
+      "anchor": "feat_palette_fits_in_256",
+      "anchor_n_unique": 2,
+      "dropped": [
+        "feat_indexed_palette_width"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9998315536839296
+    },
+    {
+      "anchor": "feat_pixel_count",
+      "anchor_n_unique": 46,
+      "dropped": [
+        "feat_bitmap_bytes",
+        "feat_log_pixels"
+      ],
+      "cluster_size": 3,
+      "min_abs_corr_in_cluster": 1.0
+    }
+  ],
+  "drop_list": [
+    "feat_bitmap_bytes",
+    "feat_flat_color_block_ratio",
+    "feat_indexed_palette_width",
+    "feat_log_pixels",
+    "feat_noise_floor_y_p10",
+    "feat_noise_floor_y_p50",
+    "feat_palette_density"
+  ]
+}

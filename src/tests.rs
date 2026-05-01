@@ -166,7 +166,6 @@ fn vstripes_have_high_horiz_chroma_zero_vert() {
     assert_eq!(out.cr_vert_sharpness, 0.0);
 }
 
-
 #[test]
 fn geometry_fields_derive_from_w_h() {
     let out = analyze_rgb8(&synth_rgb(160, 120, 1), 160, 120);
@@ -601,7 +600,6 @@ fn medium_512x256_non_square_aspect_correct() {
     assert!((out.aspect_ratio - 2.0).abs() < 1e-6);
     assert!((out.megapixels - 0.131072).abs() < 1e-5);
 }
-
 
 // ---- Large: budget plumbing matters, completes in reasonable time ----
 
@@ -1382,7 +1380,6 @@ fn analyze_features_returns_only_requested_features() {
     }
 }
 
-
 #[test]
 #[cfg(feature = "experimental")]
 fn quick_palette_matches_full_path_when_both_requested() {
@@ -1434,7 +1431,6 @@ fn analyze_features_supports_full_set() {
         );
     }
 }
-
 
 #[test]
 fn analyze_features_matches_legacy_values() {
@@ -1631,8 +1627,6 @@ fn math_lock_geometry_exact() {
     let big = ImageGeometry::new(u32::MAX, u32::MAX);
     assert_eq!(big.pixels(), u32::MAX as u64 * u32::MAX as u64);
 }
-
-
 
 #[test]
 fn math_lock_palette_count_invariants() {
@@ -1834,7 +1828,6 @@ fn feature_set_intersection_difference_subset() {
     assert!(a.contains_all(empty));
     assert!(FeatureSet::SUPPORTED.contains_all(a));
 }
-
 
 // --------------------------------------------------------------------
 // Dispatch matrix coverage — the 16-arm `match (pal, t2, t3, alpha)`
@@ -2665,7 +2658,6 @@ fn gamut_coverage_zero_for_saturated_rec2020_green() {
         "saturated Rec.2020 green ⇒ NOT sRGB-coverable (got {cov})"
     );
 }
-
 
 #[cfg(feature = "experimental")]
 #[test]

@@ -43,8 +43,8 @@ from pathlib import Path
 # zenwebp/dev/zenwebp_pareto.rs writes here. The v0.2 expansion adds
 # partition_limit, multi_pass_stats, and cost_model to the encode grid
 # (576 configs × 30 q × ~1264 image-instances = ~22M cells).
-PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01.tsv")
-FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01.tsv")
+PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.tsv")
+FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_post_cull.tsv")
 
 OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01.json")
 OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01.log")
@@ -70,7 +70,6 @@ KEEP_FEATURES = [
     "feat_noise_floor_y_p50",
     "feat_luma_histogram_entropy",
     # Mid tier (Δ +0.10..+0.20pp)
-    "feat_natural_likelihood",
     "feat_quant_survival_y_p50",
     "feat_noise_floor_uv_p50",
     "feat_aq_map_mean",
@@ -91,10 +90,14 @@ KEEP_FEATURES = [
     "feat_aq_map_std",
     "feat_gradient_fraction",
     "feat_noise_floor_y_p75",
-    "feat_screen_content_likelihood",
     "feat_high_freq_energy_ratio",
     "feat_colourfulness",
     "feat_quant_survival_uv",
+    "feat_luma_kurtosis",
+    "feat_chroma_kurtosis",
+    "feat_uniformity_smooth",
+    "feat_flat_color_smooth",
+    "feat_gradient_fraction_smooth",
 ]
 
 # Zq target grid: production-relevant range. q < 30 corresponds to
@@ -153,22 +156,42 @@ _CONFIG_RE = re.compile(
 )
 
 
+_CONFIG_RE_V01 = re.compile(
+    r"^m(?P<method>\d+)_seg(?P<seg>\d+)"
+    r"_sns(?P<sns>\d+)_fs(?P<fs>\d+)_sh(?P<sh>\d+)$"
+)
+
+
 def parse_config_name(name: str) -> dict:
-    """Decompose a zenwebp v0.2 config name into categorical + scalar
-    axes. Categorical axes are method, segments, cost_model_strict;
-    everything else is a scalar prediction head."""
+    """Decompose a zenwebp config name into categorical + scalar axes.
+
+    Accepts both the v0.2 schema (cm / pl / mp axes) and the historical
+    v0.1 schema (`m{N}_seg{N}_sns{N}_fs{N}_sh{N}`). v0.1 records get
+    `cost_model_strict=False`, `partition_limit=0`, `multi_pass_stats=0`
+    so the cell taxonomy still groups cleanly.
+    """
     m = _CONFIG_RE.match(name)
-    if not m:
-        raise ValueError(f"unparseable zenwebp config name: {name}")
-    return {
-        # categorical
-        "method": int(m.group("method")),
-        "segments": int(m.group("seg")),
-        "cost_model_strict": bool(int(m.group("cm"))),
-        # scalar
-        "sns_strength": float(m.group("sns")),
-        "filter_strength": float(m.group("fs")),
-        "filter_sharpness": float(m.group("sh")),
-        "partition_limit": float(m.group("pl")),
-        "multi_pass_stats": float(m.group("mp")),
-    }
+    if m:
+        return {
+            "method": int(m.group("method")),
+            "segments": int(m.group("seg")),
+            "cost_model_strict": bool(int(m.group("cm"))),
+            "sns_strength": float(m.group("sns")),
+            "filter_strength": float(m.group("fs")),
+            "filter_sharpness": float(m.group("sh")),
+            "partition_limit": float(m.group("pl")),
+            "multi_pass_stats": float(m.group("mp")),
+        }
+    m = _CONFIG_RE_V01.match(name)
+    if m:
+        return {
+            "method": int(m.group("method")),
+            "segments": int(m.group("seg")),
+            "cost_model_strict": False,
+            "sns_strength": float(m.group("sns")),
+            "filter_strength": float(m.group("fs")),
+            "filter_sharpness": float(m.group("sh")),
+            "partition_limit": 0.0,
+            "multi_pass_stats": 0.0,
+        }
+    raise ValueError(f"unparseable zenwebp config name: {name}")

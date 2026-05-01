@@ -12,3 +12,9 @@ Cargo.lock
 .DS_Store
 __pycache__/
 .jj/
+
+# Trained picker model JSONs — reproducible from the features TSV +
+# train_hybrid.py invocation, often exceed jj's 1 MiB snapshot limit.
+# Keep correlation_*.json and student_perm_*.json (small, comparison-
+# critical), drop hybrid model weights.
+benchmarks/*_hybrid_*.json

@@ -41,11 +41,11 @@ PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
 # top of v2.1's 35 raw features). Total 73-feature TSV.
 # `_subset100` is the fast-iteration subset (100 of 347 images). For
 # the final v2.2 bake, point at `_v2_2.tsv` (full corpus).
-FEATURES = Path("benchmarks/zq_pareto_features_2026-04-30_v2_2_subset100.tsv")
+FEATURES = Path("benchmarks/zq_pareto_features_2026-05-01.tsv")
 
 # Where to write the trained model + summary:
-OUT_JSON = Path("benchmarks/zq_bytes_hybrid_v2_2_clean.json")
-OUT_LOG = Path("benchmarks/zq_bytes_hybrid_v2_2_clean.log")
+OUT_JSON = Path("benchmarks/zq_bytes_hybrid_2026-05-01.json")
+OUT_LOG = Path("benchmarks/zq_bytes_hybrid_2026-05-01.log")
 
 
 # ---------- Schema ----------
@@ -142,18 +142,20 @@ KEEP_FEATURES = [
     "feat_noise_floor_uv",
     "feat_edge_slope_stdev",
     "feat_gradient_fraction",
-    "feat_line_art_score",
+    # DROPPED: feat_line_art_score (zenanalyze 0.1.0 deleted composite
+    # likelihoods + LineArtScore — ids 27/28/29/45 reserved).
     # DROPPED: feat_distinct_color_bins — palette codec only, structurally
     # irrelevant for zenjpeg (true-color JPEG doesn't care about palette
     # fits-in-N).
     "feat_palette_density",
     "feat_alpha_used_fraction",
     "feat_alpha_bimodal_score",
-    # ---------- v2.2 dimension features (5 of 12 — ablation-validated only) ----------
+    # ---------- v2.2 dimension features (4 of 12 — ablation-validated only) ----------
     "feat_pixel_count",            # #1 ablation impact (+4.89pp)
     "feat_log_pixels",             # smooth resolution axis
     "feat_aspect_min_over_max",    # bounded strip detection
-    "feat_log_padded_pixels_8",    # encoded surface area at JPEG 8×8 grid
+    # DROPPED: feat_log_padded_pixels_8 (zenanalyze 0.1.0 deleted the
+    # log_padded_pixels_{8,16,32,64} variants — ids reserved).
     "feat_channel_count",          # discrete RGB/RGBA distinction
     # DROPPED: min_dim/max_dim/bitmap_bytes/log_aspect_abs/block_misalignment{8,16,32,64}
     # — redundant with the above per Spearman + ablation.
@@ -186,6 +188,12 @@ KEEP_FEATURES = [
     # DROPPED: all noise_floor_uv and quant_survival_uv percentiles —
     # parents were negative-Δ ablation; UV signal handled by chroma
     # sharpness features instead.
+    # ---------- 5 new features added in zenanalyze 0.1.0 (ids 116-120) ----------
+    "feat_luma_kurtosis",            # #116 — quartic moment of |∇²L|
+    "feat_chroma_kurtosis",          # #117 — quartic moment of |∇Cb|/|∇Cr|
+    "feat_uniformity_smooth",        # #118 — exp(-var/25) per block
+    "feat_flat_color_smooth",        # #119 — smooth flat-color signal
+    "feat_gradient_fraction_smooth", # #120 — per-block low-AC ratio
 ]
 
 # Zq target grid: step 5 from 0..70 + step 2 from 70..100 (the
