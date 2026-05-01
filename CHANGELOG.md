@@ -25,7 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bitmap_bytes`, `log_bitmap_bytes`, `log_min_dim`, `log_max_dim`,
   `log_padded_pixels_{8,16,32,64}`) are Spearman-1.0 correlated with
   `feat_pixel_count` by construction; cross-codec ablation (zenjpeg
-  + zenwebp) confirms zero LOO and permutation-importance Δ. Stable
+  + zenwebp) confirms zero LOO and permutation-importance Δ.
+  **2026-05-02 expanded-corpus update (97 MP / 463 images / 9 axis
+  classes, see `benchmarks/cross_codec_aggregate_2026-05-02.md`):
+  `feat_log_pixels` and `feat_bitmap_bytes` now confirmed redundant
+  on all 4 codecs (zenjpeg / zenwebp / zenavif / zenjxl) at min |r|
+  0.9656–1.0000 (≥ 0.99 threshold still drops them on every codec).
+  Tier 1.5 caveat: `feat_log_pixels` showed +0.596 Δpp on zenjpeg
+  permutation despite Spearman 1.0 with `feat_pixel_count` —
+  permutation importance mis-attributes signal across redundant
+  pairs; Tier 0 correlation is the load-bearing test.** Stable
   feature ids 57, 60, 62, 94–104 stay reserved (never recycled).
   **Not removed**: `feat_min_dim` (58), `feat_max_dim` (59),
   `feat_aspect_min_over_max` (61), `feat_log_aspect_abs` (62) — the
@@ -34,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   even when `feat_pixel_count` is available. Both groups are gated
   by `#[deprecated(since = "0.1.0")]` in 0.1.x to give downstream
   consumers warning.
+- **`feat_indexed_palette_width` queued for cull pending corpus
+  densification.** 2026-05-02 cross-codec ablation showed it Tier 0
+  redundant against `feat_palette_fits_in_256` on all 4 codecs (min
+  |r| 0.9680–0.9972; zenavif fell into the low-variance pre-filter
+  before clustering, same underlying finding) — but every codec's
+  corpus only sampled `n_unique = 4` for the column, so the
+  redundancy claim is contingent on that 4-bin distribution. **Do
+  not ship this cull until the corpus has ≥ 100 indexed-palette
+  samples spanning palette widths {2, 4, 8, 16, 32, 64, 128, 256}
+  and Tier 0 has been re-run.** Stable feature id reserved.
 - **Remove 3 redundant new shape/smoothness features**
   (`AnalysisFeature::ChromaKurtosis` = 117,
   `AnalysisFeature::UniformitySmooth` = 118,
