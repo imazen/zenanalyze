@@ -40,12 +40,12 @@ required-features = ["bake"]    # serde_json comes from the bake feature
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
-bytemuck = { version = "1.23", default-features = false, features = ["derive"] }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"], optional = true }
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"], optional = true }
+serde_json = { version = "1.0.149", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]
-rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "small_rng"] }
+rand = { version = "0.9.2", default-features = false, features = ["std", "std_rng", "small_rng"] }
 
 [lints.rust]
 unsafe_code = "forbid"
