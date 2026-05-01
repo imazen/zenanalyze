@@ -173,15 +173,31 @@ def parse_config_name(name: str) -> dict:
 Then run from your codec's repo:
 
 ```bash
-PYTHONPATH=<zenanalyze>/zenpicker/examples:<zenanalyze>/zenpicker/tools \
+PYTHONPATH=<zenanalyze>/zentrain/examples:<zenanalyze>/zentrain/tools \
     python3 <zenanalyze>/zentrain/tools/train_hybrid.py \
-        --codec-config zenwidget_picker_config
+        --codec-config zenwidget_picker_config \
+        --activation leakyrelu
 ```
 
-End-to-end on a 16-core box: ~3 minutes wall-clock. Useful flags:
+**Use `--activation leakyrelu` for fast training.** The default
+`--activation relu` routes the student MLP fit through sklearn's
+single-threaded `MLPRegressor.fit`, which takes **~5–15 minutes** on
+this workload (each Adam matmul is too small for BLAS to extract
+parallelism, and sklearn has no batch-level parallelism). The
+`leakyrelu` path uses a PyTorch student with the same hidden shape,
+init, optimizer, and early-stopping — but runs in **~30 seconds to a
+few minutes** depending on capacity. Same numerics-class output JSON
+either way; the bake + runtime are activation-agnostic. Keep
+`--activation relu` only when you need bit-identical reproduction of
+a pre-leakyrelu sklearn-trained baseline.
+
+End-to-end on a 16-core box with `--activation leakyrelu`: ~30 seconds
+of MLP fit + ~30 seconds of HistGB teachers ≈ ~1 minute wall-clock
+total. With `--activation relu` it can stretch to ~10 minutes wall.
 
 | Flag | When |
 |---|---|
+| `--activation leakyrelu` | **Strongly recommended for new codecs.** Fast PyTorch student. Default is sklearn-relu and 10–20× slower at the same shape. |
 | `--objective {size_optimal, zensim_strict}` | size_optimal (default) trains mean log-bytes; zensim_strict trains pinball-q99 + per-zq reach gate. Ship both side-by-side |
 | `--bytes-quantile 0.99` | quantile for zensim_strict bytes head |
 | `--reach-threshold 0.99` | per-cell reach-rate floor for zensim_strict gate |

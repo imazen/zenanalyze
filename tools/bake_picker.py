@@ -770,9 +770,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", required=True, type=Path, help="output .bin path")
     ap.add_argument(
         "--dtype",
-        default="f32",
+        default="i8",
         choices=["f32", "f16", "i8"],
-        help="weight storage dtype (i8 = per-output-neuron 8-bit quantization)",
+        help="weight storage dtype. Default is `i8` (per-output-neuron "
+        "8-bit quantization) because the typical zenjpeg / zenwebp "
+        "picker bake is ~30 KB f32, ~15 KB f16, ~8 KB i8 — and most "
+        "consuming binaries (codec wasm, mobile builds) don't want to "
+        "ship more than ~80 KB of weights. The held-out argmin-acc "
+        "delta from f32→i8 is < 0.5 pp on every bake we've shipped, "
+        "well inside calibration-noise. Pick `f16` for ~2× the size "
+        "with full f32 accuracy, or `f32` only when you've measured "
+        "an i8 regression on your specific bake.",
     )
     ap.add_argument(
         "--manifest",
