@@ -62,6 +62,33 @@ PYTHONPATH=<zenanalyze>/zentrain/examples:<zenanalyze>/zentrain/tools \
 
 **Caveat:** Shares LOO's multicollinearity blind spot. If A and B are correlated, both shuffle to ~zero importance because the model just routes through whichever survived. Catches constants and true redundancies; bad for "which of these correlated peers carries unique signal."
 
+**Hybrid-heads pickers (per-cell scalars):** `feature_ablation.py` trains one HistGB per *config*, which explodes when the picker has scalar heads — train_hybrid's v0.2 schema has 110 K configs at 7 scalars × 10 cells. Use `student_permutation.py` instead (Tier 1.5 below) for these models — it operates on the trained student MLP directly, ~30 s wall regardless of config count.
+
+---
+
+## Tier 1.5 — hybrid-heads fast path (`student_permutation.py`)
+
+**What:** Permutation importance against a *trained student MLP* (the JSON output of `train_hybrid.py`), no teacher retraining. For each feature column, shuffle values on the val set, run the student forward pass, measure overhead delta vs the unpermuted baseline.
+
+**When:** Use this whenever the codec uses train_hybrid's hybrid-heads schema (per-cell bytes + scalar regression heads). The same `feature_ablation.py --method permutation` works for older single-head HistGB pickers; both compute the same kind of importance.
+
+**Run:**
+
+```bash
+PYTHONPATH=<zenanalyze>/zentrain/examples:<zenanalyze>/zentrain/tools \
+    python3 <zenanalyze>/zentrain/tools/student_permutation.py \
+        --codec-config <codec>_picker_config \
+        --model-json benchmarks/<codec>_picker_v*.json \
+        --output benchmarks/<codec>_student_perm.json \
+        --n-repeats 5
+```
+
+**Interpret:** Same thresholds as Tier 1 — Δ_pp < 0.05 is cull-candidate territory, Δ_pp < 0 is "model overfit on this feature." Shares the same multicollinearity caveat. Same downstream gates: confirm with Tier 3 LOO and Tier 4 cross-codec before deprecating.
+
+**Cost:** O(n_features × n_val_rows × forward_pass_cost). ~30 s for 43 features × 1.7 K val rows × a 96→192³→80 MLP. Independent of n_configs.
+
+**Caveat (corpus-sensitivity, same as Tier 1):** Shuffling a feature whose validation rows are constant across the active corpus reports Δ ≈ 0 *whether or not the feature carries signal in general*. Always run Tier 0 first.
+
 ---
 
 ## Tier 2 — group ablation (`feature_group_ablation.py`)
@@ -158,7 +185,8 @@ The same shape applies to every future deprecation proposal: cross-codec, post-c
 | Tool | Method | Cost | Output |
 |---|---|---|---|
 | `correlation_cleanup.py` | Spearman pairwise + cluster | seconds | constants / low-variance / redundancy buckets |
-| `feature_ablation.py --method permutation` | shuffle one column at a time | ~min | Δ per feature, ranked |
+| `feature_ablation.py --method permutation` | shuffle one column at a time (per-config HistGB teachers) | ~min, but breaks on hybrid-heads at high n_configs | Δ per feature, ranked |
+| `student_permutation.py` | shuffle one column at a time (trained student MLP forward pass) | ~30 s, hybrid-heads native | Δ per feature, ranked |
 | `feature_ablation.py --method loo` | retrain N times, drop one feature each | ~10× perm | Δ per feature, gold-standard |
 | `feature_group_ablation.py` | drop semantic groups | group-count × train | Δ per group |
 
