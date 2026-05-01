@@ -103,6 +103,9 @@ pub fn populate_tier3(
             out.patch_fraction = dct.patch_fraction;
             out.aq_map_mean = dct.aq_map_mean;
             out.aq_map_std = dct.aq_map_std;
+            out.aq_map_p1 = dct.aq_map_p1;
+            out.aq_map_p5 = dct.aq_map_p5;
+            out.aq_map_p10 = dct.aq_map_p10;
             out.aq_map_p50 = dct.aq_map_p50;
             out.aq_map_p75 = dct.aq_map_p75;
             out.aq_map_p90 = dct.aq_map_p90;
@@ -110,6 +113,9 @@ pub fn populate_tier3(
             out.aq_map_p99 = dct.aq_map_p99;
             out.noise_floor_y = dct.noise_floor_y;
             out.noise_floor_uv = dct.noise_floor_uv;
+            out.noise_floor_y_p1 = dct.noise_floor_y_p1;
+            out.noise_floor_y_p5 = dct.noise_floor_y_p5;
+            out.noise_floor_y_p10 = dct.noise_floor_y_p10;
             out.noise_floor_y_p25 = dct.noise_floor_y_p25;
             out.noise_floor_y_p50 = dct.noise_floor_y_p50;
             out.noise_floor_y_p75 = dct.noise_floor_y_p75;
@@ -122,6 +128,8 @@ pub fn populate_tier3(
             out.patch_fraction_fast = dct.patch_fraction_fast;
             out.quant_survival_y = dct.quant_survival_y;
             out.quant_survival_uv = dct.quant_survival_uv;
+            out.quant_survival_y_p1 = dct.quant_survival_y_p1;
+            out.quant_survival_y_p5 = dct.quant_survival_y_p5;
             out.quant_survival_y_p10 = dct.quant_survival_y_p10;
             out.quant_survival_y_p25 = dct.quant_survival_y_p25;
             out.quant_survival_y_p50 = dct.quant_survival_y_p50;
@@ -190,6 +198,9 @@ struct Tier3DctStats {
     /// Same per-block `block_acs` buffer, sorted, read at the
     /// listed quantile in log10 space. Set via the `experimental`
     /// feature gate; zero when disabled.
+    aq_map_p1: f32,
+    aq_map_p5: f32,
+    aq_map_p10: f32,
     aq_map_p50: f32,
     aq_map_p75: f32,
     aq_map_p90: f32,
@@ -200,6 +211,9 @@ struct Tier3DctStats {
     /// listed quantile, then put through the same
     /// `sqrt(arr/15) / 32`-clamped scaling. UV variants emit
     /// `max(cb_pX, cr_pX)`. Zero when experimental disabled.
+    noise_floor_y_p1: f32,
+    noise_floor_y_p5: f32,
+    noise_floor_y_p10: f32,
     noise_floor_y_p25: f32,
     noise_floor_y_p50: f32,
     noise_floor_y_p75: f32,
@@ -234,6 +248,8 @@ struct Tier3DctStats {
     /// (drives trellis ROI); p75 = best-block survival (caps possible
     /// compression). Buffered at sample time, sorted once at end.
     /// Zero in non-experimental builds.
+    quant_survival_y_p1: f32,
+    quant_survival_y_p5: f32,
     quant_survival_y_p10: f32,
     quant_survival_y_p25: f32,
     quant_survival_y_p50: f32,
@@ -856,6 +872,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction: 0.0,
             aq_map_mean: 0.0,
             aq_map_std: 0.0,
+            aq_map_p1: 0.0,
+            aq_map_p5: 0.0,
+            aq_map_p10: 0.0,
             aq_map_p50: 0.0,
             aq_map_p75: 0.0,
             aq_map_p90: 0.0,
@@ -863,6 +882,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             aq_map_p99: 0.0,
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
+            noise_floor_y_p1: 0.0,
+            noise_floor_y_p5: 0.0,
+            noise_floor_y_p10: 0.0,
             noise_floor_y_p25: 0.0,
             noise_floor_y_p50: 0.0,
             noise_floor_y_p75: 0.0,
@@ -875,6 +897,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            quant_survival_y_p1: 0.0,
+            quant_survival_y_p5: 0.0,
             quant_survival_y_p10: 0.0,
             quant_survival_y_p25: 0.0,
             quant_survival_y_p50: 0.0,
@@ -905,6 +929,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction: 0.0,
             aq_map_mean: 0.0,
             aq_map_std: 0.0,
+            aq_map_p1: 0.0,
+            aq_map_p5: 0.0,
+            aq_map_p10: 0.0,
             aq_map_p50: 0.0,
             aq_map_p75: 0.0,
             aq_map_p90: 0.0,
@@ -912,6 +939,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             aq_map_p99: 0.0,
             noise_floor_y: 0.0,
             noise_floor_uv: 0.0,
+            noise_floor_y_p1: 0.0,
+            noise_floor_y_p5: 0.0,
+            noise_floor_y_p10: 0.0,
             noise_floor_y_p25: 0.0,
             noise_floor_y_p50: 0.0,
             noise_floor_y_p75: 0.0,
@@ -924,6 +954,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
+            quant_survival_y_p1: 0.0,
+            quant_survival_y_p5: 0.0,
             quant_survival_y_p10: 0.0,
             quant_survival_y_p25: 0.0,
             quant_survival_y_p50: 0.0,
@@ -1200,6 +1232,10 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // read at p10/p25/p50/p75. p10 = "worst-block survival" — directly
     // proxies trellis ROI; high-survival p75 ⇒ uniformly compressible.
     #[cfg(feature = "experimental")]
+    let quant_survival_y_p1: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p5: f32;
+    #[cfg(feature = "experimental")]
     let quant_survival_y_p10: f32;
     #[cfg(feature = "experimental")]
     let quant_survival_y_p25: f32;
@@ -1231,10 +1267,12 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         sort_f32(&mut quant_uv_blocks);
         // Per-feature minimum-sample-count floor (#49). At < 100
         // blocks the per-block survival distribution is too sparse
-        // for stable p10/p25/p50/p75 reads.
+        // for stable p1/p5/p10/p25/p50/p75 reads.
         let qs_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
         let qs_or_nan =
             |arr: &[f32], q: f32| -> f32 { if qs_floor_ok { qs_at(arr, q) } else { f32::NAN } };
+        quant_survival_y_p1 = qs_or_nan(&quant_y_blocks, 0.01);
+        quant_survival_y_p5 = qs_or_nan(&quant_y_blocks, 0.05);
         quant_survival_y_p10 = qs_or_nan(&quant_y_blocks, 0.10);
         quant_survival_y_p25 = qs_or_nan(&quant_y_blocks, 0.25);
         quant_survival_y_p50 = qs_or_nan(&quant_y_blocks, 0.50);
@@ -1285,31 +1323,21 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // `f32::NAN` short-circuits to OOD fallback in the codec rather
     // than letting the picker train against noise.
     let aq_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
-    let aq_map_p50 = if aq_floor_ok {
-        log10_at(&aq_sorted, 0.50)
-    } else {
-        f32::NAN
+    let aq_or_nan = |q: f32| -> f32 {
+        if aq_floor_ok {
+            log10_at(&aq_sorted, q)
+        } else {
+            f32::NAN
+        }
     };
-    let aq_map_p75 = if aq_floor_ok {
-        log10_at(&aq_sorted, 0.75)
-    } else {
-        f32::NAN
-    };
-    let aq_map_p90 = if aq_floor_ok {
-        log10_at(&aq_sorted, 0.90)
-    } else {
-        f32::NAN
-    };
-    let aq_map_p95 = if aq_floor_ok {
-        log10_at(&aq_sorted, 0.95)
-    } else {
-        f32::NAN
-    };
-    let aq_map_p99 = if aq_floor_ok {
-        log10_at(&aq_sorted, 0.99)
-    } else {
-        f32::NAN
-    };
+    let aq_map_p1 = aq_or_nan(0.01);
+    let aq_map_p5 = aq_or_nan(0.05);
+    let aq_map_p10 = aq_or_nan(0.10);
+    let aq_map_p50 = aq_or_nan(0.50);
+    let aq_map_p75 = aq_or_nan(0.75);
+    let aq_map_p90 = aq_or_nan(0.90);
+    let aq_map_p95 = aq_or_nan(0.95);
+    let aq_map_p99 = aq_or_nan(0.99);
 
     // Noise-floor estimate via 10th-percentile per-block low-AC-energy.
     // Flat blocks' low-AC is residual noise; the 10th percentile
@@ -1345,6 +1373,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let noise_floor_y = nf_scale(quantile_at(&block_low_y, 0.10));
     let nf_floor_ok = blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE;
     let nf_or_nan = |raw: f32| -> f32 { if nf_floor_ok { nf_scale(raw) } else { f32::NAN } };
+    let noise_floor_y_p1 = nf_or_nan(quantile_at(&block_low_y, 0.01));
+    let noise_floor_y_p5 = nf_or_nan(quantile_at(&block_low_y, 0.05));
+    let noise_floor_y_p10 = nf_or_nan(quantile_at(&block_low_y, 0.10));
     let noise_floor_y_p25 = nf_or_nan(quantile_at(&block_low_y, 0.25));
     let noise_floor_y_p50 = nf_or_nan(quantile_at(&block_low_y, 0.50));
     let noise_floor_y_p75 = nf_or_nan(quantile_at(&block_low_y, 0.75));
@@ -1371,6 +1402,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
     #[cfg(not(feature = "experimental"))]
     let (
+        quant_survival_y_p1,
+        quant_survival_y_p5,
         quant_survival_y_p10,
         quant_survival_y_p25,
         quant_survival_y_p50,
@@ -1379,7 +1412,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p25,
         quant_survival_uv_p50,
         quant_survival_uv_p75,
-    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,
@@ -1387,6 +1420,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         patch_fraction,
         aq_map_mean,
         aq_map_std,
+        aq_map_p1,
+        aq_map_p5,
+        aq_map_p10,
         aq_map_p50,
         aq_map_p75,
         aq_map_p90,
@@ -1394,6 +1430,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         aq_map_p99,
         noise_floor_y,
         noise_floor_uv,
+        noise_floor_y_p1,
+        noise_floor_y_p5,
+        noise_floor_y_p10,
         noise_floor_y_p25,
         noise_floor_y_p50,
         noise_floor_y_p75,
@@ -1406,6 +1445,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         patch_fraction_fast,
         quant_survival_y,
         quant_survival_uv,
+        quant_survival_y_p1,
+        quant_survival_y_p5,
         quant_survival_y_p10,
         quant_survival_y_p25,
         quant_survival_y_p50,
