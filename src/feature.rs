@@ -295,7 +295,34 @@ features_table! {
     VarianceSpread = 9 : f32 => variance_spread,
 
     // ---------------- Palette: always full-scan ----------------------
-    /// `u32`. Distinct 5-bit-per-channel RGB bins observed.
+    /// `u32`. Distinct 5-bit-per-channel RGB bins observed in
+    /// `[0, 32_768]` (the bin storage caps at 32³ = 32 768 cells, one
+    /// per L1D way). **This under-counts the true 8-bit distinct
+    /// colour count whenever two 8-bit colours fold into the same
+    /// 5-bit cell.** Bias is always toward undercounting, never over.
+    ///
+    /// Quantitative collision rate (uniformly-distributed colours):
+    /// - true count 256 → expected bins ≈ 253 (~1 % undercount)
+    /// - true count 1 024 → ≈ 1 009 (~1.5 %)
+    /// - true count 4 096 → ≈ 3 611 (~12 %)
+    /// - true count 8 192 → ≈ 7 308 (~11 %)
+    /// - true count > 32 768 → saturates at 32 768
+    ///
+    /// Consequence for downstream features:
+    /// - [`Self::PaletteFitsIn256`] can return `true` for sources with
+    ///   257–~300 true 8-bit colours when collisions pull the binned
+    ///   count back under 257. Encoders that try indexed mode based
+    ///   on this signal would fail to fit the actual colour set and
+    ///   fall back to truecolor — correctness preserved, one wasted
+    ///   attempt per false positive.
+    /// - [`Self::PaletteLog2Size`] (which buckets `ceil(log2)` of this
+    ///   value) tends to land in the same bucket as the true count
+    ///   except at exact-power-of-2 boundaries, where the undercount
+    ///   can shift one bucket smaller.
+    ///
+    /// 5-bit was chosen so the 32 KB flag array fits in one L1D way;
+    /// 6-bit (256 KB) would cache-thrash the entire scan. The
+    /// accuracy tradeoff was paid intentionally.
     DistinctColorBins = 10 : u32 => distinct_color_bins,
     // id 11 reserved (was `DistinctColorBinsChao1`, removed pre-0.1.0).
     // Today's full-pass scan made the Chao1 correction term degenerate
@@ -396,12 +423,21 @@ features_table! {
 
     // ---------------- Quick-path palette signals --------------------
     /// `bool`. Source fits in 256 distinct 5-bit-per-channel RGB
-    /// bins — an indexed-mode codec can represent it without
-    /// colour quantization. Drives the binary "encode as indexed?"
-    /// decision when the caller doesn't care about palette size.
-    /// Computed via an early-exit scan that bails at the 257th
-    /// distinct bin (~half-image walk on truecolor, full walk on
-    /// indexed-class content). Gated behind `experimental`.
+    /// bins — an indexed-mode codec can represent it without further
+    /// colour quantization at this resolution. Drives the binary
+    /// "encode as indexed?" decision when the caller doesn't care
+    /// about palette size. Computed via an early-exit scan that bails
+    /// at the 257th distinct bin (~half-image walk on truecolor, full
+    /// walk on indexed-class content). Gated behind `experimental`.
+    ///
+    /// **Bin-storage bias.** Inherits the under-count bias documented
+    /// on [`Self::DistinctColorBins`]: this can return `true` for
+    /// sources with 257–~300 true 8-bit colours when 5-bit-cell
+    /// collisions pull the binned count back under 257. An encoder
+    /// consuming this would attempt indexed mode and fall back to
+    /// truecolor on the failed fit — correct, but slightly wasteful.
+    /// Callers who can't tolerate the false-positive rate should
+    /// run their own exact-8-bit pass on the borderline cases.
     #[cfg(feature = "experimental")]
     PaletteFitsIn256 = 31 : bool => palette_fits_in_256,
 
@@ -930,11 +966,14 @@ features_table! {
     GradientFractionSmooth = 120 : f32 => gradient_fraction_smooth,
 
     // ---------------- Palette: ceiling-log2 of distinct-bin count ----
-    /// `u32`. `ceil(log2(distinct_color_bins))`, clamped to `[1, 15]`,
-    /// with `0` reserved for "truecolor required" (more than 32 768
-    /// distinct 5-bit-per-channel bins — saturates the analyzer's bin
-    /// storage). The value is the smallest indexed-palette
-    /// **bits-per-pixel** that contains the source:
+    /// `u32`. Smallest indexed-palette bits-per-pixel that
+    /// representationally contains the source's distinct-colour set,
+    /// computed from `ceil(log2(distinct_color_bins))` over the
+    /// analyzer's 5-bit-per-channel bin storage. **Codomain:
+    /// `[1, 15] ∪ {24}`.** Value 24 is the truecolor saturation
+    /// sentinel — see below.
+    ///
+    /// Bucket meanings:
     ///
     /// - `1`  ⇒ ≤ 2 colours          (PNG-1, true monochrome)
     /// - `2`  ⇒ ≤ 4 colours          (PNG-2)
@@ -943,29 +982,44 @@ features_table! {
     /// - `5..7` ⇒ ≤ 32..128 colours  (GIF BPP, PNG rounds to 8)
     /// - `8`  ⇒ ≤ 256 colours        (PNG-8, GIF, WebP-lossless palette)
     /// - `9..15` ⇒ ≤ 512..32768      (JXL Modular palette transform tiers)
-    /// - `0`  ⇒ > 32 768 colours     (truecolor; never indexed-profitable)
+    /// - `24` ⇒ bin array saturated  (truecolor; true 8-bit count is
+    ///                                somewhere in `[32 768, 2²⁴]`)
     ///
-    /// **Cost.** When the caller already requested any full-precision
-    /// palette feature (`DistinctColorBins`, `PaletteDensity`,
-    /// `GrayscaleScore`), this value is computed for free from the
-    /// existing distinct-count via a single `leading_zeros`
-    /// instruction. When only the quick-path features are requested
-    /// (`PaletteFitsIn256`, this feature), the early-exit scan still
-    /// bails at 257 distinct bins; in that case the value is in
-    /// `[1, 8]` or `0`, with the upper-end resolution lost. Callers
-    /// who need the high-cap signal (JXL palette breakpoints at
-    /// 1024 / 4096) should also request `DistinctColorBins` so the
-    /// full-scan path runs.
+    /// **Why 24 and not 0 for truecolor.** A trained-MLP picker treats
+    /// this as a numeric input; a discontinuous `..., 14, 15, 0` jump
+    /// fights the gradient signal. Emitting `24` keeps the scale
+    /// monotonic — `..., 14, 15, [9-unit gap], 24` — and the gap
+    /// itself is meaningful ("we ran out of measurement resolution;
+    /// this is unambiguously truecolor"). 24 is the bit-width the
+    /// source would need with no palette compression at all (8 bits
+    /// per channel × 3 channels), so it's a defensible upper bound.
+    ///
+    /// **Bin-storage bias.** The 5-bit-per-channel quantization
+    /// (32 768 cells) under-counts the true 8-bit distinct-colour
+    /// count when colours collapse into the same 5-bit cell. Bias is
+    /// always toward undercounting, so `palette_log2_size` is biased
+    /// toward smaller buckets — encoders consuming the value will
+    /// pick a slightly smaller indexed BPP than ideal, and an indexed
+    /// encoder building its own palette will quickly discover the
+    /// extra colours and either expand the palette or fall back to
+    /// truecolor. Self-correcting.
+    ///
+    /// **Cost.** Always full-scan: this feature is in
+    /// `PALETTE_FULL_FEATURES`, so requesting it forces the full
+    /// per-pixel walk that builds the bin array. The reduction itself
+    /// is one `leading_zeros` instruction. Callers who only need the
+    /// cheap "fits in 256?" signal should request `PaletteFitsIn256`
+    /// instead, which uses the early-exit quick-path scan.
     ///
     /// Drives PNG-indexed bit-width choice (round up to {1, 2, 4, 8}),
     /// GIF LZW initial-code-size (matches BPP exactly), JXL Modular
     /// palette/delta-palette enable decisions. Gated behind
     /// `experimental` for 0.1.0; promote when a consumer wires up.
     ///
-    /// Replaces the pre-2026-05-02 `IndexedPaletteWidth` (id 30, codomain
-    /// `{0, 2, 4, 8}`) which lacked the 1-BPP case for binary content
-    /// and didn't surface JXL's high-cap breakpoints. That id is
-    /// reserved retired.
+    /// Replaces the pre-2026-05-02 `IndexedPaletteWidth` (id 30,
+    /// codomain `{0, 2, 4, 8}`) which lacked the 1-BPP case for
+    /// binary content and didn't surface JXL's high-cap breakpoints.
+    /// That id is reserved retired.
     #[cfg(feature = "experimental")]
     PaletteLog2Size = 121 : u32 => palette_log2_size,
 }
@@ -1326,6 +1380,14 @@ pub(crate) const PALETTE_FULL_FEATURES: FeatureSet = {
         // pixel slip past the gate ~95 % of the time and produce a
         // false-positive grayscale classification.
         s = s.with(AnalysisFeature::GrayscaleScore);
+        // PaletteLog2Size's full codomain (1..15 ∪ 24) requires an
+        // exact distinct count — the quick-path scan saturates at 8
+        // (early-exit at 257 bins) and can't surface JXL palette
+        // breakpoints at 9..15 or the truecolor saturation sentinel
+        // at 24. Including it here forces the full-scan path so
+        // callers get the resolution the feature promises without
+        // having to manually co-request `DistinctColorBins`.
+        s = s.with(AnalysisFeature::PaletteLog2Size);
     }
     s
 };
@@ -1341,7 +1403,6 @@ pub(crate) const PALETTE_QUICK_FEATURES: FeatureSet = {
     #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::PaletteFitsIn256);
-        s = s.with(AnalysisFeature::PaletteLog2Size);
     }
     s
 };

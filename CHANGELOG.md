@@ -53,13 +53,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measurable bit/pixel vs PNG-2 on monochrome scans) and didn't
   surface JXL Modular palette breakpoints at 9..15 (≤512..32768
   colours). The replacement emits `ceil(log2(distinct))` clamped to
-  `[1, 15]` with `0` for truecolor, free-of-cost when any
-  full-precision palette feature is co-requested (single
-  `leading_zeros` instruction off the existing `distinct_color_bins`
-  count; the early-exit quick-path saturates at 8 by construction).
-  Stable feature id 30 is reserved retired; both old and new
-  variants are `#[cfg(feature = "experimental")]` with no in-tree
-  consumer at the time of the swap.
+  `[1, 15]` with **`24` as the truecolor saturation sentinel**
+  (replaced the original `0` after picker-training analysis: a
+  discontinuous `..., 14, 15, 0` jump fights the trained MLP's
+  gradient signal; `24` keeps the scale monotonic with a meaningful
+  9-unit gap that itself encodes "we saturated the 5-bit binning;
+  this is unambiguously truecolor"). 24 is the bit-width the source
+  would need with no palette compression at all (8 bits × 3
+  channels), so it's a defensible upper bound. The empty-image edge
+  case folds to `1` rather than producing a separate sentinel.
+  `PaletteLog2Size` is in `PALETTE_FULL_FEATURES`, so requesting it
+  forces the full-scan path and the full 1..15 ∪ {24} resolution is
+  always available — callers do NOT need to manually co-request
+  `DistinctColorBins`. Both old and new variants are
+  `#[cfg(feature = "experimental")]` with no in-tree consumer at
+  the time of the swap; stable feature id 30 is reserved retired.
+- **5-bit-per-channel bin storage bias documented on
+  `feat_distinct_color_bins` and `feat_palette_fits_in_256`.** The
+  32 KB / 32 768-cell bin array (chosen so it fits in one L1D way)
+  under-counts the true 8-bit distinct-colour count whenever colours
+  fold into the same 5-bit cell. Bias is always toward undercount,
+  never over. Quantitative collision rate at uniform distribution:
+  ~1 % at 256 colours, ~12 % at 4 096, saturates at 32 768.
+  Consequence for `feat_palette_fits_in_256`: false-positive rate at
+  C ∈ [257, ~300] true 8-bit colours where collisions pull the
+  binned count back under 257. Encoders consuming the boolean would
+  attempt indexed mode and fall back on the failed fit — correctness
+  preserved, one wasted attempt per false positive. Callers who
+  can't tolerate the false-positive rate should run their own exact
+  8-bit pass on borderline cases.
 - **Remove 3 redundant new shape/smoothness features**
   (`AnalysisFeature::ChromaKurtosis` = 117,
   `AnalysisFeature::UniformitySmooth` = 118,

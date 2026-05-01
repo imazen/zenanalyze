@@ -79,24 +79,50 @@ pub(crate) struct PaletteStats {
     pub non_grayscale: u64,
 }
 
-/// Map a distinct-colour count to `ceil(log2(count))`, clamped to
-/// `[1, 15]`. Returns `0` for "doesn't fit in the 32 768-bin storage"
-/// (truecolor — never indexed-profitable).
+/// Map a distinct-colour count to `ceil(log2(count))` clamped to
+/// `[1, 15]`, with `24` as the saturation sentinel for "bin array is
+/// full — image is truecolor; true 8-bit colour count is in
+/// `[32 768, 2²⁴]`".
+///
+/// **Why 24 and not 0 for truecolor:** the trained picker is a small
+/// MLP; a discontinuous `..., 14, 15, 0` jump fights the gradient
+/// signal ("more colours → lower value" is wrong). Emitting 24 keeps
+/// the scale monotonic — `..., 14, 15, [9-unit gap], 24` — and the
+/// gap itself is a meaningful feature ("we ran out of measurement
+/// resolution; this is unambiguously truecolor"). 24 is the bit-width
+/// the source would need with no palette compression at all (8 bits
+/// per channel × 3 channels), so it's a defensible upper bound.
 ///
 /// Encoding rules:
-/// - `count == 0` (empty image, edge case) → `0`.
-/// - `count == 1` (solid colour) → `1` — 1 BPP indexed still encodes it.
-/// - `count == 2..=32768` → `ceil(log2(count))` ∈ `[1, 15]`.
-///   `(count - 1).leading_zeros()` gives `32 - ceil_log2`; subtract
-///   from 32 and clamp 0 → 1 for the solid-colour case.
-/// - `count > 32768` → `0`.
+/// - `count == 0` (empty image, edge case): `1` — degenerate, treated
+///   as solid colour. We don't surface a separate sentinel; empty
+///   images shouldn't reach this code path in the first place.
+/// - `count == 1` (solid colour): `1` — 1-BPP indexed still encodes it.
+/// - `count ∈ [2, 32_767]`: `ceil(log2(count))` ∈ `[1, 15]`.
+///   `(count - 1).leading_zeros()` gives `32 - ceil_log2`.
+/// - `count == 32_768` (bin array filled to capacity): `24`. The 5-bit
+///   binning stores at most 32 768 distinct cells; reaching this is a
+///   strong heuristic signal that the true 8-bit colour count is much
+///   higher. False-positive rate: a synthetic image with exactly
+///   32 768 distinct 5-bit-binned colours and not-truecolor source
+///   would emit 24, but such images are vanishingly rare in real
+///   workloads and the encoder would still try indexed mode if it
+///   cares.
 #[inline]
 fn palette_log2_size_from_count(count: u32) -> u32 {
-    if count == 0 || count > 32_768 {
-        0
+    if count >= 32_768 {
+        // Saturated bin storage — truecolor heuristic. count > 32_768
+        // is impossible from the full-scan path (the bin array can
+        // hold at most 32 768 distinct cells), but the comparison is
+        // safe and self-documenting.
+        24
+    } else if count <= 1 {
+        // Solid-colour and degenerate-empty both fold to 1 (1 BPP
+        // indexed still encodes a single colour). No 0 sentinel.
+        1
     } else {
-        let v = 32 - (count - 1).leading_zeros();
-        v.max(1)
+        // ceil(log2(count)) for count >= 2: 32 - (count-1).leading_zeros()
+        32 - (count - 1).leading_zeros()
     }
 }
 
@@ -378,8 +404,8 @@ mod log2_size_tests {
 
     #[test]
     fn codomain_matches_indexed_bpp_breakpoints() {
-        // Edge cases.
-        assert_eq!(palette_log2_size_from_count(0), 0, "empty");
+        // Edge cases — empty + solid both fold to 1 (no 0 sentinel).
+        assert_eq!(palette_log2_size_from_count(0), 1, "empty → 1 (no 0 sentinel)");
         assert_eq!(palette_log2_size_from_count(1), 1, "solid color → 1 BPP");
 
         // PNG-indexed bit-widths.
@@ -405,10 +431,26 @@ mod log2_size_tests {
         assert_eq!(palette_log2_size_from_count(513), 10);
         assert_eq!(palette_log2_size_from_count(1024), 10, "JXL 1024 break");
         assert_eq!(palette_log2_size_from_count(4096), 12, "JXL 4096 break");
-        assert_eq!(palette_log2_size_from_count(32_768), 15, "bin-storage cap");
+        assert_eq!(palette_log2_size_from_count(16_384), 14);
+        assert_eq!(palette_log2_size_from_count(32_767), 15, "just under cap");
 
-        // Truecolor sentinel.
-        assert_eq!(palette_log2_size_from_count(32_769), 0);
-        assert_eq!(palette_log2_size_from_count(u32::MAX), 0);
+        // Truecolor saturation sentinel — count == 32_768 (bin array
+        // filled) folds to 24 to keep the trained-MLP gradient signal
+        // monotonic. count > 32_768 is impossible from the full-scan
+        // path but we guard it for safety.
+        assert_eq!(palette_log2_size_from_count(32_768), 24, "saturated → 24");
+        assert_eq!(palette_log2_size_from_count(u32::MAX), 24, "guard");
+
+        // Monotonicity sanity over the whole codomain. The 9-unit gap
+        // from 15 → 24 is the only discontinuity; everywhere else the
+        // mapping is non-decreasing in count.
+        let mut prev = 0u32;
+        for c in [
+            0, 1, 2, 4, 16, 256, 1024, 4096, 16384, 32_767, 32_768,
+        ] {
+            let v = palette_log2_size_from_count(c);
+            assert!(v >= prev, "non-monotonic: count={c} → {v} after {prev}");
+            prev = v;
+        }
     }
 }
