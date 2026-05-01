@@ -214,6 +214,23 @@ SCALAR_DISPLAY_RANGES: dict = {
     "lambda": (8.0, 25.0),
 }
 
+# Quality-metric column on the pareto TSV that the picker is trained
+# against. Defaults to "zensim" for back-compat with existing zenjpeg
+# bakes. Codec configs that target butteraugli, ssim2, dssim, etc.
+# override this. Per-bake choice — different bakes per metric.
+METRIC_COLUMN: str = "zensim"
+
+# Direction of the metric. Reachability: a config "reaches" the target
+# when its metric value satisfies the direction-appropriate inequality:
+#   - "higher_better": metric >= target  (zensim, ssim2, psnr, …)
+#   - "lower_better":  metric <= target  (butteraugli, dssim, mse, …)
+METRIC_DIRECTION: str = "higher_better"
+
+# Encode-time column on the pareto TSV. Picker training optionally adds
+# a per-cell `time_log` head from this column for the time_budgeted
+# objective. Defaults to "encode_ms" (matches existing harnesses).
+TIME_COLUMN: str = "encode_ms"
+
 
 def load_codec_config(name: str):
     """Import a codec-config module and bind its exports to module-level
@@ -242,6 +259,7 @@ def load_codec_config(name: str):
     global PARETO, FEATURES, OUT_LOG, OUT_JSON
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
+    global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN
     mod = importlib.import_module(name)
     PARETO = Path(mod.PARETO)
     FEATURES = Path(mod.FEATURES)
@@ -267,6 +285,21 @@ def load_codec_config(name: str):
         SCALAR_DISPLAY_RANGES = dict(mod.SCALAR_DISPLAY_RANGES)
     elif hasattr(mod, "CATEGORICAL_AXES") or hasattr(mod, "SCALAR_AXES"):
         SCALAR_DISPLAY_RANGES = {}
+    # Quality metric column + direction. Optional — defaults to zensim
+    # / higher_better which match every existing zenjpeg / zenwebp /
+    # zenavif config. Codecs targeting butteraugli / dssim override
+    # both (`METRIC_COLUMN = "butteraugli"`, `METRIC_DIRECTION = "lower_better"`).
+    if hasattr(mod, "METRIC_COLUMN"):
+        METRIC_COLUMN = str(mod.METRIC_COLUMN)
+    if hasattr(mod, "METRIC_DIRECTION"):
+        d = str(mod.METRIC_DIRECTION).lower()
+        if d not in ("higher_better", "lower_better"):
+            raise ValueError(
+                f"METRIC_DIRECTION must be 'higher_better' or 'lower_better', got {d!r}"
+            )
+        METRIC_DIRECTION = d
+    if hasattr(mod, "TIME_COLUMN"):
+        TIME_COLUMN = str(mod.TIME_COLUMN)
     return mod
 
 
@@ -338,39 +371,63 @@ def _render_axis_value(axis: str, value) -> str:
 def load_pareto(path):
     """Load the Pareto sweep TSV.
 
-    Returns `(rows, ceilings, has_ceiling_column)` where:
+    Returns `(rows, ceilings, has_ceiling_column, has_time_column)` where:
       - rows: `{(image_path, size_class, w, h) -> [{"config_id", "bytes",
-        "zensim"}]}`.
+        "zensim"[, "time_ms"]}]}`. The `"zensim"` key holds the value
+        from `METRIC_COLUMN` (which defaults to "zensim" but can be
+        any quality column the codec targets — butteraugli, dssim, …).
+        Direction is interpreted via `METRIC_DIRECTION`.
       - ceilings: `{(image_path, size_class) -> effective_max_zensim}` —
         only populated if the sweep TSV declares the
-        `effective_max_zensim` column. The value is the max zensim score
+        `effective_max_zensim` column. The value is the max metric score
         physically achievable for that image at that size, computed by
-        the sweep harness as a byproduct (typically `max(zensim)` across
-        all configs at the highest q values).
+        the sweep harness as a byproduct (typically `max(metric)` across
+        all configs at the highest q values when METRIC_DIRECTION is
+        higher_better, or `min(metric)` for lower_better).
       - has_ceiling_column: True iff the sweep TSV declared
-        `effective_max_zensim`. Used by the trainer to gate the
-        UNCAPPED_ZQ_GRID safety check.
+        `effective_max_zensim`.
+      - has_time_column: True iff the sweep TSV declared the
+        configured TIME_COLUMN. When True, rows carry a `"time_ms"`
+        key (float, milliseconds). Drives the time_budgeted objective's
+        per-cell time head.
 
     See imazen/zenanalyze#51 for the cross-codec design context.
     """
     rows = defaultdict(list)
     ceilings: dict = {}
     has_ceiling_column = False
+    has_time_column = False
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
         has_ceiling_column = (
             rdr.fieldnames is not None and "effective_max_zensim" in rdr.fieldnames
         )
+        has_time_column = (
+            rdr.fieldnames is not None and TIME_COLUMN in rdr.fieldnames
+        )
+        if METRIC_COLUMN not in (rdr.fieldnames or []):
+            raise ValueError(
+                f"pareto TSV {path} is missing METRIC_COLUMN={METRIC_COLUMN!r}; "
+                f"available columns: {rdr.fieldnames}"
+            )
         for r in rdr:
             try:
                 cid = int(r["config_id"])
                 bytes_v = int(r["bytes"])
-                zensim_v = float(r["zensim"])
+                metric_v = float(r[METRIC_COLUMN])
             except (ValueError, KeyError):
                 continue
             CONFIG_NAMES.setdefault(cid, r["config_name"])
             key = (r["image_path"], r["size_class"], int(r["width"]), int(r["height"]))
-            rows[key].append({"config_id": cid, "bytes": bytes_v, "zensim": zensim_v})
+            row = {"config_id": cid, "bytes": bytes_v, "zensim": metric_v}
+            if has_time_column:
+                t_raw = r.get(TIME_COLUMN, "")
+                if t_raw:
+                    try:
+                        row["time_ms"] = float(t_raw)
+                    except ValueError:
+                        pass
+            rows[key].append(row)
             if has_ceiling_column:
                 cv = r.get("effective_max_zensim", "")
                 if cv:
@@ -382,7 +439,7 @@ def load_pareto(path):
                             ceilings[ceil_key] = float(cv)
                     except ValueError:
                         pass
-    return rows, ceilings, has_ceiling_column
+    return rows, ceilings, has_ceiling_column, has_time_column
 
 
 def load_features(path):
@@ -469,8 +526,57 @@ def build_cell_index():
 # ---------- Build training dataset ----------
 
 
+def rows_have_time(pareto):
+    """True iff any row in the pareto dict carries a `time_ms` key.
+    Used to decide whether to emit the per-cell time_log head."""
+    for samples in pareto.values():
+        for s in samples:
+            if "time_ms" in s:
+                return True
+        # Only need to inspect the first nonempty sample list — rows in
+        # one (image, size) cell come from the same TSV pass, so the
+        # column-presence is uniform.
+        if samples:
+            break
+    return False
+
+
+def compute_time_baselines(pareto):
+    """Median `time_ms` per size_class across all samples in the
+    dataset. Returned as `{size_class: median_ms}`. Used to compute
+    the per-(image, size_class) budget when --time-budget-multiplier > 0
+    filters within-cell candidates."""
+    by_size: dict = defaultdict(list)
+    for (image, size, w, h), samples in pareto.items():
+        for s in samples:
+            t = s.get("time_ms")
+            if t is not None and not math.isinf(t) and t > 0:
+                by_size[size].append(t)
+    baselines = {}
+    for sz, vals in by_size.items():
+        if vals:
+            vals_sorted = sorted(vals)
+            mid = len(vals_sorted) // 2
+            baselines[sz] = (
+                vals_sorted[mid]
+                if len(vals_sorted) % 2 == 1
+                else 0.5 * (vals_sorted[mid - 1] + vals_sorted[mid])
+            )
+    return baselines
+
+
 def build_dataset(
-    pareto, feats, feat_cols, cells, config_to_cell, parsed_all, ceilings=None
+    pareto,
+    feats,
+    feat_cols,
+    cells,
+    config_to_cell,
+    parsed_all,
+    ceilings=None,
+    *,
+    time_budget_multiplier: float = 0.0,
+    time_baselines: dict | None = None,
+    emit_metric_head: bool = False,
 ):
     """Per (image, size, zq) row, compute within-cell optimal:
        bytes_log[c]    = log(min bytes in cell c over configs that reach zq)
@@ -483,14 +589,36 @@ def build_dataset(
     for that (image, size) and produce only data-starvation noise. See
     imazen/zenanalyze#51.
 
-    Returns (Xs, Xe, bytes_log, scalars, reach, meta) where `scalars` is
-    a `dict[axis_name -> ndarray(n_rows, n_cells)]` keyed by SCALAR_AXES.
+    Returns (Xs, Xe, bytes_log, scalars, reach, meta, time_log,
+    metric_log, infeasible) where:
+      - `scalars` is `dict[axis_name -> ndarray(n_rows, n_cells)]`.
+      - `time_log` is `ndarray(n_rows, n_cells)` of `log(encode_ms)` for
+        the within-cell-best config (NaN where cell did not reach
+        target). None when the sweep TSV has no time column.
+      - `metric_log` is `ndarray(n_rows, n_cells)` of
+        `log(metric_value)` (or `metric_value` for direction-agnostic
+        targets) for the within-cell-best config. None when
+        `emit_metric_head=False`.
+      - `infeasible` is `{(image, size_class): True}` for (image, size)
+        pairs where every cell is over the time budget at every zq
+        target. Empty when no budget filter is in effect. Drives the
+        BUDGET_INFEASIBLE safety gate.
+
+    `time_budget_multiplier` (default 0.0 = no filter): when > 0, only
+    configs whose `time_ms <= time_baselines[size_class] * multiplier`
+    are eligible as within-cell candidates. `time_baselines` must be
+    provided (use `compute_time_baselines(pareto)`).
     """
     n_cells = len(cells)
+    has_time = bool(rows_have_time(pareto))
+    apply_budget = time_budget_multiplier > 0 and has_time and time_baselines is not None
     Xs_rows, Xe_rows = [], []
     bytes_log_rows, reach_rows = [], []
+    time_log_rows = [] if has_time else None
+    metric_log_rows = [] if emit_metric_head else None
     scalar_rows = {axis: [] for axis in SCALAR_AXES}
     meta = []
+    infeasible: dict = {}
     # Drop zq targets above ceiling - this margin. The margin lets
     # the picker still see borderline cells where some images do reach
     # the target and others don't.
@@ -527,26 +655,69 @@ def build_dataset(
                 skipped_above_ceiling += 1
                 continue
             cell_bytes = [math.inf] * n_cells
+            cell_time = [math.inf] * n_cells if has_time else None
+            cell_metric = [math.nan] * n_cells if emit_metric_head else None
             cell_scalars = {axis: [math.nan] * n_cells for axis in SCALAR_AXES}
             cell_reach = [False] * n_cells
 
+            # Per-(image, size) budget gate. When apply_budget is on,
+            # only candidates with time ≤ this value are considered.
+            budget_ms = math.inf
+            if apply_budget:
+                base = time_baselines.get(size)  # type: ignore[union-attr]
+                if base is not None:
+                    budget_ms = base * time_budget_multiplier
+
+            # Track whether ANY config (ignoring budget) would have
+            # reached this zq for this (image, size). Used to attribute
+            # post-filter failures to the budget vs to physical
+            # unreachability.
+            any_unfiltered_reach = False
+
             for cfg_id, hits in by_cfg.items():
-                # Cheapest sample for this config that reaches zq.
+                # Cheapest sample for this config that reaches the target
+                # (direction-aware: higher_better → metric ≥ zq;
+                # lower_better → metric ≤ zq) AND within budget.
                 best_b = math.inf
+                best_t: float = math.inf
+                best_m: float = math.nan
                 for s in hits:
-                    if s["zensim"] >= zq and s["bytes"] < best_b:
+                    if METRIC_DIRECTION == "higher_better":
+                        reaches = s["zensim"] >= zq
+                    else:
+                        reaches = s["zensim"] <= zq
+                    if not reaches:
+                        continue
+                    any_unfiltered_reach = True
+                    t_ms = s.get("time_ms", math.inf) if has_time else math.inf
+                    if apply_budget and t_ms > budget_ms:
+                        continue
+                    if s["bytes"] < best_b:
                         best_b = s["bytes"]
+                        if has_time:
+                            best_t = t_ms
+                        if emit_metric_head:
+                            best_m = s["zensim"]
                 if math.isinf(best_b):
                     continue
                 c = config_to_cell[cfg_id]
                 if best_b < cell_bytes[c]:
                     cell_bytes[c] = best_b
+                    if has_time:
+                        cell_time[c] = best_t
+                    if emit_metric_head:
+                        cell_metric[c] = best_m
                     p = parsed_all[cfg_id]
                     for axis in SCALAR_AXES:
                         cell_scalars[axis][c] = p[axis]
                     cell_reach[c] = True
 
             if not any(cell_reach):
+                # Mark as budget-infeasible only when the unfiltered
+                # version would have reached. Otherwise this is a
+                # physically-unreachable target, not a budget problem.
+                if apply_budget and any_unfiltered_reach:
+                    infeasible[(image, size)] = True
                 continue
 
             zq_norm = zq / 100.0
@@ -573,12 +744,39 @@ def build_dataset(
             Xs_rows.append(xs)
             Xe_rows.append(xe)
             bytes_log_rows.append(bytes_log)
+            if time_log_rows is not None:
+                # log(time_ms); NaN where the cell didn't reach.
+                tlog = np.array(
+                    [
+                        math.log(t) if (t is not None and not math.isinf(t) and t > 0)
+                        else math.nan
+                        for t in cell_time  # type: ignore[union-attr]
+                    ],
+                    dtype=np.float32,
+                )
+                time_log_rows.append(tlog)
+            if metric_log_rows is not None:
+                # For higher_better metrics (zensim, ssim2), values are
+                # always > 0 — log is fine. For lower_better (butteraugli),
+                # also > 0 in practice (distance is non-negative). Use
+                # log everywhere for numeric stability across metrics.
+                # NaN preserved for unreached cells.
+                mlog = np.array(
+                    [
+                        math.log(m) if (not math.isnan(m) and m > 0) else math.nan
+                        for m in cell_metric  # type: ignore[union-attr]
+                    ],
+                    dtype=np.float32,
+                )
+                metric_log_rows.append(mlog)
             for axis in SCALAR_AXES:
                 scalar_rows[axis].append(np.array(cell_scalars[axis], dtype=np.float32))
             reach_rows.append(reach)
             meta.append((image, size, zq))
 
     scalars = {axis: np.stack(scalar_rows[axis]) for axis in SCALAR_AXES}
+    time_log = np.stack(time_log_rows) if time_log_rows else None
+    metric_log = np.stack(metric_log_rows) if metric_log_rows else None
     return (
         np.stack(Xs_rows),
         np.stack(Xe_rows),
@@ -586,6 +784,9 @@ def build_dataset(
         scalars,
         np.stack(reach_rows),
         meta,
+        time_log,
+        metric_log,
+        infeasible,
     )
 
 
@@ -676,6 +877,50 @@ def evaluate_scalars(pred_scalars, actual_scalars, reach):
     return out
 
 
+def evaluate_per_cell_r2(pred, actual, reach):
+    """Per-cell R² over reachable cells. Returns
+    `{"per_cell": [r2 or None per cell], "median": float, "min": float}`.
+
+    R² = 1 - SS_res / SS_tot. None when the cell has < 5 reached samples
+    or zero variance in the target. Used by the TIME_HEAD_R2 and
+    METRIC_HEAD_R2 safety gates.
+    """
+    n_rows, n_cells = pred.shape
+    per_cell = []
+    valid = []
+    for c in range(n_cells):
+        a_vals = []
+        p_vals = []
+        for i in range(n_rows):
+            if not reach[i, c]:
+                continue
+            a = actual[i, c]
+            p = pred[i, c]
+            if math.isnan(a) or math.isnan(p):
+                continue
+            a_vals.append(a)
+            p_vals.append(p)
+        if len(a_vals) < 5:
+            per_cell.append(None)
+            continue
+        a_arr = np.asarray(a_vals, dtype=np.float64)
+        p_arr = np.asarray(p_vals, dtype=np.float64)
+        ss_tot = float(((a_arr - a_arr.mean()) ** 2).sum())
+        if ss_tot <= 1e-12:
+            per_cell.append(None)
+            continue
+        ss_res = float(((a_arr - p_arr) ** 2).sum())
+        r2 = 1.0 - ss_res / ss_tot
+        per_cell.append(r2)
+        valid.append(r2)
+    return {
+        "per_cell": per_cell,
+        "median": float(np.median(valid)) if valid else float("nan"),
+        "min": float(min(valid)) if valid else float("nan"),
+        "n_valid": len(valid),
+    }
+
+
 # ---------- Diagnostics + safety report ----------
 
 # Default thresholds. Codec configs override by exporting
@@ -734,6 +979,16 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     # metric saturated below target). Set to None to disable. See
     # imazen/zenanalyze#51 for the cross-codec design context.
     require_ceiling_above_zq=85,
+    # Time / metric head R² floors (held-out, per cell median). Below
+    # these the picker can't trust the head's predictions for
+    # inference-time budget filtering or quality-constraint enforcement.
+    # Only checked when the corresponding head is trained.
+    min_time_head_r2=0.6,
+    min_metric_head_r2=0.6,
+    # Fraction of (image, size) pairs where every cell is over budget
+    # at every zq target. When higher than this, the budget is too
+    # tight for the corpus — the picker has nothing to recommend.
+    max_budget_infeasible_fraction=0.05,
 )
 
 
@@ -1094,6 +1349,35 @@ def safety_check(diag, thresholds, objective: str):
                     "zensim_strict picker can't reach the top of the zq grid"
                 )
 
+    # Time / metric head R² gates — only checked when the head exists.
+    thr_time_r2 = thresholds.get("min_time_head_r2", 0.0)
+    if diag.get("time_head_r2") is not None and thr_time_r2 > 0:
+        med = diag["time_head_r2"]["median"]
+        if not math.isnan(med) and med < thr_time_r2:
+            v.append(
+                f"TIME_HEAD_R2: median per-cell R² {med:.3f} "
+                f"< threshold {thr_time_r2:.3f} — time predictions "
+                f"too noisy for inference-time budget filtering"
+            )
+    thr_metric_r2 = thresholds.get("min_metric_head_r2", 0.0)
+    if diag.get("metric_head_r2") is not None and thr_metric_r2 > 0:
+        med = diag["metric_head_r2"]["median"]
+        if not math.isnan(med) and med < thr_metric_r2:
+            v.append(
+                f"METRIC_HEAD_R2: median per-cell R² {med:.3f} "
+                f"< threshold {thr_metric_r2:.3f} — metric predictions "
+                f"too noisy to enforce quality constraints"
+            )
+    # Budget feasibility — only meaningful when budget filter is on.
+    thr_budget = thresholds.get("max_budget_infeasible_fraction", 1.0)
+    frac = diag.get("budget_infeasible_fraction", 0.0)
+    if frac > thr_budget:
+        v.append(
+            f"BUDGET_INFEASIBLE: {frac:.1%} of (image, size) pairs have "
+            f"no in-budget cell at any zq target "
+            f"> threshold {thr_budget:.1%} — budget too tight for corpus"
+        )
+
     return (len(v) == 0, v)
 
 
@@ -1108,13 +1392,18 @@ def train_teacher_per_cell(
     n_cells,
     params=None,
     bytes_quantile=None,
+    time_log_tr=None,
+    metric_log_tr=None,
 ):
-    """Per-cell HistGB regressors for: bytes_log + each scalar axis.
+    """Per-cell HistGB regressors for: bytes_log + each scalar axis
+    (+ optional time_log when `time_log_tr` is provided).
 
     `scalars_tr` is a dict `{axis_name: ndarray(n_rows, n_cells)}`.
-    Returns `(teachers_bytes, teachers_per_axis, scalar_means)` where:
-      - teachers_per_axis: dict[axis_name -> list[teacher per cell]]
-      - scalar_means:      dict[axis_name -> ndarray(n_cells,)]
+    `time_log_tr` is `ndarray(n_rows, n_cells)` of `log(encode_ms)` for
+    the within-cell-best config; NaN where the cell didn't reach target.
+    Returns `(teachers_bytes, teachers_per_axis, scalar_means,
+    teachers_time, time_means)` — the time entries are `(None, None)`
+    when `time_log_tr is None`.
 
     Per-axis sentinel mask: when SCALAR_SENTINELS[axis] is declared,
     rows where actual_value <= sentinel are excluded from that axis's
@@ -1171,7 +1460,38 @@ def train_teacher_per_cell(
             extra_mask=extra_mask, params=params, label=axis,
         )
 
-    return teachers_bytes, teachers_per_axis, scalar_means
+    # Time head (optional) — same reach mask. Codec runtime can apply a
+    # budget filter at inference using these predictions.
+    teachers_time = None
+    time_means = None
+    if time_log_tr is not None:
+        # Mean-regression for time (no quantile by default — bytes head's
+        # quantile mode is for risk-tail bytes, not time predictions).
+        teachers_time = train_teachers_per_cell_parallel(
+            Xs_tr, time_log_tr, reach_tr, params=params, label="time",
+        )
+        time_means = np.nanmean(time_log_tr, axis=0)
+
+    # Metric head (optional) — predicts the achieved metric value
+    # (log-space) for the within-cell-best config. Codec runtime uses
+    # this to enforce the user's quality constraint (e.g., bfly ≤ target).
+    teachers_metric = None
+    metric_means = None
+    if metric_log_tr is not None:
+        teachers_metric = train_teachers_per_cell_parallel(
+            Xs_tr, metric_log_tr, reach_tr, params=params, label="metric",
+        )
+        metric_means = np.nanmean(metric_log_tr, axis=0)
+
+    return (
+        teachers_bytes,
+        teachers_per_axis,
+        scalar_means,
+        teachers_time,
+        time_means,
+        teachers_metric,
+        metric_means,
+    )
 
 
 def teacher_predict_all(teachers, Xs, fallback_means, n_cells):
@@ -1264,6 +1584,39 @@ def main():
         "target_zq are excluded from the runtime mask. Default 0.99.",
     )
     parser.add_argument(
+        "--metric-column",
+        default=None,
+        help="Override codec config's METRIC_COLUMN. Pareto-TSV column "
+        "name for the quality metric the picker is trained against "
+        "(e.g., 'butteraugli', 'ssim2', 'dssim'). Default: codec config "
+        "value (or 'zensim' if unset).",
+    )
+    parser.add_argument(
+        "--metric-direction",
+        choices=["higher_better", "lower_better"],
+        default=None,
+        help="Override codec config's METRIC_DIRECTION. 'higher_better' "
+        "for zensim/ssim2/psnr; 'lower_better' for butteraugli/dssim/mse. "
+        "Default: codec config value.",
+    )
+    parser.add_argument(
+        "--time-budget-multiplier",
+        type=float,
+        default=0.0,
+        help="When > 0, applies a budget filter at label-extraction time: "
+        "only configs with time ≤ baseline_ms[size_class] × multiplier "
+        "are eligible as within-cell candidates. baseline_ms is the "
+        "median time per size_class. Default 0 (no filter).",
+    )
+    parser.add_argument(
+        "--emit-metric-head",
+        action="store_true",
+        help="Train an extra per-cell `metric_log` head (predicts the "
+        "achieved metric value of the within-cell-best config). Codec "
+        "runtime uses this to enforce the user's quality constraint. "
+        "Requires the metric column be available in the pareto TSV.",
+    )
+    parser.add_argument(
         "--out-suffix",
         default=None,
         help="Override the OUT_JSON / OUT_LOG basename suffix. Defaults to "
@@ -1342,6 +1695,15 @@ def main():
         sys.stderr.write(f"  seed override: SEED={SEED:#x}\n")
     load_codec_config(args.codec_config)
 
+    # CLI overrides — take precedence over codec config defaults.
+    global METRIC_COLUMN, METRIC_DIRECTION
+    if args.metric_column is not None:
+        METRIC_COLUMN = args.metric_column
+        sys.stderr.write(f"  CLI override: METRIC_COLUMN={METRIC_COLUMN!r}\n")
+    if args.metric_direction is not None:
+        METRIC_DIRECTION = args.metric_direction
+        sys.stderr.write(f"  CLI override: METRIC_DIRECTION={METRIC_DIRECTION!r}\n")
+
     # Per-objective output naming. The codec config defines the
     # baseline OUT_JSON/OUT_LOG; we suffix when training a non-default
     # safety profile so both bakes can co-exist. `global OUT_JSON,
@@ -1365,8 +1727,12 @@ def main():
     )
 
     sys.stderr.write(f"Loading {PARETO}...\n")
-    pareto, ceilings, has_ceiling_column = load_pareto(PARETO)
+    pareto, ceilings, has_ceiling_column, has_time_column = load_pareto(PARETO)
     feats, feat_cols = load_features(FEATURES)
+    sys.stderr.write(
+        f"  metric column: {METRIC_COLUMN} ({METRIC_DIRECTION})\n"
+        f"  time column:   {TIME_COLUMN} ({'present' if has_time_column else 'absent'})\n"
+    )
     if has_ceiling_column:
         n_with_ceiling = sum(1 for v in ceilings.values() if v is not None)
         sys.stderr.write(
@@ -1385,15 +1751,66 @@ def main():
     for c in cells:
         sys.stderr.write(f"  {c['id']:>2d}: {c['label']:30s}  ({len(c['member_config_ids'])} configs)\n")
 
-    Xs, Xe, bytes_log, scalars, reach, meta = build_dataset(
-        pareto, feats, feat_cols, cells, config_to_cell, parsed_all,
+    # Time baselines per size_class (median ms across all configs).
+    # Only used when --time-budget-multiplier > 0; we always compute so
+    # we can record them in the manifest for the codec runtime.
+    time_baselines = compute_time_baselines(pareto) if has_time_column else {}
+    if args.time_budget_multiplier > 0 and not has_time_column:
+        sys.stderr.write(
+            f"  WARNING: --time-budget-multiplier={args.time_budget_multiplier} "
+            f"but pareto TSV has no '{TIME_COLUMN}' column — budget filter "
+            f"will be a no-op\n"
+        )
+    if args.time_budget_multiplier > 0 and time_baselines:
+        sys.stderr.write(
+            f"  budget per size_class (median × {args.time_budget_multiplier}): "
+            + ", ".join(
+                f"{sz}={time_baselines[sz] * args.time_budget_multiplier:.1f}ms"
+                for sz in sorted(time_baselines)
+            )
+            + "\n"
+        )
+
+    (
+        Xs,
+        Xe,
+        bytes_log,
+        scalars,
+        reach,
+        meta,
+        time_log,
+        metric_log,
+        infeasible,
+    ) = build_dataset(
+        pareto,
+        feats,
+        feat_cols,
+        cells,
+        config_to_cell,
+        parsed_all,
         ceilings=(ceilings if has_ceiling_column else None),
+        time_budget_multiplier=args.time_budget_multiplier,
+        time_baselines=time_baselines if time_baselines else None,
+        emit_metric_head=args.emit_metric_head,
     )
     sys.stderr.write(
-        f"\nDecision rows: {len(Xs)}; Xs={Xs.shape[1]}, Xe={Xe.shape[1]}, n_cells={n_cells}\n"
+        f"\nDecision rows: {len(Xs)}; Xs={Xs.shape[1]}, Xe={Xe.shape[1]}, n_cells={n_cells}"
+        + (" (+ time_log)" if time_log is not None else "")
+        + (" (+ metric_log)" if metric_log is not None else "")
+        + (f" (BUDGET_INFEASIBLE: {len(infeasible)} (image, size) pairs)"
+           if infeasible else "")
+        + "\n"
     )
     n_scalar_axes = len(SCALAR_AXES)
-    output_dim = (1 + n_scalar_axes) * n_cells
+    has_time_head = time_log is not None
+    has_metric_head = metric_log is not None
+    # Output blocks per cell: bytes + (time?) + (metric?) + scalar axes.
+    output_dim = (
+        1
+        + (1 if has_time_head else 0)
+        + (1 if has_metric_head else 0)
+        + n_scalar_axes
+    ) * n_cells
 
     rng = np.random.default_rng(SEED)
     images = sorted({m[0] for m in meta})
@@ -1411,11 +1828,26 @@ def main():
     scalars_va = {axis: scalars[axis][va] for axis in SCALAR_AXES}
     rch_tr, rch_va = reach[tr], reach[va]
     meta_va = [meta[i] for i in va]
+    time_log_tr = time_log[tr] if time_log is not None else None
+    time_log_va = time_log[va] if time_log is not None else None
+    metric_log_tr = metric_log[tr] if metric_log is not None else None
+    metric_log_va = metric_log[va] if metric_log is not None else None
 
     # --- Teacher
     bytes_quantile = args.bytes_quantile if args.objective == "zensim_strict" else None
-    t_bytes, t_per_axis, scalar_means = train_teacher_per_cell(
-        Xs_tr, bl_tr, scalars_tr, rch_tr, n_cells, bytes_quantile=bytes_quantile
+    (
+        t_bytes,
+        t_per_axis,
+        scalar_means,
+        t_time,
+        time_means,
+        t_metric,
+        metric_means,
+    ) = train_teacher_per_cell(
+        Xs_tr, bl_tr, scalars_tr, rch_tr, n_cells,
+        bytes_quantile=bytes_quantile,
+        time_log_tr=time_log_tr,
+        metric_log_tr=metric_log_tr,
     )
     sys.stderr.write("\nGenerating teacher soft targets (val + train)...\n")
     bytes_pred_tr = teacher_predict_all(t_bytes, Xs_tr, np.nanmean(bl_tr, axis=0), n_cells)
@@ -1428,6 +1860,20 @@ def main():
         axis: teacher_predict_all(t_per_axis[axis], Xs_va, scalar_means[axis], n_cells)
         for axis in SCALAR_AXES
     }
+    if has_time_head:
+        time_means_safe = np.where(np.isnan(time_means), 0.0, time_means)
+        time_pred_tr = teacher_predict_all(t_time, Xs_tr, time_means_safe, n_cells)
+        time_pred_va = teacher_predict_all(t_time, Xs_va, time_means_safe, n_cells)
+    else:
+        time_pred_tr = None
+        time_pred_va = None
+    if has_metric_head:
+        metric_means_safe = np.where(np.isnan(metric_means), 0.0, metric_means)
+        metric_pred_tr = teacher_predict_all(t_metric, Xs_tr, metric_means_safe, n_cells)
+        metric_pred_va = teacher_predict_all(t_metric, Xs_va, metric_means_safe, n_cells)
+    else:
+        metric_pred_tr = None
+        metric_pred_va = None
 
     all_mask = np.ones(n_cells, dtype=bool)
     teacher_argmin = evaluate_argmin(bytes_pred_va, bl_va, rch_va, meta_va, all_mask)
@@ -1443,10 +1889,16 @@ def main():
     )
 
     # --- Student
-    # Soft targets: bytes + (one block per scalar axis), each block n_cells wide.
-    soft_tr = np.concatenate(
-        [bytes_pred_tr] + [scalar_pred_tr[axis] for axis in SCALAR_AXES], axis=1
-    )
+    # Soft targets: bytes + (time?) + (one block per scalar axis), each
+    # block n_cells wide. Layout matches `output_layout` emitted in the
+    # bake manifest.
+    soft_blocks = [bytes_pred_tr]
+    if time_pred_tr is not None:
+        soft_blocks.append(time_pred_tr)
+    if metric_pred_tr is not None:
+        soft_blocks.append(metric_pred_tr)
+    soft_blocks.extend(scalar_pred_tr[axis] for axis in SCALAR_AXES)
+    soft_tr = np.concatenate(soft_blocks, axis=1)
     hidden_repr = "x".join(str(x) for x in hidden_layer_sizes)
     sys.stderr.write(
         f"\nTraining MLP student (hidden={hidden_repr}, output_dim={soft_tr.shape[1]})...\n"
@@ -1558,6 +2010,25 @@ def main():
         meta_tr, SIZE_CLASSES, ZQ_TARGETS
     )
 
+    # --- Optional time + metric head R² (held-out, per cell)
+    time_head_r2 = None
+    if has_time_head:
+        time_head_r2 = evaluate_per_cell_r2(time_pred_va, time_log_va, rch_va)
+    metric_head_r2 = None
+    if has_metric_head:
+        metric_head_r2 = evaluate_per_cell_r2(metric_pred_va, metric_log_va, rch_va)
+    # Budget infeasible fraction: (image, size) pairs where every cell
+    # is over budget at every zq target. Denominator is total candidate
+    # (image, size) pairs in the pareto (not just meta — meta excludes
+    # pairs that never reached any zq, which is exactly the infeasible
+    # set when budget filter is active).
+    total_pairs = len({(image, size) for (image, size, _w, _h) in pareto.keys()})
+    budget_infeasible_fraction = (
+        len(infeasible) / total_pairs
+        if (infeasible and total_pairs > 0)
+        else 0.0
+    )
+
     # --- Safety report: assemble + check thresholds
     diag = {
         "argmin": {"train": student_argmin_tr, "val": student_argmin},
@@ -1570,6 +2041,9 @@ def main():
         "mlp": mlp_health,
         "feature_bounds": feature_bounds,
         "reach_safety": reach_safety,
+        "time_head_r2": time_head_r2,
+        "metric_head_r2": metric_head_r2,
+        "budget_infeasible_fraction": budget_infeasible_fraction,
         # Sweep ceilings: did the codec's harness emit
         # `effective_max_zensim` in the Pareto TSV? Drives the
         # UNCAPPED_ZQ_GRID safety gate. See imazen/zenanalyze#51.
@@ -1610,10 +2084,21 @@ def main():
 
     # --- Persist
     n_params = sum(c.size + i.size for c, i in zip(student.coefs_, student.intercepts_))
-    # Output layout: bytes_log first, then one block per scalar axis.
+    # Output layout: bytes_log first, then (optional) time_log, then one
+    # block per scalar axis. Each block is n_cells wide. Codec runtime
+    # reads the manifest to find which slice of the output vector is
+    # which head.
     output_layout = {"bytes_log": [0, n_cells]}
-    for i, axis in enumerate(SCALAR_AXES):
-        output_layout[axis] = [(i + 1) * n_cells, (i + 2) * n_cells]
+    next_block = 1
+    if has_time_head:
+        output_layout["time_log"] = [next_block * n_cells, (next_block + 1) * n_cells]
+        next_block += 1
+    if has_metric_head:
+        output_layout["metric_log"] = [next_block * n_cells, (next_block + 1) * n_cells]
+        next_block += 1
+    for axis in SCALAR_AXES:
+        output_layout[axis] = [next_block * n_cells, (next_block + 1) * n_cells]
+        next_block += 1
     # Sentinel record for runtime — codec config supplies values.
     sentinels_for_manifest = {
         axis: float(SCALAR_SENTINELS[axis])
@@ -1665,6 +2150,26 @@ def main():
                 args.bytes_quantile if args.objective == "zensim_strict" else None
             ),
             "reach_threshold": args.reach_threshold,
+            # Metric the picker was trained against. Codec runtime checks
+            # this matches the metric the caller is targeting before
+            # using the bake.
+            "metric_name": METRIC_COLUMN,
+            "metric_direction": METRIC_DIRECTION,
+            "time_column": TIME_COLUMN if has_time_head else None,
+            "has_time_head": bool(has_time_head),
+            "has_metric_head": bool(has_metric_head),
+            # Budget filter applied at label-extraction time. When > 0,
+            # within-cell candidates were restricted to time ≤
+            # baseline_ms[size_class] × this multiplier. Codec runtime
+            # should apply the same filter at inference for parity.
+            "time_budget_multiplier": float(args.time_budget_multiplier),
+            # Median time per size_class — codec runtime needs these to
+            # compute budgets at inference matching how labels were
+            # extracted.
+            "time_baselines_ms": {str(k): float(v) for k, v in time_baselines.items()},
+            # Count of (image, size) pairs where every cell is over
+            # budget at every zq target. Drives BUDGET_INFEASIBLE.
+            "n_infeasible_pairs": int(len(infeasible)),
         },
         "reach_safety": reach_safety,
         "teacher_metrics": {"argmin": teacher_argmin, "scalars": teacher_scalars},
