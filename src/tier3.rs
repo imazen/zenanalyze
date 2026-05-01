@@ -121,6 +121,7 @@ pub fn populate_tier3(
             out.noise_floor_uv_p75 = dct.noise_floor_uv_p75;
             out.noise_floor_uv_p90 = dct.noise_floor_uv_p90;
             out.gradient_fraction = dct.gradient_fraction;
+            out.gradient_fraction_smooth = dct.gradient_fraction_smooth;
             out.patch_fraction_fast = dct.patch_fraction_fast;
             out.quant_survival_y = dct.quant_survival_y;
             out.quant_survival_uv = dct.quant_survival_uv;
@@ -230,6 +231,11 @@ struct Tier3DctStats {
     /// blocks): this is the per-block-thresholded fraction, robust
     /// to a few high-detail blocks dragging the mean.
     gradient_fraction: f32,
+    /// Smooth analog of `gradient_fraction` (#120): mean of
+    /// `block_low_y_ac / max(block_ac, 16)` across sampled blocks.
+    /// Differentiable everywhere; same intent (smooth-gradient
+    /// detection) without the threshold cliff.
+    gradient_fraction_smooth: f32,
     /// **Experimental.** dHash-based patch_fraction (~10× cheaper than
     /// the DCT signature). 0.99 correlated with `patch_fraction`; AUC
     /// 0.852 (vs DCT's 0.880); peak F1 0.779 (DCT 0.763) on the
@@ -890,6 +896,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_uv_p75: 0.0,
             noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
+            gradient_fraction_smooth: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
@@ -947,6 +954,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_uv_p75: 0.0,
             noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
+            gradient_fraction_smooth: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
@@ -989,6 +997,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // in the low-zigzag positions (smooth-content blocks where larger
     // DCT transforms pay off).
     let mut gradient_blocks: u32 = 0;
+    let mut gradient_smooth_sum: f32 = 0.0;
     // Bounded to `max_blocks` (default 256) — small enough that a
     // sort-and-sweep is faster than a hash map on this CPU.
     let mut signatures: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
@@ -1116,6 +1125,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             if block_ac > 16.0 && block_low_y_ac >= 0.9 * block_ac {
                 gradient_blocks += 1;
             }
+            // GradientFractionSmooth (#120): per-block low-AC ratio
+            // accumulated as a continuous signal. Mirrors the hard
+            // threshold's intent (high values = smooth-gradient blocks)
+            // without the binary jumps. Floor block_ac at 16 to match
+            // the hard version's "near-flat blocks don't contribute"
+            // semantics — a dead-flat block has zero AC and would
+            // produce NaN/garbage from `low_ac/block_ac`.
+            gradient_smooth_sum += (block_low_y_ac / block_ac.max(16.0)) as f32;
 
             // Chroma low-AC for chroma noise floor. Reuses the
             // already-computed coeffs_cb / coeffs_cr.
@@ -1393,6 +1410,15 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     } else {
         0.0
     };
+    // GradientFractionSmooth (#120): mean ratio over sampled blocks.
+    // Div-by-zero check: blocks_sampled > 0 gate matches the hard
+    // version above; per-block denominator was floored at 16 inside
+    // the inner loop.
+    let gradient_fraction_smooth = if blocks_sampled > 0 {
+        gradient_smooth_sum / blocks_sampled as f32
+    } else {
+        0.0
+    };
 
     #[cfg(not(feature = "experimental"))]
     let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
@@ -1438,6 +1464,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         noise_floor_uv_p75,
         noise_floor_uv_p90,
         gradient_fraction,
+        gradient_fraction_smooth,
         patch_fraction_fast,
         quant_survival_y,
         quant_survival_uv,

@@ -933,6 +933,64 @@ features_table! {
     /// `f32`. Y quant-survival at p5.
     #[cfg(feature = "experimental")]
     QuantSurvivalYP5 = 115 : f32 => quant_survival_y_p5,
+
+    // ---------------- Distribution-shape (kurtosis) signals ----------
+    // L4-moment-based features. Capture "how peaked" a distribution
+    // is — a single scalar that distinguishes Gaussian-ish (~ 3) from
+    // heavy-tailed (≫ 3, e.g. screen content with bimodal AC) without
+    // needing a sort. Differentiable; smoother than percentile features
+    // for MLP picker training.
+    /// `f32`. Excess kurtosis of `|∇²L|` over the 256-bin Laplacian
+    /// histogram already computed for `LaplacianVariance*P*` features.
+    /// Computed post-hoc from the histogram with no per-pixel cost —
+    /// `(E[X⁴] / E[X²]²) − 3` where `X = |∇²L|` clamped to `[0, 255]`.
+    /// Captures texture-energy distribution shape: ~ 0 for natural
+    /// photos (Gaussian-ish gradient distribution); ≫ 0 for screen
+    /// content (heavy tail from sharp transitions on flat backgrounds).
+    /// Complementary to `LaplacianVariance` (which measures spread, not
+    /// shape).
+    #[cfg(feature = "experimental")]
+    LumaKurtosis = 116 : f32 => luma_kurtosis,
+    /// `f32`. Excess kurtosis of `|∇Cb|` and `|∇Cr|` combined,
+    /// computed from new `cb/cr_grad_quad_sum` accumulators alongside
+    /// the existing `cb/cr_grad_sum` chroma-gradient pass. Captures
+    /// chroma-edge peakiness: low for photos with smooth chroma
+    /// transitions, high for screen content with sharp chroma boundaries
+    /// (UI element edges, anti-aliased text glyphs).
+    #[cfg(feature = "experimental")]
+    ChromaKurtosis = 117 : f32 => chroma_kurtosis,
+
+    // ---------------- Smooth replacements for hard thresholds --------
+    // Threshold-counting features (var < 25 / range ≤ 4 / etc.) have
+    // piecewise-constant gradients that fight MLP training. Smooth
+    // counterparts using exp-decay or direct ratios are differentiable
+    // everywhere and capture the same "fraction-of-mass" signal.
+    /// `f32`. Smooth analog of `Uniformity`: mean of `exp(-var/25)`
+    /// over sampled 8×8 blocks, where `var` is per-block luma variance.
+    /// At `var = 0` contributes 1.0; at `var = 25` (the hard
+    /// threshold) contributes ~0.37; at `var ≥ 100` ~0.018. Continuous
+    /// and differentiable in `var`. Cross-codec ablation will tell us
+    /// whether this dominates the hard-threshold `Uniformity` for
+    /// learned pickers.
+    #[cfg(feature = "experimental")]
+    UniformitySmooth = 118 : f32 => uniformity_smooth,
+    /// `f32`. Smooth analog of `FlatColorBlockRatio`: mean of
+    /// `exp(-(max_range/4)²)` over sampled 8×8 blocks where
+    /// `max_range = max(R_max-R_min, G_max-G_min, B_max-B_min)`. At
+    /// `max_range = 0` contributes 1.0; at `max_range = 4` (the hard
+    /// threshold) contributes 1/e ≈ 0.37; at `max_range ≥ 12` near-zero.
+    /// Differentiable in the per-channel ranges.
+    #[cfg(feature = "experimental")]
+    FlatColorSmooth = 119 : f32 => flat_color_smooth,
+    /// `f32`. Smooth analog of `GradientFraction`: mean of
+    /// `block_low_y_ac / max(block_ac, 16)` over sampled 8×8 DCT blocks.
+    /// The hard `GradientFraction` only counts blocks where the ratio
+    /// is `≥ 0.9` AND `block_ac > 16`; this smooth version returns the
+    /// continuous ratio for every block. Captures "what fraction of
+    /// luma AC energy lives in the low-zigzag positions" as a smooth
+    /// signal — drives JXL DCT16/DCT32 enable decisions.
+    #[cfg(feature = "experimental")]
+    GradientFractionSmooth = 120 : f32 => gradient_fraction_smooth,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1868,10 +1926,20 @@ mod tests {
     /// must return `None` for these so callers don't get a value at a
     /// slot whose meaning has changed.
     const RESERVED_RETIRED_IDS: &[u16] = &[
-        // id 11 was `DistinctColorBinsChao1`, removed pre-0.1.0
-        // because the full-pass scan made it permanently equal to
-        // `DistinctColorBins`.
+        // id 11 was `DistinctColorBinsChao1`, removed pre-0.1.0.
         11,
+        // ids 27, 28, 29, 45 were `TextLikelihood` /
+        // `ScreenContentLikelihood` / `NaturalLikelihood` /
+        // `LineArtScore` — composites flag deleted; stable ids reserved.
+        27, 28, 29, 45,
+        // ids 64, 66 were `BlockMisalignment16` / `BlockMisalignment64`
+        // — collapsed into `_8` / `_32` anchors at Spearman 0.96 / 0.998
+        // on zenavif's non-power-of-2 corpus.
+        64, 66,
+        // ids 94..104 were the 11 mathematical transforms of
+        // `feat_pixel_count` (log2/log10/log_padded/sqrt/etc.) — pure
+        // collinearity per #59.
+        94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104,
     ];
 
     #[test]
@@ -1896,9 +1964,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the low-tail percentile additions
-        // (ids 105–115).
-        assert!(AnalysisFeature::from_u16(116).is_none());
+        // First unused id past the kurtosis + smooth-replacement
+        // additions (ids 116–120).
+        assert!(AnalysisFeature::from_u16(121).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -1958,7 +2026,7 @@ mod tests {
         // the upper bound when new ids land — `assert_eq!` below
         // catches drift between SUPPORTED.len() and this loop's
         // walked range.
-        for id in 0..120u16 {
+        for id in 0..128u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }

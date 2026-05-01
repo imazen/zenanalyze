@@ -2376,7 +2376,7 @@ fn wide_gamut_rgba_f32_linear_runs_without_error() {
 // preserves the dynamic-range signal.
 // --------------------------------------------------------------------
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", feature = "hdr"))]
 #[test]
 fn hdr_signal_survives_via_tier_depth_when_rowstream_would_clip() {
     use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
@@ -2432,7 +2432,7 @@ fn hdr_signal_survives_via_tier_depth_when_rowstream_would_clip() {
     );
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", feature = "hdr"))]
 #[test]
 fn sdr_srgb_does_not_trip_hdr_present() {
     // A regular 8-bit sRGB image — even one with code 255 throughout —
@@ -2590,7 +2590,7 @@ fn gradient_fraction_high_for_smooth_low_for_noise() {
     );
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", feature = "hdr"))]
 #[test]
 fn gamut_coverage_one_for_srgb_pixels_in_rec2020_container() {
     // Descriptor-gap test: an image declared as Rec.2020 / linear f32
@@ -2636,7 +2636,7 @@ fn gamut_coverage_one_for_srgb_pixels_in_rec2020_container() {
     );
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", feature = "hdr"))]
 #[test]
 fn gamut_coverage_zero_for_saturated_rec2020_green() {
     // Saturated green at (0, 1, 0) in BT.2020 primaries projects to
@@ -2873,7 +2873,7 @@ fn grayscale_score_one_for_neutral_image_zero_for_saturated() {
     assert!(g2 < 0.01, "saturated colour ⇒ near 0.0, got {g2}");
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", feature = "hdr"))]
 #[test]
 fn effective_bit_depth_distinguishes_u8_promoted_from_genuine_u16() {
     // The depth tier's effective-bit-depth probe correctly classifies
@@ -3245,6 +3245,7 @@ mod sanity_matrix {
         assert_eq!(count, 144, "expected 144 combinations, got {count}");
     }
 
+    #[cfg(feature = "hdr")]
     #[test]
     fn sanity_hdr_present_only_for_hdr_transfer_with_bright_pixels() {
         // For each HDR-capable transfer (PQ, HLG, Linear), an image
@@ -3301,6 +3302,7 @@ mod sanity_matrix {
         }
     }
 
+    #[cfg(feature = "hdr")]
     #[test]
     fn sanity_effective_bit_depth_per_channel_type() {
         // u8 always reports 8, f32 reports 32 (storage depth), u16
@@ -3339,6 +3341,7 @@ mod sanity_matrix {
         }
     }
 
+    #[cfg(feature = "hdr")]
     #[test]
     fn sanity_wide_gamut_fraction_zero_for_in_gamut_content() {
         // Linear-light values clamped to [0, 1] never trip
@@ -3366,6 +3369,7 @@ mod sanity_matrix {
         }
     }
 
+    #[cfg(feature = "hdr")]
     #[test]
     fn sanity_wide_gamut_fraction_one_for_above_unity_linear() {
         // f32 linear values above 1.0 are necessarily wide-gamut
@@ -3403,6 +3407,7 @@ mod sanity_matrix {
         assert!(r.source_descriptor().is_opaque());
     }
 
+    #[cfg(feature = "hdr")]
     #[test]
     fn sanity_rgb16_u8_promoted_round_trips_to_8bit_depth() {
         // Bit-equality check at the matrix level (already locked in
