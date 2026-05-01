@@ -512,6 +512,81 @@ impl<'a> Model<'a> {
         &self.metadata
     }
 
+    /// Bake-time safety + rescue summary, from the
+    /// `zentrain.safety_compact` metadata key. Returns `None` for
+    /// bakes that didn't emit the key (older bakes, or trainers
+    /// that opted out via `--no-safety-compact`).
+    ///
+    /// Codec runtime SHOULD refuse to load a bake whose
+    /// `safety_compact.passed == 0` unless the consumer explicitly
+    /// opts into `force_load`.
+    pub fn safety_compact(&self) -> Option<crate::SafetyCompact> {
+        self.metadata
+            .get_pod::<crate::SafetyCompact>(crate::keys::SAFETY_COMPACT)
+    }
+
+    /// Per-cell rescue hints from the `zentrain.cell_rescue_hints`
+    /// metadata key. Returns an empty `Vec` when the key is absent.
+    /// Length equals the bake's `n_cells` (the categorical-bytes
+    /// head dim).
+    pub fn cell_rescue_hints(&self) -> alloc::vec::Vec<crate::CellHint> {
+        let Some(entry) = self.metadata.get(crate::keys::CELL_RESCUE_HINTS) else {
+            return alloc::vec::Vec::new();
+        };
+        // Pod-read each entry one at a time (unaligned-safe). Avoids
+        // alignment-cast errors when the metadata blob places the
+        // bytes at an odd offset.
+        let len = core::mem::size_of::<crate::CellHint>();
+        if entry.value.len() % len != 0 {
+            return alloc::vec::Vec::new();
+        }
+        entry
+            .value
+            .chunks_exact(len)
+            .map(bytemuck::pod_read_unaligned::<crate::CellHint>)
+            .collect()
+    }
+
+    /// Known-good `target_zq → fallback_cell + quality bump` table
+    /// from the `zentrain.zq_fallback_table` metadata key. Returns
+    /// an empty `Vec` when the key is absent. Used by the
+    /// `KnownGoodFallback` rescue strategy.
+    pub fn zq_fallback_table(&self) -> alloc::vec::Vec<crate::FallbackEntry> {
+        let Some(entry) = self.metadata.get(crate::keys::ZQ_FALLBACK_TABLE) else {
+            return alloc::vec::Vec::new();
+        };
+        let len = core::mem::size_of::<crate::FallbackEntry>();
+        if entry.value.len() % len != 0 {
+            return alloc::vec::Vec::new();
+        }
+        entry
+            .value
+            .chunks_exact(len)
+            .map(bytemuck::pod_read_unaligned::<crate::FallbackEntry>)
+            .collect()
+    }
+
+    /// Per-output-dim training-distribution bounds from the
+    /// `zentrain.output_bounds` metadata key. Returns an empty
+    /// `Vec` when the key is absent. Length equals `n_outputs`.
+    /// Codec uses [`crate::output_first_out_of_distribution`] to
+    /// detect picks where the MLP is extrapolating past its
+    /// training envelope.
+    pub fn output_bounds(&self) -> alloc::vec::Vec<crate::OutputBound> {
+        let Some(entry) = self.metadata.get(crate::keys::OUTPUT_BOUNDS) else {
+            return alloc::vec::Vec::new();
+        };
+        let len = core::mem::size_of::<crate::OutputBound>();
+        if entry.value.len() % len != 0 {
+            return alloc::vec::Vec::new();
+        }
+        entry
+            .value
+            .chunks_exact(len)
+            .map(bytemuck::pod_read_unaligned::<crate::OutputBound>)
+            .collect()
+    }
+
     /// Length of the scratch buffers (`scratch_a`, `scratch_b`,
     /// `output`) needed by the forward-pass kernel —
     /// `max(n_inputs, max_layer_out_dim)`. [`Predictor`] reads this

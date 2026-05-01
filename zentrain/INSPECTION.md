@@ -134,6 +134,7 @@ perturbations to keep the grid manageable).
 | Same cell picked at every corner | Picker isn't differentiating boundary inputs. The MLP defaulted to its prior on out-of-distribution corners — training corpus didn't span this far |
 | Median confidence > 1.0 at corners | Picker is HIGHLY confident at OOD inputs. It SHOULD be uncertain. Indicates linear extrapolation past the training envelope. **High-risk**: production traffic that lands at corners (e.g. extreme aspect ratios, pure-screen content) gets picks the model has no business being confident in |
 | Fewer than 30 % of cells fire at corners | Corner inputs all converge to a small handful of cells — model has effectively collapsed boundary behavior |
+| Predicted bytes_log lands outside `output_bounds` p01..p99 at any corner | Pure hallucination — the MLP is producing a value the training run never observed. Check via `output_first_out_of_distribution(&pred, model.output_bounds())` after each corner predict. Codecs that hit this in production should refuse the pick and route to `KnownGoodFallback` |
 
 ### 5. `diverge` — tree-vs-MLP disagreement, stratified by confidence
 

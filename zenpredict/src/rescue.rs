@@ -48,6 +48,52 @@ impl Default for RescuePolicy {
     }
 }
 
+impl RescuePolicy {
+    /// Construct a `RescuePolicy` from the bake's
+    /// `zentrain.safety_compact` summary, falling back to defaults
+    /// for fields the bake didn't populate. Use this instead of
+    /// [`RescuePolicy::default`] in production codecs — the
+    /// bake-tuned threshold is calibration-anchored to the actual
+    /// shortfall distribution of the training corpus.
+    ///
+    /// `profile_strict = false` reads
+    /// `safety_compact.rescue_threshold_default` (or 3.0 fallback);
+    /// `profile_strict = true` reads the strict-tier threshold
+    /// (typically tighter, e.g. 1.0 pp). Both fields live in the
+    /// `_reserved` tail of the v1 [`crate::SafetyCompact`] today;
+    /// future bumps to `version` will surface them as named fields.
+    ///
+    /// Returns the default policy when the bake has no
+    /// `safety_compact` (older bakes).
+    pub fn from_bake(model: &crate::Model<'_>, profile_strict: bool) -> Self {
+        let mut policy = Self::default();
+        let Some(safety) = model.safety_compact() else {
+            return policy;
+        };
+        // For v1 SafetyCompact, both rescue thresholds live in
+        // `_reserved` as two trailing f32s. Read defensively.
+        let rescue_default = f32::from_le_bytes(
+            safety._reserved[0..4]
+                .try_into()
+                .expect("4-byte slice → [u8;4]"),
+        );
+        let rescue_strict = f32::from_le_bytes(
+            safety._reserved[4..8]
+                .try_into()
+                .expect("4-byte slice → [u8;4]"),
+        );
+        let chosen = if profile_strict {
+            rescue_strict
+        } else {
+            rescue_default
+        };
+        if chosen.is_finite() && chosen > 0.0 {
+            policy.rescue_threshold = chosen;
+        }
+        policy
+    }
+}
+
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RescueStrategy {

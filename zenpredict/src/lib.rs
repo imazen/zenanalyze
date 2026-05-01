@@ -138,6 +138,7 @@ mod metadata;
 mod model;
 mod predictor;
 pub mod rescue;
+mod safety;
 
 #[cfg(feature = "bake")]
 pub mod bake;
@@ -147,7 +148,9 @@ pub use argmin::{
     argmin_masked_top_k, argmin_masked_top_k_in_range, argmin_masked_top_k_with_scorer,
     argmin_masked_with_scorer, pick_with_confidence, pick_with_confidence_in_range, threshold_mask,
 };
-pub use bounds::{FeatureBound, first_out_of_distribution};
+pub use bounds::{
+    FeatureBound, OutputBound, first_out_of_distribution, output_first_out_of_distribution,
+};
 pub use error::PredictError;
 pub use inference::f16_bits_to_f32;
 pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
@@ -157,6 +160,7 @@ pub use model::{
 };
 pub use predictor::Predictor;
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
+pub use safety::{CellHint, FallbackEntry, SafetyCompact, SafetyProfile, fallback_for};
 
 #[cfg(test)]
 mod tests;

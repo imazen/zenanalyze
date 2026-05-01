@@ -146,6 +146,143 @@ def hex_encode(b: bytes) -> str:
     return b.hex()
 
 
+# ----------------------------------------------------------------
+# Compact safety / rescue / output-bound binary encoders
+# (mirror the zenpredict::safety + bounds wire formats).
+# ----------------------------------------------------------------
+
+
+def encode_cell_rescue_hints(model: dict) -> bytes:
+    """Pack `[CellHint; n_cells]` per zenpredict::safety::CellHint
+    (4 bytes each: suggested_strategy u8, p99_shortfall_pp u8,
+    expected_rescue_rate u8, flags u8).
+
+    Pulls from `model.cell_hints` if the trainer emitted it; falls
+    back to per-cell zeros (= ConservativeBump default, no shortfall
+    history). Returns empty bytes when no n_cells inferable."""
+    n_outputs = int(
+        model.get("n_outputs")
+        if model.get("n_outputs") is not None
+        else model.get("n_configs", 0)
+    )
+    hh = model.get("hybrid_heads_manifest") or {}
+    n_cells = int(hh.get("n_cells", 0)) or n_outputs
+    if n_cells <= 0:
+        return b""
+
+    hints = model.get("cell_hints") or []
+    out = bytearray()
+    for c in range(n_cells):
+        h = hints[c] if c < len(hints) and isinstance(hints[c], dict) else {}
+        strategy = {"conservative_bump": 0, "second_best_pick": 1, "known_good_fallback": 2}.get(
+            h.get("suggested_strategy", "conservative_bump"), 0
+        )
+        p99 = max(0, min(255, int(round(float(h.get("p99_shortfall_pp", 0))))))
+        rescue_rate_f = float(h.get("expected_rescue_rate", 0.0))
+        rescue_rate = max(0, min(255, int(round(rescue_rate_f * 255))))
+        flags = 0
+        if h.get("dead", False):
+            flags |= 0x01
+        if h.get("degenerate", False):
+            flags |= 0x02
+        if h.get("high_variance", False):
+            flags |= 0x04
+        out += struct.pack("<BBBB", strategy, p99, rescue_rate, flags)
+    return bytes(out)
+
+
+def encode_zq_fallback_table(model: dict) -> bytes:
+    """Pack `[FallbackEntry; n_zq_bands]` (4 bytes each:
+    zq_target u8, fallback_cell u8, quality_bump_pp i8, flags u8).
+
+    Trainer emits via `model.zq_fallback_table`. Falls back to a
+    conservative default when missing: one entry per
+    `reach_safety.by_zq` zq target, fallback_cell = `argmin reach
+    failure rate at that zq` (cell with the highest reach rate at
+    that zq)."""
+    explicit = model.get("zq_fallback_table")
+    if isinstance(explicit, list) and explicit:
+        out = bytearray()
+        for e in explicit:
+            zq = max(0, min(100, int(e.get("zq_target", 0))))
+            cell = max(0, min(255, int(e.get("fallback_cell", 0))))
+            bump = max(-128, min(127, int(e.get("quality_bump_pp", 0))))
+            flags = 0x01 if e.get("verified", False) else 0
+            out += struct.pack("<BBbB", zq, cell, bump, flags)
+        return bytes(out)
+
+    # Synthesize from reach_safety: per zq, pick the cell with the
+    # highest reach rate. quality_bump = 0 (codec defaults). flags
+    # = 1 if reach >= 0.99 (verified), else 0.
+    reach = model.get("reach_safety") or {}
+    by_zq = reach.get("by_zq") or {}
+    if not by_zq:
+        return b""
+    out = bytearray()
+    for zq_key in sorted(by_zq.keys(), key=lambda s: int(s)):
+        zq = int(zq_key)
+        rates = by_zq[zq_key].get("reach_rate") or by_zq[zq_key].get("rates")
+        if not isinstance(rates, list) or not rates:
+            continue
+        cell = max(range(len(rates)), key=lambda i: rates[i])
+        verified = rates[cell] >= 0.99
+        flags = 0x01 if verified else 0
+        out += struct.pack("<BBbB", zq & 0xFF, cell & 0xFF, 0, flags)
+    return bytes(out)
+
+
+def encode_output_bounds(model: dict) -> bytes:
+    """Pack `[OutputBound; n_outputs]` (8 bytes each: low f32, high f32).
+
+    Trainer emits via `model.output_bounds`, a dict
+    `{ <head_name>: [{p01, p99}, ...] }` or a flat list aligned to
+    n_outputs. Falls back to ±inf sentinels (`-3.4028235e+38` /
+    `+3.4028235e+38`) when the trainer didn't compute them — the
+    runtime check then becomes a no-op for missing dims, and codec
+    consumers see the full envelope `(p01, p99)` only when present."""
+    n_outputs = int(
+        model.get("n_outputs")
+        if model.get("n_outputs") is not None
+        else model.get("n_configs", 0)
+    )
+    if n_outputs <= 0:
+        return b""
+
+    explicit = model.get("output_bounds")
+    bounds: list[tuple[float, float]] = []
+
+    if isinstance(explicit, list) and len(explicit) == n_outputs:
+        for b in explicit:
+            if isinstance(b, dict):
+                lo = float(b.get("p01", b.get("low", float("-inf"))))
+                hi = float(b.get("p99", b.get("high", float("inf"))))
+            elif isinstance(b, (list, tuple)) and len(b) == 2:
+                lo, hi = float(b[0]), float(b[1])
+            else:
+                lo, hi = float("-inf"), float("inf")
+            bounds.append((lo, hi))
+    else:
+        sys.stderr.write(
+            "WARNING: model has no `output_bounds` matching n_outputs. Emitting "
+            "open ±sentinels — codec OOD-on-output check is a no-op for this bake. "
+            "Have train_hybrid.py compute per-output (p01, p99) on the held-out "
+            "validation set and emit `output_bounds: [{p01, p99}, ...]`.\n"
+        )
+        sentinel_lo, sentinel_hi = -3.4028235e38, 3.4028235e38
+        bounds = [(sentinel_lo, sentinel_hi)] * n_outputs
+
+    out = bytearray()
+    for lo, hi in bounds:
+        # Replace ±inf with finite f32-max sentinels; the runtime
+        # treats both as "permissive" but JSON serialization rejects
+        # `Infinity` literals, and we want the binary form to be
+        # the same shape regardless.
+        lo_f = -3.4028235e38 if not (lo > float("-inf")) else max(lo, -3.4028235e38)
+        hi_f = 3.4028235e38 if not (hi < float("inf")) else min(hi, 3.4028235e38)
+        out += struct.pack("<ff", lo_f, hi_f)
+    return bytes(out)
+
+
 def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     """Build the metadata blob entries from the training JSON.
 
@@ -217,14 +354,75 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             "text": prov,
         })
 
-    # safety_report — embed as utf8 JSON. Codec runtime can refuse to
-    # load a bake whose `passed` field is false.
-    sr = model.get("safety_report")
-    if sr is not None:
+    # safety_compact — fixed 32-byte SafetyCompact struct (see
+    # zenpredict/src/safety.rs). Replaces the v0.1 full-JSON
+    # safety_report embed; the full diagnostic report stays in the
+    # sibling manifest.json for trainer-side review.
+    sr = model.get("safety_report") or {}
+    metrics = model.get("calibration_metrics") or {}
+    profile_str = model.get("safety_profile", "size_optimal")
+    profile_byte = {"size_optimal": 0, "zensim_strict": 1}.get(profile_str, 0)
+    rescue_default = float(model.get("rescue_threshold_default", 3.0))
+    rescue_strict = float(model.get("rescue_threshold_strict", 1.0))
+    flags = 0x0001 if sr.get("strict_certified", False) else 0
+    if profile_str == "zensim_strict" and sr.get("passed", True):
+        flags |= 0x0001
+    safety_compact_bytes = struct.pack(
+        "<HHBBBBI fff ff",     # version u16, flags u16, passed u8, n_violations u8,
+                                 # safety_profile u8, threshold_set_version u8,
+                                 # corpus_hash u32, mean_overhead f32, p99_shortfall f32,
+                                 # argmin_acc f32, rescue_threshold_default f32,
+                                 # rescue_threshold_strict f32
+        1,                                          # version
+        flags,
+        1 if sr.get("passed", True) else 0,
+        min(255, len(sr.get("violations") or [])),
+        profile_byte,
+        int(model.get("threshold_set_version", 1)),
+        int(model.get("corpus_hash", 0)) & 0xFFFFFFFF,
+        float(metrics.get("mean_overhead", float("nan"))),
+        float(metrics.get("p99_shortfall", float("nan"))),
+        float(metrics.get("argmin_acc", float("nan"))),
+        rescue_default,
+        rescue_strict,
+    )
+    assert len(safety_compact_bytes) == 32, f"safety_compact wire size {len(safety_compact_bytes)} != 32"
+    entries.append({
+        "key": "zentrain.safety_compact",
+        "type": "numeric",
+        "hex": safety_compact_bytes.hex(),
+    })
+
+    # cell_rescue_hints — `[CellHint; n_cells]`, 4 bytes each.
+    # See zenpredict/src/safety.rs::CellHint.
+    cell_hints_bytes = encode_cell_rescue_hints(model)
+    if cell_hints_bytes:
         entries.append({
-            "key": "zentrain.safety_report",
-            "type": "utf8",
-            "text": json.dumps(sr, sort_keys=True, separators=(",", ":")),
+            "key": "zentrain.cell_rescue_hints",
+            "type": "bytes",
+            "hex": cell_hints_bytes.hex(),
+        })
+
+    # zq_fallback_table — `[FallbackEntry; n_zq_bands]`, 4 bytes each.
+    # Bake-prescribed safe configs for KnownGoodFallback strategy.
+    fallback_bytes = encode_zq_fallback_table(model)
+    if fallback_bytes:
+        entries.append({
+            "key": "zentrain.zq_fallback_table",
+            "type": "bytes",
+            "hex": fallback_bytes.hex(),
+        })
+
+    # output_bounds — `[OutputBound; n_outputs]`, 8 bytes each
+    # (low: f32, high: f32). Per-output-dim training-distribution
+    # envelope; codec checks `output_first_out_of_distribution`
+    # after every predict() to catch picker hallucinations.
+    output_bounds_bytes = encode_output_bounds(model)
+    if output_bounds_bytes:
+        entries.append({
+            "key": "zentrain.output_bounds",
+            "type": "bytes",
+            "hex": output_bounds_bytes.hex(),
         })
 
     # feat_cols — newline-separated utf8. Cheap; tiny bakes don't pay

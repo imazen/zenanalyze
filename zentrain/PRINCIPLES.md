@@ -102,12 +102,60 @@ saturate vs `pixel_budget`. Drift is `+0.054σ` at 1 MP, `+0.107σ` at
 runtime default budget changes.** PR #44 (raise default to 2 MP) is
 gated on this.
 
-### 5. OOD bounds in every bake
+### 5. OOD bounds — input AND output, in every bake
 
-The bake MUST emit `feature_bounds` (the top-level Section in ZNPR
-v2). p01 / p99 per feature column from the training corpus. Codecs
-read bounds at load and call `first_out_of_distribution` on every
-encode.
+Every bake emits two bound tables:
+
+- **Input bounds** — `feature_bounds` (top-level Section). p01 / p99
+  per feature column from the training corpus. Codecs read once at
+  load and call `first_out_of_distribution(&features, bounds)` on
+  every encode. OOD inputs route to `RescueStrategy::KnownGoodFallback`
+  before the picker is called.
+- **Output bounds** — `keys::OUTPUT_BOUNDS` (TLV metadata, repeated
+  `OutputBound = (f32, f32)`). p01 / p99 per output dim of the
+  trained model's predictions on held-out data. Codecs read once at
+  load and call `output_first_out_of_distribution(&pred, bounds)`
+  AFTER `predictor.predict` to catch hallucinations — a cell whose
+  predicted bytes_log lands outside the seen range is the picker
+  extrapolating, not interpolating, and should not be trusted.
+
+The two checks compose: input OOD short-circuits to fallback; output
+OOD downgrades the pick's confidence (route to rescue, refuse strict
+mode, log for the operator).
+
+### 5a. Bake metadata triage
+
+ZNPR v2 metadata is a TLV blob carried inside the model file —
+runtime reads it once at load and discards what it doesn't need. It
+is NOT a debugging dump.
+
+The runtime ONLY needs:
+
+| Key | Type | Size | Purpose |
+|---|---|---|---|
+| `safety_compact` | bytes (`SafetyCompact`) | 32 B | safety-gate result + rescue thresholds, seeds `RescuePolicy::from_bake` |
+| `cell_rescue_hints` | bytes (`CellHint[n_cells]`) | 4 × n_cells | per-cell strategy pick + p99 shortfall + rescue rate |
+| `zq_fallback_table` | bytes (`FallbackEntry[n_zq_bands]`) | 4 × n_zq | known-good `(target_zq → fallback_cell, quality_bump)` for `KnownGoodFallback` |
+| `output_bounds` | bytes (`OutputBound[n_outputs]`) | 8 × n_outputs | per-output p01/p99 for hallucination detection |
+| `feature_names` | utf8 (CSV, ~1 KB) | ~1 KB | schema_hash debug hooks; prints stable names on mismatch |
+| `reach_rates_zq{50,75,90}` | numeric | 4 × n_cells × 3 | strict-profile gates (`threshold_mask`) |
+
+Total budget: ~3 KB for typical bakes (12 cells × 30 zq), ≤ 5 KB
+for uber-rich (50 cells × 50 zq). Anything else stays in the sibling
+`manifest.json` next to the `.bin` (full safety_report,
+per-corpus-class regression, ablation tables, bake provenance) — the
+trainer writes both, ops dashboards read the JSON, codecs only ever
+load the `.bin`.
+
+**Banned in embedded metadata:** full safety_report JSON, per-image
+prediction arrays, per-corpus regression coefficients, anything that
+scales with corpus size. `bake_picker.py` ENFORCES the budget — bake
+fails with a clear error if metadata exceeds 8 KB.
+
+For future format additions, `value_type` codes 3..=15 are reserved
+for compression methods (e.g. 3 = zstd-decoded payload, 4 = brotli).
+Decompression is opt-in per-entry; no hot-path entry will ever be
+compressed.
 
 ### 6. Re-bake triggers
 

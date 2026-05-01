@@ -12,7 +12,14 @@
 //! while offset < section_end:
 //!   [1]    key_len: u8                 (255-byte cap)
 //!   [...]  key:     [u8; key_len]      UTF-8, validated on parse
-//!   [1]    value_type: u8              0=bytes, 1=utf8, 2=numeric, 3..=255 reserved
+//!   [1]    value_type: u8              0=bytes, 1=utf8, 2=numeric,
+//!                                       3..=15 reserved for compressed
+//!                                       payload variants (planned: 3=zstd,
+//!                                       4=brotli, 5=miniz_oxide). Decode
+//!                                       opt-in per-entry; the runtime ignores
+//!                                       any compressed-typed entry it doesn't
+//!                                       recognize, treating it as missing
+//!                                       (forward-compat). 16..=255 reserved.
 //!   [4]    value_len: u32 (LE, unaligned read)
 //!   [...]  value:    [u8; value_len]
 //! ```
@@ -22,6 +29,12 @@
 //! `#[repr(C)]` structs (e.g. `zentrain.calibration_metrics`'s
 //! three-`f32` payload) are read with `bytemuck::pod_read_unaligned`
 //! at the call site — metadata is not zero-copy by design.
+//!
+//! Hot-path entries (anything in [`keys`] that the runtime reads
+//! every encode) MUST be `value_type=0` (bytes) — never compressed.
+//! Compression is intended only for verbose ops/debug payloads
+//! (`safety_report.full`, ablation tables) that may live alongside
+//! the bake later, not for the inference loop.
 //!
 //! ## Namespace convention
 //!
@@ -292,7 +305,37 @@ pub mod keys {
     pub const PROVENANCE: &str = "zentrain.provenance";
     /// numeric (12 bytes) — `#[repr(C)] { mean_overhead, p99_shortfall, argmin_acc: f32 }`.
     pub const CALIBRATION_METRICS: &str = "zentrain.calibration_metrics";
-    /// bytes — `[u8 passed]` then optional utf8 violation list.
+    /// numeric (32 bytes) — `[`crate::SafetyCompact`]` fixed-shape
+    /// summary. Read once at codec startup; seeds
+    /// [`crate::RescuePolicy::from_bake`]. Hard-fail load when
+    /// `passed == 0` unless caller force-loads.
+    pub const SAFETY_COMPACT: &str = "zentrain.safety_compact";
+    /// bytes — `[CellHint; n_cells]` packed (4 bytes per cell).
+    /// Per-cell rescue strategy preference, p99 shortfall, expected
+    /// rescue rate, dead/degenerate/high-variance flags. Codec
+    /// consults when picker returns cell `c` and pass-0 verify
+    /// undershoots target.
+    pub const CELL_RESCUE_HINTS: &str = "zentrain.cell_rescue_hints";
+    /// bytes — `[FallbackEntry; n_zq_bands]` packed (4 bytes each).
+    /// Known-good `(target_zq → fallback_cell + quality_bump)`
+    /// table for the `KnownGoodFallback` rescue strategy. Bake
+    /// prescribes safe configs that bypass the picker when the MLP
+    /// can't be trusted (OOD inputs, strict-mode reach failure,
+    /// etc.).
+    pub const ZQ_FALLBACK_TABLE: &str = "zentrain.zq_fallback_table";
+    /// bytes — `[OutputBound; n_outputs]` (8 bytes each — same
+    /// shape as [`crate::FeatureBound`]). Per-output-dim
+    /// training-distribution bounds. Codec calls
+    /// [`crate::output_first_out_of_distribution`] on every
+    /// `predict()` result; out-of-bounds output → MLP is
+    /// extrapolating → route to `KnownGoodFallback`.
+    pub const OUTPUT_BOUNDS: &str = "zentrain.output_bounds";
+    /// **Deprecated** — full safety_report JSON. Older bakes
+    /// embedded this; new bakes should emit only [`SAFETY_COMPACT`]
+    /// and keep the full report in the sibling `manifest.json`.
+    /// Kept as a constant so legacy bakes can still surface it via
+    /// `metadata.get_utf8(keys::SAFETY_REPORT)` for diagnostic
+    /// tooling. Do not consume from the runtime hot path.
     pub const SAFETY_REPORT: &str = "zentrain.safety_report";
     /// utf8 — friendly name (`zenjpeg_picker_v2.1_full`).
     pub const BAKE_NAME: &str = "zentrain.bake_name";
