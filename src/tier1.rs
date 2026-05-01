@@ -615,15 +615,24 @@ pub(crate) fn extract_tier1_into_dispatch(
             out.laplacian_variance_peak = f32::NAN;
         } else {
             let mut acc: u64 = 0;
+            let mut p1: u32 = 0;
+            let mut p5: u32 = 0;
+            let mut p10: u32 = 0;
             let mut p50: u32 = 0;
             let mut p75: u32 = 0;
             let mut p90: u32 = 0;
             let mut p99: u32 = 0;
             let mut peak: u32 = 0;
+            let t1 = ((total as f64) * 0.01) as u64;
+            let t5 = ((total as f64) * 0.05) as u64;
+            let t10 = ((total as f64) * 0.10) as u64;
             let t50 = ((total as f64) * 0.50) as u64;
             let t75 = ((total as f64) * 0.75) as u64;
             let t90 = ((total as f64) * 0.90) as u64;
             let t99 = ((total as f64) * 0.99) as u64;
+            let mut found_1 = false;
+            let mut found_5 = false;
+            let mut found_10 = false;
             let mut found_50 = false;
             let mut found_75 = false;
             let mut found_90 = false;
@@ -633,6 +642,18 @@ pub(crate) fn extract_tier1_into_dispatch(
                     peak = bin as u32;
                 }
                 acc += count as u64;
+                if !found_1 && acc >= t1 {
+                    p1 = bin as u32;
+                    found_1 = true;
+                }
+                if !found_5 && acc >= t5 {
+                    p5 = bin as u32;
+                    found_5 = true;
+                }
+                if !found_10 && acc >= t10 {
+                    p10 = bin as u32;
+                    found_10 = true;
+                }
                 if !found_50 && acc >= t50 {
                     p50 = bin as u32;
                     found_50 = true;
@@ -650,6 +671,9 @@ pub(crate) fn extract_tier1_into_dispatch(
                     found_99 = true;
                 }
             }
+            out.laplacian_variance_p1 = p1 as f32;
+            out.laplacian_variance_p5 = p5 as f32;
+            out.laplacian_variance_p10 = p10 as f32;
             out.laplacian_variance_p50 = p50 as f32;
             out.laplacian_variance_p75 = p75 as f32;
             out.laplacian_variance_p90 = p90 as f32;

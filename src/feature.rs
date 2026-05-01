@@ -979,6 +979,57 @@ features_table! {
     LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
     /// `f32`. Same for 64×64 (JXL DCT64).
     LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
+
+    // ---------------- Low-tail percentile companions ---------------
+    // Adds P1/P5/P10 to LaplacianVariance / AqMap / NoiseFloorY (and
+    // P1/P5 to QuantSurvivalY which already ships P10). Same
+    // histograms / sorted block buffers already computed for the
+    // upper-tail percentiles — the additions are pure index lookups
+    // (or one extra prefix-sum threshold for Laplacian's histogram).
+    // Provisional: ablation on subset100 will prune the redundant
+    // ones via Spearman ρ > 0.95 with adjacent percentiles.
+    /// `f32`. `|∇²L|` p1 — fraction of *very* flat blocks. Different
+    /// signal from `Uniformity` (mean): captures presence of large
+    /// smooth regions even when the rest of the image is busy.
+    /// Codec-relevant — flat blocks compress to ~few bits via DC +
+    /// early-zero AC.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP1 = 105 : f32 => laplacian_variance_p1,
+    /// `f32`. `|∇²L|` p5.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP5 = 106 : f32 => laplacian_variance_p5,
+    /// `f32`. `|∇²L|` p10.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP10 = 107 : f32 => laplacian_variance_p10,
+    /// `f32`. AC-energy log10 p1. Encoder-floor signal — blocks the
+    /// encoder treats as easiest. May saturate at the AQ floor on
+    /// most images (hypothesis to validate via ablation).
+    #[cfg(feature = "experimental")]
+    AqMapP1 = 108 : f32 => aq_map_p1,
+    /// `f32`. AC-energy log10 p5.
+    #[cfg(feature = "experimental")]
+    AqMapP5 = 109 : f32 => aq_map_p5,
+    /// `f32`. AC-energy log10 p10.
+    #[cfg(feature = "experimental")]
+    AqMapP10 = 110 : f32 => aq_map_p10,
+    /// `f32`. Y noise floor at p1.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP1 = 111 : f32 => noise_floor_y_p1,
+    /// `f32`. Y noise floor at p5.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP5 = 112 : f32 => noise_floor_y_p5,
+    /// `f32`. Y noise floor at p10. Same scaling as parent
+    /// [`Self::NoiseFloorY`] (which is also p10) — reserved as a
+    /// distinct slot in case the parent's scaling drifts.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP10 = 113 : f32 => noise_floor_y_p10,
+    /// `f32`. Y quant-survival at p1 — the worst-block tail. Sharper
+    /// trellis-ROI signal than [`Self::QuantSurvivalYP10`].
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP1 = 114 : f32 => quant_survival_y_p1,
+    /// `f32`. Y quant-survival at p5.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP5 = 115 : f32 => quant_survival_y_p5,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -2007,9 +2058,9 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the dimension log/derivative variants
-        // (issue #42, ids 56–104).
-        assert!(AnalysisFeature::from_u16(105).is_none());
+        // First unused id past the low-tail percentile additions
+        // (ids 105–115).
+        assert!(AnalysisFeature::from_u16(116).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
