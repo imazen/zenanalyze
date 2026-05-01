@@ -46,6 +46,41 @@ jobs:
         if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
         run: cargo build -p zenpicker --examples
 
+  zenpredict:
+    name: zenpredict (${{ matrix.os }} / ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-11-arm, macos-15-intel, macos-latest]
+        # zenpredict has 3 valid feature combos (`bake` requires `std`):
+        #   ""           — no_std + alloc, runtime only
+        #   "std"        — full runtime, no baker
+        #   "std,bake"   — full runtime + Rust-side baker + CLIs
+        features: ["", "std", "std,bake"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        run: cargo fmt -p zenpredict --check
+      - name: Clippy
+        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        run: cargo clippy -p zenpredict --no-default-features --features "${{ matrix.features }}" --all-targets -- -D warnings
+      - name: Build
+        run: cargo build -p zenpredict --no-default-features --features "${{ matrix.features }}"
+      - name: Test (lib)
+        run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --lib
+      - name: Test (integration)
+        if: matrix.features == 'std,bake'
+        run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --tests
+      - name: Test (doc)
+        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --doc
+
   cross:
     name: Cross (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -72,3 +107,12 @@ jobs:
           # uppercase env vars set in the calling shell).
           CROSS_RUNTIME: "1"
         run: cross test --target ${{ matrix.target }} --features "experimental,composites" --lib
+      # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
+      # because Model::from_bytes does u32 / usize arithmetic that wraps
+      # on 32-bit; checked_mul guards exist but live-fire tests confirm.
+      - name: Build zenpredict
+        run: cross build -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,bake"
+      - name: Test zenpredict
+        env:
+          CROSS_RUNTIME: "1"
+        run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,bake" --lib
