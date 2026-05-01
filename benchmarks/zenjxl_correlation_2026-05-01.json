@@ -3,7 +3,7 @@
   "threshold": 0.99,
   "n_rows": 300,
   "n_features_in": 92,
-  "n_features_dropped": 7,
+  "n_features_dropped": 8,
   "n_constant": 6,
   "n_low_variance": 6,
   "constant_columns": [
@@ -72,7 +72,7 @@
         "feat_noise_floor_y_p50"
       ],
       "cluster_size": 2,
-      "min_abs_corr_in_cluster": 0.9937883754263939
+      "min_abs_corr_in_cluster": 0.994012822364693
     },
     {
       "anchor": "feat_distinct_color_bins",
@@ -81,7 +81,7 @@
         "feat_palette_density"
       ],
       "cluster_size": 2,
-      "min_abs_corr_in_cluster": 0.9999937777086413
+      "min_abs_corr_in_cluster": 0.9999959999555554
     },
     {
       "anchor": "feat_flat_color_smooth",
@@ -90,16 +90,17 @@
         "feat_flat_color_block_ratio"
       ],
       "cluster_size": 2,
-      "min_abs_corr_in_cluster": 0.9921483572039689
+      "min_abs_corr_in_cluster": 0.9930288114312383
     },
     {
       "anchor": "feat_noise_floor_y",
       "anchor_n_unique": 163,
       "dropped": [
+        "feat_aq_map_p10",
         "feat_noise_floor_y_p10"
       ],
-      "cluster_size": 2,
-      "min_abs_corr_in_cluster": 1.0
+      "cluster_size": 3,
+      "min_abs_corr_in_cluster": 0.9904252269469664
     },
     {
       "anchor": "feat_palette_fits_in_256",
@@ -108,7 +109,7 @@
         "feat_indexed_palette_width"
       ],
       "cluster_size": 2,
-      "min_abs_corr_in_cluster": 0.9998315536839296
+      "min_abs_corr_in_cluster": 0.9999453327259189
     },
     {
       "anchor": "feat_pixel_count",
@@ -122,6 +123,7 @@
     }
   ],
   "drop_list": [
+    "feat_aq_map_p10",
     "feat_bitmap_bytes",
     "feat_flat_color_block_ratio",
     "feat_indexed_palette_width",
