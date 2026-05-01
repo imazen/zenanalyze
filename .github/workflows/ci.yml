@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-11-arm, macos-15-intel, macos-latest]
-        features: ["", "experimental", "composites", "experimental,composites"]
+        features: ["", "experimental", "hdr", "experimental,hdr"]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -26,10 +26,10 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: cargo fmt --check
       - name: Clippy
-        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: cargo clippy --features "${{ matrix.features }}" --all-targets -- -D warnings
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
@@ -40,10 +40,10 @@ jobs:
       - name: Test zenpicker
         run: cargo test -p zenpicker --lib
       - name: Clippy zenpicker
-        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: cargo clippy -p zenpicker --all-targets -- -D warnings
       - name: Build zenpicker examples
-        if: matrix.features == 'experimental,composites' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: cargo build -p zenpicker --examples
 
   zenpredict:
@@ -98,7 +98,7 @@ jobs:
           tool: cross
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cross build --target ${{ matrix.target }} --features "experimental,composites"
+        run: cross build --target ${{ matrix.target }} --features "experimental,hdr"
       - name: Test
         env:
           # Surfaces inside the qemu guest so tests can detect emulated runtime
@@ -106,7 +106,7 @@ jobs:
           # `CROSS_RUNTIME` automatically (passthrough is the default for
           # uppercase env vars set in the calling shell).
           CROSS_RUNTIME: "1"
-        run: cross test --target ${{ matrix.target }} --features "experimental,composites" --lib
+        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib
       # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
       # because Model::from_bytes does u32 / usize arithmetic that wraps
       # on 32-bit; checked_mul guards exist but live-fire tests confirm.
