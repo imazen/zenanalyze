@@ -125,8 +125,15 @@ def build_dataset(pareto, feats, feat_cols):
 
     Y: log-bytes per config; np.nan if config doesn't reach zq.
     meta: (image, size, zq) per row.
+
+    Config-id space is **densely remapped** ([0, len(CONFIG_NAMES))).
+    Codec sweeps that allocate sparse `config_id` hashes (zenavif's
+    phase 1a uses ints up to ~110 000 from a hash; zenwebp / zenjpeg
+    use sequential 0..N) would otherwise force the trainer to allocate
+    a HistGB teacher per empty bucket.
     """
-    n_configs = max(CONFIG_NAMES) + 1
+    config_id_remap = {cid: dense for dense, cid in enumerate(sorted(CONFIG_NAMES))}
+    n_configs = len(config_id_remap)
     X_rows, Y_rows, meta = [], [], []
     for (image, size, w, h), samples in pareto.items():
         feat_key = (image, size)
@@ -139,9 +146,10 @@ def build_dataset(pareto, feats, feat_cols):
 
         per_cfg = defaultdict(lambda: defaultdict(lambda: math.inf))
         for s in samples:
+            cid_dense = config_id_remap[s["config_id"]]
             for zq in ZQ_TARGETS:
-                if s["zensim"] >= zq and s["bytes"] < per_cfg[zq][s["config_id"]]:
-                    per_cfg[zq][s["config_id"]] = s["bytes"]
+                if s["zensim"] >= zq and s["bytes"] < per_cfg[zq][cid_dense]:
+                    per_cfg[zq][cid_dense] = s["bytes"]
 
         for zq in ZQ_TARGETS:
             if not per_cfg[zq]:
