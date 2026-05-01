@@ -1,5 +1,7 @@
 //! Tier 1 hot-path microbench. Measures Tier-1-only cost at 1/4/16 MP
 //! to identify where the mass lives.
+#![allow(deprecated)] // example exercises composites variants slated for removal next major
+
 use std::time::Instant;
 use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 use zenpixels::{PixelDescriptor, PixelSlice};

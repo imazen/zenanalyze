@@ -86,6 +86,7 @@ pub fn populate_tier3(
     let h_stats = luma_histogram_stats(stream);
     out.luma_histogram_entropy = h_stats.entropy;
     #[cfg(feature = "composites")]
+    #[allow(deprecated)]
     {
         out.line_art_score = h_stats.line_art_score;
     }
@@ -1634,6 +1635,13 @@ fn dct2d_8_three_planes_simd(
 /// [`natural_likelihood`]: crate::feature::AnalysisFeature::NaturalLikelihood
 /// [`screen_content_likelihood`]: crate::feature::AnalysisFeature::ScreenContentLikelihood
 #[cfg(feature = "composites")]
+#[deprecated(
+    since = "0.1.0",
+    note = "the `composites` flag is being retired in the next major release. \
+            Compute these from the raw signals directly or via a learned classifier \
+            shipped through zenpredict."
+)]
+#[allow(deprecated)]
 pub fn compute_derived_likelihoods<const T3: bool, const PAL: bool>(out: &mut RawAnalysis) {
     let chroma_sh = out.cb_sharpness + out.cr_sharpness;
     let chroma_lo = (0.005 - chroma_sh).clamp(0.0, 0.005) / 0.005;

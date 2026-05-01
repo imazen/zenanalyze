@@ -24,13 +24,27 @@ default = []
 # for *structural* uncertainty (no consumer pinned the meaning yet,
 # or the metric is research-stage).
 experimental = []
-# Opt-in to *classifier-style composite scores* — features whose
-# value is a hand-tuned combination of stable raw signals via
-# weighted sums / mins / thresholds. Examples in 0.1.x:
-# `TextLikelihood`, `ScreenContentLikelihood`, `NaturalLikelihood`,
-# `LineArtScore`. The raw signals these consume are stable in 0.1.x;
-# the *composite coefficients* are calibration-driven and will drift
-# as the corpus-trained tuning matures.
+# DEPRECATED. Will be removed in the next major release.
+#
+# Hand-tuned weighted-sum composite scores
+# (`TextLikelihood`, `ScreenContentLikelihood`, `NaturalLikelihood`,
+# `LineArtScore`) over stable raw signals. The composite coefficients
+# turned out to drift faster than is practical to maintain as a
+# stable API surface. `PatchFraction` (AUC = 0.88) outperforms
+# `ScreenContentLikelihood` as a single discriminator; for the
+# others, a learned classifier shipped via zenpredict produces
+# calibrated probabilities cheaper than maintaining hand-tuned
+# coefficients.
+#
+# Migration: consume the raw signals directly
+# (`LumaHistogramEntropy`, `EdgeDensity`, `ChromaComplexity`,
+# `PatchFraction`, `FlatColorBlockRatio`, `DistinctColorBins`) and
+# apply your own weights, OR train a small zenpredict model on a
+# labeled corpus and ship the `.bin` alongside your codec.
+#
+# This flag still works in 0.1.x; the variants emit a `deprecated`
+# warning. The next major bump removes the variants entirely
+# (their stable feature ids 27, 28, 29, 45 stay reserved).
 composites = []
 
 [dependencies]

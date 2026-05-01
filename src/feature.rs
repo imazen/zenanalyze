@@ -65,6 +65,7 @@ macro_rules! features_table {
     (
         $(
             $(#[$variant_attr:meta])*
+            $(@decl[$($decl_attr:meta),* $(,)?])?
             $variant:ident = $id:literal : $ty:ty => $field:ident
         ),* $(,)?
     ) => {
@@ -84,6 +85,7 @@ macro_rules! features_table {
         pub enum AnalysisFeature {
             $(
                 $(#[$variant_attr])*
+                $($(#[$decl_attr])*)?
                 $variant = $id,
             )*
             // Future features take the next free sequential id (30, 31, …).
@@ -110,7 +112,7 @@ macro_rules! features_table {
             /// id must accept the `None` arm gracefully (older /
             /// newer / cfg-disabled builds).
             #[inline]
-            #[allow(unused_doc_comments)]
+            #[allow(unused_doc_comments, deprecated)]
             pub const fn from_u16(n: u16) -> Option<Self> {
                 // `unused_doc_comments` allow: variants in the
                 // table carry `///` docstrings that the macro forwards
@@ -148,7 +150,7 @@ macro_rules! features_table {
             /// JSON sidecars and downstream Python fitters keep
             /// working. Generated from the field-name token via
             /// `stringify!`.
-            #[allow(unused_doc_comments)]
+            #[allow(unused_doc_comments, deprecated)]
             pub const fn name(self) -> &'static str {
                 match self {
                     $(
@@ -176,7 +178,7 @@ macro_rules! features_table {
             /// API; there is intentionally no `FeatureSet::all()`
             /// because production callers should request only what
             /// they need.
-            #[allow(unused_doc_comments, unused_mut, unused_assignments)]
+            #[allow(unused_doc_comments, unused_mut, unused_assignments, deprecated)]
             pub const SUPPORTED: Self = {
                 // Const block with `let mut` so individual `with`
                 // calls can be cfg-gated. The chain form
@@ -230,7 +232,7 @@ macro_rules! features_table {
             /// append-at-end fast path on every call. Cfg-gated rows
             /// drop out of the copy list when their feature is
             /// disabled.
-            #[allow(unused_doc_comments)]
+            #[allow(unused_doc_comments, deprecated)]
             pub(crate) fn into_results(
                 self,
                 requested: FeatureSet,
@@ -240,6 +242,7 @@ macro_rules! features_table {
                 let mut r = AnalysisResults::new(requested, geometry, source_descriptor);
                 $(
                     $(#[$variant_attr])*
+                    #[allow(deprecated)]
                     {
                         if requested.contains(AnalysisFeature::$variant) {
                             r.set(AnalysisFeature::$variant, self.$field);
@@ -403,6 +406,12 @@ features_table! {
     /// labeled corpus). Do not threshold at `>= 0.7` — almost nothing
     /// fires there. See `docs/calibration-corpus-2026-04-27.md`.
     #[cfg(feature = "composites")]
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "the `composites` flag is being retired in the next major release. \
+                Compute from raw signals (LumaHistogramEntropy, EdgeDensity, ChromaComplexity, \
+                FlatColorBlockRatio) directly, or pin a learned classifier via zenpredict."
+    )]
     TextLikelihood = 27 : f32 => text_likelihood,
     /// `f32`. Soft score: UI / chart / synthetic content.
     ///
@@ -424,6 +433,13 @@ features_table! {
     /// F1 (0.769) at its own optimal operating point. See
     /// `docs/calibration-corpus-2026-04-27.md`.
     #[cfg(feature = "composites")]
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "the `composites` flag is being retired in the next major release. \
+                `PatchFraction` (AUC = 0.88) is a stronger single screen-vs-photo \
+                discriminator. Combine raw signals directly or pin a learned classifier \
+                via zenpredict."
+    )]
     ScreenContentLikelihood = 28 : f32 => screen_content_likelihood,
     /// `f32`. Soft score: natural photographic content.
     ///
@@ -437,6 +453,13 @@ features_table! {
     /// multiply old thresholds by `1 / 0.69` to translate.) See
     /// `docs/calibration-corpus-2026-04-27.md`.
     #[cfg(feature = "composites")]
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "the `composites` flag is being retired in the next major release. \
+                Compute photo-vs-screen discrimination from raw signals \
+                (LumaHistogramEntropy, EdgeDensity, ChromaComplexity, PatchFraction) \
+                directly, or pin a learned classifier via zenpredict."
+    )]
     NaturalLikelihood = 29 : f32 => natural_likelihood,
 
     // ---------------- Quick-path palette signals --------------------
@@ -599,6 +622,12 @@ features_table! {
     /// Behind the `composites` cargo feature: the combinator
     /// coefficients are calibration-driven and may drift in 0.1.x.
     #[cfg(feature = "composites")]
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "the `composites` flag is being retired in the next major release. \
+                Combine raw signals (LumaHistogramEntropy + Otsu-bimodality from a \
+                histogram you compute) directly, or pin a learned classifier via zenpredict."
+    )]
     LineArtScore = 45 : f32 => line_art_score,
 
     /// `f32`. Fraction `[0, 1]` of sampled pixels in the canonical
@@ -1532,6 +1561,7 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
     }
     #[cfg(feature = "composites")]
+    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
     {
         s = s.with(AnalysisFeature::LineArtScore);
     }
@@ -1594,6 +1624,7 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
     // ScreenContentLikelihood reads `patch_fraction` (DCT-derived)
     // when experimental is on; falls back to non-DCT formula otherwise.
     #[cfg(all(feature = "composites", feature = "experimental"))]
+    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
     {
         s = s.with(AnalysisFeature::ScreenContentLikelihood);
     }
@@ -1633,6 +1664,7 @@ pub(crate) const DEPTH_FEATURES: FeatureSet = {
 pub(crate) const DERIVED_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     #[cfg(feature = "composites")]
+    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
     {
         s = s.with(AnalysisFeature::TextLikelihood);
         s = s.with(AnalysisFeature::ScreenContentLikelihood);
@@ -1664,6 +1696,7 @@ pub(crate) const DERIVED_FEATURES: FeatureSet = {
 pub(crate) const T3_NEEDED_BY: FeatureSet = {
     let mut s = TIER3_FEATURES;
     #[cfg(feature = "composites")]
+    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
     {
         s = s.with(AnalysisFeature::TextLikelihood);
         s = s.with(AnalysisFeature::NaturalLikelihood);
@@ -1693,6 +1726,7 @@ pub(crate) const T3_NEEDED_BY: FeatureSet = {
 pub(crate) const PAL_NEEDED_BY: FeatureSet = {
     let mut s = PALETTE_FEATURES;
     #[cfg(feature = "composites")]
+    #[allow(deprecated)] // composites slated for removal next major; const set has to enumerate
     {
         s = s.with(AnalysisFeature::ScreenContentLikelihood);
         s = s.with(AnalysisFeature::NaturalLikelihood);

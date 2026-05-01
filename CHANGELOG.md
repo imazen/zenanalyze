@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > next zenanalyze release (size-invariance discipline, patch
 > fingerprint, threshold recalibration).
 
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
+     Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
+
+- **Remove the `composites` cargo feature and its 4 enum variants**
+  (`AnalysisFeature::TextLikelihood` = 27,
+  `AnalysisFeature::ScreenContentLikelihood` = 28,
+  `AnalysisFeature::NaturalLikelihood` = 29,
+  `AnalysisFeature::LineArtScore` = 45). The composite scores are
+  hand-tuned weighted sums of stable raw signals; their coefficients
+  drift faster than the API can usefully expose. Empirically
+  `PatchFraction` (AUC = 0.88) outperforms `ScreenContentLikelihood`
+  as a single discriminator anyway. Stable feature ids 27, 28, 29, 45
+  stay reserved (never recycled). Migration: consume raw signals
+  directly (LumaHistogramEntropy, EdgeDensity, ChromaComplexity,
+  PatchFraction, FlatColorBlockRatio, DistinctColorBins) or train a
+  small zenpredict model on a labeled corpus and ship the `.bin`.
+  `tier3::compute_derived_likelihoods` and the four variants now
+  emit `#[deprecated]` warnings in 0.1.x to surface the migration.
+
 ### Added — picker training principles + cross-codec defaults (will ship with next zenanalyze release)
 
 - **`zentrain/PRINCIPLES.md`** — single source of truth for what's

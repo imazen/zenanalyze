@@ -587,6 +587,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
         // the dispatch axes decided.
+        #[allow(deprecated)] // composites slated for removal next major; internal call OK
         tier3::compute_derived_likelihoods::<T3, PAL>(&mut raw);
     }
 
@@ -791,4 +792,5 @@ pub fn try_analyze_features_rgb8(
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // tests cover composites variants slated for removal next major
 mod tests;

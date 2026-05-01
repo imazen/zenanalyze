@@ -35,6 +35,7 @@
 //! CORPUS_ROOT=/path/to/codec-corpus \
 //!   ./target/release/examples/corpus_eval > /tmp/zenanalyze_labeled.csv
 //! ```
+#![allow(deprecated)] // example exercises composites variants slated for removal next major
 
 use std::fs;
 use std::path::{Path, PathBuf};
