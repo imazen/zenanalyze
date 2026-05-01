@@ -151,24 +151,53 @@ _CONFIG_RE = re.compile(
     r"_sns(?P<sns>\d+)_fs(?P<fs>\d+)_sh(?P<sh>\d+)"
     r"_pl(?P<pl>\d+)_mp(?P<mp>[01])$"
 )
+# Legacy v0.1 format (2026-04-29 / 2026-04-30 bakes): no
+# cost_model_strict / partition_limit / multi_pass_stats axes.
+# Older bakes on disk are still useful for ablation / comparison runs;
+# parse_config_name accepts both formats so student_permutation.py and
+# friends can re-load them without re-training.
+_CONFIG_RE_V01 = re.compile(
+    r"^m(?P<method>\d+)_seg(?P<seg>\d+)"
+    r"_sns(?P<sns>\d+)_fs(?P<fs>\d+)_sh(?P<sh>\d+)$"
+)
 
 
 def parse_config_name(name: str) -> dict:
-    """Decompose a zenwebp v0.2 config name into categorical + scalar
+    """Decompose a zenwebp config name into categorical + scalar
     axes. Categorical axes are method, segments, cost_model_strict;
-    everything else is a scalar prediction head."""
+    everything else is a scalar prediction head.
+
+    Accepts both:
+      - v0.2: ``m4_seg1_cm0_sns0_fs0_sh0_pl0_mp0`` (current bakes)
+      - v0.1: ``m4_seg1_sns0_fs0_sh0`` (2026-04-29 / 2026-04-30 bakes
+        before cm/pl/mp axes were added). v0.1 rows default
+        cost_model_strict=False, partition_limit=0, multi_pass_stats=0
+        — i.e. they slot into the v0.2 cell that matches the legacy
+        defaults so a v0.1 bake's outputs are interpretable under the
+        v0.2 schema.
+    """
     m = _CONFIG_RE.match(name)
-    if not m:
-        raise ValueError(f"unparseable zenwebp config name: {name}")
-    return {
-        # categorical
-        "method": int(m.group("method")),
-        "segments": int(m.group("seg")),
-        "cost_model_strict": bool(int(m.group("cm"))),
-        # scalar
-        "sns_strength": float(m.group("sns")),
-        "filter_strength": float(m.group("fs")),
-        "filter_sharpness": float(m.group("sh")),
-        "partition_limit": float(m.group("pl")),
-        "multi_pass_stats": float(m.group("mp")),
-    }
+    if m:
+        return {
+            "method": int(m.group("method")),
+            "segments": int(m.group("seg")),
+            "cost_model_strict": bool(int(m.group("cm"))),
+            "sns_strength": float(m.group("sns")),
+            "filter_strength": float(m.group("fs")),
+            "filter_sharpness": float(m.group("sh")),
+            "partition_limit": float(m.group("pl")),
+            "multi_pass_stats": float(m.group("mp")),
+        }
+    m = _CONFIG_RE_V01.match(name)
+    if m:
+        return {
+            "method": int(m.group("method")),
+            "segments": int(m.group("seg")),
+            "cost_model_strict": False,
+            "sns_strength": float(m.group("sns")),
+            "filter_strength": float(m.group("fs")),
+            "filter_sharpness": float(m.group("sh")),
+            "partition_limit": 0.0,
+            "multi_pass_stats": 0.0,
+        }
+    raise ValueError(f"unparseable zenwebp config name: {name}")
