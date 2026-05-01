@@ -54,10 +54,19 @@ pub fn forward(
     // (np.sqrt(var_)); transform divides by it. Mirror that here so
     // the runtime feeds the network inputs scaled the same way the
     // training-time eval did.
+    //
+    // Zero-variance columns: sklearn's `_handle_zeros_in_scale`
+    // replaces `scale=0` with `1.0` so the column passes through as
+    // `(x - mean)`. We mirror that defensively in case a baker forgot
+    // to sanitize. Cost: one branch per input dim per predict
+    // (~12-32 per call; negligible vs the matmul). NaN-`/`-NaN paths
+    // are unaffected; only exact-zero scale is rerouted.
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     for i in 0..n_inputs {
-        scratch_a[i] = (features[i] - mean[i]) / scale[i];
+        let s = scale[i];
+        let safe_s = if s == 0.0 { 1.0 } else { s };
+        scratch_a[i] = (features[i] - mean[i]) / safe_s;
     }
 
     let mut input_buf: &mut [f32] = scratch_a;

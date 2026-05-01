@@ -113,6 +113,12 @@ pub struct Metadata<'a> {
 impl<'a> Metadata<'a> {
     /// Parse a metadata blob. An empty blob (`bytes.len() == 0`) is
     /// the "no metadata" case and yields an empty `Metadata`.
+    ///
+    /// `key_len = 0` (an empty-string key) is **accepted** and parses
+    /// to a valid entry with `key = ""`. Bakers SHOULD NOT emit empty
+    /// keys; the loader does not reject them in the spirit of
+    /// forward-compat. Lookups via [`Metadata::get`] use exact string
+    /// match, so an empty-string key only collides with itself.
     pub fn parse(bytes: &'a [u8]) -> Result<Self, PredictError> {
         let mut entries = alloc::vec::Vec::new();
         let mut pos = 0usize;
@@ -159,9 +165,20 @@ impl<'a> Metadata<'a> {
                     have: bytes.len() - pos,
                 });
             }
-            let value_len_bytes: [u8; 4] = bytes[pos..pos + 4]
-                .try_into()
-                .expect("4-byte slice → [u8; 4] is infallible");
+            // The 4-byte slice → [u8; 4] conversion is infallible
+            // because we just bounds-checked `pos + 4 <= bytes.len()`
+            // above, but we use `?` instead of `.expect` to keep the
+            // hot parse loop panic-free (defense-in-depth: a future
+            // refactor can't accidentally drop the bounds check and
+            // leave a panic in its wake).
+            let value_len_bytes: [u8; 4] =
+                bytes[pos..pos + 4]
+                    .try_into()
+                    .map_err(|_| PredictError::Truncated {
+                        offset: pos,
+                        want: 4,
+                        have: bytes.len() - pos,
+                    })?;
             let value_len = u32::from_le_bytes(value_len_bytes) as usize;
             pos += 4;
 

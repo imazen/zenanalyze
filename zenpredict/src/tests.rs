@@ -405,6 +405,95 @@ mod bake_roundtrip {
         assert!(matches!(err, PredictError::SchemaHashMismatch { .. }));
     }
 
+    /// Schema mismatch must be reported BEFORE any layer-table parsing
+    /// so adversarial bakes with mismatched schema + huge n_layers
+    /// don't allocate before failing. We craft a header where
+    /// n_layers is set to a value that would fail layer-table parse,
+    /// but with the wrong schema hash — the error must be the schema
+    /// mismatch, not the section error.
+    #[test]
+    fn schema_hash_check_runs_before_layer_table() {
+        let mut bytes = make_simple_model();
+        // Set n_layers to a value that would walk past the file —
+        // u32::MAX. layer_table.slice() would fail before our fix
+        // because the section is still small (the bake doesn't grow);
+        // schema check happens first now.
+        bytes[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        let aligned = Aligned(bytes);
+        let err = Model::from_bytes_with_schema(&aligned.0, 0).unwrap_err();
+        assert!(
+            matches!(err, PredictError::SchemaHashMismatch { .. }),
+            "got {err:?} — schema must be checked before n_layers parse"
+        );
+    }
+
+    /// Zero-variance scaler columns (`scaler_scale[i] == 0.0`) must
+    /// not produce NaN / inf. Mirrors sklearn's
+    /// `_handle_zeros_in_scale`: when scale is exactly zero, treat as
+    /// 1.0 so the column passes through as `(x - mean)`.
+    #[test]
+    fn zero_scaler_scale_does_not_panic_or_nan() {
+        let scaler_mean = [0.0f32, 0.0, 0.0];
+        // Mid column has zero scale — would divide by zero without
+        // the guard.
+        let scaler_scale = [1.0f32, 0.0, 1.0];
+        let w0 = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        ];
+        let b0 = [0.0f32, 0.0, 0.0, 0.0];
+        let w1 = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let b1 = [10.0f32, 20.0];
+        let layers = [
+            BakeLayer {
+                in_dim: 3,
+                out_dim: 4,
+                activation: Activation::LeakyRelu,
+                dtype: WeightDtype::F32,
+                weights: &w0,
+                biases: &b0,
+            },
+            BakeLayer {
+                in_dim: 4,
+                out_dim: 2,
+                activation: Activation::Identity,
+                dtype: WeightDtype::F32,
+                weights: &w1,
+                biases: &b1,
+            },
+        ];
+        let bytes = bake_v2(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &[],
+        })
+        .unwrap();
+        let aligned = Aligned(bytes);
+        let model = Model::from_bytes(&aligned.0).unwrap();
+        let mut p = Predictor::new(model);
+        let out = p.predict(&[1.0, 5.0, 1.0]).unwrap();
+        for v in out {
+            assert!(v.is_finite(), "scaler /0 produced non-finite output: {v}");
+        }
+    }
+
+    /// `from_bytes_with_schema` is the cheap-fail path: it must agree
+    /// with `from_bytes` + post-check on success.
+    #[test]
+    fn from_bytes_and_with_schema_agree_on_success() {
+        let bytes = make_simple_model();
+        let aligned = Aligned(bytes);
+        let a = Model::from_bytes(&aligned.0).unwrap();
+        let b = Model::from_bytes_with_schema(&aligned.0, 0xdeadbeef_cafebabe).unwrap();
+        assert_eq!(a.schema_hash(), b.schema_hash());
+        assert_eq!(a.n_inputs(), b.n_inputs());
+        assert_eq!(a.n_outputs(), b.n_outputs());
+        assert_eq!(a.n_layers(), b.n_layers());
+    }
+
     /// Tiny helper to convert `&[f32; 3]` → `[u8; 12]` for metadata
     /// payloads. Not in the public crate API.
     fn unsafe_to_bytes(arr: &[f32; 3]) -> [u8; 12] {

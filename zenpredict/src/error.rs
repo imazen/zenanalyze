@@ -47,6 +47,12 @@ pub enum PredictError {
     OutputDimMismatch { expected: usize, got: usize },
     /// A header dimension was zero where it must be positive.
     ZeroDimension { what: &'static str },
+    /// A dimension multiplication overflowed `usize` during parse —
+    /// e.g. `n_inputs * out_dim`, `n_layers * sizeof(LayerEntry)`,
+    /// `expected_count * 4` for f32 sections. Crafted bakes can trip
+    /// this on 32-bit targets (`i686-unknown-linux-gnu`,
+    /// `wasm32-unknown-unknown`); safe parsers reject rather than wrap.
+    DimensionOverflow { what: &'static str },
     /// Caller passed a feature vector of the wrong length to
     /// `Predictor::predict` or related entries.
     FeatureLenMismatch { expected: usize, got: usize },
@@ -122,6 +128,9 @@ impl fmt::Display for PredictError {
                 "zenpredict: final layer out_dim {got} != header n_outputs {expected}"
             ),
             Self::ZeroDimension { what } => write!(f, "zenpredict: zero dimension in `{what}`"),
+            Self::DimensionOverflow { what } => {
+                write!(f, "zenpredict: dimension overflow in `{what}`")
+            }
             Self::FeatureLenMismatch { expected, got } => write!(
                 f,
                 "zenpredict: feature vector length {got} != n_inputs {expected}"

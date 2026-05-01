@@ -266,7 +266,29 @@ pub struct Model<'a> {
 impl<'a> Model<'a> {
     /// Parse a v2 model from raw bytes. The returned `Model` borrows
     /// from `bytes` for `'a`.
+    ///
+    /// Reserved fields in [`Header`] (`_pad0`, `reserved`, `flags`)
+    /// and [`LayerEntry`] (`reserved`, `flags`) are ignored on read,
+    /// so future format extensions can populate them without
+    /// invalidating the schema. Bakers MUST zero them.
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, PredictError> {
+        Self::from_bytes_inner(bytes, None)
+    }
+
+    /// Parse and verify the schema_hash matches `expected` BEFORE any
+    /// section parsing, so a wrong-bake input bails out cheaply
+    /// (`O(1)`) rather than walking the layer table first.
+    ///
+    /// Convenience for codecs that compile-in a schema hash and want
+    /// to fail loudly at load when a stale bake gets shipped.
+    pub fn from_bytes_with_schema(bytes: &'a [u8], expected: u64) -> Result<Self, PredictError> {
+        Self::from_bytes_inner(bytes, Some(expected))
+    }
+
+    fn from_bytes_inner(
+        bytes: &'a [u8],
+        expected_schema: Option<u64>,
+    ) -> Result<Self, PredictError> {
         if bytes.len() < HEADER_SIZE {
             return Err(PredictError::Truncated {
                 offset: 0,
@@ -285,6 +307,17 @@ impl<'a> Model<'a> {
             return Err(PredictError::UnsupportedVersion {
                 version: header.version,
                 expected: FORMAT_VERSION,
+            });
+        }
+        // Schema hash is checked BEFORE any layer-table allocation
+        // so adversarial bakes with mismatched schema + huge n_layers
+        // don't allocate before failing.
+        if let Some(want) = expected_schema
+            && header.schema_hash != want
+        {
+            return Err(PredictError::SchemaHashMismatch {
+                expected: want,
+                got: header.schema_hash,
             });
         }
 
@@ -307,12 +340,11 @@ impl<'a> Model<'a> {
 
         // Layer table.
         let layer_bytes = header.layer_table.slice("layer_table", bytes)?;
-        let expected_layer_bytes =
-            n_layers
-                .checked_mul(LAYER_ENTRY_SIZE)
-                .ok_or(PredictError::ZeroDimension {
-                    what: "layer_table size overflow",
-                })?;
+        let expected_layer_bytes = n_layers.checked_mul(LAYER_ENTRY_SIZE).ok_or(
+            PredictError::DimensionOverflow {
+                what: "n_layers * sizeof(LayerEntry)",
+            },
+        )?;
         if layer_bytes.len() != expected_layer_bytes {
             return Err(PredictError::SectionOutOfRange {
                 what: "layer_table",
@@ -356,11 +388,12 @@ impl<'a> Model<'a> {
             let activation = Activation::from_byte(entry.activation)?;
             let weight_dtype = WeightDtype::from_byte(entry.weight_dtype)?;
 
-            let n_weights = in_dim
-                .checked_mul(out_dim)
-                .ok_or(PredictError::ZeroDimension {
-                    what: "layer.weights overflow",
-                })?;
+            let n_weights =
+                in_dim
+                    .checked_mul(out_dim)
+                    .ok_or(PredictError::DimensionOverflow {
+                        what: "layer.in_dim * layer.out_dim",
+                    })?;
             let weights = match weight_dtype {
                 WeightDtype::F32 => WeightStorage::F32(cast_f32_section(
                     "layer.weights[f32]",
@@ -416,8 +449,14 @@ impl<'a> Model<'a> {
         let feature_bounds = if header.feature_bounds.is_empty() {
             &[][..]
         } else {
+            let n_bound_f32s =
+                n_inputs
+                    .checked_mul(2)
+                    .ok_or(PredictError::DimensionOverflow {
+                        what: "feature_bounds = n_inputs * 2",
+                    })?;
             let raw =
-                cast_f32_section("feature_bounds", header.feature_bounds, bytes, n_inputs * 2)?;
+                cast_f32_section("feature_bounds", header.feature_bounds, bytes, n_bound_f32s)?;
             // Reinterpret pairs of f32 as `[FeatureBound]`. They are
             // `#[repr(C)] { low: f32, high: f32 }` so the layout is
             // identical.
@@ -444,20 +483,6 @@ impl<'a> Model<'a> {
             feature_bounds,
             metadata,
         })
-    }
-
-    /// Parse and verify the schema_hash matches `expected`. Convenience
-    /// for codecs that compile-in a schema hash and want to fail loudly
-    /// at load when a stale bake gets shipped.
-    pub fn from_bytes_with_schema(bytes: &'a [u8], expected: u64) -> Result<Self, PredictError> {
-        let model = Self::from_bytes(bytes)?;
-        if model.header.schema_hash != expected {
-            return Err(PredictError::SchemaHashMismatch {
-                expected,
-                got: model.header.schema_hash,
-            });
-        }
-        Ok(model)
     }
 
     pub fn header(&self) -> &Header {
@@ -613,7 +638,9 @@ fn cast_f32_section<'a>(
     expected_count: usize,
 ) -> Result<&'a [f32], PredictError> {
     let raw = section.slice(what, bytes)?;
-    let expected_bytes = expected_count * 4;
+    let expected_bytes = expected_count
+        .checked_mul(4)
+        .ok_or(PredictError::DimensionOverflow { what })?;
     if raw.len() != expected_bytes {
         return Err(PredictError::SectionOutOfRange {
             what,
@@ -639,7 +666,9 @@ fn cast_u16_section<'a>(
     expected_count: usize,
 ) -> Result<&'a [u16], PredictError> {
     let raw = section.slice(what, bytes)?;
-    let expected_bytes = expected_count * 2;
+    let expected_bytes = expected_count
+        .checked_mul(2)
+        .ok_or(PredictError::DimensionOverflow { what })?;
     if raw.len() != expected_bytes {
         return Err(PredictError::SectionOutOfRange {
             what,
