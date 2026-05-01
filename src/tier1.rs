@@ -139,13 +139,6 @@ struct PixelStats {
     edge_count: u64,
     cb_grad_sum: f64,
     cr_grad_sum: f64,
-    /// Quartic moment of `|∇Cb|` / `|∇Cr|` — drives `ChromaKurtosis` (#117).
-    /// Squared-moment paired with the existing chroma_grad_count so the
-    /// kurtosis reduction can compute `E[g⁴] / E[g²]² − 3` at writeback.
-    cb_grad_sq_sum: f64,
-    cr_grad_sq_sum: f64,
-    cb_grad_quad_sum: f64,
-    cr_grad_quad_sum: f64,
     chroma_grad_count: u64,
     /// Hasler-Süsstrunk M3 colourfulness intermediates.
     /// `rg = R − G`, `yb = 0.5·(R + G) − B` per pixel.
@@ -194,10 +187,6 @@ impl Default for PixelStats {
             edge_count: 0,
             cb_grad_sum: 0.0,
             cr_grad_sum: 0.0,
-            cb_grad_sq_sum: 0.0,
-            cr_grad_sq_sum: 0.0,
-            cb_grad_quad_sum: 0.0,
-            cr_grad_quad_sum: 0.0,
             chroma_grad_count: 0,
             rg_sum: 0.0,
             rg_sq_sum: 0.0,
@@ -226,10 +215,6 @@ impl PixelStats {
         self.edge_count += o.edge_count;
         self.cb_grad_sum += o.cb_grad_sum;
         self.cr_grad_sum += o.cr_grad_sum;
-        self.cb_grad_sq_sum += o.cb_grad_sq_sum;
-        self.cr_grad_sq_sum += o.cr_grad_sq_sum;
-        self.cb_grad_quad_sum += o.cb_grad_quad_sum;
-        self.cr_grad_quad_sum += o.cr_grad_quad_sum;
         self.chroma_grad_count += o.chroma_grad_count;
         self.rg_sum += o.rg_sum;
         self.rg_sq_sum += o.rg_sq_sum;
@@ -354,15 +339,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     let mut uniform_blocks: u32 = 0;
     let mut total_blocks: u32 = 0;
     let mut flat_color_blocks: u32 = 0;
-    // Smooth analogs (#118, #119) — accumulated alongside the hard
-    // counters in the SIMD kernel + tail-stripe scalar fallback.
-    // `#[allow(unused_assignments)]`: the writebacks live behind
-    // `cfg(feature = "experimental")`, but the accumulators run
-    // unconditionally to keep the SIMD-kernel signature stable.
-    #[allow(unused_assignments)]
-    let mut uniformity_soft_sum: f64 = 0.0;
-    #[allow(unused_assignments)]
-    let mut flat_color_soft_sum: f64 = 0.0;
     // Grayscale signal: count pixels where the per-pixel R / G / B
     // range is small. Threshold 4 matches the noise-tolerant range
     // used by FlatColorBlockRatio and absorbs JPEG-grade chroma noise
@@ -488,8 +464,6 @@ pub(crate) fn extract_tier1_into_dispatch(
                 }
                 block_var_sum += s.variance_sum;
             }
-            uniformity_soft_sum += s.uniformity_soft_sum;
-            flat_color_soft_sum += s.flat_color_soft_sum;
         } else {
             // Tail stripe: keep the scalar fallback for partial heights
             // (rare; only the last sampled stripe of a non-multiple-of-8
@@ -552,12 +526,6 @@ pub(crate) fn extract_tier1_into_dispatch(
                     block_var_max = var;
                 }
                 block_var_sum += var as f64;
-                // Smooth analogs (#118, #119) — match SIMD kernel formulas
-                // exactly so the tail stripe contributes consistently.
-                uniformity_soft_sum += (-(var as f64) / 25.0).exp();
-                let max_range = r_range.max(g_range).max(b_range) as f64;
-                let s = max_range / 4.0;
-                flat_color_soft_sum += (-(s * s)).exp();
                 total_blocks += 1;
             }
         }
@@ -587,45 +555,10 @@ pub(crate) fn extract_tier1_into_dispatch(
     } else {
         1.0
     };
-    #[cfg(feature = "experimental")]
-    {
-        out.uniformity_smooth = if total_blocks > 0 {
-            (uniformity_soft_sum / total_blocks as f64) as f32
-        } else {
-            1.0
-        };
-    }
     if stats.chroma_grad_count > 0 {
         let gc = stats.chroma_grad_count as f64;
         out.cb_sharpness = (stats.cb_grad_sum / gc) as f32;
         out.cr_sharpness = (stats.cr_grad_sum / gc) as f32;
-    }
-    #[cfg(feature = "experimental")]
-    {
-        // ChromaKurtosis (#117): excess kurtosis of `|∇Cb|` and `|∇Cr|`
-        // combined. We have non-central moments (Σg, Σg², Σg⁴); convert
-        // to central via Steiner's translation rule:
-        //   E[(g-μ)²] = E[g²] − μ²
-        //   E[(g-μ)⁴] = E[g⁴] − 4μ E[g³] + 6μ² E[g²] − 3μ⁴
-        // We don't have Σg³ accumulated (would add another scalar op
-        // per pixel) — approximate with the non-central form
-        // `E[g⁴] / E[g²]² − 3`. For zero-centered distributions the two
-        // forms agree; for chroma gradient (which is non-negative and
-        // peaks near zero), this slightly overstates kurtosis but
-        // monotonicity is preserved — adequate for ordering content
-        // by chroma-edge peakiness.
-        out.chroma_kurtosis = if stats.chroma_grad_count > 1 {
-            let gc = stats.chroma_grad_count as f64;
-            let m2 = (stats.cb_grad_sq_sum + stats.cr_grad_sq_sum) / (2.0 * gc);
-            let m4 = (stats.cb_grad_quad_sum + stats.cr_grad_quad_sum) / (2.0 * gc);
-            if m2 > 1e-12 {
-                (m4 / (m2 * m2) - 3.0) as f32
-            } else {
-                0.0
-            }
-        } else {
-            f32::NAN
-        };
     }
     // `distinct_color_bins` is populated by the always-full-scan
     // `palette` tier in `analyze_with`, AFTER tier 1 runs. Tier 1
@@ -635,14 +568,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     } else {
         0.0
     };
-    #[cfg(feature = "experimental")]
-    {
-        out.flat_color_smooth = if total_blocks > 0 {
-            (flat_color_soft_sum / total_blocks as f64) as f32
-        } else {
-            0.0
-        };
-    }
     // Hasler-Süsstrunk M3 colourfulness:
     //   M3 = sqrt(σ_rg² + σ_yb²) + 0.3 * sqrt(μ_rg² + μ_yb²)
     let mu_rg = stats.rg_sum / n;
@@ -1031,13 +956,6 @@ pub(crate) struct StripeBlockStats {
     pub max_variance: f32,
     /// Sum of per-block luma variance (for mean reduction).
     pub variance_sum: f64,
-    /// Sum of `exp(-var/25)` per block — drives smooth `UniformitySmooth`
-    /// (#118). Differentiable in `var`; complementary to the hard-
-    /// threshold `uniform_blocks` count.
-    pub uniformity_soft_sum: f64,
-    /// Sum of `exp(-(max_range/4)²)` per block — drives smooth
-    /// `FlatColorSmooth` (#119). `max_range = max(R-, G-, B-range)`.
-    pub flat_color_soft_sum: f64,
 }
 
 /// SIMD'd block-stats kernel for one full 8-row stripe. Returns
@@ -1070,8 +988,6 @@ fn stripe_block_stats_simd(
     let mut min_variance: f32 = f32::INFINITY;
     let mut max_variance: f32 = 0.0;
     let mut variance_sum: f64 = 0.0;
-    let mut uniformity_soft_sum: f64 = 0.0;
-    let mut flat_color_soft_sum: f64 = 0.0;
 
     let block_n = (STRIPE_H * STRIPE_H) as f32;
     let inv_256_v = f32x8::splat(token, 1.0 / 256.0);
@@ -1139,10 +1055,6 @@ fn stripe_block_stats_simd(
             max_variance = var;
         }
         variance_sum += var as f64;
-        // Smooth uniformity: exp-decay around the var=25 threshold.
-        // `(-var/25).exp()` is a single scalar op per block (~10 ns);
-        // negligible vs the per-block SIMD reductions above.
-        uniformity_soft_sum += (-(var as f64) / 25.0).exp();
 
         let r_min = r_min_v.reduce_min();
         let r_max = r_max_v.reduce_max();
@@ -1156,11 +1068,6 @@ fn stripe_block_stats_simd(
         if r_range <= 4.0 && g_range <= 4.0 && b_range <= 4.0 {
             flat_color_blocks += 1;
         }
-        // Smooth flat-color: exp(-(max_range/4)²). Continuous in the
-        // per-channel ranges; reaches 1/e at the hard-threshold value.
-        let max_range = r_range.max(g_range).max(b_range) as f64;
-        let s = max_range / 4.0;
-        flat_color_soft_sum += (-(s * s)).exp();
     }
 
     StripeBlockStats {
@@ -1169,8 +1076,6 @@ fn stripe_block_stats_simd(
         min_variance: if blocks_x == 0 { 0.0 } else { min_variance },
         max_variance,
         variance_sum,
-        uniformity_soft_sum,
-        flat_color_soft_sum,
     }
 }
 
@@ -1427,10 +1332,6 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
 
     let mut cb_grad_sum: f64 = 0.0;
     let mut cr_grad_sum: f64 = 0.0;
-    let mut cb_grad_sq_sum: f64 = 0.0;
-    let mut cr_grad_sq_sum: f64 = 0.0;
-    let mut cb_grad_quad_sum: f64 = 0.0;
-    let mut cr_grad_quad_sum: f64 = 0.0;
     let mut chroma_grad_count: u64 = 0;
 
     if width > 1 {
@@ -1475,12 +1376,6 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 let cr_g = (cr_right - cr_cur).abs() as f64;
                 cb_grad_sum += cb_g;
                 cr_grad_sum += cr_g;
-                let cb_g2 = cb_g * cb_g;
-                let cr_g2 = cr_g * cr_g;
-                cb_grad_sq_sum += cb_g2;
-                cr_grad_sq_sum += cr_g2;
-                cb_grad_quad_sum += cb_g2 * cb_g2;
-                cr_grad_quad_sum += cr_g2 * cr_g2;
                 chroma_grad_count += 1;
 
                 if has_next {
@@ -1548,12 +1443,6 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             let cr_g = (cr_right - cr_cur).abs() as f64;
             cb_grad_sum += cb_g;
             cr_grad_sum += cr_g;
-            let cb_g2 = cb_g * cb_g;
-            let cr_g2 = cr_g * cr_g;
-            cb_grad_sq_sum += cb_g2;
-            cr_grad_sq_sum += cr_g2;
-            cb_grad_quad_sum += cb_g2 * cb_g2;
-            cr_grad_quad_sum += cr_g2 * cr_g2;
             chroma_grad_count += 1;
             if has_next {
                 let doff = next_row_off.unwrap() + x * 3;
@@ -1583,10 +1472,6 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         edge_count,
         cb_grad_sum,
         cr_grad_sum,
-        cb_grad_sq_sum,
-        cr_grad_sq_sum,
-        cb_grad_quad_sum,
-        cr_grad_quad_sum,
         chroma_grad_count,
         skin_count,
         edge_grad_sum,

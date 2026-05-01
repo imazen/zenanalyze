@@ -94,9 +94,6 @@ KEEP_FEATURES = [
     "feat_colourfulness",
     "feat_quant_survival_uv",
     "feat_luma_kurtosis",
-    "feat_chroma_kurtosis",
-    "feat_uniformity_smooth",
-    "feat_flat_color_smooth",
     "feat_gradient_fraction_smooth",
 ]
 

@@ -951,37 +951,12 @@ features_table! {
     /// shape).
     #[cfg(feature = "experimental")]
     LumaKurtosis = 116 : f32 => luma_kurtosis,
-    /// `f32`. Excess kurtosis of `|∇Cb|` and `|∇Cr|` combined,
-    /// computed from new `cb/cr_grad_quad_sum` accumulators alongside
-    /// the existing `cb/cr_grad_sum` chroma-gradient pass. Captures
-    /// chroma-edge peakiness: low for photos with smooth chroma
-    /// transitions, high for screen content with sharp chroma boundaries
-    /// (UI element edges, anti-aliased text glyphs).
-    #[cfg(feature = "experimental")]
-    ChromaKurtosis = 117 : f32 => chroma_kurtosis,
 
     // ---------------- Smooth replacements for hard thresholds --------
     // Threshold-counting features (var < 25 / range ≤ 4 / etc.) have
     // piecewise-constant gradients that fight MLP training. Smooth
     // counterparts using exp-decay or direct ratios are differentiable
     // everywhere and capture the same "fraction-of-mass" signal.
-    /// `f32`. Smooth analog of `Uniformity`: mean of `exp(-var/25)`
-    /// over sampled 8×8 blocks, where `var` is per-block luma variance.
-    /// At `var = 0` contributes 1.0; at `var = 25` (the hard
-    /// threshold) contributes ~0.37; at `var ≥ 100` ~0.018. Continuous
-    /// and differentiable in `var`. Cross-codec ablation will tell us
-    /// whether this dominates the hard-threshold `Uniformity` for
-    /// learned pickers.
-    #[cfg(feature = "experimental")]
-    UniformitySmooth = 118 : f32 => uniformity_smooth,
-    /// `f32`. Smooth analog of `FlatColorBlockRatio`: mean of
-    /// `exp(-(max_range/4)²)` over sampled 8×8 blocks where
-    /// `max_range = max(R_max-R_min, G_max-G_min, B_max-B_min)`. At
-    /// `max_range = 0` contributes 1.0; at `max_range = 4` (the hard
-    /// threshold) contributes 1/e ≈ 0.37; at `max_range ≥ 12` near-zero.
-    /// Differentiable in the per-channel ranges.
-    #[cfg(feature = "experimental")]
-    FlatColorSmooth = 119 : f32 => flat_color_smooth,
     /// `f32`. Smooth analog of `GradientFraction`: mean of
     /// `block_low_y_ac / max(block_ac, 16)` over sampled 8×8 DCT blocks.
     /// The hard `GradientFraction` only counts blocks where the ratio
@@ -1940,6 +1915,11 @@ mod tests {
         // `feat_pixel_count` (log2/log10/log_padded/sqrt/etc.) — pure
         // collinearity per #59.
         94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104,
+        // ids 117, 118, 119 were `ChromaKurtosis` /
+        // `UniformitySmooth` / `FlatColorSmooth` — Tier-0 redundant
+        // with existing features on ≥3/4 codecs in the 2026-05-01
+        // cross-codec ablation. Stable ids reserved.
+        117, 118, 119,
     ];
 
     #[test]

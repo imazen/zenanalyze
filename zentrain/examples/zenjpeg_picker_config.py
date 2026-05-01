@@ -188,11 +188,10 @@ KEEP_FEATURES = [
     # DROPPED: all noise_floor_uv and quant_survival_uv percentiles —
     # parents were negative-Δ ablation; UV signal handled by chroma
     # sharpness features instead.
-    # ---------- 5 new features added in zenanalyze 0.1.0 (ids 116-120) ----------
+    # ---------- 2 new features kept in zenanalyze 0.1.0 (ids 116, 120) ----------
+    # ChromaKurtosis (117), UniformitySmooth (118), FlatColorSmooth (119)
+    # were retired 2026-05-01 — Tier-0 redundant on cross-codec ablation.
     "feat_luma_kurtosis",            # #116 — quartic moment of |∇²L|
-    "feat_chroma_kurtosis",          # #117 — quartic moment of |∇Cb|/|∇Cr|
-    "feat_uniformity_smooth",        # #118 — exp(-var/25) per block
-    "feat_flat_color_smooth",        # #119 — smooth flat-color signal
     "feat_gradient_fraction_smooth", # #120 — per-block low-AC ratio
 ]
 

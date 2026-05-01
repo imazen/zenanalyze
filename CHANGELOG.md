@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   even when `feat_pixel_count` is available. Both groups are gated
   by `#[deprecated(since = "0.1.0")]` in 0.1.x to give downstream
   consumers warning.
+- **Remove 3 redundant new shape/smoothness features**
+  (`AnalysisFeature::ChromaKurtosis` = 117,
+  `AnalysisFeature::UniformitySmooth` = 118,
+  `AnalysisFeature::FlatColorSmooth` = 119). Cross-codec ablation
+  (zenjpeg + zenwebp + zenavif + zenjxl, 2026-05-01) showed all three
+  Tier-0 redundant on ≥3/4 codecs against existing features (`Uniformity`,
+  `FlatColorBlockRatio`, the chroma_grad_sum-derived sharpness signals).
+  The two new features that EARNED their keep — `LumaKurtosis` (116)
+  and `GradientFractionSmooth` (120) — remain. Stable feature ids 117,
+  118, 119 stay reserved (never recycled).
 - **Remove the `composites` cargo feature and its 4 enum variants**
   (`AnalysisFeature::TextLikelihood` = 27,
   `AnalysisFeature::ScreenContentLikelihood` = 28,

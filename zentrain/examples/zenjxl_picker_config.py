@@ -140,11 +140,10 @@ KEEP_FEATURES = [
     "feat_grayscale_score",
     "feat_edge_slope_stdev",
     # New experimental shape / smoothness features (post-cull,
-    # zenanalyze 0.1.0 — 5 features added 2026-04-30).
+    # zenanalyze 0.1.0 — 2 features kept 2026-05-01 after Tier-0
+    # ablation removed chroma_kurtosis / uniformity_smooth /
+    # flat_color_smooth as redundant).
     "feat_luma_kurtosis",
-    "feat_chroma_kurtosis",
-    "feat_uniformity_smooth",
-    "feat_flat_color_smooth",
     "feat_gradient_fraction_smooth",
     # Dimension / shape
     "feat_pixel_count",
