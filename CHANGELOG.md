@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+- **Remove 13 redundant transforms of `feat_pixel_count`** (#59,
+  partial). The pure mathematical transforms (`log_pixels`,
+  `log2_pixels`, `log10_pixels`, `log_pixels_rounded`, `sqrt_pixels`,
+  `bitmap_bytes`, `log_bitmap_bytes`, `log_min_dim`, `log_max_dim`,
+  `log_padded_pixels_{8,16,32,64}`) are Spearman-1.0 correlated with
+  `feat_pixel_count` by construction; cross-codec ablation (zenjpeg
+  + zenwebp) confirms zero LOO and permutation-importance Δ. Stable
+  feature ids 57, 60, 62, 94–104 stay reserved (never recycled).
+  **Not removed**: `feat_min_dim` (58), `feat_max_dim` (59),
+  `feat_aspect_min_over_max` (61), `feat_log_aspect_abs` (62) — the
+  zenwebp ablation showed +0.10–0.14pp LOO Δ on these (m4/m5/m6
+  method choice depends on shape), so they're zenwebp-load-bearing
+  even when `feat_pixel_count` is available. Both groups are gated
+  by `#[deprecated(since = "0.1.0")]` in 0.1.x to give downstream
+  consumers warning.
 - **Remove the `composites` cargo feature and its 4 enum variants**
   (`AnalysisFeature::TextLikelihood` = 27,
   `AnalysisFeature::ScreenContentLikelihood` = 28,

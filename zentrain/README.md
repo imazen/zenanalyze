@@ -15,6 +15,7 @@ This README is the canonical entry point. Three subsidiary docs cover content to
 | **[README.md](README.md)** (this file) | Anyone designing a bake. Single source of truth for the workflow, output layout, safety profiles, and the codec-config-module contract |
 | **[PRINCIPLES.md](PRINCIPLES.md)** | **Cross-codec defaults reference.** Read this first if you're adopting / re-baking for any codec — the data discipline, argmin objectives, per-codec adoption notes, default settings, validation gates, and known landmines that apply to every consumer (zenjpeg / zenwebp / zenavif / zenjxl / zenpng / zengif / zenpicker / zensim) |
 | **[FOR_NEW_CODECS.md](FOR_NEW_CODECS.md)** | Tutorial. Walk a new codec from "I have a config grid" to a shipped bake in ~30 min |
+| **[ABLATION.md](ABLATION.md)** | Feature-ablation methodology. Read **before deprecating any feature**: four-tier pipeline (correlation cleanup → permutation → group → LOO), the "constants vs redundancy" trap that has bitten us twice, and cross-codec validation requirements |
 | **[SAFETY_PLANE.md](SAFETY_PLANE.md)** | Codec-implementation deep dive. Two-shot rescue protocol, `RescuePolicy` field layout, calibration questions |
 
 Reference code + tools:

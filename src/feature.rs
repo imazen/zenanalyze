@@ -797,6 +797,14 @@ features_table! {
     PixelCount = 56 : u32 => pixel_count,
     /// `f32`. `ln(w * h)`, natural log. Useful as a smooth
     /// resolution axis for predictors (vs `size_class` one-hot).
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPixels = 57 : f32 => log_pixels,
     /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
     /// a 1024×1 image and a 32×32 image have very different
@@ -812,6 +820,14 @@ features_table! {
     /// values up to 2²⁴ ≈ 16 MB; larger images lose ~ULP-level
     /// precision per byte but stay correct in log space (≤ 1 ULP
     /// drift in log10 ≈ 1e-7) — fine for ML features.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     BitmapBytes = 60 : f32 => bitmap_bytes,
     /// `f32`. `min(w, h) / max(w, h)` ∈ `(0, 1]`. Square = `1.0`,
     /// extreme strip → 0. Bounded and smooth — well-conditioned for
@@ -976,37 +992,125 @@ features_table! {
     // spent more directly than the visible pixel count does.
     /// `f32`. `log2(w * h)`. Range ~12 → 24 for typical images.
     /// Power-of-2 friendly, integer-clean for power-of-2 sizes.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     Log2Pixels = 94 : f32 => log2_pixels,
     /// `f32`. `log10(w * h)`. Range ~3.6 → 7.2 for typical images.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     Log10Pixels = 95 : f32 => log10_pixels,
     /// `f32`. `ln(w * h)` rounded to the nearest 0.5 — bucket-
     /// aligned smooth signal that gives the network a quantized
     /// "size class" handle without the 4-bucket cliff of the
     /// engineered `size_*` one-hot.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPixelsRounded = 96 : f32 => log_pixels_rounded,
     /// `f32`. `sqrt(w * h)` — geometric mean linear dimension.
     /// Useful when the network wants a linear (not log) size axis
     /// that doesn't blow up the dynamic range like raw `PixelCount`.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     SqrtPixels = 97 : f32 => sqrt_pixels,
     /// `f32`. `ln(bitmap_bytes)`. Compressed-vs-uncompressed-
     /// reference signal in log space — `BitmapBytes` itself has the
     /// same wide-dynamic-range memorization risk as `PixelCount`.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogBitmapBytes = 98 : f32 => log_bitmap_bytes,
     /// `f32`. `ln(min(w, h))` — log of the shorter dimension.
     /// Captures strips and thumbnails where one dim is dominant.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogMinDim = 99 : f32 => log_min_dim,
     /// `f32`. `ln(max(w, h))` — log of the longer dimension.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogMaxDim = 100 : f32 => log_max_dim,
     /// `f32`. `ln(ceil(w/8)*8 × ceil(h/8)*8)`. Log of the block-
     /// padded encoded surface area at the JPEG 8×8 / WebP/AVIF 8×8
     /// grid. For aligned images equals `LogPixels`; for
     /// off-by-one sizes is slightly larger by `ln(1 + alignment_loss)`.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPaddedPixels8 = 101 : f32 => log_padded_pixels_8,
     /// `f32`. Same for 16×16 (JPEG 4:2:0 MCU, AVIF 16×16).
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPaddedPixels16 = 102 : f32 => log_padded_pixels_16,
     /// `f32`. Same for 32×32 (JXL DCT32, AV1 32×32).
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
     /// `f32`. Same for 64×64 (JXL DCT64).
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "redundant transform of feat_pixel_count; identical Spearman rank \
+                across the corpus, zero LOO and permutation-importance Δ — see #59. \
+                Stable id stays reserved (never recycled). For tree learners, consume \
+                feat_pixel_count directly; for linear learners, compute the transform \
+                in your training pipeline."
+    )]
     LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
 
     // ---------------- Low-tail percentile companions ---------------

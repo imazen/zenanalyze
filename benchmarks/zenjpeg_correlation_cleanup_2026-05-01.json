@@ -1,0 +1,245 @@
+{
+  "source": "benchmarks/zq_pareto_features_2026-04-30_v2_2_subset100.tsv",
+  "threshold": 0.99,
+  "n_rows": 400,
+  "n_features_in": 103,
+  "n_features_dropped": 16,
+  "n_constant": 20,
+  "n_low_variance": 20,
+  "constant_columns": [
+    {
+      "name": "feat_alpha_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_used_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_alpha_bimodal_score",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_peak_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_p99_luminance_nits",
+      "n_unique": 1,
+      "value": 80.0
+    },
+    {
+      "name": "feat_hdr_headroom_stops",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_hdr_pixel_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_wide_gamut_peak",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_wide_gamut_fraction",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_effective_bit_depth",
+      "n_unique": 1,
+      "value": 8.0
+    },
+    {
+      "name": "feat_hdr_present",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_gamut_coverage_srgb",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_gamut_coverage_p3",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_aspect_min_over_max",
+      "n_unique": 1,
+      "value": 1.0
+    },
+    {
+      "name": "feat_log_aspect_abs",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_block_misalignment_8",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_block_misalignment_16",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_block_misalignment_32",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_block_misalignment_64",
+      "n_unique": 1,
+      "value": 0.0
+    },
+    {
+      "name": "feat_channel_count",
+      "n_unique": 1,
+      "value": 3.0
+    }
+  ],
+  "low_variance_columns": [
+    {
+      "name": "feat_indexed_palette_width",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_palette_fits_in_256",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_is_grayscale",
+      "n_unique": 2
+    },
+    {
+      "name": "feat_pixel_count",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_pixels",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_min_dim",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_max_dim",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_bitmap_bytes",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_quant_survival_uv_p10",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log2_pixels",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log10_pixels",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_pixels_rounded",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_sqrt_pixels",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_bitmap_bytes",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_min_dim",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_max_dim",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_padded_pixels_8",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_padded_pixels_16",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_padded_pixels_32",
+      "n_unique": 3
+    },
+    {
+      "name": "feat_log_padded_pixels_64",
+      "n_unique": 3
+    }
+  ],
+  "clusters": [
+    {
+      "anchor": "feat_palette_fits_in_256",
+      "anchor_n_unique": 2,
+      "dropped": [
+        "feat_indexed_palette_width"
+      ],
+      "cluster_size": 2,
+      "min_abs_corr_in_cluster": 0.9999988749929685
+    },
+    {
+      "anchor": "feat_pixel_count",
+      "anchor_n_unique": 3,
+      "dropped": [
+        "feat_bitmap_bytes",
+        "feat_log10_pixels",
+        "feat_log2_pixels",
+        "feat_log_bitmap_bytes",
+        "feat_log_max_dim",
+        "feat_log_min_dim",
+        "feat_log_padded_pixels_16",
+        "feat_log_padded_pixels_32",
+        "feat_log_padded_pixels_64",
+        "feat_log_padded_pixels_8",
+        "feat_log_pixels",
+        "feat_log_pixels_rounded",
+        "feat_max_dim",
+        "feat_min_dim",
+        "feat_sqrt_pixels"
+      ],
+      "cluster_size": 16,
+      "min_abs_corr_in_cluster": 0.9999999999999999
+    }
+  ],
+  "drop_list": [
+    "feat_bitmap_bytes",
+    "feat_indexed_palette_width",
+    "feat_log10_pixels",
+    "feat_log2_pixels",
+    "feat_log_bitmap_bytes",
+    "feat_log_max_dim",
+    "feat_log_min_dim",
+    "feat_log_padded_pixels_16",
+    "feat_log_padded_pixels_32",
+    "feat_log_padded_pixels_64",
+    "feat_log_padded_pixels_8",
+    "feat_log_pixels",
+    "feat_log_pixels_rounded",
+    "feat_max_dim",
+    "feat_min_dim",
+    "feat_sqrt_pixels"
+  ]
+}

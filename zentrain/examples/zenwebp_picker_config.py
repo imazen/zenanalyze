@@ -40,13 +40,14 @@ from pathlib import Path
 
 # ---------- Paths ----------
 
-# zenwebp/dev/zenwebp_pareto.rs writes here. Bump dates when re-running
-# the sweep on a new corpus or with a new config grid.
-PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.tsv")
-FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-04-30_combined.tsv")
+# zenwebp/dev/zenwebp_pareto.rs writes here. The v0.2 expansion adds
+# partition_limit, multi_pass_stats, and cost_model to the encode grid
+# (576 configs × 30 q × ~1264 image-instances = ~22M cells).
+PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01.tsv")
+FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01.tsv")
 
-OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-04-30.json")
-OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-04-30.log")
+OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01.json")
+OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01.log")
 
 
 # ---------- Schema ----------
@@ -105,39 +106,69 @@ KEEP_FEATURES = [
 ZQ_TARGETS = list(range(30, 70, 5)) + list(range(70, 96, 2))
 
 
-# ---------- Axis schema ----------
-
-CATEGORICAL_AXES = ["method", "segments"]
-SCALAR_AXES = ["sns_strength", "filter_strength", "filter_sharpness"]
+# ---------- Axis schema (v0.2) ----------
+#
+# Cells: method × segments × cost_model = 3 × 2 × 2 = 12 cells.
+# Scalar heads: sns_strength + filter_strength + filter_sharpness +
+#               partition_limit + multi_pass_stats. multi_pass_stats
+#               is binary (0/1); only m4 cells have meaningful training
+#               signal for it (m5/m6 don't honor the flag — see
+#               LossyConfig::with_multi_pass_stats docstring).
+#               Picker output for that head on m5/m6 cells is ignored
+#               at runtime via the codec's `--method` gating.
+# cost_model encoded as bool: 0 = ZenwebpDefault, 1 = StrictLibwebpParity.
+CATEGORICAL_AXES = ["method", "segments", "cost_model_strict"]
+SCALAR_AXES = [
+    "sns_strength",
+    "filter_strength",
+    "filter_sharpness",
+    "partition_limit",
+    "multi_pass_stats",
+]
 SCALAR_SENTINELS: dict = {}
 SCALAR_DISPLAY_RANGES = {
     "sns_strength": (0, 100),
     "filter_strength": (0, 100),
     "filter_sharpness": (0, 7),
+    "partition_limit": (0, 100),
+    "multi_pass_stats": (0, 1),
 }
 
 
 # ---------- Config-name parser ----------
 
-# Format: m{method}_seg{segments}_sns{sns}_fs{filter_strength}_sh{filter_sharpness}
+# Format (v0.2):
+#   m{method}_seg{seg}_cm{cm}_sns{sns}_fs{fs}_sh{sh}_pl{pl}_mp{mp}
 # Examples:
-#   m4_seg1_sns0_fs0_sh0      → method=4, segments=1, sns=0,   fs=0,  sh=0
-#   m6_seg4_sns100_fs60_sh6   → method=6, segments=4, sns=100, fs=60, sh=6
+#   m4_seg1_cm0_sns0_fs0_sh0_pl0_mp0
+#       → method=4, segments=1, cost_model_strict=False,
+#         sns=0, fs=0, sh=0, partition_limit=0, multi_pass_stats=False
+#   m6_seg4_cm1_sns100_fs60_sh6_pl100_mp0
+#       → method=6, segments=4, cost_model_strict=True,
+#         sns=100, fs=60, sh=6, partition_limit=100, multi_pass_stats=False
 _CONFIG_RE = re.compile(
-    r"^m(?P<method>\d+)_seg(?P<seg>\d+)"
-    r"_sns(?P<sns>\d+)_fs(?P<fs>\d+)_sh(?P<sh>\d+)$"
+    r"^m(?P<method>\d+)_seg(?P<seg>\d+)_cm(?P<cm>[01])"
+    r"_sns(?P<sns>\d+)_fs(?P<fs>\d+)_sh(?P<sh>\d+)"
+    r"_pl(?P<pl>\d+)_mp(?P<mp>[01])$"
 )
 
 
 def parse_config_name(name: str) -> dict:
-    """Decompose a zenwebp config name into categorical + scalar axes."""
+    """Decompose a zenwebp v0.2 config name into categorical + scalar
+    axes. Categorical axes are method, segments, cost_model_strict;
+    everything else is a scalar prediction head."""
     m = _CONFIG_RE.match(name)
     if not m:
         raise ValueError(f"unparseable zenwebp config name: {name}")
     return {
+        # categorical
         "method": int(m.group("method")),
         "segments": int(m.group("seg")),
+        "cost_model_strict": bool(int(m.group("cm"))),
+        # scalar
         "sns_strength": float(m.group("sns")),
         "filter_strength": float(m.group("fs")),
         "filter_sharpness": float(m.group("sh")),
+        "partition_limit": float(m.group("pl")),
+        "multi_pass_stats": float(m.group("mp")),
     }
