@@ -1,12 +1,25 @@
-# Multi-MLP picker architecture + safety-default path, 2026-05-02
+# Picker safety-default path + multi-objective runtime, 2026-05-02
 
-User-driven architectural pivot: pickers should ship as a **catalog
-of objective-specific MLPs** rather than one multi-output MLP +
-caller-composed scorer closures. Safety should be the **default
+> **Revised after user pushback (~04:30 UTC).** Earlier draft proposed
+> a CATALOG of objective-specific MLPs (Default / RdSlope /
+> MetricTimeMasked, separate trains, separate bakes). The user
+> correctly noted (a) safety masking applies uniformly across
+> objectives — Default's safety story carries through, (b) shipping
+> more than 2 picker bakes per (codec, metric) is heavy from
+> storage / operations / mental-model standpoints. Revised plan:
+> **one MLP per (codec, metric)** with multi-output heads always
+> emitted; **three objectives implemented at RUNTIME via score
+> functions + masks**, not separate models. Same safety story,
+> ~3× fewer bakes, ~5 days less engineering.
+
+User-driven architectural pivot: safety should be the **default
 path**, not opt-in. Every encode runs input-OOD → predict →
-output-plausibility → confidence-gap → fallback as a single atomic
-decision; codecs receive a structured pick result, not raw model
-outputs.
+output-plausibility → mask+score → confidence-gap → param-clamp →
+fallback as a single atomic decision; codecs receive a structured
+`Pick` result, not raw model outputs. **Three objectives (Default,
+RdSlope, MetricTimeMasked) ride on the same MLP — implemented as
+runtime masks and scoring functions over the model's
+already-emitted multi-output heads.**
 
 This doc is the architectural target. Cross-references the
 [`orchestration_architecture_2026-05-02.md`](orchestration_architecture_2026-05-02.md)
@@ -54,61 +67,76 @@ Gaps:
    zenwebp uses Default recipe only; zenjpeg/zenjxl/zenavif don't
    load pickers at all.
 
-## Three-MLP architecture
+## Single-MLP, multi-objective architecture
 
-Per codec × per objective × per metric. Three objectives ship as
-default; each can take any supported metric:
+**One MLP per (codec, metric).** The MLP always emits all three
+output heads (default-on, no longer opt-in via
+`--emit-metric-head`):
 
-### MLP class A — `Default` (smallest bytes at target zq)
+- `bytes_log[N_CELLS]` — log-bytes per cell representative config
+- `time_log[N_CELLS]` — log-encode-ms per cell representative
+- `metric_log[N_CELLS]` — log-achieved-metric per cell representative
+- `scalars[N_CELLS][n_scalar_axes]` — per-cell continuous knob
+  predictions (existing trainer behavior)
 
-What we have today. Argmin label per (image, target_zq):
-config minimizing `bytes` among configs reaching `target_zq`.
-Inputs: features + `target_zq`. Outputs: `bytes_log[N_CELLS]`.
+Per cell, the "representative" is the config minimizing bytes among
+those reaching `target_zq` — the existing Default-trained label.
 
-### MLP class B — `RdSlope` (μ-aware bytes/ms tradeoff)
+**Three objectives at runtime via masks + score functions:**
 
-Argmin label per (image, μ): config minimizing `bytes + μ × time_ms`.
-Inputs: features + `target_zq` + `μ` (continuous, normalized to
-`[0, 1]` over a sensible per-codec range, e.g., `0` to `0.05 bytes/ms`
-for AVIF). Outputs: `bytes_log[N_CELLS]` + `time_log[N_CELLS]`.
+| Objective | Mask `m[c]` | Score | Argmin |
+|---|---|---|---|
+| `Default { target_zq }` | `true` | `bytes_log[c]` | min score |
+| `RdSlope { target_zq, μ }` | `true` | `bytes_log[c] + μ × time_log[c]` | min score |
+| `MetricTimeMasked { target_zq, T, N_ms }` | `metric_log[c] ≥ log(T)` ∧ `time_log[c] ≤ log(N_ms)` | `bytes_log[c]` | min score; infeasible-sentinel if mask is empty |
 
-Trained against the SLOPE, not the multi-output composition.
-Calibration: per-platform `time_calibration_ms_per_mp` baked in
-metadata + startup-measured per-CPU multiplier (issue #56).
+All three run through the same `pick()` orchestrator + safety
+chain. The MLP doesn't care what objective it's called with — the
+model outputs are objective-agnostic predictions of per-cell
+properties.
 
-### MLP class C — `MetricTimeMasked` (metric ≥ T AND time ≤ N)
-
-Argmin label per (image, T, N): config minimizing `bytes` among
-configs satisfying `metric ≥ T` AND `time ≤ N`. Inputs: features +
-`target_zq` + `target_metric_T` + `time_cap_N`. Outputs:
-`bytes_log[N_CELLS]` + `metric_log[N_CELLS]` + `time_log[N_CELLS]`.
-
-Returns "infeasible" (sentinel cell id) when no config satisfies
-both constraints — caller routes to fallback.
-
-### Catalog
-
-Per codec, the bake catalog grows from "one bake per metric" to:
+**Catalog**:
 
 ```
-picker_default_<metric>.bin       # smallest bytes at target_zq
-picker_rd_slope_<metric>.bin      # μ-aware
-picker_metric_masked_<metric>.bin # ≥T, ≤N
+codec_crate/src/pickers/
+  picker_<metric>.bin           # one per metric, supports all 3 objectives
 ```
 
-For 3 metrics × 3 objectives × 4 codecs: 36 bakes × ~150 KB =
-~5 MB total. Manageable storage; trivial selection at runtime
-(pick `.bin` based on caller's `PickerObjective` enum).
+For 4 codecs × 2 metrics: **8 bakes total**. ~150 KB each = ~1.2 MB
+total. Within the "more than 2 picker bakes per (codec, metric) is
+heavy" budget.
 
-The trade-off vs one-MLP-many-closures:
+### Trade-off vs the per-objective-MLP design (rejected)
 
-| Metric | Multi-output MLP + closure | Per-objective MLP |
-|---|---|---|
-| Argmin accuracy | model approximates each objective from the same logits | each model fully calibrated for its objective |
-| Storage | 1× per metric | 3× per metric |
-| Bake cost | 1× per metric | 3× per metric (most cost is encode/zensim, shared across objectives — only the trainer step duplicates) |
-| Cross-bake bias | possible (model favors the head it sees gradient on most) | impossible by construction |
-| Caller surface | closure boilerplate | enum select |
+The per-objective-MLP design trains DIRECTLY against the slope label
+or the masked argmin label. The single-MLP design uses one model's
+predictions and composes the objective at runtime. The accuracy
+difference is concentrated at the **within-cell scalar setpoint**:
+each cell's predicted continuous knobs (`speed`, `sns_strength`,
+…) are calibrated for the min-bytes representative config. When
+`RdSlope { high μ }` runs at runtime, the cell pick correctly
+favors fast cells, but the scalars *within* the chosen cell are
+still min-bytes-tuned — slightly slope-suboptimal at the edges.
+
+In practice the loss is small:
+
+- Cells bound the major decisions (e.g., zenwebp's `method ×
+  segments`); within-cell scalar choices trade off less than
+  between-cell choices.
+- The dominant signal (cell choice) IS slope-optimized via
+  `bytes_log + μ × time_log`.
+- The MetricTimeMasked accuracy at the mask boundary is similarly
+  bounded — masked-out cells genuinely fail the constraint
+  according to the trained model; the picker errs on the side of
+  conservatism (refuses cells whose `metric_log[c]` predicts at
+  the constraint).
+
+A future refinement could add per-objective scalar heads
+(`scalars_default[N][k]`, `scalars_rdslope[N][k]`) without changing
+the MLP class — just more output dims, ~3× output size. **Defer
+until measured to matter.** PRINCIPLES.md §"Score recipes" already
+documented this composition; the change is making it a first-class
+API rather than a closure pattern.
 
 ## Safety-violation taxonomy (5 classes)
 
@@ -196,18 +224,24 @@ Observability is structured (every variant carries reasons).
 
 ## Trainer responsibilities
 
-To support the default path, the trainer bakes additional
-metadata per `.bin`:
+To support the default path, the trainer always emits all three
+output heads (no longer opt-in) and bakes additional metadata per
+`.bin`:
 
-| TLV key | Type | Purpose |
-|---|---|---|
-| `picker_objective` | u8 enum | `Default` / `RdSlope` / `MetricTimeMasked` |
-| `param_clamp_ranges` | `(f32, f32)[n_scalar_outputs]` | hard min/max per scalar; runtime clamps to these |
-| `confidence_gap_threshold` | f32 | minimum gap between top-2 scores; below = trigger downgrade |
-| `output_bounds` | already there | per-output p01/p99 |
-| `feature_bounds` | already there | per-feature p01/p99 |
-| `zq_fallback_table` | already there | fallback config per zq band |
-| `time_calibration_ms_per_mp` | f32 | per-MP encode-time baseline at training; runtime measures local CPU and applies multiplier |
+| TLV key | Type | Purpose | Status |
+|---|---|---|---|
+| `param_clamp_ranges` | `(f32, f32)[n_scalar_outputs]` | hard min/max per scalar; runtime clamps to these | new in D2 |
+| `confidence_gap_threshold` | f32 | minimum gap between top-2 scores; below = trigger downgrade | new in D2 |
+| `mu_range_for_codec` | `(f32, f32)` | per-codec normalization for the μ input (e.g., `(0.0, 0.05)` bytes/ms for AVIF) | new in D2 |
+| `time_calibration_ms_per_mp` | f32 | median ms-per-MP at training; runtime measures local CPU and applies multiplier | new in D3 |
+| `output_bounds` | already there | per-output p01/p99 | shipped |
+| `feature_bounds` | already there | per-feature p01/p99 | shipped |
+| `zq_fallback_table` | already there | fallback config per zq band | shipped |
+| `safety_compact` + `cell_rescue_hints` | already there | RescuePolicy substrate | shipped |
+
+Note: no `picker_objective` TLV — one bake supports all three
+objectives, selected at runtime via the `PickerObjective` enum
+passed to `pick()`.
 
 The trainer gates the bake on:
 - **Fallback exercisable**: every `(image, size, zq)` cell that
@@ -251,104 +285,101 @@ let bin = pickers.load(PickerObjective::RdSlope { .. }, Metric::Zensim)?;
 let pick = bin.pick(&features, objective)?;
 ```
 
-## Phased plan
+## Phased plan (revised: D3+D4 collapse into runtime work)
 
-Roughly 3–4 weeks of focused engineering, in five phases. Each
-phase delivers something useful by itself.
+**~8 days total**, down from the per-objective-MLP plan's ~13 days.
+Single-MLP-multi-objective architecture eliminates the separate
+training passes for RdSlope and MetricTimeMasked; both become
+runtime score+mask functions over the existing multi-output heads.
 
 ### Phase D1 — Default-path orchestration in zenpredict (~3 days)
 
 Add `Pick` enum, `PickerObjective` enum, `Predictor::pick()`
-wrapper. Wire input-OOD + output-OOD + cell confidence-gap +
-param-clamp + KnownGoodFallback into one method. Keep the
-existing `argmin_masked_with_scorer` for advanced callers.
+wrapper. Wire input-OOD + output-OOD + objective-specific
+mask+score + cell confidence-gap + param-clamp + KnownGoodFallback
+into one method. Keep the existing `argmin_masked_with_scorer` for
+advanced callers (escape hatch).
 
 | # | Item | Effort |
 |---|---|---:|
 | D1.1 | `Pick` + `PickerObjective` + `ClampReason` + `ReplaceReason` enums | 4 hr |
-| D1.2 | `Predictor::pick()` orchestrator | 1 day |
+| D1.2 | `Predictor::pick()` orchestrator with mask+score per objective | 1 day |
 | D1.3 | Param-clamp logic + `param_clamp_ranges` TLV reader | 4 hr |
 | D1.4 | Confidence-gap check + `confidence_gap_threshold` TLV reader | 4 hr |
-| D1.5 | Tests: synthetic feature → each Pick variant fires | 1 day |
+| D1.5 | Tests: synthetic feature → each `Pick` variant fires for each objective | 1 day |
 
-### Phase D2 — Trainer bakes extra TLV (~2 days)
-
-| # | Item | Effort |
-|---|---|---:|
-| D2.1 | Compute `param_clamp_ranges` from corpus | 2 hr |
-| D2.2 | Compute `confidence_gap_threshold` from corpus | 2 hr |
-| D2.3 | Emit `picker_objective` TLV | 1 hr |
-| D2.4 | Validate fallback exercisable (CI gate) | 4 hr |
-| D2.5 | `time_calibration_ms_per_mp` (issue #56) | 1 day |
-
-### Phase D3 — `RdSlope` MLP (~3 days)
+### Phase D2 — Trainer bakes extra TLV + heads-default-on (~2 days)
 
 | # | Item | Effort |
 |---|---|---:|
-| D3.1 | `--objective rd-slope` flag in train_hybrid.py; per-(image, μ) label assignment | 1 day |
-| D3.2 | μ as continuous input feature (normalized) | 4 hr |
-| D3.3 | Trainer emits `bytes_log + time_log` (already does); validate | 4 hr |
-| D3.4 | Calibration probe: startup-measured CPU multiplier | 4 hr |
-| D3.5 | Smoke test on zenwebp: bake with `--objective rd-slope`, run `Predictor::pick(RdSlope { μ })`, confirm trades bytes for ms | 1 day |
+| D2.1 | Make `time_log` + `metric_log` heads default-on (remove `--emit-metric-head` opt-in) | 2 hr |
+| D2.2 | Compute `param_clamp_ranges` from corpus (per scalar axis: p01/p99 of legal range × clamp tolerance) | 2 hr |
+| D2.3 | Compute `confidence_gap_threshold` from safety report's narrow-win cells | 2 hr |
+| D2.4 | Emit `mu_range_for_codec` TLV (per-codec μ calibration range, normalized to `[0,1]`) | 1 hr |
+| D2.5 | CI gate: bake fails if (a) any safety-flagged cell can't route via `zq_fallback_table`, (b) any scalar lacks clamp range, (c) confidence threshold doesn't classify narrow wins | 1 day |
 
-### Phase D4 — `MetricTimeMasked` MLP (~3 days)
-
-Same shape as D3, but argmin under (T, N) constraints. Returns
-infeasible-sentinel when no config qualifies.
+### Phase D3 — Time calibration (~1 day)
 
 | # | Item | Effort |
 |---|---|---:|
-| D4.1 | `--objective metric-masked` flag; (T, N)-constrained label assignment | 1 day |
-| D4.2 | T, N as continuous inputs | 4 hr |
-| D4.3 | Infeasible-sentinel handling at predict time | 4 hr |
-| D4.4 | Smoke test on zenwebp | 1 day |
+| D3.1 | `time_calibration_ms_per_mp` TLV (median ms-per-MP at training) | 2 hr |
+| D3.2 | Startup CPU multiplier probe (encode a fixed reference image, compare to baked baseline) | 4 hr |
+| D3.3 | RdSlope μ correction: `μ_effective = μ_caller × cpu_multiplier` | 2 hr |
 
-### Phase D5 — Production wiring (~2 days)
+Closes issue #56 (RD-vs-time bake calibration protocol).
 
-Wire one objective per codec to actually load the right bake at
-runtime, validate the default path produces sane picks. Closes
-the "trained models that don't run in production" gap from the
-audits.
+### Phase D4 — Production wiring per codec (~2 days)
+
+Wire each codec to call `pick()` at encode time. Default
+objective: `Default { target_zq }`. Codec exposes `with_objective(o)`
+knob for callers who want RdSlope or MetricTimeMasked.
 
 | # | Item | Effort |
 |---|---|---:|
-| D5.1 | zenwebp picks `Default zensim` by default; expose `with_objective()` knob | 4 hr |
-| D5.2 | zenjpeg loads picker.bin via `pick()` | 4 hr |
-| D5.3 | zenjxl, zenavif similarly | 8 hr |
-| D5.4 | Integration tests per codec | 1 day |
+| D4.1 | zenwebp: replace existing `argmin_masked_with_scorer` calls with `pick()` | 4 hr |
+| D4.2 | zenjpeg: load picker.bin via `pick()` (closes issue #128) | 4 hr |
+| D4.3 | zenjxl, zenavif: same pattern | 8 hr |
+| D4.4 | Integration tests per codec (each objective produces sensible picks) | 1 day |
+
+D4 is gated on the rapid-iteration plan's Phase 0 (the 3 idle codec
+pickers must first load — most of that work overlaps D4.1-D4.3).
 
 ## Trade-offs / open questions
 
-1. **Catalog explosion**: 4 codecs × 3 objectives × 3 metrics =
-   36 bakes. Each ~150 KB. Storage: trivial. Bake compute:
-   3× the trainer work (sweep is shared). Operational: codec
-   needs a small "pickers" registry + selection logic.
+1. **Within-cell scalar slope-suboptimality** (the trade-off we
+   accepted): single-MLP scalar regressors are min-bytes-tuned, so
+   `RdSlope { high μ }` picks the right cell but uses
+   slightly-too-slow scalars within that cell. Magnitude probably
+   small; if measurement shows it matters, add per-objective
+   scalar heads (~3× scalar output dims) without changing
+   MLP class.
 
 2. **μ range per codec**: each codec has different
    bytes/ms-tradeoff regimes (zenjpeg fast, rav1e slow). The μ
-   normalization range needs per-codec calibration. Bake into
-   metadata.
+   normalization range needs per-codec calibration. `mu_range_for_codec`
+   TLV (Phase D2.4) handles this.
 
 3. **(T, N) feasibility surface**: for `MetricTimeMasked`, the
-   feasible set varies per image. Some images have NO config
-   that satisfies (high T, low N) — picker must reliably
-   detect this and return infeasible-sentinel. Trainer needs to
-   include "infeasible" as a label class.
+   feasible set varies per image. Some images have NO cell whose
+   `metric_log[c] ≥ T` AND `time_log[c] ≤ N` — `pick()` must
+   reliably return `infeasible-sentinel` and route to fallback.
 
-4. **MLP architectural cost**: 3× MLPs means 3× training time;
-   not a problem at our corpus sizes (~minutes per train) but
-   matters when we add more codecs or metrics.
+4. **Time-calibration drift**: a picker baked on a fast machine
+   sees small `time_log` values; deployed on a slow machine, the
+   `μ × time_log[c]` term under-weights time. The startup CPU
+   multiplier probe (Phase D3.2) corrects this. Probe accuracy
+   matters for slope correctness — needs a stable reference image.
 
 5. **Backward compat**: existing `argmin_masked_with_scorer`
-   stays; the new `pick()` is purely additive. Codecs migrate at
-   their own pace. zenwebp's existing usage of
+   stays as the escape hatch; the new `pick()` is purely additive.
+   Codecs migrate at their own pace. zenwebp's existing usage of
    `argmin_masked_with_scorer` keeps working.
 
-6. **Catalog vs single-bake hybrid**: an alternative is one bake
-   per metric with all three objectives' label heads. Simpler
-   storage; harder to argue calibration purity. PRINCIPLES.md
-   §"Metric choice" already chose Option A (one bake per metric)
-   for that reason. Per-objective bakes follow the same logic.
+6. **Single bake per (codec, metric)**: 4 codecs × 2 metrics =
+   8 bakes. PRINCIPLES.md §"Metric choice" Option A (one bake per
+   metric) extends naturally — three objectives all ride on one
+   model since the model outputs are objective-agnostic per-cell
+   property predictions.
 
 ## Cross-references
 
