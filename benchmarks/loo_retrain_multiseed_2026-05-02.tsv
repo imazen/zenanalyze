@@ -1,0 +1,9 @@
+feature	n_seeds_ok	mean_delta_overhead_pp	stddev_delta_overhead_pp	mean_delta_argmin_pp	stddev_delta_argmin_pp
+feat_log_pixels	5	0.0960	0.2157	-0.7600	4.8886
+feat_aq_map_p10	5	0.1660	0.4065	-0.3800	6.9934
+feat_palette_density	5	-0.0120	0.4437	0.7800	7.6212
+feat_noise_floor_y_p50	5	-0.3500	0.2804	5.0000	3.9981
+feat_bitmap_bytes	5	0.1700	0.5300	-2.5800	6.2807
+feat_log_padded_pixels_64	5	-0.1860	0.4740	3.2000	5.4516
+feat_log_padded_pixels_8	5	0.2720	0.3482	-4.1000	6.6140
+feat_log_padded_pixels_16	5	0.1860	0.2920	-1.1400	6.5934
