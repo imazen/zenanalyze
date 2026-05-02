@@ -721,12 +721,20 @@ features_table! {
     /// Tier 0 correlation surfaces redundancy *candidates* — for
     /// algebraic transforms, the gate is Tier 3 LOO retrain.
     LogPixels = 57 : f32 => log_pixels,
-    // id 60 retired 2026-05-02: `BitmapBytes` was confirmed redundant
-    // for fixed-channel rgb8 corpora (= 3 · pixel_count exactly when
-    // channels and bytes-per-sample are constant). The picker MLP
-    // can scale by 3 trivially via ReLU. May be reinstated if a
-    // multi-format consumer (rgba16 / rgbaf32 / graya) needs the
-    // signal back.
+    /// `f32`. Uncompressed bitmap byte count: `w * h * channels *
+    /// bytes_per_sample`, cast to f32. Restored 2026-05-02 after LOO
+    /// retrain: even though it's `3·pixel_count` for fixed-channel
+    /// rgb8 sources, the LOO-paired retrain on the zenwebp pareto
+    /// sweep showed the strongest single-feature signal in the entire
+    /// experiment — adding it dropped student mean overhead from
+    /// 2.83% → 1.93% (ΔOH +0.90pp) and lifted argmin accuracy from
+    /// 43.4% → 52.0% (ΔAC −8.6pp). Same class of error as the
+    /// `LogPixels` cull: tiny picker MLPs (450 params/head) use
+    /// numerically-rescaled handles even when one is a constant
+    /// multiple of another. f32 is exact for values ≤ 2²⁴ ≈ 16 MB;
+    /// larger images lose ~ULP-level precision but stay correct in
+    /// log space (≤ 1 ULP drift in log10) — fine for ML features.
+    BitmapBytes = 60 : f32 => bitmap_bytes,
     /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
     /// a 1024×1 image and a 32×32 image have very different
     /// per-pixel codec costs but the same `PixelCount`.
@@ -913,9 +921,17 @@ features_table! {
     /// `f32`. As above for 32×32 — matches JXL DCT32 mode and AV1's
     /// 32×32 transform breakpoints.
     LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
-    /// `f32`. As above for 64×64 — matches AV1's 64×64 superblock cap
-    /// and JXL VarDCT large-transform decisions.
-    LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
+    // id 104 retired 2026-05-02: `LogPaddedPixels64`. The 2026-05-02
+    // LOO retrain on zenwebp showed adding this column dropped
+    // student argmin accuracy by 13.6pp — the largest negative
+    // contribution in the experiment. At our codec set's data scale
+    // the 64×64 grid is past the useful resolution; signal is mostly
+    // aliased to `LogPixels` except on the very largest images, but
+    // the model spends parameters on it anyway. The sweet spot is
+    // the {8,16,32} triplet matching JPEG / WebP / JXL DCT16-32 grids;
+    // 64×64 was AV1-only and AV1 doesn't surface this signal in our
+    // current pareto. May be reinstated if AV1-large-image content
+    // becomes a common-case workload. Stable id reserved.
 
     // ---------------- Low-tail percentile companions ---------------
     // Adds P1/P5/P10 to LaplacianVariance / AqMap / NoiseFloorY (and
@@ -2018,10 +2034,13 @@ mod tests {
         // scalings of `LogPixels`, or rgb8-channel-constant scalings
         // of `PixelCount`).
         94, 95, 96, 97, 98, 99, 100,
-        // id 60 was `BitmapBytes`, retired 2026-05-02. Linear in
-        // `PixelCount` for fixed-channel rgb8 sources (= 3·pixel_count).
-        // May be reinstated for multi-format consumers.
-        60,
+        // id 104 was `LogPaddedPixels64`, retired 2026-05-02 after the
+        // LOO retrain showed adding it dropped zenwebp argmin accuracy
+        // by 13.6pp — the largest negative contribution in the
+        // experiment. The {8,16,32} triplet covers JPEG / WebP / JXL
+        // transform grids; 64×64 was AV1-only and aliased to LogPixels
+        // at our data scale.
+        104,
         // ids 117, 118, 119 were `ChromaKurtosis` /
         // `UniformitySmooth` / `FlatColorSmooth` — Tier-0 redundant
         // with existing features on ≥3/4 codecs in the 2026-05-01
