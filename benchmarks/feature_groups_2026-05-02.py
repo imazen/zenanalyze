@@ -1,18 +1,21 @@
 """Build a hierarchical-clustering dendrogram + reordered correlation
-heatmap + VIF table for the zenwebp features TSV.
+heatmap + VIF table for a features TSV.
 
-Outputs:
-- benchmarks/feature_groups_dendrogram_2026-05-02.svg (full dendrogram)
-- benchmarks/feature_groups_heatmap_2026-05-02.svg   (reordered correlogram)
-- benchmarks/feature_groups_clusters_2026-05-02.tsv  (per-feature cluster
-  ids at thresholds 0.99/0.95/0.90/0.85, plus VIF + semantic prefix)
+Outputs (paths take a `--label` slug — e.g., `zenwebp`, `zenjxl_lossy`):
+- benchmarks/feature_groups_<label>_dendrogram_2026-05-02.svg
+- benchmarks/feature_groups_<label>_heatmap_2026-05-02.svg
+- benchmarks/feature_groups_<label>_clusters_2026-05-02.tsv
 
 Usage:
-    python3 benchmarks/feature_groups_2026-05-02.py
+    python3 benchmarks/feature_groups_2026-05-02.py \\
+        --tsv <path> --label <slug>
+
+Defaults to the zenwebp combined_filled TSV with label `zenwebp`.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -29,11 +32,7 @@ from scipy.stats import spearmanr
 
 ZA_ROOT = Path("/home/lilith/work/zen/zenanalyze")
 ZW_ROOT = Path("/home/lilith/work/zen/zenwebp")
-TSV = ZW_ROOT / "benchmarks/zenwebp_pareto_features_2026-05-01_combined_filled.tsv"
-
-OUT_DENDRO = ZA_ROOT / "benchmarks/feature_groups_dendrogram_2026-05-02.svg"
-OUT_HEATMAP = ZA_ROOT / "benchmarks/feature_groups_heatmap_2026-05-02.svg"
-OUT_CLUSTERS = ZA_ROOT / "benchmarks/feature_groups_clusters_2026-05-02.tsv"
+DEFAULT_TSV = ZW_ROOT / "benchmarks/zenwebp_pareto_features_2026-05-01_combined_filled.tsv"
 
 # Feature-name prefix → semantic group label. Used as a sanity overlay
 # on the auto-clusters; agreement validates, disagreement is interesting.
@@ -102,8 +101,22 @@ def semantic_prefix(feat: str) -> str:
 
 
 def main() -> int:
-    sys.stderr.write(f"[groups] reading {TSV}\n")
-    df = pd.read_csv(TSV, sep="\t")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tsv", default=str(DEFAULT_TSV),
+                        help="Input features TSV with feat_* columns.")
+    parser.add_argument("--label", default="zenwebp",
+                        help="Slug used in output filenames "
+                             "(feature_groups_<label>_*.svg/.tsv).")
+    args = parser.parse_args()
+
+    tsv_path = Path(args.tsv)
+    label = args.label
+    out_dendro = ZA_ROOT / f"benchmarks/feature_groups_{label}_dendrogram_2026-05-02.svg"
+    out_heatmap = ZA_ROOT / f"benchmarks/feature_groups_{label}_heatmap_2026-05-02.svg"
+    out_clusters = ZA_ROOT / f"benchmarks/feature_groups_{label}_clusters_2026-05-02.tsv"
+
+    sys.stderr.write(f"[groups] reading {tsv_path} (label={label})\n")
+    df = pd.read_csv(tsv_path, sep="\t")
     feat_cols = [c for c in df.columns if c.startswith("feat_")]
     sys.stderr.write(f"[groups] {len(df)} rows × {len(feat_cols)} features\n")
 
@@ -194,8 +207,8 @@ def main() -> int:
             "cluster_at_0_85": int(cluster_ids[0.85][i]),
         })
     out_df = pd.DataFrame(rows).sort_values(["cluster_at_0_85", "cluster_at_0_90", "cluster_at_0_95", "vif"])
-    out_df.to_csv(OUT_CLUSTERS, sep="\t", index=False, float_format="%.4f")
-    sys.stderr.write(f"[groups] wrote {OUT_CLUSTERS}\n")
+    out_df.to_csv(out_clusters, sep="\t", index=False, float_format="%.4f")
+    sys.stderr.write(f"[groups] wrote {out_clusters}\n")
 
     # Dendrogram.
     sys.stderr.write("[groups] rendering dendrogram...\n")
@@ -215,14 +228,14 @@ def main() -> int:
     ax.axvline(1.0 - 0.85, color="gray", linestyle=":", linewidth=0.8, label="ρ≥0.85")
     ax.set_xlabel(r"Distance: $1 - |\rho_\mathrm{Spearman}|$  (smaller = tighter cluster)")
     ax.set_title(
-        f"zenwebp features hierarchical clustering — average linkage on "
+        f"{label} features hierarchical clustering — average linkage on "
         f"$1 - |\\rho|$, n={len(df)} pareto rows, {n_features} features"
     )
     ax.legend(loc="lower right", fontsize=8)
     fig.tight_layout()
-    fig.savefig(OUT_DENDRO, format="svg")
+    fig.savefig(out_dendro, format="svg")
     plt.close(fig)
-    sys.stderr.write(f"[groups] wrote {OUT_DENDRO}\n")
+    sys.stderr.write(f"[groups] wrote {out_dendro}\n")
 
     # Reordered heatmap.
     sys.stderr.write("[groups] rendering reordered correlation heatmap...\n")
@@ -239,14 +252,14 @@ def main() -> int:
     ax.set_yticklabels(labels_reordered, fontsize=5)
     ax.set_title(
         f"$|\\rho_\\mathrm{{Spearman}}|$ heatmap, dendrogram-ordered "
-        f"(zenwebp, n={len(df)})"
+        f"({label}, n={len(df)})"
     )
     cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(r"$|\rho|$", rotation=0, labelpad=12)
     fig.tight_layout()
-    fig.savefig(OUT_HEATMAP, format="svg")
+    fig.savefig(out_heatmap, format="svg")
     plt.close(fig)
-    sys.stderr.write(f"[groups] wrote {OUT_HEATMAP}\n")
+    sys.stderr.write(f"[groups] wrote {out_heatmap}\n")
 
     # Console summary: clusters at 0.95 with > 1 member.
     sys.stderr.write("\n[groups] redundancy clusters at ρ≥0.95 (size > 1):\n")
