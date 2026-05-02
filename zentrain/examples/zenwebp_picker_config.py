@@ -45,7 +45,7 @@ from pathlib import Path
 # combined original-250×4 + size-dense-264 corpus. 21.8M Pareto rows;
 # 114 zenanalyze features per (image, size_class).
 PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01_combined.tsv")
-FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_combined.tsv")
+FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_combined_filled.tsv")
 
 OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.json")
 OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.log")
@@ -125,7 +125,14 @@ ZQ_TARGETS = list(range(30, 70, 5)) + list(range(70, 96, 2))
 # normalize per-head loss scales (tracked separately).
 #
 # cost_model encoded as bool: 0 = ZenwebpDefault, 1 = StrictLibwebpParity.
-CATEGORICAL_AXES = ["method", "segments", "cost_model_strict"]
+# 6 cells (back from 12) — cost_model_strict halved per-cell data and
+# the student's argmin_acc collapsed from 62% (v0.1, 6 cells) to 14%
+# (v0.2 attempt with 12 cells). The cost_model dimension didn't pay
+# for itself at our data scale; rows still in the TSV but not modeled
+# as a categorical split. partition_limit kept as a 4th scalar head —
+# it's a continuous 0..100 axis that aligns scale-wise with the other
+# wide-range scalars.
+CATEGORICAL_AXES = ["method", "segments"]
 SCALAR_AXES = [
     "sns_strength",
     "filter_strength",
