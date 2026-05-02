@@ -95,48 +95,83 @@ chain. The MLP doesn't care what objective it's called with — the
 model outputs are objective-agnostic predictions of per-cell
 properties.
 
-**Catalog**:
+**Catalog (hybrid)**:
 
 ```
 codec_crate/src/pickers/
-  picker_<metric>.bin           # one per metric, supports all 3 objectives
+  picker_<metric>.bin           # base — Default + MetricTimeMasked via runtime mask
+  picker_rdslope_<metric>.bin   # OPTIONAL — slope-tuned, μ as continuous input
 ```
 
-For 4 codecs × 2 metrics: **8 bakes total**. ~150 KB each = ~1.2 MB
-total. Within the "more than 2 picker bakes per (codec, metric) is
-heavy" budget.
+- **Base bake**: always shipped. One MLP per (codec, metric) that
+  emits all multi-output heads. Serves Default and MetricTimeMasked
+  via runtime composition.
+- **Slope-tuned bake**: per-codec opt-in. Trains a separate MLP
+  with μ as a continuous input feature (normalized to the codec's
+  `mu_range_for_codec`); argmin labels per `(image, μ)` minimize
+  `bytes + μ × time_ms`. Within-cell scalars are slope-aware.
+  Codecs where time/RD tradeoff matters in production (AVIF, JXL,
+  zenwebp at high effort) ship it; codecs where it doesn't (zenjpeg
+  is fast enough that μ rarely matters) skip.
 
-### Trade-off vs the per-objective-MLP design (rejected)
+`Predictor::pick(features, PickerObjective::RdSlope { μ })`:
+1. Try to load slope-tuned bake; if present, use it directly with
+   μ as input.
+2. If absent, fall back to base bake + runtime composition
+   (`bytes_log + μ × time_log`) with the within-cell-scalar caveat
+   noted.
 
-The per-objective-MLP design trains DIRECTLY against the slope label
-or the masked argmin label. The single-MLP design uses one model's
-predictions and composes the objective at runtime. The accuracy
-difference is concentrated at the **within-cell scalar setpoint**:
-each cell's predicted continuous knobs (`speed`, `sns_strength`,
-…) are calibrated for the min-bytes representative config. When
-`RdSlope { high μ }` runs at runtime, the cell pick correctly
-favors fast cells, but the scalars *within* the chosen cell are
-still min-bytes-tuned — slightly slope-suboptimal at the edges.
+Storage:
 
-In practice the loss is small:
+| Layout | 4 codecs × 2 metrics | Disk |
+|---|---|---|
+| Base only (every codec ships) | 8 bakes | ~1.2 MB |
+| + slope-tuned for AVIF + JXL + WebP | 14 bakes | ~2.1 MB |
+| Worst case (all codecs ship slope-tuned) | 16 bakes | ~2.4 MB |
+
+Within the "more than 2 picker bakes per (codec, metric) is heavy"
+budget — even worst case is 2 bakes per (codec, metric).
+
+### Trade-off vs the per-objective-MLP design
+
+The single-MLP design uses one model's predictions and composes the
+objective at runtime. Accuracy difference is concentrated at the
+**within-cell scalar setpoint**: each cell's predicted continuous
+knobs (`speed`, `sns_strength`, …) are calibrated for the min-bytes
+representative config. When `RdSlope { high μ }` runs at runtime,
+the cell pick correctly favors fast cells, but the scalars *within*
+the chosen cell are still min-bytes-tuned — slope-suboptimal at the
+edges.
+
+For **Default** and **MetricTimeMasked** the loss is bounded:
 
 - Cells bound the major decisions (e.g., zenwebp's `method ×
   segments`); within-cell scalar choices trade off less than
   between-cell choices.
-- The dominant signal (cell choice) IS slope-optimized via
-  `bytes_log + μ × time_log`.
-- The MetricTimeMasked accuracy at the mask boundary is similarly
-  bounded — masked-out cells genuinely fail the constraint
-  according to the trained model; the picker errs on the side of
-  conservatism (refuses cells whose `metric_log[c]` predicts at
-  the constraint).
+- MetricTimeMasked is a *hard* constraint (no continuous tradeoff
+  coefficient); the runtime mask is exact.
+- The dominant signal (cell choice) IS objective-aware via
+  `bytes_log + μ × time_log` for slope or via the mask for
+  MetricTimeMasked.
 
-A future refinement could add per-objective scalar heads
-(`scalars_default[N][k]`, `scalars_rdslope[N][k]`) without changing
-the MLP class — just more output dims, ~3× output size. **Defer
-until measured to matter.** PRINCIPLES.md §"Score recipes" already
-documented this composition; the change is making it a first-class
-API rather than a closure pattern.
+For **RdSlope** the loss is harder to bound because:
+
+- Slope is a *continuous* tradeoff; the within-cell scalar error
+  compounds with μ.
+- A standalone RdSlope MLP can take μ as a continuous input
+  feature, letting it learn "at low μ prefer slow-but-small;
+  at high μ prefer fast-but-larger" as a function of μ — the
+  shared MLP never sees μ at training time.
+- Time predictions are intrinsically harder than bytes (CPU/memory/
+  ILP variance); a slope-tuned model has a chance to learn which
+  configs yield CONSISTENT time, not just the cell-representative
+  time.
+
+→ **Hybrid catalog**: ship one base MLP per (codec, metric) for
+Default + MetricTimeMasked, plus an OPTIONAL slope-tuned MLP per
+(codec, metric) for codecs where the RD/time tradeoff matters in
+production (AVIF and JXL definitely; WebP at high effort; JPEG
+probably not). See the "Catalog" section below.
 
 ## Safety-violation taxonomy (5 classes)
 
@@ -318,6 +353,16 @@ advanced callers (escape hatch).
 | D2.4 | Emit `mu_range_for_codec` TLV (per-codec μ calibration range, normalized to `[0,1]`) | 1 hr |
 | D2.5 | CI gate: bake fails if (a) any safety-flagged cell can't route via `zq_fallback_table`, (b) any scalar lacks clamp range, (c) confidence threshold doesn't classify narrow wins | 1 day |
 
+### Phase D2b — Slope-tuned MLP training mode (~1 day)
+
+| # | Item | Effort |
+|---|---|---:|
+| D2b.1 | `--objective rd-slope` flag in train_hybrid.py | 30 min |
+| D2b.2 | μ as continuous input feature (sample over `mu_range_for_codec` during training; one input dim) | 4 hr |
+| D2b.3 | Per-(image, μ) argmin label assignment: minimize `bytes + μ × time_ms` over reachable configs | 2 hr |
+| D2b.4 | Output filename convention: `picker_rdslope_<metric>.bin` (vs `picker_<metric>.bin` for the base bake) | 30 min |
+| D2b.5 | Picker config knob: `EMIT_SLOPE_TUNED_BAKE: bool` per codec (default False except AVIF/JXL/zenwebp-effort) | 30 min |
+
 ### Phase D3 — Time calibration (~1 day)
 
 | # | Item | Effort |
@@ -328,21 +373,41 @@ advanced callers (escape hatch).
 
 Closes issue #56 (RD-vs-time bake calibration protocol).
 
-### Phase D4 — Production wiring per codec (~2 days)
+### Phase D4 — Production wiring per codec — base bake (~2 days)
 
-Wire each codec to call `pick()` at encode time. Default
-objective: `Default { target_zq }`. Codec exposes `with_objective(o)`
-knob for callers who want RdSlope or MetricTimeMasked.
+Wire each codec to call `pick()` with the base bake. Default
+objective: `Default { target_zq }`. Codec exposes
+`with_objective(o)` knob for callers who want RdSlope or
+MetricTimeMasked.
 
 | # | Item | Effort |
 |---|---|---:|
 | D4.1 | zenwebp: replace existing `argmin_masked_with_scorer` calls with `pick()` | 4 hr |
 | D4.2 | zenjpeg: load picker.bin via `pick()` (closes issue #128) | 4 hr |
 | D4.3 | zenjxl, zenavif: same pattern | 8 hr |
-| D4.4 | Integration tests per codec (each objective produces sensible picks) | 1 day |
+| D4.4 | Integration tests per codec (Default + MetricTimeMasked produce sensible picks; RdSlope falls back to runtime composition with caveat note) | 1 day |
 
-D4 is gated on the rapid-iteration plan's Phase 0 (the 3 idle codec
-pickers must first load — most of that work overlaps D4.1-D4.3).
+D4 overlaps significantly with the rapid-iteration plan's Phase 0
+(wire the 3 idle pickers).
+
+### Phase D5 — Slope-tuned bakes per opt-in codec (~3 days)
+
+Per-codec slope-tuned MLP shipping. Each codec independently
+decides whether to ship the slope-tuned variant. `pick()` already
+falls back to runtime composition when the slope-tuned bake is
+absent (D1 plumbing).
+
+| # | Item | Effort |
+|---|---|---:|
+| D5.1 | Train + bake `picker_rdslope_zensim.bin` for zenavif (rav1e is the slowest; biggest slope impact) | 6 hr |
+| D5.2 | Same for zenjxl | 6 hr |
+| D5.3 | Same for zenwebp at high-effort regime | 6 hr |
+| D5.4 | Operator-side switching: `pick(RdSlope { μ })` automatically picks slope-tuned bake when present | 2 hr |
+| D5.5 | Smoke test: each codec's slope-tuned bake produces measurably better picks at extreme μ vs base+composition fallback | 1 day |
+
+zenjpeg skipped — encode is fast enough that μ rarely shifts the
+optimal config (the within-cell scalar loss is in the noise floor
+of zenjpeg's fast-encoder regime).
 
 ## Trade-offs / open questions
 
