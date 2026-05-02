@@ -413,6 +413,65 @@ def _render_axis_value(axis: str, value) -> str:
 # ---------- Data loading ----------
 
 
+def _read_table_columns(path: Path):
+    """Read a TSV / CSV / Parquet file column-wise.
+
+    Auto-detects Parquet by `.parquet` / `.pq` suffix; everything else
+    routes through pyarrow's CSV reader with TAB delimiter.
+
+    For multi-GB pareto sweeps the **column-wise interface is
+    materially faster than row-wise**. csv.DictReader on the zenwebp
+    21.8M-row combined pareto takes 68 s; pyarrow CSV takes 3 s;
+    Parquet (zstd) takes 1.9 s. The 36× speedup only materializes
+    if downstream code consumes columns directly instead of
+    reconstructing per-row dicts (which loses most of the gain to
+    Python dict allocation overhead).
+
+    See `~/work/claudehints/topics/parquet-vs-tsv.md` for the
+    project-wide format convention and `benchmarks/tsv_to_parquet.py`
+    for the converter.
+
+    Returns
+    -------
+    fieldnames : list[str]
+    columns : dict[str, list_or_array]
+        Each value is one of:
+        - `list` of Python objects (strings, mixed-type, etc.)
+        - `numpy.ndarray` for numeric columns (int64, float64)
+        Callers should index `columns[name][i]` per row in a tight
+        Python loop, NOT reconstruct per-row dicts.
+    """
+    suffix = path.suffix.lower()
+    if suffix in (".parquet", ".pq"):
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(path)
+    else:
+        import pyarrow.csv as pa_csv
+
+        table = pa_csv.read_csv(
+            path,
+            parse_options=pa_csv.ParseOptions(delimiter="\t"),
+            convert_options=pa_csv.ConvertOptions(strings_can_be_null=True),
+        )
+
+    fieldnames = list(table.column_names)
+    cols: dict = {}
+    for name in fieldnames:
+        col = table.column(name)
+        # Numeric columns → numpy (zero-copy where possible). String
+        # columns → Python list. Heuristic: integer/float types use
+        # to_numpy(); everything else uses to_pylist().
+        try:
+            if col.type.bit_width:  # integer / float (raises for non-numeric)
+                cols[name] = col.to_numpy(zero_copy_only=False)
+            else:
+                cols[name] = col.to_pylist()
+        except (AttributeError, ValueError):
+            cols[name] = col.to_pylist()
+    return fieldnames, cols
+
+
 def load_pareto(path):
     """Load the Pareto sweep TSV.
 
@@ -440,92 +499,111 @@ def load_pareto(path):
     """
     rows = defaultdict(list)
     ceilings: dict = {}
-    has_ceiling_column = False
-    has_time_column = False
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        has_ceiling_column = (
-            rdr.fieldnames is not None and "effective_max_zensim" in rdr.fieldnames
+    fieldnames, cols = _read_table_columns(Path(path))
+    has_ceiling_column = "effective_max_zensim" in fieldnames
+    has_time_column = TIME_COLUMN in fieldnames
+    if METRIC_COLUMN not in fieldnames:
+        raise ValueError(
+            f"pareto file {path} is missing METRIC_COLUMN={METRIC_COLUMN!r}; "
+            f"available columns: {fieldnames}"
         )
-        has_time_column = (
-            rdr.fieldnames is not None and TIME_COLUMN in rdr.fieldnames
-        )
-        if METRIC_COLUMN not in (rdr.fieldnames or []):
-            raise ValueError(
-                f"pareto TSV {path} is missing METRIC_COLUMN={METRIC_COLUMN!r}; "
-                f"available columns: {rdr.fieldnames}"
-            )
-        for r in rdr:
-            try:
-                cid = int(r["config_id"])
-                bytes_v = int(r["bytes"])
-                metric_v = float(r[METRIC_COLUMN])
-            except (ValueError, KeyError):
-                continue
-            CONFIG_NAMES.setdefault(cid, r["config_name"])
-            key = (r["image_path"], r["size_class"], int(r["width"]), int(r["height"]))
-            row = {"config_id": cid, "bytes": bytes_v, "zensim": metric_v}
-            if has_time_column:
-                t_raw = r.get(TIME_COLUMN, "")
-                if t_raw:
+    image_path = cols["image_path"]
+    size_class = cols["size_class"]
+    width = cols["width"]
+    height = cols["height"]
+    config_id = cols["config_id"]
+    config_name = cols["config_name"]
+    bytes_col = cols["bytes"]
+    metric = cols[METRIC_COLUMN]
+    time_col = cols[TIME_COLUMN] if has_time_column else None
+    ceil_col = cols["effective_max_zensim"] if has_ceiling_column else None
+    n = len(width)
+    # Tight Python loop — no per-row dict from a CSV parser. The
+    # only allocations are the inner-list dict (downstream needs
+    # `row["config_id"]` etc.) and the tuple key.
+    for i in range(n):
+        try:
+            cid = int(config_id[i])
+            bytes_v = int(bytes_col[i])
+            metric_v = float(metric[i])
+        except (ValueError, TypeError):
+            continue
+        # Skip rows whose metric is NaN.
+        if metric_v != metric_v:
+            continue
+        if cid not in CONFIG_NAMES:
+            CONFIG_NAMES[cid] = config_name[i]
+        key = (image_path[i], size_class[i], int(width[i]), int(height[i]))
+        row = {"config_id": cid, "bytes": bytes_v, "zensim": metric_v}
+        if has_time_column:
+            t = time_col[i]
+            # NaN check (works for numpy floats and Python None)
+            if t is not None and t == t:
+                try:
+                    row["time_ms"] = float(t)
+                except (ValueError, TypeError):
+                    pass
+        rows[key].append(row)
+        if has_ceiling_column:
+            cv = ceil_col[i]
+            if cv is not None and cv == cv:
+                # Per-(image, size) — value is identical across
+                # all (config, q) rows of that key. Take first.
+                ceil_key = (image_path[i], size_class[i])
+                if ceil_key not in ceilings:
                     try:
-                        row["time_ms"] = float(t_raw)
-                    except ValueError:
-                        pass
-            rows[key].append(row)
-            if has_ceiling_column:
-                cv = r.get("effective_max_zensim", "")
-                if cv:
-                    try:
-                        # Per-(image, size) — value is identical across
-                        # all (config, q) rows of that key. Take first.
-                        ceil_key = (r["image_path"], r["size_class"])
-                        if ceil_key not in ceilings:
-                            ceilings[ceil_key] = float(cv)
-                    except ValueError:
+                        ceilings[ceil_key] = float(cv)
+                    except (ValueError, TypeError):
                         pass
     return rows, ceilings, has_ceiling_column, has_time_column
 
 
 def load_features(path):
     feats = {}
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
-        cols = [c for c in KEEP_FEATURES if c in all_cols]
-        n_dropped = 0
-        for r in rdr:
-            vals = []
-            has_nan = False
-            for c in cols:
-                v = r[c]
-                if v == "" or v is None:
+    fieldnames, columns = _read_table_columns(Path(path))
+    all_cols = [c for c in fieldnames if c.startswith("feat_")]
+    cols = [c for c in KEEP_FEATURES if c in all_cols]
+    image_path = columns["image_path"]
+    size_class = columns["size_class"]
+    n = len(image_path)
+    n_dropped = 0
+    for i in range(n):
+        vals = []
+        has_nan = False
+        for c in cols:
+            v = columns[c][i]
+            if v == "" or v is None:
+                has_nan = True
+                vals.append(float("nan"))
+            else:
+                try:
+                    fv = float(v)
+                except (ValueError, TypeError):
                     has_nan = True
                     vals.append(float("nan"))
-                else:
-                    fv = float(v)
-                    if fv != fv:
-                        has_nan = True
-                    vals.append(fv)
-            if has_nan:
-                # Percentile features emit "" / NaN when the image is too
-                # small to satisfy the per-feature minimum-sample-count
-                # floor (zenanalyze #49). Drop those (image, size) keys
-                # from training — at inference the codec routes those
-                # tiny cells to the known-good fallback via the picker's
-                # OOD-bounds machinery, so they never need a trained
-                # picker decision.
-                n_dropped += 1
-                continue
-            feats[(r["image_path"], r["size_class"])] = np.array(
-                vals, dtype=np.float32
-            )
-        if n_dropped:
-            sys.stderr.write(
-                f"Dropped {n_dropped} (image, size) keys with NaN "
-                f"feature values (tiny images skipping percentile "
-                f"features — handled by OOD fallback at inference).\n"
-            )
+                    continue
+                if fv != fv:
+                    has_nan = True
+                vals.append(fv)
+        if has_nan:
+            # Percentile features emit "" / NaN when the image is too
+            # small to satisfy the per-feature minimum-sample-count
+            # floor (zenanalyze #49). Drop those (image, size) keys
+            # from training — at inference the codec routes those
+            # tiny cells to the known-good fallback via the picker's
+            # OOD-bounds machinery, so they never need a trained
+            # picker decision.
+            n_dropped += 1
+            continue
+        feats[(image_path[i], size_class[i])] = np.array(
+            vals, dtype=np.float32
+        )
+    if n_dropped:
+        sys.stderr.write(
+            f"Dropped {n_dropped} (image, size) keys with NaN "
+            f"feature values (tiny images skipping percentile "
+            f"features — handled by OOD fallback at inference).\n"
+        )
     return feats, cols
 
 

@@ -44,8 +44,8 @@ from pathlib import Path
 # combos) on 1046 unique (image, size_class) instances drawn from the
 # combined original-250×4 + size-dense-264 corpus. 21.8M Pareto rows;
 # 114 zenanalyze features per (image, size_class).
-PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01_combined.tsv")
-FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_combined_filled.tsv")
+PARETO = Path("benchmarks/zenwebp_pareto_2026-05-01_combined.parquet")
+FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-05-01_combined_filled.parquet")
 
 OUT_JSON = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.json")
 OUT_LOG = Path("benchmarks/zenwebp_hybrid_2026-05-01_v0.2.log")

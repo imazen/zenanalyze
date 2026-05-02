@@ -57,6 +57,24 @@ against the global sweep discipline in
 `~/work/claudehints/CLAUDE.md`; bumping them tighter is fine, looser
 is not.
 
+### 0. Pareto sweeps + features TSVs ship as Parquet (>50 MB)
+
+The format rule. `train_hybrid.py` auto-detects Parquet (`.parquet` /
+`.pq`) and falls back to pyarrow CSV for TSV, so picker configs flip
+`PARETO = Path(".../foo.tsv")` → `Path(".../foo.parquet")` and the
+trainer Just Works. Real measurement on the zenwebp 21.8 M-row pareto:
+
+- **Pure file read+parse**: csv.DictReader 68 s → Parquet 1.9 s (36×).
+- **End-to-end `load_pareto`**: 68 s → 54 s (1.3×). The remaining
+  bottleneck is Python per-row dict construction, queued behind a
+  downstream refactor to consume Arrow columns directly.
+- **Disk**: 3.4 GB → 0.21 GB (16× zstd compression). Unconditional.
+
+Convert with `benchmarks/tsv_to_parquet.py` (in zenanalyze).
+
+Full guidance + Rust + Python recipes:
+[`~/work/claudehints/topics/parquet-vs-tsv.md`](../../../claudehints/topics/parquet-vs-tsv.md).
+
 ### 1. Sweep four dimensions every time
 
 The corpus that trains the picker MUST cover:

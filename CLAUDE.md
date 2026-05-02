@@ -54,6 +54,32 @@ Five passes, gated by the requested `FeatureSet`:
 The Native-vs-Convert decision in `RowStream::new` only applies to
 Tier 1/2/3 + Palette. Alpha and `tier_depth` always read the source.
 
+## Benchmark + ablation file format — Parquet, not TSV (>50 MB)
+
+Pareto sweeps, ablation outputs, multi-seed LOO retrain inputs —
+anything tabular in `benchmarks/` that's bigger than ~50 MB SHIPS AS
+PARQUET. Compare on real data (zenwebp pareto, 21.8 M rows, 3.4 GB
+TSV):
+
+| Stage | csv.DictReader | Parquet (zstd-3) | Speedup |
+|---|--:|--:|--:|
+| Pure file read+parse | 68 s | 1.9 s | **36×** |
+| End-to-end `load_pareto` | 68 s | 54 s | 1.3× |
+| Disk size | 3.4 GB | 0.21 GB | **16×** |
+
+The end-to-end gap reflects Python per-row dict construction in
+`load_pareto`'s downstream code. The 36× headline applies once
+the consumer is refactored to use Arrow columns directly (queued).
+**Disk savings and cold-cache wins are unconditional today.**
+
+`zentrain/tools/train_hybrid.py`'s `_read_table_columns()` helper
+auto-detects format by `.parquet` / `.pq` suffix; existing TSV
+configs keep working unchanged. Convert with
+`benchmarks/tsv_to_parquet.py`. Picker configs flip
+`PARETO = Path(".../foo.tsv")` → `Path(".../foo.parquet")`.
+
+Full guidance: `~/work/claudehints/topics/parquet-vs-tsv.md`.
+
 ## Don't
 
 - Don't propose 0.2.x.
@@ -64,3 +90,5 @@ Tier 1/2/3 + Palette. Alpha and `tier_depth` always read the source.
 - Don't bake content-class assumptions into the analyzer. The job is
   to surface signals; the consumer (codec orchestrator) decides what
   to do with them.
+- Don't write multi-GB TSVs to `benchmarks/` — Parquet (zstd) is
+  16× smaller AND 36× faster to load. Use `tsv_to_parquet.py`.
