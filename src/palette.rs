@@ -405,7 +405,11 @@ mod log2_size_tests {
     #[test]
     fn codomain_matches_indexed_bpp_breakpoints() {
         // Edge cases — empty + solid both fold to 1 (no 0 sentinel).
-        assert_eq!(palette_log2_size_from_count(0), 1, "empty → 1 (no 0 sentinel)");
+        assert_eq!(
+            palette_log2_size_from_count(0),
+            1,
+            "empty → 1 (no 0 sentinel)"
+        );
         assert_eq!(palette_log2_size_from_count(1), 1, "solid color → 1 BPP");
 
         // PNG-indexed bit-widths.
@@ -423,7 +427,11 @@ mod log2_size_tests {
         assert_eq!(palette_log2_size_from_count(65), 7, "GIF BPP=7");
         assert_eq!(palette_log2_size_from_count(128), 7);
         assert_eq!(palette_log2_size_from_count(129), 8);
-        assert_eq!(palette_log2_size_from_count(256), 8, "PNG-8 / GIF-8 boundary");
+        assert_eq!(
+            palette_log2_size_from_count(256),
+            8,
+            "PNG-8 / GIF-8 boundary"
+        );
 
         // JXL palette breakpoints (full-scan path only).
         assert_eq!(palette_log2_size_from_count(257), 9);
@@ -445,9 +453,7 @@ mod log2_size_tests {
         // from 15 → 24 is the only discontinuity; everywhere else the
         // mapping is non-decreasing in count.
         let mut prev = 0u32;
-        for c in [
-            0, 1, 2, 4, 16, 256, 1024, 4096, 16384, 32_767, 32_768,
-        ] {
+        for c in [0, 1, 2, 4, 16, 256, 1024, 4096, 16384, 32_767, 32_768] {
             let v = palette_log2_size_from_count(c);
             assert!(v >= prev, "non-monotonic: count={c} → {v} after {prev}");
             prev = v;

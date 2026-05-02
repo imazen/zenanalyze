@@ -71,6 +71,9 @@ required-features = ["experimental"]
 [[example]]
 name = "grayscale_perf"
 
+[[example]]
+name = "extract_features_for_picker"
+
 [lints.rust]
 # zenanalyze ships zero `unsafe` blocks; SIMD goes through the
 # safe-token wrappers in archmage / magetypes. Forbidding here
