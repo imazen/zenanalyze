@@ -80,6 +80,18 @@ configs keep working unchanged. Convert with
 
 Full guidance: `~/work/claudehints/topics/parquet-vs-tsv.md`.
 
+## Multi-codec training is moving toward zentrain orchestration
+
+Per-codec piecemeal extraction (4 codec-specific binaries, 4 picker
+configs duplicating ~150 lines of scaffolding) is being replaced by
+zentrain-owned orchestration. Tier 1 (single-command refresh of all
+codecs' features files) shipped 2026-05-02 as
+`zentrain/tools/refresh_features.py`. Tiers 2–4 (centralized Rust
+extractor in zenanalyze, pareto-schema unification, picker-config
+minimization) are queued in `zentrain/INVERSION.md`. Read that
+roadmap before adding a new codec; new codecs should plug into the
+inversion target, not the legacy piecemeal pattern.
+
 ## Don't
 
 - Don't propose 0.2.x.
