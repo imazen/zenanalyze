@@ -117,6 +117,54 @@ recycled. **Kept** (still load-bearing in zenwebp at LOO Δ
 Picker configs and `zentrain/FOR_NEW_CODECS.md` updated to drop the
 removed feature names from `KEEP_FEATURES`.
 
+### Restored 2026-05-02 — `LogPixels` (id 57) + `LogPaddedPixels{8,16,32,64}` (ids 101..104)
+
+Reconsidered after a tiny-model expressivity review: a 3-layer
+128-unit MLP with ~11 k params split across 24 output heads
+(≈ 450 params/head) cannot recover algebraic transforms (`ln`, `sqrt`,
+ratio/division, `ceil(w / block) * block`) from the source variable.
+Spearman 1.0 is "redundant for an infinitely-expressive learner",
+not "redundant for our actual production picker". The +0.596 Δpp
+permutation finding on `feat_log_pixels` in the 2026-05-02 zenjpeg
+ablation was the model reporting that it uses both `LogPixels` and
+`PixelCount` as separate numerical handles (different scales attend
+to different regions of feature space) — not measurement noise.
+
+Restored:
+
+- `feat_log_pixels` (id 57) — `ln(w * h)`. Removed from
+  `RESERVED_RETIRED_IDS`.
+- `feat_log_padded_pixels_8` (id 101) — `ln(padded_w * padded_h)`
+  at 8×8 grid alignment.
+- `feat_log_padded_pixels_16` (id 102) — same at 16×16.
+- `feat_log_padded_pixels_32` (id 103) — same at 32×32.
+- `feat_log_padded_pixels_64` (id 104) — same at 64×64.
+
+The block-padded variants encode the codec's actual encoded surface
+area at each transform-block grid (JPEG 8×8, JXL DCT16/32, AV1
+32×32 / 64×64 superblocks), which the picker MLP cannot recover from
+`PixelCount` + a constant block size — it would have to learn modular
+arithmetic from a finite sample.
+
+**NOT restored** (still appropriately retired):
+
+- ids 94..100: `Log2Pixels`, `Log10Pixels`, `LogPixelsRounded`,
+  `SqrtPixels`, `LogBitmapBytes`, `LogMinDim`, `LogMaxDim`. These
+  ARE recoverable by a tiny MLP — constant-factor scalings of
+  `LogPixels`, or rgb8-channel-constant scalings of `BitmapBytes`.
+  A linear ReLU layer can apply them.
+- id 60: `BitmapBytes`. Linear in `PixelCount` for fixed-channel
+  rgb8 corpora (= 3·`pixel_count`); may be reinstated for
+  multi-format consumers.
+
+**Revised cull policy** (see commit message): for tiny picker MLPs,
+the cull gate is **Tier 3 LOO retrain Δ < 0.05pp on accuracy**, not
+Tier 0 ρ ≥ 0.95. Algebraic transforms (`log`, `sqrt`, ratio,
+division) are NEVER pure redundancy — they get the same Tier 3 test
+as anything else. Smooth-vs-hard threshold pairs require LOO before
+either is dropped (the smooth one's continuous gradient and the
+hard one's tree-friendly threshold are different inductive biases).
+
 ### Added — picker training principles + cross-codec defaults (will ship with next zenanalyze release)
 
 - **`zentrain/PRINCIPLES.md`** — single source of truth for what's

@@ -1,9 +1,9 @@
 //! Dimension features — pure descriptor math, no per-pixel work.
 //!
-//! Computes 11 features from `(width, height, descriptor)` alone:
-//! `PixelCount`, `MinDim`, `MaxDim`,
-//! `AspectMinOverMax`, `LogAspectAbs`, `BlockMisalignment{8,16,32,64}`,
-//! `ChannelCount`. See issue #42 for rationale.
+//! Computes the dimension features from `(width, height, descriptor)`:
+//! `PixelCount`, `LogPixels`, `MinDim`, `MaxDim`,
+//! `AspectMinOverMax`, `LogAspectAbs`, `BlockMisalignment{8,32}`,
+//! `LogPaddedPixels{8,16,32,64}`, `ChannelCount`. See issue #42.
 //!
 //! All cheap enough that we always populate the `RawAnalysis` fields
 //! unconditionally — the `into_results` filter then drops any features
@@ -47,6 +47,11 @@ pub(crate) fn populate_dimensions(
     let pixels_u64 = w64 * h64;
 
     raw.pixel_count = pixels_u64.min(u32::MAX as u64) as u32;
+    raw.log_pixels = if pixels_u64 == 0 {
+        0.0
+    } else {
+        (pixels_u64 as f64).ln() as f32
+    };
     raw.min_dim = width.min(height);
     raw.max_dim = width.max(height);
 
@@ -73,6 +78,34 @@ pub(crate) fn populate_dimensions(
     // zenavif) and `_64` redundant with `_32` (Spearman 0.998).
     raw.block_misalignment_8 = block_misalignment(width, height, 8);
     raw.block_misalignment_32 = block_misalignment(width, height, 32);
+
+    // LogPaddedPixels{8,16,32,64}: log of the codec's encoded surface
+    // area at each block grid. Equals `LogPixels` for aligned sources,
+    // slightly larger for off-bucket sizes. Tiny picker MLPs can't
+    // compute the ceil-pad themselves; restored 2026-05-02 after the
+    // initial cull was reconsidered.
+    raw.log_padded_pixels_8 = log_padded_pixels(width, height, 8);
+    raw.log_padded_pixels_16 = log_padded_pixels(width, height, 16);
+    raw.log_padded_pixels_32 = log_padded_pixels(width, height, 32);
+    raw.log_padded_pixels_64 = log_padded_pixels(width, height, 64);
+}
+
+/// `ln(padded_w * padded_h)` where each dim is rounded up to a
+/// multiple of `block`. Returns 0 for degenerate inputs.
+fn log_padded_pixels(width: u32, height: u32, block: u32) -> f32 {
+    if width == 0 || height == 0 || block == 0 {
+        return 0.0;
+    }
+    let pad_w = (block - width % block) % block;
+    let pad_h = (block - height % block) % block;
+    let padded_w = (width + pad_w) as u64;
+    let padded_h = (height + pad_h) as u64;
+    let padded = padded_w * padded_h;
+    if padded == 0 {
+        0.0
+    } else {
+        (padded as f64).ln() as f32
+    }
 }
 
 /// Returns `padded(N) / (w * h) - 1.0` — the fraction of *padding*
@@ -161,6 +194,50 @@ mod tests {
     }
 
     #[test]
+    fn log_pixels_matches_expected() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 1024, 1024, rgb8());
+        // ln(1024^2) = 2 ln 1024 ≈ 13.863
+        assert!((raw.log_pixels - 13.863).abs() < 1e-2);
+    }
+
+    #[test]
+    fn log_padded_pixels_aligned_matches_log_pixels() {
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 256, 256, rgb8());
+        // 256 is a multiple of 8/16/32/64 — all padded values equal
+        // the visible log_pixels.
+        assert!(
+            (raw.log_padded_pixels_8 - raw.log_pixels).abs() < 1e-5,
+            "8: padded={}, log_pixels={}",
+            raw.log_padded_pixels_8,
+            raw.log_pixels
+        );
+        assert!((raw.log_padded_pixels_16 - raw.log_pixels).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_32 - raw.log_pixels).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_64 - raw.log_pixels).abs() < 1e-5);
+    }
+
+    #[test]
+    fn log_padded_pixels_off_by_one_pads_up() {
+        // 257×257 → padded to 264, 272, 288, 320 for blocks 8, 16, 32, 64.
+        let mut raw = RawAnalysis::default();
+        populate_dimensions(&mut raw, 257, 257, rgb8());
+        let expect_8 = ((264u64 * 264u64) as f64).ln() as f32;
+        let expect_16 = ((272u64 * 272u64) as f64).ln() as f32;
+        let expect_32 = ((288u64 * 288u64) as f64).ln() as f32;
+        let expect_64 = ((320u64 * 320u64) as f64).ln() as f32;
+        assert!(
+            (raw.log_padded_pixels_8 - expect_8).abs() < 1e-5,
+            "got {}",
+            raw.log_padded_pixels_8
+        );
+        assert!((raw.log_padded_pixels_16 - expect_16).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_32 - expect_32).abs() < 1e-5);
+        assert!((raw.log_padded_pixels_64 - expect_64).abs() < 1e-5);
+    }
+
+    #[test]
     fn channel_count_reflects_descriptor_layout() {
         let mut raw = RawAnalysis::default();
         populate_dimensions(&mut raw, 100, 100, PixelDescriptor::RGB8_SRGB);
@@ -193,8 +270,10 @@ mod tests {
         populate_dimensions(&mut raw, 0, 100, rgb8());
         // No panics, no NaN, all zeros.
         assert_eq!(raw.pixel_count, 0);
+        assert_eq!(raw.log_pixels, 0.0);
         assert_eq!(raw.block_misalignment_8, 0.0);
         assert_eq!(raw.aspect_min_over_max, 0.0);
         assert_eq!(raw.log_aspect_abs, 0.0);
+        assert_eq!(raw.log_padded_pixels_8, 0.0);
     }
 }

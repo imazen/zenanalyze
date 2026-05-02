@@ -706,10 +706,27 @@ features_table! {
     /// images larger than ~4.29 gigapixels (rare; we don't support
     /// images that big elsewhere).
     PixelCount = 56 : u32 => pixel_count,
-    // ids 57 + 60 retired 2026-05-02: `LogPixels` (Spearman 1.0 with
-    // `PixelCount`) and `BitmapBytes` (Spearman 1.0 with `PixelCount`
-    // for fixed-channel sources) confirmed redundant on all 4 codecs
-    // in the cross-codec ablation. Stable ids reserved.
+    /// `f32`. `ln(w * h)`, natural log. Restored 2026-05-02 after
+    /// the initial cull (`e9cd04d0`) was reconsidered: the cull was
+    /// motivated by Spearman 1.0 with `PixelCount`, but rank-equality
+    /// is only redundant for an infinitely-expressive learner. Our
+    /// production picker MLPs are tiny (3 layers × 128 units, ~11k
+    /// params split across 24 output heads ≈ 450 params/head) and
+    /// cannot recover `ln(x)` from `x`. The two columns give the
+    /// model different numerical handles: `PixelCount` saturates
+    /// attention at large images; `LogPixels` keeps resolution at
+    /// small ones. The +0.596 Δpp permutation finding on this
+    /// feature in the 2026-05-02 zenjpeg ablation is the model
+    /// reporting that it uses both columns, not measurement noise.
+    /// Tier 0 correlation surfaces redundancy *candidates* — for
+    /// algebraic transforms, the gate is Tier 3 LOO retrain.
+    LogPixels = 57 : f32 => log_pixels,
+    // id 60 retired 2026-05-02: `BitmapBytes` was confirmed redundant
+    // for fixed-channel rgb8 corpora (= 3 · pixel_count exactly when
+    // channels and bytes-per-sample are constant). The picker MLP
+    // can scale by 3 trivially via ReLU. May be reinstated if a
+    // multi-format consumer (rgba16 / rgbaf32 / graya) needs the
+    // signal back.
     /// `u32`. `min(w, h)`. Catches strips and thumbnails directly —
     /// a 1024×1 image and a 32×32 image have very different
     /// per-pixel codec costs but the same `PixelCount`.
@@ -864,13 +881,41 @@ features_table! {
     QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
 
     // ---------------- Dimension log/derivative variants -------------
-    // (Section retired 2026-05-02. The 11 mathematical transforms of
-    // `feat_pixel_count` at ids 94..104 — log2_pixels / log10_pixels /
-    // log_pixels_rounded / sqrt_pixels / log_bitmap_bytes / log_min_dim /
-    // log_max_dim / log_padded_pixels_{8,16,32,64} — were Spearman 1.0
-    // with `PixelCount` by construction and contributed nothing in
-    // cross-codec ablation. `LogPixels` (id 57) and `BitmapBytes`
-    // (id 60) followed in the 2026-05-02 cull. All ids reserved.)
+    // ids 94..100 retired in commit `e5c3c39` (log2/log10/sqrt/rounded
+    // pixel transforms + log_bitmap_bytes + log_min/max_dim) — these
+    // are constant-factor scalings of LogPixels (linear-recoverable
+    // by the MLP) or rgb8-channel-constant scalings of BitmapBytes.
+    // The block-padded variants at ids 101..104 are NOT recoverable
+    // from PixelCount + block size alone (require ceil-pad math the
+    // tiny MLP can't compute), so they were restored after the
+    // tiny-model expressivity review.
+
+    /// `f32`. `ln(padded_w * padded_h)` where the source is conceptually
+    /// padded up to a multiple-of-8 grid in each axis — i.e., the log
+    /// of the encoder's actual encoded-block surface area for codecs
+    /// with 8×8 transforms (JPEG, the JXL DCT8 mode, the WebP 4×4 / 8×8
+    /// hybrid, AVIF's 4×4 inner blocks). For aligned sources equals
+    /// `LogPixels`; for off-bucket sizes (e.g., 257×257 → padded 264×264)
+    /// it's slightly larger, exposing the marginal cost the codec pays
+    /// for the under-utilised tail row + column.
+    ///
+    /// Restored 2026-05-02 after the initial cull (`e5c3c39`) was
+    /// reconsidered: a 3-layer 128-unit MLP can't compute
+    /// `ceil(w / block) * block` from `w` and a constant `block` —
+    /// it would have to learn modular arithmetic from a finite sample.
+    /// The four padded-pixel variants give the picker direct numerical
+    /// handles for "what surface area does this codec actually pay
+    /// per encoded block size".
+    LogPaddedPixels8 = 101 : f32 => log_padded_pixels_8,
+    /// `f32`. As `LogPaddedPixels8` but for 16×16 grid alignment —
+    /// matches WebP-VP8L lossless tile boundaries and JXL DCT16 mode.
+    LogPaddedPixels16 = 102 : f32 => log_padded_pixels_16,
+    /// `f32`. As above for 32×32 — matches JXL DCT32 mode and AV1's
+    /// 32×32 transform breakpoints.
+    LogPaddedPixels32 = 103 : f32 => log_padded_pixels_32,
+    /// `f32`. As above for 64×64 — matches AV1's 64×64 superblock cap
+    /// and JXL VarDCT large-transform decisions.
+    LogPaddedPixels64 = 104 : f32 => log_padded_pixels_64,
 
     // ---------------- Low-tail percentile companions ---------------
     // Adds P1/P5/P10 to LaplacianVariance / AqMap / NoiseFloorY (and
@@ -1966,15 +2011,17 @@ mod tests {
         // — collapsed into `_8` / `_32` anchors at Spearman 0.96 / 0.998
         // on zenavif's non-power-of-2 corpus.
         64, 66,
-        // ids 94..104 were the 11 mathematical transforms of
-        // `feat_pixel_count` (log2/log10/log_padded/sqrt/etc.) — pure
-        // collinearity per #59.
-        94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104,
-        // ids 57 + 60 were `LogPixels` / `BitmapBytes`, retired
-        // 2026-05-02 after the cross-codec ablation showed Spearman
-        // 1.0 with `feat_pixel_count` on all 4 codecs at min |r|
-        // 0.9656–1.0000. Stable ids reserved.
-        57, 60,
+        // ids 94..100 were 7 of the 11 mathematical transforms of
+        // `feat_pixel_count` (log2 / log10 / log_pixels_rounded /
+        // sqrt_pixels / log_bitmap_bytes / log_min_dim / log_max_dim).
+        // These ARE recoverable by a tiny MLP (constant-factor
+        // scalings of `LogPixels`, or rgb8-channel-constant scalings
+        // of `PixelCount`).
+        94, 95, 96, 97, 98, 99, 100,
+        // id 60 was `BitmapBytes`, retired 2026-05-02. Linear in
+        // `PixelCount` for fixed-channel rgb8 sources (= 3·pixel_count).
+        // May be reinstated for multi-format consumers.
+        60,
         // ids 117, 118, 119 were `ChromaKurtosis` /
         // `UniformitySmooth` / `FlatColorSmooth` — Tier-0 redundant
         // with existing features on ≥3/4 codecs in the 2026-05-01

@@ -492,11 +492,14 @@ Drop the redundant member from each pair *before* re-training. The MLP can't sep
 
 zenanalyze ships ~12 dimension features (PixelCount, MinDim, MaxDim, BitmapBytes, AspectMinOverMax, LogPixels, BlockMisalignment{8,16,32,64}, ChannelCount, etc.) plus 11 log/derivative variants (Log2Pixels, Log10Pixels, Sqrt, LogPaddedPixels{8,16,32,64}, etc.). **Don't include all of them by default.**
 
-zenjpeg v2.2-clean keeps **3** dimension features after the
-2026-05-02 cull retired `feat_log_pixels` / `feat_log_padded_pixels_8`
-(Spearman 1.0 with `feat_pixel_count`, no LOO impact):
+zenjpeg v2.2-clean keeps these dimension features (the 2026-05-02
+cull-then-restore cycle settled on `LogPixels` + the four
+`LogPaddedPixels{8,16,32,64}` variants being load-bearing for tiny
+picker MLPs that can't recover them algebraically):
 
-- `feat_pixel_count` — the #1 ablation impact in the entire schema (+4.89pp). This is the dominant size signal.
+- `feat_pixel_count` — the #1 ablation impact in the entire schema (+4.89pp). The dominant size signal.
+- `feat_log_pixels` — smooth resolution axis; complements the linear pixel_count for tiny-MLP attention at small images.
+- `feat_log_padded_pixels_8` — encoder-block surface area at JPEG 8×8 grid. Picker MLPs can't compute the ceil-pad themselves.
 - `feat_aspect_min_over_max` — bounded `(0, 1]`, captures strips and thumbnails.
 - `feat_channel_count` — discrete grayscale/RGB/RGBA distinction.
 

@@ -152,7 +152,7 @@ KEEP_FEATURES = [
     "feat_alpha_bimodal_score",
     # ---------- v2.2 dimension features (4 of 12 — ablation-validated only) ----------
     "feat_pixel_count",            # #1 ablation impact (+4.89pp)
-    # feat_log_pixels removed 2026-05-02 (Spearman 1.0 with feat_pixel_count)
+    "feat_log_pixels",             # smooth resolution axis — restored 2026-05-02 after tiny-MLP expressivity review
     "feat_aspect_min_over_max",    # bounded strip detection
     # DROPPED: feat_log_padded_pixels_8 (zenanalyze 0.1.0 deleted the
     # log_padded_pixels_{8,16,32,64} variants — ids reserved).
