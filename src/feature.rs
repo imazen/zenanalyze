@@ -334,7 +334,34 @@ features_table! {
     // the future budget-sampled variant can re-introduce the variant
     // at the same number for FeatureSet wire-format compatibility.
     /// `f32`. `DistinctColorBins / min(pixel_count, 32 768)`.
+    ///
+    /// **Deprecated 2026-05-02.** Tier 0 cross-codec analysis showed
+    /// perfect-Jaccard clustering with [`Self::DistinctColorBins`] on
+    /// 3 of 4 codecs (zenjpeg / zenavif / zenjxl) at ρ=1.0000 —
+    /// algebraically `density = distinct / min(pixels, 32 768)` is
+    /// a corpus-bound rescaling of the count when image sizes are
+    /// roughly uniform (the 4th codec, zenwebp, also clustered them
+    /// near ρ=1.0). Tier 3 multi-seed LOO retrain (5 seeds, zenwebp)
+    /// showed mean ΔAC = +0.78 ± 7.62 pp with `distinct_color_bins`
+    /// already in the base — within noise; no measurable signal
+    /// beyond what the count alone provides.
+    ///
+    /// Migrate consumers to one or both of:
+    /// - [`Self::DistinctColorBins`] for the raw count, or
+    /// - [`Self::PaletteLog2Size`] for the discrete-bucket version
+    ///   matching codec palette modes (PNG-1/2/4/8, GIF BPP,
+    ///   JXL Modular palette tiers).
+    ///
+    /// Still computed and emitted in 0.1.x; new picker configs
+    /// should drop from `KEEP_FEATURES`. Stable id 12 stays
+    /// reserved when the variant is eventually retired.
     #[cfg(feature = "experimental")]
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "use DistinctColorBins (raw count) or PaletteLog2Size (discrete BPP); \
+                density is corpus-bound redundant per cross-codec Tier 0 + multi-seed LOO. \
+                See benchmarks/feature_groups_cross_codec_2026-05-02.md."
+    )]
     PaletteDensity = 12 : f32 => palette_density,
 
     // ---------------- Tier 2: per-channel per-axis chroma ------------
@@ -1440,11 +1467,16 @@ impl Default for FeatureSet {
 /// colour count. Asking for any of these forces the full-scan path
 /// (every pixel walked). Const-block style so individual `.with()`
 /// calls can be cfg-gated when their variant is experimental.
+#[allow(deprecated)]
 pub(crate) const PALETTE_FULL_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::DistinctColorBins);
     #[cfg(feature = "experimental")]
     {
+        // PaletteDensity is `#[deprecated]` (2026-05-02) but still
+        // computed during the deprecation window; allow the warning
+        // here so PALETTE_FULL_FEATURES continues to include it for
+        // existing pickers that haven't migrated yet.
         s = s.with(AnalysisFeature::PaletteDensity);
         // GrayscaleScore is computed on the same full-scan walk that
         // builds the palette histogram. It needs 100 % coverage —
