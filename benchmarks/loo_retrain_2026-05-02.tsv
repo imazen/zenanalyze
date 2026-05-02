@@ -1,0 +1,11 @@
+codec	feature	with_student_overhead_pct	without_student_overhead_pct	delta_student_overhead_pp	with_student_argmin_pct	without_student_argmin_pct	delta_student_argmin_pp	with_teacher_overhead_pct	without_teacher_overhead_pct
+zenwebp	feat_log_pixels	2.4400	2.8300	0.3900	42.5000	43.4000	0.9000	2.7000	2.7000
+zenwebp	feat_log_padded_pixels_8	2.4000	2.8300	0.4300	45.2000	43.4000	-1.8000	2.7000	2.7000
+zenwebp	feat_log_padded_pixels_16	2.1600	2.8300	0.6700	46.7000	43.4000	-3.3000	2.7000	2.7000
+zenwebp	feat_log_padded_pixels_32	2.1400	2.8300	0.6900	46.4000	43.4000	-3.0000	2.8000	2.7000
+zenwebp	feat_log_padded_pixels_64	2.7500	2.8300	0.0800	29.8000	43.4000	13.6000	2.7000	2.7000
+zenwebp	feat_bitmap_bytes	1.9300	2.8300	0.9000	52.0000	43.4000	-8.6000	2.7000	2.7000
+zenwebp	feat_palette_density	2.7200	2.8300	0.1100	44.1000	43.4000	-0.7000	2.7900	2.7000
+zenwebp	feat_aq_map_p10	2.3600	2.8300	0.4700	42.8000	43.4000	0.6000	2.8500	2.7000
+zenwebp	feat_noise_floor_y_p10	2.1900	2.8300	0.6400	49.2000	43.4000	-5.8000	2.8300	2.7000
+zenwebp	feat_noise_floor_y_p50	2.8300	2.2400	-0.5900	43.4000	43.9000	0.5000	2.7000	2.5900
