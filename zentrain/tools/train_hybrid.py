@@ -300,7 +300,52 @@ def load_codec_config(name: str):
         METRIC_DIRECTION = d
     if hasattr(mod, "TIME_COLUMN"):
         TIME_COLUMN = str(mod.TIME_COLUMN)
+    # Optional — FEATURE_GROUPS validator. Codec configs declare
+    # mutual-exclusion groups based on the cross-codec dendrogram +
+    # LOO data; the validator enforces `count(KEEP ∩ group) ≤
+    # max_picked` per group. See benchmarks/feature_groups_cross_codec
+    # _2026-05-02.md for the methodology and the 6 perfect-Jaccard
+    # cross-codec clusters that motivated the design.
+    if hasattr(mod, "FEATURE_GROUPS"):
+        validate_keep_features(KEEP_FEATURES, mod.FEATURE_GROUPS)
     return mod
+
+
+def validate_keep_features(keep, groups):
+    """Enforce per-group `max_picked` constraints on KEEP_FEATURES.
+
+    Each entry in `groups` is `{"members": [feat_name, ...],
+    "max_picked": int}`. The validator counts overlap between
+    `KEEP_FEATURES` and `group["members"]`; if it exceeds
+    `max_picked`, raise `ValueError` with a pointer to the cull docs.
+
+    Groups with `max_picked >= len(members)` are unconstrained
+    (allow all members). The validator is silent on success.
+    """
+    keep_set = set(keep)
+    violations = []
+    for name, group in groups.items():
+        members = list(group.get("members", []))
+        max_picked = int(group.get("max_picked", len(members)))
+        if max_picked >= len(members):
+            continue  # unconstrained
+        picked = sorted(keep_set & set(members))
+        if len(picked) > max_picked:
+            violations.append(
+                f"  group {name!r}: max_picked={max_picked}, "
+                f"got {len(picked)}: {picked}"
+            )
+    if violations:
+        raise ValueError(
+            "FEATURE_GROUPS validator failed — KEEP_FEATURES violates "
+            "mutual-exclusion constraints:\n"
+            + "\n".join(violations)
+            + "\n\nPick one feature per group per the cross-codec "
+            "dendrogram analysis. See "
+            "benchmarks/feature_groups_cross_codec_2026-05-02.md "
+            "for group definitions and the LOO ranking that informs "
+            "which member to keep."
+        )
 
 
 # ---------- Config-name parser (codec-supplied) ----------

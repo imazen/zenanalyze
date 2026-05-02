@@ -98,6 +98,112 @@ KEEP_FEATURES = [
     "feat_gradient_fraction_smooth",
 ]
 
+
+# ---------- Feature-group mutual-exclusion validator ----------
+#
+# Seeded from the 2026-05-02 cross-codec dendrogram analysis (zenwebp
+# + zenjxl). The 6 perfect-Jaccard clusters become hard mutual-
+# exclusion groups (max_picked = 1); strong-but-not-identical clusters
+# get max_picked = 1 too where the underlying physical signal is the
+# same; the resolution-dimension supercluster gets max_picked = 5
+# based on the 2026-05-02 LOO retrain.
+#
+# `train_hybrid.py` invokes `validate_keep_features` at codec-config
+# load time. Violations error out before training, with a pointer to
+# `benchmarks/feature_groups_cross_codec_2026-05-02.md`.
+#
+# Reference: benchmarks/feature_groups_cross_codec_2026-05-02.md
+FEATURE_GROUPS = {
+    # ---- 6 perfect-Jaccard cross-codec clusters (zenwebp + zenjxl) ----
+    "aspect": {
+        "members": ["feat_aspect_min_over_max", "feat_log_aspect_abs"],
+        "max_picked": 1,
+    },
+    "palette_boolean": {
+        # legacy: feat_indexed_palette_width retired in commit 248b48b
+        # → feat_palette_log2_size; both included for the deprecation
+        # window so picker configs that still reference the retired
+        # name fail clean.
+        "members": [
+            "feat_palette_log2_size",
+            "feat_palette_fits_in_256",
+            "feat_indexed_palette_width",
+        ],
+        "max_picked": 1,
+    },
+    "median_block_cost": {
+        "members": [
+            "feat_aq_map_p50",
+            "feat_noise_floor_y_p50",
+            "feat_quant_survival_y_p50",
+        ],
+        # Structural target: 1 (perfect-Jaccard cluster). Current
+        # zenwebp picker has 2 members (noise_floor + quant_survival);
+        # tighten after multi-seed LOO confirms which dominates.
+        "max_picked": 2,
+    },
+    "low_tail_p1": {
+        "members": ["feat_aq_map_p1", "feat_noise_floor_y_p1"],
+        "max_picked": 1,
+    },
+    "uv_chroma_compressibility": {
+        "members": ["feat_dct_compressibility_uv", "feat_quant_survival_uv"],
+        "max_picked": 1,
+    },
+    "edge_coef_survival": {
+        "members": ["feat_edge_density", "feat_quant_survival_y"],
+        # Structural target: 1 (perfect-Jaccard cluster). Current
+        # zenwebp picker has both — they may carry independent
+        # signal at our data scale; tighten after multi-seed LOO.
+        "max_picked": 2,
+    },
+    # ---- 3 strong-agreement clusters (Jaccard 0.5–0.8) ----
+    "low_tail_p5_p10": {
+        "members": [
+            "feat_aq_map_p5", "feat_aq_map_p10",
+            "feat_noise_floor_y_p5", "feat_noise_floor_y_p10",
+        ],
+        "max_picked": 1,
+    },
+    "upper_tail_block_cost": {
+        "members": [
+            "feat_aq_map_p75",
+            "feat_noise_floor_y_p75",
+            "feat_quant_survival_y_p75",
+        ],
+        # Structural target: 1 (Jaccard 0.67 zenwebp↔zenjxl).
+        # Current zenwebp has all 3; tighten after multi-seed LOO
+        # picks the dominant tail.
+        "max_picked": 3,
+    },
+    "flat_block_signal": {
+        "members": ["feat_aq_map_mean", "feat_uniformity"],
+        # Structural target: 1 (Jaccard 0.67 — zenjxl extends to 3
+        # incl. uniformity_smooth; zenwebp has 2). Current zenwebp
+        # picker has both; tighten after multi-seed LOO.
+        "max_picked": 2,
+    },
+    # ---- soft-constraint groups (multiple useful per LOO) ----
+    "resolution_dimension": {
+        "members": [
+            "feat_pixel_count", "feat_log_pixels", "feat_bitmap_bytes",
+            "feat_log_padded_pixels_8", "feat_log_padded_pixels_16",
+            "feat_log_padded_pixels_32",
+            "feat_min_dim", "feat_max_dim",
+        ],
+        # 2026-05-02 LOO showed ≥5 carry signal; rank by ΔAC.
+        "max_picked": 5,
+    },
+    "palette": {
+        "members": [
+            "feat_distinct_color_bins", "feat_palette_density",
+            "feat_palette_log2_size", "feat_palette_fits_in_256",
+        ],
+        "max_picked": 2,  # one count + one categorical
+    },
+}
+
+
 # Zq target grid: production-relevant range. q < 30 corresponds to
 # extreme-low quality that's rarely shipped (the per-zq-tail safety
 # gate fired at zq=5 with 84.8% p99 overhead — that's just low-q

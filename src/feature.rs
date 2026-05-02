@@ -748,8 +748,27 @@ features_table! {
     AspectMinOverMax = 61 : f32 => aspect_min_over_max,
     /// `f32`. `|ln(w / h)|` ∈ `[0, ∞)`. Square = `0`, larger =
     /// more extreme. Symmetric (no sign ambiguity between landscape
-    /// and portrait) and unbounded above — sensitive to very
-    /// extreme ratios where `AspectMinOverMax` saturates.
+    /// and portrait) and unbounded above.
+    ///
+    /// **Deprecated 2026-05-02.** The 2026-05-02 cross-codec
+    /// dendrogram analysis (zenwebp + zenjxl) showed perfect-Jaccard
+    /// clustering with [`Self::AspectMinOverMax`] at ρ≥0.95 on both
+    /// codecs (cluster #001 in both feature_groups TSVs). The two
+    /// features carry the same aspect-ratio signal: one bounded in
+    /// `(0, 1]`, the other unbounded above. Tiny picker MLPs have
+    /// no way to use both without redundancy. Migrate consumers to
+    /// `AspectMinOverMax` (numerically better-conditioned for
+    /// gradient-based training and well-defined at the
+    /// `min == max == 1` square boundary).
+    ///
+    /// Still computed and emitted; new picker configs should drop
+    /// from `KEEP_FEATURES`. The id (62) stays reserved when the
+    /// variant is eventually retired in a future cull pass.
+    @decl[deprecated(
+        since = "0.1.0",
+        note = "use AspectMinOverMax — same signal, bounded [0,1]; \
+                see benchmarks/feature_groups_cross_codec_2026-05-02.md"
+    )]
     LogAspectAbs = 62 : f32 => log_aspect_abs,
     /// `f32`. Fraction of padding pixels needed to round the
     /// image up to a complete 8×8 grid. `0.0` for images whose
