@@ -580,7 +580,82 @@ def build_bake_request_json(
         "layers": layers_json,
         "feature_bounds": encode_feature_bounds(model, n_inputs, feat_cols),
         "metadata": encode_metadata(model, out_path),
+        # ZNPR v3 — optional per-output post-processing and sparse
+        # hand-tune overrides. The trainer threads these through
+        # untouched; absent keys / empty arrays produce a v3 bin
+        # that decodes the same as v2 used to (raw passthrough).
+        # Schema lives at zenpredict::bake::OutputSpecJson and
+        # SparseOverrideJson.
+        "output_specs": encode_output_specs(model, n_outputs),
+        "sparse_overrides": encode_sparse_overrides(model, n_outputs),
     }
+
+
+def encode_output_specs(model: dict, n_outputs: int) -> list[dict]:
+    """Build the v3 `output_specs` array from a trainer model dict.
+
+    Looks for a top-level `output_specs` key (a list of dicts in the
+    same shape as `OutputSpecJson` — keys: `bounds`, `transform`,
+    `params`, `discrete_set`, `sentinel`). Returns `[]` if the key is
+    absent (raw passthrough) — runtime treats that as "no specs".
+
+    No validation here beyond length: the runtime baker
+    (`zenpredict-bake`) rejects unknown transforms / out-of-range
+    discrete sets / etc.
+    """
+    specs = model.get("output_specs")
+    if not specs:
+        return []
+    if len(specs) != n_outputs:
+        raise SystemExit(
+            f"output_specs has {len(specs)} entries, expected n_outputs={n_outputs}"
+        )
+    out = []
+    for entry in specs:
+        # Pass through; serialize numpy types to plain Python.
+        cleaned = {}
+        if "bounds" in entry and entry["bounds"] is not None:
+            lo, hi = entry["bounds"]
+            cleaned["bounds"] = [float(lo), float(hi)]
+        if "transform" in entry and entry["transform"] is not None:
+            cleaned["transform"] = str(entry["transform"])
+        if "params" in entry and entry["params"] is not None:
+            cleaned["params"] = [float(p) for p in entry["params"]]
+        if "discrete_set" in entry and entry["discrete_set"] is not None:
+            cleaned["discrete_set"] = [float(v) for v in entry["discrete_set"]]
+        if "sentinel" in entry and entry["sentinel"] is not None:
+            cleaned["sentinel"] = float(entry["sentinel"])
+        out.append(cleaned)
+    return out
+
+
+def encode_sparse_overrides(model: dict, n_outputs: int) -> list[dict]:
+    """Build the v3 `sparse_overrides` array from a trainer model dict.
+
+    Looks for a top-level `sparse_overrides` key (a list of dicts in
+    the same shape as `SparseOverrideJson` — keys: `idx`, `value`).
+    Returns `[]` if the key is absent.
+
+    `value: None` (in Python) → `null` in JSON → `f32::NAN` on the
+    Rust side → forces `OutputValue::Default` for that output at
+    runtime.
+    """
+    overrides = model.get("sparse_overrides")
+    if not overrides:
+        return []
+    out = []
+    for entry in overrides:
+        idx = int(entry["idx"])
+        if idx < 0 or idx >= n_outputs:
+            raise SystemExit(
+                f"sparse_overrides idx {idx} out of range (n_outputs={n_outputs})"
+            )
+        value = entry.get("value")
+        if value is None:
+            out.append({"idx": idx, "value": None})
+        else:
+            out.append({"idx": idx, "value": float(value)})
+    return out
 
 
 def find_bake_bin(explicit: Path | None) -> Path:
