@@ -246,6 +246,70 @@ SCALAR_DISPLAY_RANGES = {
 }
 
 
+# ---------- Per-feature pre-standardize transform ----------
+#
+# log: pixel_count, log_pixels (already log; identity is fine but
+#      explicit log on pixel_count handles the x>0 tail). The codec's
+#      v2.2 schema includes feat_pixel_count + feat_log_pixels — use
+#      log on raw and identity on the already-log column to avoid
+#      double-logging.
+# log1p: laplacian_variance + percentiles (smooth photo tails to ~0),
+#        aq_map percentiles (long upper tail), variance (heavy-tailed),
+#        edge_slope_stdev.
+FEATURE_TRANSFORMS = {
+    "feat_pixel_count": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_p99": "log1p",
+}
+
+
+# ---------- ZNPR v3 output post-processing ----------
+#
+# zenjpeg's sweep grid uses the discrete set {0.0, 8.0, 14.5, 25.0}
+# for lambda (0.0 = trellis-off sentinel). The trainer fits the
+# scalar head on those raw values (per-cell teacher predicts the
+# natural-unit lambda directly). Two viable v3 specs for this axis:
+#   1. discrete_set + round (pin output to one of the 4 grid values)
+#   2. log-output Exp transform (cleaner gradient on a log-distributed
+#      target, runtime exp-decodes)
+# Option 1 is chosen here — it preserves the trainer's existing
+# linear-unit fit without re-tooling the head's loss. Switching to
+# Exp would require log-space label transformation in train_hybrid;
+# tracked for v0.2.
+#
+# chroma_scale is bounded continuous in [0.6, 1.5] — identity transform
+# with bounds clamping.
+OUTPUT_SPECS = {
+    "bytes_log": {
+        "bounds": [0.0, 30.0],
+        "transform": "identity",
+    },
+    "lambda": {
+        "bounds": [0.0, 25.0],
+        "transform": "round",
+        # Discrete grid: 0 = trellis-off sentinel, then the 3 hyb<N>
+        # values from the v2.1+ sweep. After Round snapping the codec
+        # runtime maps 0.0 → trellis-off.
+        "discrete_set": [0.0, 8.0, 14.5, 25.0],
+        "sentinel": LAMBDA_NOTRELLIS_SENTINEL,
+    },
+    "chroma_scale": {
+        "bounds": [0.6, 1.5],
+        "transform": "identity",
+    },
+}
+
+SPARSE_OVERRIDES: list = []
+
+
 def parse_config_name(name: str) -> dict:
     """Parse a zenjpeg config name into its categorical + scalar axes.
 

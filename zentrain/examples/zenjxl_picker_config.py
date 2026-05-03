@@ -116,7 +116,8 @@ KEEP_FEATURES = [
     "feat_aq_map_p90",
     "feat_aq_map_p95",
     "feat_aq_map_p99",
-    "feat_noise_floor_y",
+    # DROPPED 2026-05-03 (#52 LOO cull): feat_noise_floor_y
+    # mean ΔOH +0.508pp, σ 0.363 — strongest cull candidate.
     "feat_noise_floor_uv",
     "feat_noise_floor_y_p25",
     "feat_noise_floor_y_p50",
@@ -136,9 +137,11 @@ KEEP_FEATURES = [
     "feat_quant_survival_y_p50",
     "feat_quant_survival_y_p75",
     "feat_quant_survival_uv_p10",
-    "feat_gradient_fraction",
+    # DROPPED 2026-05-03 (#52 LOO cull): feat_gradient_fraction
+    # mean ΔOH +0.266pp, σ 0.512.
     "feat_grayscale_score",
-    "feat_edge_slope_stdev",
+    # DROPPED 2026-05-03 (#52 LOO cull): feat_edge_slope_stdev
+    # mean ΔOH +0.234pp, σ 0.254.
     # New experimental shape / smoothness features (post-cull,
     # zenanalyze 0.1.0 — 2 features kept 2026-05-01 after Tier-0
     # ablation removed chroma_kurtosis / uniformity_smooth /
@@ -177,6 +180,49 @@ SCALAR_DISPLAY_RANGES: dict = {
     "k_ac_quant": (0.5, 1.5),
     "entropy_mul_dct8": (0.5, 1.5),
 }
+
+
+# ---------- Per-feature pre-standardize transform ----------
+FEATURE_TRANSFORMS = {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_aq_map_std": "log1p",
+}
+
+
+# ---------- ZNPR v3 output post-processing ----------
+#
+# zenjxl scalar heads are continuous multipliers in narrow ranges.
+# Identity + bounds clamp the output to the physically-meaningful
+# range published in jxl-encoder. Categorical knobs (gaborish, patches,
+# enhanced_clustering, ac_intensity) live in the cell taxonomy, not in
+# OUTPUT_SPECS.
+OUTPUT_SPECS = {
+    "bytes_log": {
+        "bounds": [0.0, 30.0],
+        "transform": "identity",
+    },
+    "k_info_loss_mul": {
+        "bounds": [0.5, 2.0],
+        "transform": "identity",
+    },
+    "k_ac_quant": {
+        "bounds": [0.5, 1.5],
+        "transform": "identity",
+    },
+    "entropy_mul_dct8": {
+        "bounds": [0.5, 1.5],
+        "transform": "identity",
+    },
+}
+
+SPARSE_OVERRIDES: list = []
 
 
 # ---------- Config-name parser ----------

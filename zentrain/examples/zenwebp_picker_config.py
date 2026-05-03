@@ -70,7 +70,9 @@ KEEP_FEATURES = [
     "feat_pixel_count",
     "feat_uniformity",
     "feat_distinct_color_bins",
-    "feat_cr_sharpness",
+    # DROPPED 2026-05-03 (LOO consensus, mean ΔOH +0.226pp, σ 0.263 — m≥0.5σ
+    # rule; #52). Removing it improves overhead measurably across 5 seeds.
+    # "feat_cr_sharpness",
     "feat_edge_density",
     "feat_noise_floor_y_p50",
     "feat_luma_histogram_entropy",
@@ -135,6 +137,11 @@ FEATURE_GROUPS = {
     "edge_coef_survival": {
         "members": ["feat_edge_density", "feat_quant_survival_y"],
         "max_picked": 2,
+    },
+    "chroma_sharpness": {
+        # feat_cr_sharpness dropped 2026-05-03 (LOO cull); only cb side present.
+        "members": ["feat_cb_sharpness"],
+        "max_picked": 1,
     },
     "upper_tail_block_cost": {
         "members": [
@@ -244,6 +251,33 @@ SPARSE_OVERRIDES: list = []
 # direction surfaces as `PickError::SchemaMismatch`.
 SCHEMA_VERSION_TAG = "zenwebp.picker.v0.1"
 BAKE_NAME = "zenwebp_picker_v0.2"
+
+
+# ---------- Per-feature pre-standardize transform ----------
+#
+# Trainer applies these BEFORE the StandardScaler fit; runtime must
+# apply the same transform pre-scaler. Default for absent keys is
+# "identity".
+#
+# - log: log-distributed positive features (pixel_count). standardize
+#   over log-space gives the MLP a more linear feature axis.
+# - log1p: heavy-tailed positive features that may be ≈0 on flat
+#   patches (laplacian variance + percentiles). log1p handles the
+#   x→0 tail without -inf; standardize captures the post-transform
+#   spread.
+# - identity (default): bounded [0,1] features (uniformity,
+#   edge_density, patch_fraction), already-bounded ratios, sharpness
+#   measurements, and discrete counts.
+FEATURE_TRANSFORMS = {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+}
 
 
 # ---------- Config-name parser ----------

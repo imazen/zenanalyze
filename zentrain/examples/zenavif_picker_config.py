@@ -69,21 +69,25 @@ OUT_LOG = Path("benchmarks/rav1e_phase1a_hybrid_2026-05-01.log")
 # tighten this list once cross-codec evidence supports specific
 # drops. Until then, hand the picker every signal we have so the
 # permutation-importance ranking is computed on the full surface.
+# LOO multi-seed cull (2026-05-03, #52): 16 features whose mean ΔOH ≥
+# +0.10pp AND ≥ +0.5σ across 5 seeds — removing them improves overall
+# overhead consistently. Commented in-place with the LOO numbers so a
+# future re-run can confirm the drops.
 KEEP_FEATURES = [
     # Tier 1 (sparse stripe)
     "feat_variance",
-    "feat_edge_density",
+    # DROPPED: feat_edge_density (mean +0.150pp, σ 0.212)
     "feat_chroma_complexity",
     "feat_cb_sharpness",
-    "feat_cr_sharpness",
+    # DROPPED: feat_cr_sharpness (mean +0.100pp, σ 0.170)
     "feat_uniformity",
     "feat_flat_color_block_ratio",
     "feat_colourfulness",
     "feat_laplacian_variance",
     "feat_variance_spread",
     "feat_distinct_color_bins",
-    "feat_palette_density",
-    "feat_cb_horiz_sharpness",
+    # DROPPED: feat_palette_density (mean +0.288pp, σ 0.406 — biggest cull)
+    "feat_cb_horiz_sharpness",  # NOTE: also +0.214pp/0.301σ — kept for now (cb_*_sharpness group coverage)
     "feat_cb_vert_sharpness",
     "feat_cb_peak_sharpness",
     "feat_cr_horiz_sharpness",
@@ -97,14 +101,14 @@ KEEP_FEATURES = [
     "feat_patch_fraction",
     "feat_patch_fraction_fast",
     "feat_quant_survival_y",
-    "feat_quant_survival_uv",
-    "feat_aq_map_mean",
+    # DROPPED: feat_quant_survival_uv (mean +0.200pp, σ 0.250)
+    # DROPPED: feat_aq_map_mean (mean +0.170pp, σ 0.332)
     "feat_aq_map_std",
-    "feat_aq_map_p50",
-    "feat_aq_map_p75",
+    # DROPPED: feat_aq_map_p50 (mean +0.166pp, σ 0.296)
+    # DROPPED: feat_aq_map_p75 (mean +0.232pp, σ 0.135)
     "feat_aq_map_p90",
     "feat_aq_map_p95",
-    "feat_aq_map_p99",
+    # DROPPED: feat_aq_map_p99 (mean +0.200pp, σ 0.351)
     "feat_noise_floor_y",
     "feat_noise_floor_uv",
     "feat_noise_floor_y_p25",
@@ -113,17 +117,17 @@ KEEP_FEATURES = [
     "feat_noise_floor_y_p90",
     "feat_noise_floor_uv_p25",
     "feat_noise_floor_uv_p50",
-    "feat_noise_floor_uv_p75",
-    "feat_noise_floor_uv_p90",
-    "feat_laplacian_variance_p50",
-    "feat_laplacian_variance_p75",
-    "feat_laplacian_variance_p90",
+    # DROPPED: feat_noise_floor_uv_p75 (mean +0.220pp, σ 0.387)
+    # DROPPED: feat_noise_floor_uv_p90 (mean +0.160pp, σ 0.197)
+    # DROPPED: feat_laplacian_variance_p50 (mean +0.244pp, σ 0.369)
+    # DROPPED: feat_laplacian_variance_p75 (mean +0.218pp, σ 0.179)
+    # DROPPED: feat_laplacian_variance_p90 (mean +0.194pp, σ 0.252)
     "feat_laplacian_variance_p99",
     "feat_laplacian_variance_peak",
     "feat_quant_survival_y_p10",
     "feat_quant_survival_y_p25",
     "feat_quant_survival_y_p50",
-    "feat_quant_survival_y_p75",
+    # DROPPED: feat_quant_survival_y_p75 (mean +0.242pp, σ 0.194)
     "feat_quant_survival_uv_p10",
     "feat_gradient_fraction",
     "feat_grayscale_score",
@@ -133,7 +137,7 @@ KEEP_FEATURES = [
     # removed chroma_kurtosis / uniformity_smooth / flat_color_smooth
     # as redundant).
     "feat_luma_kurtosis",
-    "feat_gradient_fraction_smooth",
+    # DROPPED: feat_gradient_fraction_smooth (mean +0.102pp, σ 0.164)
     # Dimension / shape
     "feat_pixel_count",
     "feat_min_dim",
@@ -159,6 +163,43 @@ CATEGORICAL_AXES = ["speed"]
 SCALAR_AXES: list[str] = []
 SCALAR_SENTINELS: dict = {}
 SCALAR_DISPLAY_RANGES: dict = {}
+
+
+# ---------- Per-feature pre-standardize transform ----------
+#
+# log: log-distributed positive features (pixel_count, dimensions).
+# log1p: heavy-tailed positives (variance, laplacian variance, edge
+#        slope stdev). aq_map_std also long-tailed.
+# identity (default): bounded ratios, sharpness, scores, alpha bools.
+FEATURE_TRANSFORMS = {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_std": "log1p",
+}
+
+
+# ---------- ZNPR v3 output post-processing ----------
+#
+# Phase 1a holds qm/vaq/strength/tune fixed; the only output head is
+# bytes_log per cell. SCALAR_AXES is empty so no further heads.
+# Once phase 2 lands speed-as-scalar (or vaq_strength as continuous),
+# add discrete_set+round (speed: 0..10) and identity+bounds for
+# vaq_strength (~0.5..2.0).
+OUTPUT_SPECS = {
+    "bytes_log": {
+        "bounds": [0.0, 30.0],
+        "transform": "identity",
+    },
+}
+
+SPARSE_OVERRIDES: list = []
 
 
 # ---------- Config-name parser ----------
