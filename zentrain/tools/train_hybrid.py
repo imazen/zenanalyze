@@ -176,6 +176,37 @@ def _train_torch_leakyrelu_student(
                 return self._net(t).cpu().numpy().astype(np.float32)
 
     return _TorchStudent()
+
+
+def _predict_via_coefs(student, X: np.ndarray, activation: str) -> np.ndarray:
+    """Numpy forward pass over `student.coefs_/intercepts_`.
+
+    Used after per-head loss normalization mutates the final layer so that
+    both backends (sklearn `MLPRegressor` and the torch LeakyReLU student)
+    produce predictions consistent with the baked weights. The torch
+    student's internal `nn.Sequential` is NOT updated when we mutate
+    `coefs_`/`intercepts_`, so calling its native `predict()` after the
+    rescale would still return standardized-unit values; routing through
+    this helper guarantees natural-unit output for downstream metrics,
+    diagnostics, and CSV dumps.
+
+    `activation` selects the hidden-layer nonlinearity. Output layer is
+    always linear (regression head).
+    """
+    a = X.astype(np.float64, copy=False)
+    n_layers = len(student.coefs_)
+    for li, (W, b) in enumerate(zip(student.coefs_, student.intercepts_)):
+        z = a @ W + b
+        if li < n_layers - 1:
+            if activation == "leakyrelu":
+                a = np.where(z > 0, z, 0.01 * z)
+            else:
+                a = np.maximum(z, 0.0)
+        else:
+            a = z
+    return a.astype(np.float32)
+
+
 from sklearn.preprocessing import StandardScaler
 
 SIZE_CLASSES = ["tiny", "small", "medium", "large"]
@@ -2022,6 +2053,63 @@ def main():
         soft_blocks.append(metric_pred_tr)
     soft_blocks.extend(scalar_pred_tr[axis] for axis in SCALAR_AXES)
     soft_tr = np.concatenate(soft_blocks, axis=1)
+
+    # Per-head loss normalization (mathematically equivalent to inverse-loss-
+    # weighted training in natural-space):
+    #
+    # The MLP trains under MSE on a flat output vector concatenating heads of
+    # very different scales — log-bytes (~10..14), log-time (~-3..3), and
+    # narrow scalars like filter_sharpness (0..7) or multi_pass_stats (0..1).
+    # Raw MSE gradient is dominated by the wide-range heads, leaving the
+    # narrow ones unfit (581% / 2770% normalized RMSE observed pre-fix).
+    #
+    # Fix: standardize each scalar block to (label - μ) / σ before fit, then
+    # absorb the inverse affine into the final-layer weights AFTER fit:
+    #     coefs_[-1][:, i] *= σ_block
+    #     intercepts_[-1][i] = intercepts_[-1][i] * σ_block + μ_block
+    # The post-fit network produces predictions in natural units, so
+    # `OUTPUT_SPECS` (bounds/round/discrete_set) and the bake artifact (which
+    # captures `coefs_/intercepts_` directly) work unchanged. Bytes/time/
+    # metric log heads stay untouched — they're already log-space and their
+    # downstream consumers expect that.
+    #
+    # Each scalar block is n_cells columns; the (μ, σ) used here are scalar
+    # (one per block, computed over all rows × cells in the block) so the
+    # rescale is a single multiply per output column. Using per-cell (μ_c,
+    # σ_c) within a block would also be correct but adds no value — the
+    # teachers already produce sensible per-cell predictions; we only need
+    # to balance the relative gradient magnitude across heads.
+    scalar_block_starts: list[tuple[int, int, str, float, float]] = []
+    next_block = 1
+    if time_pred_tr is not None:
+        next_block += 1
+    if metric_pred_tr is not None:
+        next_block += 1
+    for axis in SCALAR_AXES:
+        start = next_block * n_cells
+        end = (next_block + 1) * n_cells
+        block = soft_tr[:, start:end]
+        mu = float(np.mean(block))
+        sigma = float(np.std(block))
+        # Guard against zero-variance heads (constant teacher predictions).
+        # σ=0 means the block already contributes nothing to the gradient
+        # and absorbing it would divide by zero — skip rescaling, leave
+        # labels unchanged.
+        if sigma < 1e-12:
+            sys.stderr.write(
+                f"  per-head norm: scalar block '{axis}' has σ≈0 "
+                f"(μ={mu:.4f}); skipping rescale\n"
+            )
+            scalar_block_starts.append((start, end, axis, 0.0, 1.0))
+        else:
+            soft_tr[:, start:end] = (block - mu) / sigma
+            scalar_block_starts.append((start, end, axis, mu, sigma))
+            sys.stderr.write(
+                f"  per-head norm: scalar block '{axis}' "
+                f"μ={mu:.4f} σ={sigma:.4f} (standardized for fit)\n"
+            )
+        next_block += 1
+
     hidden_repr = "x".join(str(x) for x in hidden_layer_sizes)
     sys.stderr.write(
         f"\nTraining MLP student (hidden={hidden_repr}, output_dim={soft_tr.shape[1]})...\n"
@@ -2061,11 +2149,33 @@ def main():
         student.fit(Xe_tr_s, soft_tr)
     sys.stderr.write(f"  trained, final loss={student.loss_:.4f}, n_iter={student.n_iter_}\n")
 
-    Y_va_pred = student.predict(Xe_va_s)
+    # Post-fit: absorb the inverse standardization (label = ŷ_std * σ + μ)
+    # into the final layer so the network's forward pass produces natural-
+    # unit predictions. After this point `student.coefs_/intercepts_` ARE
+    # the natural-unit weights — both the bake artifact (which serializes
+    # those arrays directly into `layers`) and our numpy forward pass below
+    # see the rescaled values. For sklearn `MLPRegressor`, `predict()` uses
+    # `coefs_/intercepts_` so it stays consistent. For the torch student
+    # the underlying `nn.Sequential` is NOT mutated — we therefore route
+    # all downstream prediction through `_predict_via_coefs` (numpy) so
+    # both backends produce predictions matching what gets shipped.
+    final_W = student.coefs_[-1]   # shape: (hidden_last, output_dim)
+    final_b = student.intercepts_[-1]  # shape: (output_dim,)
+    for start, end, axis, mu, sigma in scalar_block_starts:
+        if sigma == 1.0 and mu == 0.0:
+            continue  # σ≈0 path — labels were left unchanged, nothing to absorb
+        final_W[:, start:end] *= sigma
+        final_b[start:end] = final_b[start:end] * sigma + mu
+
+    Y_va_pred = _predict_via_coefs(student, Xe_va_s, args.activation)
     pred_bytes = Y_va_pred[:, :n_cells]
+    # Use the same per-block offsets we computed for normalization above —
+    # this fixes a latent bug where the original `(i+1)*n_cells` indexing
+    # silently mis-sliced when `has_time_head` or `has_metric_head` shifted
+    # the scalar blocks downstream.
     student_pred_scalars = {
-        axis: Y_va_pred[:, (i + 1) * n_cells : (i + 2) * n_cells]
-        for i, axis in enumerate(SCALAR_AXES)
+        axis: Y_va_pred[:, start:end]
+        for start, end, axis, _mu, _sigma in scalar_block_starts
     }
 
     student_argmin = evaluate_argmin(pred_bytes, bl_va, rch_va, meta_va, all_mask)
@@ -2081,7 +2191,7 @@ def main():
     )
 
     # --- Diagnostics: also evaluate student on TRAIN to detect overfit
-    Y_tr_pred = student.predict(Xe_tr_s)
+    Y_tr_pred = _predict_via_coefs(student, Xe_tr_s, args.activation)
     pred_bytes_tr = Y_tr_pred[:, :n_cells]
     meta_tr = [meta[i] for i in tr]
     student_argmin_tr = evaluate_argmin(pred_bytes_tr, bl_tr, rch_tr, meta_tr, all_mask)
