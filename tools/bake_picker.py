@@ -435,6 +435,37 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             "text": "\n".join(feat_cols),
         })
 
+    # feature_transforms — parallel array to feat_cols. Newline-separated
+    # utf8 of {"identity", "log", "log1p"}. Codec runtimes that consume
+    # this MUST apply the named per-feature transform BEFORE the
+    # standardize step (mean/scale stored elsewhere in the bake) — the
+    # trainer emits scaler stats that already saw the post-transform
+    # distribution, so skipping the transform at inference produces
+    # silently-wrong predictions.
+    feat_transforms = model.get("feature_transforms")
+    if (
+        isinstance(feat_transforms, list)
+        and feat_transforms
+        and any(t != "identity" for t in feat_transforms)
+    ):
+        # Validate length matches feat_cols.
+        if isinstance(feat_cols, list) and len(feat_transforms) != len(feat_cols):
+            raise SystemExit(
+                f"feature_transforms has {len(feat_transforms)} entries, "
+                f"feat_cols has {len(feat_cols)}"
+            )
+        for t in feat_transforms:
+            if not isinstance(t, str) or t not in ("identity", "log", "log1p"):
+                raise SystemExit(
+                    f"feature_transforms entry {t!r} is not one of "
+                    f"identity / log / log1p"
+                )
+        entries.append({
+            "key": "zentrain.feature_transforms",
+            "type": "utf8",
+            "text": "\n".join(feat_transforms),
+        })
+
     # hybrid_heads_manifest → packed [n_cells: u32, n_heads: u32, head_kinds: u8[n_heads]].
     hh = model.get("hybrid_heads_manifest")
     if isinstance(hh, dict):

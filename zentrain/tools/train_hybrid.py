@@ -262,6 +262,34 @@ METRIC_DIRECTION: str = "higher_better"
 # objective. Defaults to "encode_ms" (matches existing harnesses).
 TIME_COLUMN: str = "encode_ms"
 
+# Per-feature pre-standardize transform. Codec configs declare a
+# {feat_name: "log" | "log1p" | "identity"} dict; the trainer applies
+# the transform once at feature-load time, BEFORE the StandardScaler
+# fit. Standardization captures post-transform mean/scale, so the
+# scaler's interpretation matches what the network was trained on.
+#
+# The selected transform per feature is recorded in the model JSON
+# under top-level `feature_transforms` (parallel to `feat_cols`); the
+# bake step threads it into the v3 artifact for runtime symmetry.
+# Until the codec runtimes consume `feature_transforms`, fresh bakes
+# only round-trip correctly when the runtime applies an identical
+# pre-transform — codec configs that omit FEATURE_TRANSFORMS (or set
+# it empty) train identically to pre-#52 behaviour.
+FEATURE_TRANSFORMS: dict = {}
+
+# Per-output OutputSpec metadata, keyed by head name (e.g. "bytes_log",
+# or any SCALAR_AXES name). Threaded verbatim into the model JSON so
+# downstream `inject_v3_specs.py` / `bake_picker.py` can expand them
+# into the per-output array without re-importing the codec config.
+# Empty default → behaviour identical to pre-#52 (no per-output
+# bounds/discrete_set/transform applied at the runtime).
+OUTPUT_SPECS: dict = {}
+
+# Per-output sparse hand-tune overrides. List of `{idx, value}` dicts
+# in the laid-out output index space. `value=None` forces
+# OutputValue::Default at runtime.
+SPARSE_OVERRIDES: list = []
+
 
 def load_codec_config(name: str):
     """Import a codec-config module and bind its exports to module-level
@@ -291,6 +319,7 @@ def load_codec_config(name: str):
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
     global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN
+    global FEATURE_TRANSFORMS, OUTPUT_SPECS, SPARSE_OVERRIDES
     mod = importlib.import_module(name)
     PARETO = Path(mod.PARETO)
     FEATURES = Path(mod.FEATURES)
@@ -339,6 +368,22 @@ def load_codec_config(name: str):
     # cross-codec clusters that motivated the design.
     if hasattr(mod, "FEATURE_GROUPS"):
         validate_keep_features(KEEP_FEATURES, mod.FEATURE_GROUPS)
+    # Optional — per-feature pre-standardize transform. Validated
+    # below at feature-load time (unknown transform names raise).
+    if hasattr(mod, "FEATURE_TRANSFORMS"):
+        FEATURE_TRANSFORMS = dict(mod.FEATURE_TRANSFORMS)
+    else:
+        FEATURE_TRANSFORMS = {}
+    # Optional — per-output OutputSpec metadata + sparse overrides.
+    # Threaded straight through to the bake artifact.
+    if hasattr(mod, "OUTPUT_SPECS"):
+        OUTPUT_SPECS = dict(mod.OUTPUT_SPECS)
+    else:
+        OUTPUT_SPECS = {}
+    if hasattr(mod, "SPARSE_OVERRIDES"):
+        SPARSE_OVERRIDES = list(mod.SPARSE_OVERRIDES)
+    else:
+        SPARSE_OVERRIDES = []
     return mod
 
 
@@ -589,11 +634,63 @@ def load_pareto(path):
     return rows, ceilings, has_ceiling_column, has_time_column
 
 
+_VALID_FEATURE_TRANSFORMS = {"identity", "log", "log1p"}
+
+
+def _apply_feature_transform(name: str, transform: str, value: float) -> float:
+    """Apply a per-feature pre-standardize transform.
+
+    Supported:
+      - "identity" (no-op; default for absent / unknown columns)
+      - "log"     — natural log; clamps to log(eps) for non-positive
+                    values so a 0-row doesn't return -inf and tank the
+                    StandardScaler.
+      - "log1p"   — log(1+x); valid for non-negative inputs. Negatives
+                    clip to 0 (better than -inf NaN propagation).
+
+    Unknown transform names raise — codec configs are authoritative,
+    a typo silently breaking training is worse than crashing the run.
+    """
+    if transform == "identity":
+        return value
+    if transform == "log":
+        # log(0) = -inf; clamp to log(1e-12) ≈ -27.6 to keep std finite.
+        if value <= 0.0:
+            return math.log(1e-12)
+        return math.log(value)
+    if transform == "log1p":
+        if value < 0.0:
+            return 0.0
+        return math.log1p(value)
+    raise ValueError(
+        f"unknown FEATURE_TRANSFORMS['{name}'] = {transform!r}; "
+        f"valid values: {sorted(_VALID_FEATURE_TRANSFORMS)}"
+    )
+
+
 def load_features(path):
     feats = {}
     fieldnames, columns = _read_table_columns(Path(path))
     all_cols = [c for c in fieldnames if c.startswith("feat_")]
     cols = [c for c in KEEP_FEATURES if c in all_cols]
+    # Resolve per-column transforms ahead of the row loop. Unknown
+    # transform names crash here, before any rows are processed.
+    transforms = []
+    for c in cols:
+        t = FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"
+        if t not in _VALID_FEATURE_TRANSFORMS:
+            raise ValueError(
+                f"FEATURE_TRANSFORMS[{c!r}] = {t!r} not in "
+                f"{sorted(_VALID_FEATURE_TRANSFORMS)}"
+            )
+        transforms.append(t)
+    n_transformed = sum(1 for t in transforms if t != "identity")
+    if n_transformed:
+        sys.stderr.write(
+            f"FEATURE_TRANSFORMS active on {n_transformed}/{len(cols)} "
+            f"columns: "
+            f"{[(c, t) for c, t in zip(cols, transforms) if t != 'identity']}\n"
+        )
     image_path = columns["image_path"]
     size_class = columns["size_class"]
     n = len(image_path)
@@ -601,7 +698,7 @@ def load_features(path):
     for i in range(n):
         vals = []
         has_nan = False
-        for c in cols:
+        for c, t in zip(cols, transforms):
             v = columns[c][i]
             if v == "" or v is None:
                 has_nan = True
@@ -615,6 +712,8 @@ def load_features(path):
                     continue
                 if fv != fv:
                     has_nan = True
+                if t != "identity" and fv == fv:
+                    fv = _apply_feature_transform(c, t, fv)
                 vals.append(fv)
         if has_nan:
             # Percentile features emit "" / NaN when the image is too
@@ -635,7 +734,7 @@ def load_features(path):
             f"feature values (tiny images skipping percentile "
             f"features — handled by OOD fallback at inference).\n"
         )
-    return feats, cols
+    return feats, cols, transforms
 
 
 # ---------- Build categorical cell mapping ----------
@@ -1882,7 +1981,7 @@ def main():
 
     sys.stderr.write(f"Loading {PARETO}...\n")
     pareto, ceilings, has_ceiling_column, has_time_column = load_pareto(PARETO)
-    feats, feat_cols = load_features(FEATURES)
+    feats, feat_cols, feat_transforms = load_features(FEATURES)
     sys.stderr.write(
         f"  metric column: {METRIC_COLUMN} ({METRIC_DIRECTION})\n"
         f"  time column:   {TIME_COLUMN} ({'present' if has_time_column else 'absent'})\n"
@@ -2337,6 +2436,56 @@ def main():
         axis: float(SCALAR_SENTINELS[axis])
         for axis in SCALAR_AXES if axis in SCALAR_SENTINELS
     }
+    # Build a per-feat_col list of feature_transforms (length = len(feat_cols)).
+    # Engineered axes downstream of feat_cols (size_oh, log_px, zq_norm,
+    # interactions, icc placeholder) are passthrough; the runtime applies
+    # transforms only to the leading feat-column slice.
+    feat_transform_list = [
+        FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"
+        for c in feat_cols
+    ]
+    # Expand OUTPUT_SPECS (keyed by head name) to a per-output-index
+    # array of length n_outputs, in `output_layout` order. Codecs that
+    # define every head in OUTPUT_SPECS get a full per-output array;
+    # configs that omit OUTPUT_SPECS emit an empty list (bake_picker
+    # reads that as "no per-output specs", ZNPR v3 round-trips raw).
+    output_specs_array: list[dict] = []
+    if OUTPUT_SPECS:
+        # Default specs for trainer-internal heads (time_log, metric_log)
+        # the codec configs don't need to declare. These are log-space
+        # diagnostic outputs; identity transform with very wide bounds.
+        DEFAULT_HEAD_SPECS = {
+            "time_log": {"bounds": [-30.0, 30.0], "transform": "identity"},
+            "metric_log": {"bounds": [-30.0, 30.0], "transform": "identity"},
+        }
+        per_idx: list[dict | None] = [None] * output_dim
+        missing_heads = []
+        for head_name, span in output_layout.items():
+            spec = OUTPUT_SPECS.get(head_name) or DEFAULT_HEAD_SPECS.get(head_name)
+            if spec is None:
+                missing_heads.append(head_name)
+                continue
+            start, end = int(span[0]), int(span[1])
+            for i in range(start, end):
+                per_idx[i] = dict(spec)
+        if missing_heads:
+            sys.stderr.write(
+                f"WARNING: OUTPUT_SPECS is set but missing entries for "
+                f"heads {missing_heads}; emitting empty output_specs "
+                f"(bake will treat as raw passthrough).\n"
+            )
+            output_specs_array = []
+        elif any(s is None for s in per_idx):
+            # Defensive: layout span didn't cover full range — should not
+            # happen but emit empty rather than partial.
+            sys.stderr.write(
+                "WARNING: output_layout did not cover all n_outputs; "
+                "emitting empty output_specs.\n"
+            )
+            output_specs_array = []
+        else:
+            output_specs_array = [dict(s) for s in per_idx]  # type: ignore[arg-type]
+
     out = {
         "n_inputs": int(Xe.shape[1]),
         "n_outputs": output_dim,
@@ -2344,6 +2493,17 @@ def main():
         "safety_profile": args.objective,
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
+        # Per-feat_col pre-standardize transform (parallel array to
+        # `feat_cols`). Runtime not yet consuming this — fresh bakes
+        # with non-identity transforms produce wrong predictions until
+        # the codec runtime applies the same transform pre-scaler. See
+        # imazen/zenanalyze#52.
+        "feature_transforms": feat_transform_list,
+        # Per-output OutputSpec metadata in n_outputs order. Empty when
+        # OUTPUT_SPECS is unset on the codec config.
+        "output_specs": output_specs_array,
+        # Sparse hand-tune overrides — list of {idx, value} dicts.
+        "sparse_overrides": list(SPARSE_OVERRIDES),
         "scaler_mean": scaler.mean_.tolist(),
         # `scaler_scale` stores sklearn's `StandardScaler.scale_`
         # directly — that attribute IS the standard deviation
