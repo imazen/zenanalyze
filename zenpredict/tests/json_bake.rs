@@ -7,7 +7,7 @@
 
 use zenpredict::bake::{BakeJsonError, BakeRequestJson, bake_from_json, bake_from_json_str};
 use zenpredict::keys;
-use zenpredict::{MetadataType, Model, Predictor};
+use zenpredict::{MetadataType, Model, OutputValue, Predictor};
 
 #[repr(C, align(16))]
 struct Aligned(Vec<u8>);
@@ -237,6 +237,128 @@ fn cli_binary_round_trip() {
         model.metadata().get_utf8(keys::BAKE_NAME).unwrap(),
         "cli_test"
     );
+}
+
+#[test]
+fn json_round_trip_with_output_specs() {
+    // 2-input → 4-output identity-ish model:
+    //   out0 = in0      → bounded to [0, 5]
+    //   out1 = in1      → rounded to {0..7} with sentinel 0
+    //   out2 = in0+in1  → passthrough
+    //   out3 = in0-in1  → bounded to [-1, 1] with sentinel -1
+    let json = r#"{
+        "schema_hash": 0,
+        "scaler_mean": [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [
+            {
+                "in_dim": 2,
+                "out_dim": 4,
+                "activation": "identity",
+                "dtype": "f32",
+                "weights": [1.0, 0.0, 1.0, 1.0,  0.0, 1.0, 1.0, -1.0],
+                "biases":  [0.0, 0.0, 0.0, 0.0]
+            }
+        ],
+        "output_specs": [
+            {"bounds": [0.0, 5.0]},
+            {"bounds": [0.0, 7.0], "transform": "round",
+             "discrete_set": [0,1,2,3,4,5,6,7], "sentinel": 0.0},
+            {},
+            {"bounds": [-1.0, 1.0], "sentinel": -1.0}
+        ]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    assert_eq!(model.version(), 3);
+    assert!(model.has_output_specs());
+    assert_eq!(model.output_specs().len(), 4);
+    assert_eq!(model.discrete_sets().len(), 8);
+    let mut p = Predictor::new(model);
+    // Use 0.4 so `f32::round` (round-half-away-from-zero in Rust)
+    // floors it to 0 — proves the round → snap → sentinel chain.
+    let r = p.predict_with_specs(&[3.0, 0.4]).unwrap();
+    // raw = [3, 0.4, 3.4, 2.6]
+    // out0 clamp 3 → 3
+    assert_eq!(r[0], OutputValue::Override(3.0));
+    // out1 round 0.4 → 0; snap → 0; sentinel 0 → Default
+    assert_eq!(r[1], OutputValue::Default);
+    // out2 passthrough
+    if let OutputValue::Override(v) = r[2] {
+        assert!((v - 3.4).abs() < 1e-6);
+    } else {
+        panic!("expected Override");
+    }
+    // out3 clamp 2.6 → 1.0
+    assert_eq!(r[3], OutputValue::Override(1.0));
+}
+
+#[test]
+fn json_round_trip_with_sparse_overrides() {
+    let json = r#"{
+        "schema_hash": 0,
+        "scaler_mean": [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [
+            {
+                "in_dim": 2,
+                "out_dim": 4,
+                "activation": "identity",
+                "dtype": "f32",
+                "weights": [1.0, 0.0, 1.0, 1.0,  0.0, 1.0, 1.0, -1.0],
+                "biases":  [0.0, 0.0, 0.0, 0.0]
+            }
+        ],
+        "sparse_overrides": [
+            {"idx": 0, "value": 99.0},
+            {"idx": 2, "value": null}
+        ]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    assert_eq!(model.sparse_overrides().len(), 2);
+    let mut p = Predictor::new(model);
+    let r = p.predict_with_specs(&[3.0, 4.0]).unwrap();
+    assert_eq!(r[0], OutputValue::Override(99.0));
+    assert_eq!(r[1], OutputValue::Override(4.0));
+    assert_eq!(r[2], OutputValue::Default);
+    assert_eq!(r[3], OutputValue::Override(-1.0));
+}
+
+#[test]
+fn json_sigmoid_scaled_transform() {
+    let json = r#"{
+        "schema_hash": 0,
+        "scaler_mean": [0.0],
+        "scaler_scale": [1.0],
+        "layers": [
+            {
+                "in_dim": 1,
+                "out_dim": 1,
+                "activation": "identity",
+                "dtype": "f32",
+                "weights": [1.0],
+                "biases": [0.0]
+            }
+        ],
+        "output_specs": [
+            {"transform": "sigmoid_scaled", "params": [0.0, 100.0],
+             "bounds": [0.0, 100.0]}
+        ]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    let mut p = Predictor::new(model);
+    // raw 0 → sigmoid 0.5 → scaled to 50
+    let r = p.predict_with_specs(&[0.0]).unwrap();
+    if let OutputValue::Override(v) = r[0] {
+        assert!((v - 50.0).abs() < 1e-3);
+    } else {
+        panic!("expected Override");
+    }
 }
 
 fn tempdir() -> std::path::PathBuf {
