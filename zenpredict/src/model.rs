@@ -1,4 +1,4 @@
-//! ZNPR v2 binary model format — parser and typed views.
+//! ZNPR v3 binary model format — parser and typed views.
 //!
 //! ## Layout
 //!
@@ -18,13 +18,16 @@
 //!                           - per-layer biases (f32)
 //!                           - feature_bounds (FeatureBound = (f32, f32))
 //!                           - metadata blob (TLV; see [`crate::metadata`])
+//!                           - output_specs (OutputSpec[n_outputs])
+//!                           - discrete_sets (f32 pool)
+//!                           - sparse_overrides (SparseOverride[N])
 //! ```
 //!
 //! ### Header (128 bytes)
 //!
 //! ```text
 //! 0..4    magic = b"ZNPR"
-//! 4..6    version: u16 = 2
+//! 4..6    version: u16 = 3
 //! 6..8    flags: u16  (reserved, 0)
 //! 8..12   n_inputs: u32
 //! 12..16  n_outputs: u32
@@ -36,8 +39,21 @@
 //! 48..56  layer_table: Section
 //! 56..64  feature_bounds: Section   (len=0 when absent)
 //! 64..72  metadata: Section         (len=0 when absent)
-//! 72..128 reserved: [u32; 14]
+//! 72..80  output_specs: Section     (len=0 when absent; n_outputs * 32 bytes)
+//! 80..88  discrete_sets: Section    (len=0 when absent; pool of f32)
+//! 88..96  sparse_overrides: Section (len=0 when absent; n_overrides * 8 bytes)
+//! 96..128 reserved: [u32; 8]
 //! ```
+//!
+//! ### v3 vs v2
+//!
+//! v3 adds three optional sections (`output_specs`,
+//! `discrete_sets`, `sparse_overrides`) that drive
+//! [`crate::Predictor::predict_with_specs`]. The v2 header layout
+//! is preserved through the first 72 bytes; v3 packs the new
+//! sections into bytes that v2 had reserved. **v2 bins do not load**
+//! — they fail with [`crate::PredictError::UnsupportedVersion`].
+//! See [`crate::output_spec`] for the wire shape of the new POD types.
 //!
 //! ### LayerEntry (48 bytes)
 //!
@@ -86,8 +102,9 @@ use bytemuck::{Pod, Zeroable, pod_read_unaligned};
 
 use crate::error::PredictError;
 use crate::metadata::Metadata;
+use crate::output_spec::{OutputSpec, SparseOverride};
 
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 pub const LEAKY_RELU_ALPHA: f32 = 0.01;
 const MAGIC: [u8; 4] = *b"ZNPR";
 const HEADER_SIZE: usize = 128;
@@ -160,7 +177,10 @@ pub struct Header {
     pub layer_table: Section,
     pub feature_bounds: Section,
     pub metadata: Section,
-    pub reserved: [u32; 14],
+    pub output_specs: Section,
+    pub discrete_sets: Section,
+    pub sparse_overrides: Section,
+    pub reserved: [u32; 8],
 }
 
 const _: () = assert!(core::mem::size_of::<Header>() == HEADER_SIZE);
@@ -261,6 +281,9 @@ pub struct Model<'a> {
     layers: alloc::vec::Vec<LayerView<'a>>,
     feature_bounds: &'a [crate::bounds::FeatureBound],
     metadata: Metadata<'a>,
+    output_specs: &'a [OutputSpec],
+    discrete_sets: &'a [f32],
+    sparse_overrides: &'a [SparseOverride],
 }
 
 impl<'a> Model<'a> {
@@ -473,6 +496,111 @@ impl<'a> Model<'a> {
         let metadata_bytes = header.metadata.slice("metadata", bytes)?;
         let metadata = Metadata::parse(metadata_bytes)?;
 
+        // Output specs (optional). `n_outputs * sizeof(OutputSpec)`
+        // when present.
+        let output_specs: &[OutputSpec] = if header.output_specs.is_empty() {
+            &[]
+        } else {
+            let raw = header.output_specs.slice("output_specs", bytes)?;
+            let expected = n_outputs.checked_mul(core::mem::size_of::<OutputSpec>()).ok_or(
+                PredictError::DimensionOverflow {
+                    what: "n_outputs * sizeof(OutputSpec)",
+                },
+            )?;
+            if raw.len() != expected {
+                return Err(PredictError::SectionOutOfRange {
+                    what: "output_specs",
+                    offset: header.output_specs.offset,
+                    len: header.output_specs.len,
+                    file_len: bytes.len(),
+                });
+            }
+            bytemuck::try_cast_slice::<u8, OutputSpec>(raw).map_err(|_| {
+                PredictError::SectionMisaligned {
+                    what: "output_specs",
+                    offset: header.output_specs.offset,
+                    required_align: core::mem::align_of::<OutputSpec>(),
+                }
+            })?
+        };
+
+        // Discrete-sets pool (optional). Flat `[f32]` referenced by
+        // `OutputSpec::{discrete_set_offset, discrete_set_len}`.
+        let discrete_sets: &[f32] = if header.discrete_sets.is_empty() {
+            &[]
+        } else {
+            let raw = header.discrete_sets.slice("discrete_sets", bytes)?;
+            if !raw.len().is_multiple_of(4) {
+                return Err(PredictError::SectionOutOfRange {
+                    what: "discrete_sets",
+                    offset: header.discrete_sets.offset,
+                    len: header.discrete_sets.len,
+                    file_len: bytes.len(),
+                });
+            }
+            bytemuck::try_cast_slice::<u8, f32>(raw).map_err(|_| {
+                PredictError::SectionMisaligned {
+                    what: "discrete_sets",
+                    offset: header.discrete_sets.offset,
+                    required_align: core::mem::align_of::<f32>(),
+                }
+            })?
+        };
+
+        // Validate every spec's slice into the discrete pool.
+        for spec in output_specs {
+            if spec.discrete_set_len > 0 {
+                let off = spec.discrete_set_offset as usize;
+                let len = spec.discrete_set_len as usize;
+                let end = off.checked_add(len).ok_or(PredictError::DimensionOverflow {
+                    what: "discrete_set_offset + discrete_set_len",
+                })?;
+                if end > discrete_sets.len() {
+                    return Err(PredictError::SectionOutOfRange {
+                        what: "OutputSpec.discrete_set range",
+                        offset: spec.discrete_set_offset,
+                        len: spec.discrete_set_len,
+                        file_len: discrete_sets.len(),
+                    });
+                }
+            }
+        }
+
+        // Sparse overrides (optional). Each entry is 8 bytes.
+        let sparse_overrides: &[SparseOverride] = if header.sparse_overrides.is_empty() {
+            &[]
+        } else {
+            let raw = header.sparse_overrides.slice("sparse_overrides", bytes)?;
+            if !raw.len().is_multiple_of(core::mem::size_of::<SparseOverride>()) {
+                return Err(PredictError::SectionOutOfRange {
+                    what: "sparse_overrides",
+                    offset: header.sparse_overrides.offset,
+                    len: header.sparse_overrides.len,
+                    file_len: bytes.len(),
+                });
+            }
+            let parsed =
+                bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
+                    PredictError::SectionMisaligned {
+                        what: "sparse_overrides",
+                        offset: header.sparse_overrides.offset,
+                        required_align: core::mem::align_of::<SparseOverride>(),
+                    }
+                })?;
+            // Reject overrides whose index is out of range — the
+            // baker checked too, but we want to fail loudly on
+            // mutated inputs.
+            for entry in parsed {
+                if (entry.idx as usize) >= n_outputs {
+                    return Err(PredictError::OutputDimMismatch {
+                        expected: n_outputs,
+                        got: entry.idx as usize,
+                    });
+                }
+            }
+            parsed
+        };
+
         Ok(Self {
             bytes,
             header,
@@ -481,6 +609,9 @@ impl<'a> Model<'a> {
             layers,
             feature_bounds,
             metadata,
+            output_specs,
+            discrete_sets,
+            sparse_overrides,
         })
     }
 
@@ -534,6 +665,34 @@ impl<'a> Model<'a> {
 
     pub fn metadata(&self) -> &Metadata<'a> {
         &self.metadata
+    }
+
+    /// Per-output [`OutputSpec`] table, as parsed from the bin's
+    /// `output_specs` section. Empty when the bake didn't ship the
+    /// section — callers that want post-processing should check
+    /// [`Self::has_output_specs`] first; the raw forward-pass path
+    /// works on every bake regardless.
+    pub fn output_specs(&self) -> &'a [OutputSpec] {
+        self.output_specs
+    }
+
+    /// `true` iff the bake shipped per-output specs. Equivalent to
+    /// `!self.output_specs().is_empty()` but spelled-out for the
+    /// codec-side branching that consumers want clearly named.
+    pub fn has_output_specs(&self) -> bool {
+        !self.output_specs.is_empty()
+    }
+
+    /// Flat f32 pool of discrete-set values referenced by
+    /// `OutputSpec::{discrete_set_offset, discrete_set_len}`.
+    pub fn discrete_sets(&self) -> &'a [f32] {
+        self.discrete_sets
+    }
+
+    /// Sparse hand-tune overrides applied AFTER the forward pass +
+    /// per-output spec pipeline by [`crate::Predictor::predict_with_specs`].
+    pub fn sparse_overrides(&self) -> &'a [SparseOverride] {
+        self.sparse_overrides
     }
 
     /// Bake-time safety + rescue summary, from the

@@ -1,6 +1,6 @@
 //! # zenpredict — zero-copy MLP runtime
 //!
-//! Parse a packed binary model (ZNPR v2 format), run scaler +
+//! Parse a packed binary model (ZNPR v3 format), run scaler +
 //! layer-by-layer forward pass, surface typed metadata, run masked
 //! argmin for codec-config selection.
 //!
@@ -68,6 +68,9 @@
 //!     layers: &layers,
 //!     feature_bounds: &[],
 //!     metadata: &[],
+//!     output_specs: &[],
+//!     discrete_sets: &[],
+//!     sparse_overrides: &[],
 //! }).unwrap();
 //!
 //! // Load and predict. Real consumers wrap the bytes in
@@ -96,12 +99,13 @@
 //!
 //! ## Format stability
 //!
-//! ZNPR v2 — fixed `#[repr(C)]` header + offset table + zero-copy
-//! data sections + a TLV metadata blob. See [`Header`] and
-//! [`LayerEntry`] for the wire layout, and the source of `model.rs`
-//! for the documented byte offsets. v1 (the original 32-byte-header
-//! positional layout) is not supported by this crate; older bakes
-//! need to be rebaked through the v2 baker.
+//! ZNPR v3 — fixed `#[repr(C)]` header + offset table + zero-copy
+//! data sections + a TLV metadata blob + optional per-output
+//! [`OutputSpec`] / discrete-set / sparse-override sections. See
+//! [`Header`] and [`LayerEntry`] for the wire layout, and the source
+//! of `model.rs` for the documented byte offsets. Earlier formats
+//! (v1, v2) are not supported by this crate; older bakes need to be
+//! rebaked through the v3 baker.
 //!
 //! ## Storage
 //!
@@ -136,6 +140,7 @@ mod error;
 mod inference;
 mod metadata;
 mod model;
+pub mod output_spec;
 mod predictor;
 pub mod rescue;
 mod safety;
@@ -158,6 +163,7 @@ pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
 };
+pub use output_spec::{OutputSpec, OutputTransform, OutputValue, SparseOverride, apply_spec};
 pub use predictor::Predictor;
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};
 pub use safety::{CellHint, FallbackEntry, SafetyCompact, SafetyProfile, fallback_for};

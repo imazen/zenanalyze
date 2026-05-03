@@ -119,6 +119,9 @@ fn bake_codec_picker() -> Vec<u8> {
         layers: &layers,
         feature_bounds: &feature_bounds,
         metadata: &metadata,
+    output_specs: &[],
+    discrete_sets: &[],
+    sparse_overrides: &[],
     })
     .unwrap()
 }
@@ -257,6 +260,9 @@ fn end_to_end_perceptual_scorer_lifecycle() {
         layers: &layers,
         feature_bounds: &[],
         metadata: &[],
+    output_specs: &[],
+    discrete_sets: &[],
+    sparse_overrides: &[],
     })
     .unwrap();
     let aligned = Aligned(bytes);
@@ -350,6 +356,9 @@ fn metadata_namespace_convention_works() {
         layers: &layers,
         feature_bounds: &[],
         metadata: &entries,
+    output_specs: &[],
+    discrete_sets: &[],
+    sparse_overrides: &[],
     })
     .unwrap();
     let aligned = Aligned(bytes);
@@ -385,6 +394,9 @@ fn empty_metadata_does_not_break_load() {
         layers: &layers,
         feature_bounds: &[],
         metadata: &[],
+    output_specs: &[],
+    discrete_sets: &[],
+    sparse_overrides: &[],
     })
     .unwrap();
     let aligned = Aligned(bytes);
@@ -430,6 +442,9 @@ fn metadata_iteration_returns_all_entries() {
         layers: &layers,
         feature_bounds: &[],
         metadata: &entries,
+    output_specs: &[],
+    discrete_sets: &[],
+    sparse_overrides: &[],
     })
     .unwrap();
     let aligned = Aligned(bytes);

@@ -9,6 +9,7 @@ use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform, pick_confi
 use crate::error::PredictError;
 use crate::inference::forward;
 use crate::model::Model;
+use crate::output_spec::{OutputValue, apply_spec};
 
 /// Scratch-owning forward-pass wrapper. Allocations happen in
 /// [`Predictor::new`]; `predict` and the `argmin_*` family are
@@ -18,6 +19,9 @@ pub struct Predictor<'a> {
     scratch_a: alloc::vec::Vec<f32>,
     scratch_b: alloc::vec::Vec<f32>,
     output: alloc::vec::Vec<f32>,
+    /// Post-processed output buffer for [`Self::predict_with_specs`].
+    /// Sized to `n_outputs` at construction; reused across calls.
+    spec_output: alloc::vec::Vec<OutputValue>,
 }
 
 impl<'a> Predictor<'a> {
@@ -29,6 +33,7 @@ impl<'a> Predictor<'a> {
             scratch_a: alloc::vec![0.0; need],
             scratch_b: alloc::vec![0.0; need],
             output: alloc::vec![0.0; n_out],
+            spec_output: alloc::vec![OutputValue::Default; n_out],
         }
     }
 
@@ -66,6 +71,75 @@ impl<'a> Predictor<'a> {
             &mut self.output,
         )?;
         Ok(&self.output)
+    }
+
+    /// Run forward pass and apply the bake's per-output specs and
+    /// sparse overrides. Returns one [`OutputValue`] per model
+    /// output: either an `Override(f32)` carrying the post-processed
+    /// value, or `Default` indicating "use the codec's built-in
+    /// default for this parameter".
+    ///
+    /// Pipeline per output `i`:
+    ///
+    /// 1. forward pass yields `raw[i]`
+    /// 2. `output_specs[i]` (if present) applies activation, clamp,
+    ///    snap-to-discrete, then sentinel match (see
+    ///    [`crate::output_spec::apply_spec`])
+    /// 3. sparse overrides: any `(i, value)` entry replaces the
+    ///    pipeline result with `Override(value)`, or with `Default`
+    ///    when `value.is_nan()`
+    ///
+    /// When the bake has no `output_specs` section (raw-passthrough
+    /// bake), every output is returned as `Override(raw[i])` —
+    /// equivalent to [`Self::predict`] wrapped in `Override`. Sparse
+    /// overrides still apply.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::predict`]: feature-length mismatch, etc. The
+    /// spec pipeline itself is infallible — invalid (offset, len)
+    /// pairs were rejected at load time.
+    pub fn predict_with_specs(
+        &mut self,
+        features: &[f32],
+    ) -> Result<&[OutputValue], PredictError> {
+        forward(
+            &self.model,
+            features,
+            &mut self.scratch_a,
+            &mut self.scratch_b,
+            &mut self.output,
+        )?;
+        let specs = self.model.output_specs();
+        let pool = self.model.discrete_sets();
+        // Two paths: with-specs (apply per-output pipeline) vs.
+        // without (raw passthrough → Override). We keep the loop
+        // tight in either case.
+        if specs.is_empty() {
+            for (slot, &raw) in self.spec_output.iter_mut().zip(self.output.iter()) {
+                *slot = OutputValue::Override(raw);
+            }
+        } else {
+            for (i, slot) in self.spec_output.iter_mut().enumerate() {
+                *slot = apply_spec(&specs[i], self.output[i], pool);
+            }
+        }
+        // Sparse overrides land last so a maintainer can force a
+        // specific output even when the spec pipeline produced
+        // something different.
+        for entry in self.model.sparse_overrides() {
+            let i = entry.idx as usize;
+            // Bounds were validated at load time but defend in
+            // depth.
+            if i < self.spec_output.len() {
+                self.spec_output[i] = if entry.value.is_nan() {
+                    OutputValue::Default
+                } else {
+                    OutputValue::Override(entry.value)
+                };
+            }
+        }
+        Ok(&self.spec_output)
     }
 
     /// Pick the argmin output index over the masked set.

@@ -72,6 +72,7 @@ use super::v2::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
 use crate::bounds::FeatureBound;
 use crate::metadata::MetadataType;
 use crate::model::{Activation, WeightDtype};
+use crate::output_spec::{OutputSpec, OutputTransform, SparseOverride};
 
 /// Errors specific to JSON-driven baking. Thin wrapper over
 /// [`BakeError`] adding the JSON-side validation cases.
@@ -138,6 +139,34 @@ pub struct BakeRequestJson {
     pub feature_bounds: Vec<FeatureBoundJson>,
     #[serde(default)]
     pub metadata: Vec<MetadataEntryJson>,
+    /// Per-output specs: bounds clamp, activation, snap-to-discrete,
+    /// and optional sentinel. Length, when present, must equal
+    /// `n_outputs` (i.e. the last layer's `out_dim`). Pass an empty
+    /// array to omit.
+    ///
+    /// JSON shape:
+    /// ```json
+    /// [
+    ///   {"bounds": [0, 100], "transform": "sigmoid_scaled", "params": [0, 100]},
+    ///   {"bounds": [0, 7], "transform": "round", "discrete_set": [0,1,2,3,4,5,6,7], "sentinel": -1}
+    /// ]
+    /// ```
+    #[serde(default)]
+    pub output_specs: Vec<OutputSpecJson>,
+    /// Sparse hand-tune overrides, applied AFTER the per-output spec
+    /// pipeline. Each entry's `idx` must be `< n_outputs`.
+    /// `"value": null` (or omitted) emits `f32::NAN`, which triggers
+    /// `OutputValue::Default` at runtime.
+    ///
+    /// JSON shape:
+    /// ```json
+    /// [
+    ///   {"idx": 3, "value": 0.0},
+    ///   {"idx": 5, "value": null}
+    /// ]
+    /// ```
+    #[serde(default)]
+    pub sparse_overrides: Vec<SparseOverrideJson>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -190,6 +219,73 @@ impl From<DtypeJson> for WeightDtype {
 pub struct FeatureBoundJson {
     pub low: f32,
     pub high: f32,
+}
+
+/// Per-output post-processing config, JSON-side.
+///
+/// All fields are optional. Missing `bounds` means
+/// `[-inf, +inf]` (no clamp). Missing `transform` means
+/// [`OutputTransform::Identity`]. Missing `discrete_set` means no
+/// snap. `sentinel: null` (or omitted) means no sentinel match.
+#[derive(Deserialize, Debug, Clone)]
+pub struct OutputSpecJson {
+    /// Inclusive `[low, high]` clamp. Two-element JSON array.
+    #[serde(default)]
+    pub bounds: Option<[f32; 2]>,
+    /// One of `"identity"`, `"sigmoid"`, `"sigmoid_scaled"`, `"exp"`,
+    /// `"round"`. Default `"identity"`.
+    #[serde(default)]
+    pub transform: Option<OutputTransformJson>,
+    /// Two f32 parameters interpreted by the transform. For
+    /// `sigmoid_scaled` this is `[low, high]`; for the others, unused.
+    #[serde(default)]
+    pub params: Option<[f32; 2]>,
+    /// Snap to nearest value in this set. Empty / null = no snap.
+    #[serde(default)]
+    pub discrete_set: Option<Vec<f32>>,
+    /// Output value that should surface as
+    /// [`crate::OutputValue::Default`]. `null` = no sentinel.
+    #[serde(default)]
+    pub sentinel: Option<f32>,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputTransformJson {
+    #[default]
+    Identity,
+    Sigmoid,
+    SigmoidScaled,
+    Exp,
+    Round,
+}
+
+impl OutputTransformJson {
+    pub(crate) fn to_byte(self) -> u8 {
+        OutputTransform::from(self) as u8
+    }
+}
+
+impl From<OutputTransformJson> for OutputTransform {
+    fn from(t: OutputTransformJson) -> Self {
+        match t {
+            OutputTransformJson::Identity => OutputTransform::Identity,
+            OutputTransformJson::Sigmoid => OutputTransform::Sigmoid,
+            OutputTransformJson::SigmoidScaled => OutputTransform::SigmoidScaled,
+            OutputTransformJson::Exp => OutputTransform::Exp,
+            OutputTransformJson::Round => OutputTransform::Round,
+        }
+    }
+}
+
+/// Sparse hand-tune override, JSON-side. `value: null` (or omitted)
+/// emits `f32::NAN`, which surfaces as
+/// [`crate::OutputValue::Default`] at runtime.
+#[derive(Deserialize, Debug, Clone, Copy)]
+pub struct SparseOverrideJson {
+    pub idx: u32,
+    #[serde(default)]
+    pub value: Option<f32>,
 }
 
 impl From<FeatureBoundJson> for FeatureBound {
@@ -359,6 +455,45 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         })
         .collect();
 
+    // Build the v3 OutputSpec table + flat discrete-sets pool from
+    // the JSON. The pool is grown as each spec's discrete set is
+    // appended; specs reference (offset, len) into the pool.
+    let mut discrete_sets_pool: Vec<f32> = Vec::new();
+    let output_specs: Vec<OutputSpec> = req
+        .output_specs
+        .iter()
+        .map(|s| {
+            let (off, len) = if let Some(values) = &s.discrete_set {
+                let off = discrete_sets_pool.len() as u32;
+                discrete_sets_pool.extend_from_slice(values);
+                (off, values.len() as u32)
+            } else {
+                (0, 0)
+            };
+            OutputSpec {
+                bounds: FeatureBound::new(
+                    s.bounds.map(|b| b[0]).unwrap_or(f32::NEG_INFINITY),
+                    s.bounds.map(|b| b[1]).unwrap_or(f32::INFINITY),
+                ),
+                transform: s.transform.unwrap_or_default().to_byte(),
+                _pad: [0; 3],
+                transform_params: s.params.unwrap_or([0.0, 0.0]),
+                discrete_set_offset: off,
+                discrete_set_len: len,
+                sentinel: s.sentinel.unwrap_or(f32::NAN),
+            }
+        })
+        .collect();
+
+    let sparse_overrides: Vec<SparseOverride> = req
+        .sparse_overrides
+        .iter()
+        .map(|o| SparseOverride {
+            idx: o.idx,
+            value: o.value.unwrap_or(f32::NAN),
+        })
+        .collect();
+
     let bake = BakeRequest {
         schema_hash: req.schema_hash,
         flags: req.flags,
@@ -367,6 +502,9 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         layers: &layers,
         feature_bounds: &feature_bounds,
         metadata: &metadata,
+        output_specs: &output_specs,
+        discrete_sets: &discrete_sets_pool,
+        sparse_overrides: &sparse_overrides,
     };
     Ok(bake_v2(&bake)?)
 }

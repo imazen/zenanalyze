@@ -1,9 +1,15 @@
-//! ZNPR v2 byte-stream composer.
+//! ZNPR v3 byte-stream composer.
+//!
+//! Despite the function name [`bake_v2`] — kept for source
+//! compatibility with the few internal callers — this module emits
+//! the v3 wire format described in [`crate::model`]. v2 outputs are
+//! no longer producible from this crate; v2 bins do not load.
 
 use core::fmt;
 
 use crate::metadata::MetadataType;
 use crate::model::{Activation, Section, WeightDtype};
+use crate::output_spec::{OutputSpec, OutputTransform, SparseOverride};
 
 /// Errors raised by [`bake_v2`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
@@ -44,6 +50,31 @@ pub enum BakeError {
         len: usize,
     },
     MetadataKeyEmpty,
+    /// `output_specs.len()` was non-zero but didn't equal `n_outputs`.
+    OutputSpecsLengthMismatch {
+        expected: usize,
+        got: usize,
+    },
+    /// An [`OutputSpec`]'s `(discrete_set_offset, discrete_set_len)`
+    /// addresses bytes outside the `discrete_sets` pool.
+    OutputSpecDiscreteOutOfRange {
+        output_index: usize,
+        offset: u32,
+        len: u32,
+        pool_len: usize,
+    },
+    /// An [`OutputSpec`]'s transform byte wasn't a recognized
+    /// [`OutputTransform`] variant. (Bake-side rejects unknowns to
+    /// avoid silent misbehaviour at load time.)
+    UnknownOutputTransform {
+        output_index: usize,
+        byte: u8,
+    },
+    /// A [`SparseOverride`]'s `idx` was `>= n_outputs`.
+    SparseOverrideIndexOutOfRange {
+        idx: u32,
+        n_outputs: usize,
+    },
 }
 
 impl fmt::Display for BakeError {
@@ -95,6 +126,28 @@ impl fmt::Display for BakeError {
                 write!(f, "bake: metadata key length {len} exceeds u8 max (255)")
             }
             Self::MetadataKeyEmpty => write!(f, "bake: metadata key is empty"),
+            Self::OutputSpecsLengthMismatch { expected, got } => write!(
+                f,
+                "bake: output_specs length {got} != expected {expected} (n_outputs)"
+            ),
+            Self::OutputSpecDiscreteOutOfRange {
+                output_index,
+                offset,
+                len,
+                pool_len,
+            } => write!(
+                f,
+                "bake: output_spec[{output_index}].discrete_set range \
+                 (offset={offset}, len={len}) outside discrete_sets pool of {pool_len} f32s"
+            ),
+            Self::UnknownOutputTransform { output_index, byte } => write!(
+                f,
+                "bake: output_spec[{output_index}].transform byte {byte:#x} is not a known OutputTransform variant"
+            ),
+            Self::SparseOverrideIndexOutOfRange { idx, n_outputs } => write!(
+                f,
+                "bake: sparse_override idx {idx} >= n_outputs {n_outputs}"
+            ),
         }
     }
 }
@@ -120,7 +173,7 @@ pub struct BakeMetadataEntry<'a> {
     pub value: &'a [u8],
 }
 
-/// All inputs to a v2 bake.
+/// All inputs to a v3 bake.
 pub struct BakeRequest<'a> {
     pub schema_hash: u64,
     pub flags: u16,
@@ -131,6 +184,18 @@ pub struct BakeRequest<'a> {
     /// input). Pass an empty slice to omit the section.
     pub feature_bounds: &'a [crate::bounds::FeatureBound],
     pub metadata: &'a [BakeMetadataEntry<'a>],
+    /// Per-output specs. Length must equal `n_outputs`. Pass an
+    /// empty slice to omit the section (raw passthrough on decode).
+    pub output_specs: &'a [OutputSpec],
+    /// Pool of f32 values referenced by `OutputSpec::{discrete_set_offset,
+    /// discrete_set_len}`. Each spec slices an inclusive set out
+    /// of this pool. Pass empty if no spec snaps to a discrete set.
+    pub discrete_sets: &'a [f32],
+    /// Sparse hand-tune overrides applied AFTER the per-output spec
+    /// pipeline. Each entry's `idx` must be `< n_outputs`. Use
+    /// `value = f32::NAN` to force [`crate::OutputValue::Default`]
+    /// for that output.
+    pub sparse_overrides: &'a [SparseOverride],
 }
 
 const HEADER_SIZE: usize = 128;
@@ -140,6 +205,9 @@ const SECTION_OFF_SCALER_SCALE: usize = 40;
 const SECTION_OFF_LAYER_TABLE: usize = 48;
 const SECTION_OFF_FEATURE_BOUNDS: usize = 56;
 const SECTION_OFF_METADATA: usize = 64;
+const SECTION_OFF_OUTPUT_SPECS: usize = 72;
+const SECTION_OFF_DISCRETE_SETS: usize = 80;
+const SECTION_OFF_SPARSE_OVERRIDES: usize = 88;
 
 /// Compose a v2 ZNPR byte stream. Output round-trips through
 /// [`crate::Model::from_bytes`].
@@ -170,6 +238,49 @@ pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> 
             expected: n_inputs,
             got: req.feature_bounds.len(),
         });
+    }
+
+    if !req.output_specs.is_empty() && req.output_specs.len() != n_outputs {
+        return Err(BakeError::OutputSpecsLengthMismatch {
+            expected: n_outputs,
+            got: req.output_specs.len(),
+        });
+    }
+    for (output_index, spec) in req.output_specs.iter().enumerate() {
+        if OutputTransform::from_byte(spec.transform).is_none() {
+            return Err(BakeError::UnknownOutputTransform {
+                output_index,
+                byte: spec.transform,
+            });
+        }
+        if spec.discrete_set_len > 0 {
+            let off = spec.discrete_set_offset as usize;
+            let len = spec.discrete_set_len as usize;
+            let end = off
+                .checked_add(len)
+                .ok_or(BakeError::OutputSpecDiscreteOutOfRange {
+                    output_index,
+                    offset: spec.discrete_set_offset,
+                    len: spec.discrete_set_len,
+                    pool_len: req.discrete_sets.len(),
+                })?;
+            if end > req.discrete_sets.len() {
+                return Err(BakeError::OutputSpecDiscreteOutOfRange {
+                    output_index,
+                    offset: spec.discrete_set_offset,
+                    len: spec.discrete_set_len,
+                    pool_len: req.discrete_sets.len(),
+                });
+            }
+        }
+    }
+    for entry in req.sparse_overrides {
+        if (entry.idx as usize) >= n_outputs {
+            return Err(BakeError::SparseOverrideIndexOutOfRange {
+                idx: entry.idx,
+                n_outputs,
+            });
+        }
     }
 
     // Validate layer chain.
@@ -227,7 +338,7 @@ pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> 
 
     // Magic + version + flags + dims + schema_hash.
     buf[0..4].copy_from_slice(b"ZNPR");
-    buf[4..6].copy_from_slice(&2u16.to_le_bytes());
+    buf[4..6].copy_from_slice(&crate::model::FORMAT_VERSION.to_le_bytes());
     buf[6..8].copy_from_slice(&req.flags.to_le_bytes());
     buf[8..12].copy_from_slice(&(n_inputs as u32).to_le_bytes());
     buf[12..16].copy_from_slice(&(n_outputs as u32).to_le_bytes());
@@ -365,6 +476,50 @@ pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> 
         }
     };
     write_section(&mut buf, SECTION_OFF_METADATA, metadata_section);
+
+    // Output specs (optional). 32 bytes per entry, must align to 4
+    // (largest f32 field).
+    let output_specs_section = if req.output_specs.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(&mut buf, 4);
+        let start = buf.len() as u32;
+        let bytes: &[u8] = bytemuck::cast_slice(req.output_specs);
+        buf.extend_from_slice(bytes);
+        Section {
+            offset: start,
+            len: bytes.len() as u32,
+        }
+    };
+    write_section(&mut buf, SECTION_OFF_OUTPUT_SPECS, output_specs_section);
+
+    // Discrete-sets pool (optional). f32 array.
+    let discrete_sets_section = if req.discrete_sets.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(&mut buf, 4);
+        append_f32(&mut buf, req.discrete_sets)
+    };
+    write_section(&mut buf, SECTION_OFF_DISCRETE_SETS, discrete_sets_section);
+
+    // Sparse overrides (optional). 8 bytes per entry; align to 4.
+    let sparse_overrides_section = if req.sparse_overrides.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(&mut buf, 4);
+        let start = buf.len() as u32;
+        let bytes: &[u8] = bytemuck::cast_slice(req.sparse_overrides);
+        buf.extend_from_slice(bytes);
+        Section {
+            offset: start,
+            len: bytes.len() as u32,
+        }
+    };
+    write_section(
+        &mut buf,
+        SECTION_OFF_SPARSE_OVERRIDES,
+        sparse_overrides_section,
+    );
 
     Ok(buf)
 }
