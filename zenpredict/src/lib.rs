@@ -137,6 +137,7 @@ extern crate alloc;
 pub mod argmin;
 mod bounds;
 mod error;
+mod feature_transform;
 mod inference;
 mod metadata;
 mod model;
@@ -157,6 +158,7 @@ pub use bounds::{
     FeatureBound, OutputBound, first_out_of_distribution, output_first_out_of_distribution,
 };
 pub use error::PredictError;
+pub use feature_transform::{FeatureTransform, apply_feature_transforms};
 pub use inference::f16_bits_to_f32;
 pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
 pub use model::{

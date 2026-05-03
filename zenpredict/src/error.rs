@@ -75,6 +75,13 @@ pub enum PredictError {
     },
     /// `get_utf8` saw a value that wasn't valid UTF-8.
     MetadataValueNotUtf8 { key_len: usize },
+    /// `zentrain.feature_transforms` value carried a token that
+    /// wasn't one of `identity` / `log` / `log1p`.
+    UnknownFeatureTransform,
+    /// `zentrain.feature_transforms` line count didn't equal
+    /// `n_inputs` (or the runtime helper's `transforms` slice
+    /// disagreed with `features.len()`).
+    FeatureTransformsLenMismatch { expected: usize, got: usize },
 }
 
 impl fmt::Display for PredictError {
@@ -158,6 +165,15 @@ impl fmt::Display for PredictError {
             Self::MetadataValueNotUtf8 { key_len } => write!(
                 f,
                 "zenpredict: metadata value (key len {key_len}) declared utf8 but failed validation"
+            ),
+            Self::UnknownFeatureTransform => write!(
+                f,
+                "zenpredict: feature_transforms value carried an unknown token \
+                 (expected one of identity/log/log1p)"
+            ),
+            Self::FeatureTransformsLenMismatch { expected, got } => write!(
+                f,
+                "zenpredict: feature_transforms length {got} != expected {expected}"
             ),
         }
     }

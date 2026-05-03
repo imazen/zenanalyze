@@ -7,6 +7,7 @@
 
 use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform, pick_confidence_from_top_k};
 use crate::error::PredictError;
+use crate::feature_transform::{FeatureTransform, apply_feature_transforms};
 use crate::inference::forward;
 use crate::model::Model;
 use crate::output_spec::{OutputValue, apply_spec};
@@ -22,18 +23,34 @@ pub struct Predictor<'a> {
     /// Post-processed output buffer for [`Self::predict_with_specs`].
     /// Sized to `n_outputs` at construction; reused across calls.
     spec_output: alloc::vec::Vec<OutputValue>,
+    /// Scratch buffer for the `_transformed` family. Sized to
+    /// `n_inputs` when the bake declared `feature_transforms`, and
+    /// to zero otherwise (the no-transform path forwards the input
+    /// slice without copying). Reused across calls.
+    feat_scratch: alloc::vec::Vec<f32>,
 }
 
 impl<'a> Predictor<'a> {
     pub fn new(model: Model<'a>) -> Self {
         let need = model.scratch_len();
         let n_out = model.n_outputs();
+        let n_in = model.n_inputs();
+        // Only allocate transform scratch when the bake actually
+        // ships transforms. Old (no-transforms) bins keep the same
+        // memory footprint they had in the 0.1.0 release — important
+        // for the path-pinned codecs that haven't rebaked yet.
+        let feat_scratch_len = if model.feature_transforms().is_some() {
+            n_in
+        } else {
+            0
+        };
         Self {
             model,
             scratch_a: alloc::vec![0.0; need],
             scratch_b: alloc::vec![0.0; need],
             output: alloc::vec![0.0; n_out],
             spec_output: alloc::vec![OutputValue::Default; n_out],
+            feat_scratch: alloc::vec![0.0; feat_scratch_len],
         }
     }
 
@@ -137,6 +154,124 @@ impl<'a> Predictor<'a> {
             }
         }
         Ok(&self.spec_output)
+    }
+
+    /// Like [`Self::predict`], but applies the bake's
+    /// `zentrain.feature_transforms` (issue #52) to each feature
+    /// element before standardize + forward pass. **This is the
+    /// recommended entry point for codec runtimes** — calling
+    /// [`Self::predict`] on a bake whose `FEATURE_TRANSFORMS`
+    /// declares any non-identity transform produces silently-wrong
+    /// predictions because the trainer's scaler stats already
+    /// reflect the post-transform distribution.
+    ///
+    /// When the bake omits `feature_transforms` (or every entry is
+    /// `Identity`), this method forwards the caller's slice without
+    /// copying — same allocation profile as [`Self::predict`].
+    pub fn predict_transformed(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
+        // Apply transforms inline so the forward call can borrow
+        // `scratch_a`/`scratch_b`/`output` mutably without aliasing
+        // through a helper that also borrows `self`.
+        if let Some(transforms) = self.model.feature_transforms() {
+            if features.len() != transforms.len() {
+                return Err(PredictError::FeatureLenMismatch {
+                    expected: transforms.len(),
+                    got: features.len(),
+                });
+            }
+            if self.feat_scratch.len() < features.len() {
+                self.feat_scratch.resize(features.len(), 0.0);
+            }
+            let dst = &mut self.feat_scratch[..features.len()];
+            apply_feature_transforms(transforms, features, dst)?;
+            forward(
+                &self.model,
+                dst,
+                &mut self.scratch_a,
+                &mut self.scratch_b,
+                &mut self.output,
+            )?;
+        } else {
+            forward(
+                &self.model,
+                features,
+                &mut self.scratch_a,
+                &mut self.scratch_b,
+                &mut self.output,
+            )?;
+        }
+        Ok(&self.output)
+    }
+
+    /// Like [`Self::predict_with_specs`], but applies the bake's
+    /// `zentrain.feature_transforms` (issue #52) to each feature
+    /// element before forward pass. See
+    /// [`Self::predict_transformed`] for the rationale on which
+    /// entry point codec runtimes should call.
+    pub fn predict_with_specs_transformed(
+        &mut self,
+        features: &[f32],
+    ) -> Result<&[OutputValue], PredictError> {
+        if let Some(transforms) = self.model.feature_transforms() {
+            if features.len() != transforms.len() {
+                return Err(PredictError::FeatureLenMismatch {
+                    expected: transforms.len(),
+                    got: features.len(),
+                });
+            }
+            if self.feat_scratch.len() < features.len() {
+                self.feat_scratch.resize(features.len(), 0.0);
+            }
+            let dst = &mut self.feat_scratch[..features.len()];
+            apply_feature_transforms(transforms, features, dst)?;
+            forward(
+                &self.model,
+                dst,
+                &mut self.scratch_a,
+                &mut self.scratch_b,
+                &mut self.output,
+            )?;
+        } else {
+            forward(
+                &self.model,
+                features,
+                &mut self.scratch_a,
+                &mut self.scratch_b,
+                &mut self.output,
+            )?;
+        }
+        let specs = self.model.output_specs();
+        let pool = self.model.discrete_sets();
+        if specs.is_empty() {
+            for (slot, &raw) in self.spec_output.iter_mut().zip(self.output.iter()) {
+                *slot = OutputValue::Override(raw);
+            }
+        } else {
+            for (i, slot) in self.spec_output.iter_mut().enumerate() {
+                *slot = apply_spec(&specs[i], self.output[i], pool);
+            }
+        }
+        for entry in self.model.sparse_overrides() {
+            let i = entry.idx as usize;
+            if i < self.spec_output.len() {
+                self.spec_output[i] = if entry.value.is_nan() {
+                    OutputValue::Default
+                } else {
+                    OutputValue::Override(entry.value)
+                };
+            }
+        }
+        Ok(&self.spec_output)
+    }
+
+    /// Per-feature transforms declared by the bake. Convenience
+    /// re-export of [`Model::feature_transforms`] so callers that
+    /// already hold a `Predictor` don't need to thread the model
+    /// through.
+    ///
+    /// [`Model::feature_transforms`]: crate::Model::feature_transforms
+    pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
+        self.model.feature_transforms()
     }
 
     /// Pick the argmin output index over the masked set.

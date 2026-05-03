@@ -101,6 +101,7 @@
 use bytemuck::{Pod, Zeroable, pod_read_unaligned};
 
 use crate::error::PredictError;
+use crate::feature_transform::{FeatureTransform, parse_feature_transforms};
 use crate::metadata::Metadata;
 use crate::output_spec::{OutputSpec, SparseOverride};
 
@@ -284,6 +285,12 @@ pub struct Model<'a> {
     output_specs: &'a [OutputSpec],
     discrete_sets: &'a [f32],
     sparse_overrides: &'a [SparseOverride],
+    /// Owned cache of parsed `zentrain.feature_transforms`. `None`
+    /// when the bake omitted the key (consumer treats every feature
+    /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
+    /// Parse-time error (length mismatch / unknown token) bubbles up
+    /// from [`Self::from_bytes`].
+    feature_transforms: Option<alloc::vec::Vec<FeatureTransform>>,
 }
 
 impl<'a> Model<'a> {
@@ -495,6 +502,10 @@ impl<'a> Model<'a> {
         // Metadata blob (optional).
         let metadata_bytes = header.metadata.slice("metadata", bytes)?;
         let metadata = Metadata::parse(metadata_bytes)?;
+        // Pre-parse `zentrain.feature_transforms` so the
+        // `Predictor::predict_*_transformed` hot path doesn't have to
+        // re-walk the metadata blob and re-tokenize on every call.
+        let feature_transforms = parse_feature_transforms(&metadata, n_inputs)?;
 
         // Output specs (optional). `n_outputs * sizeof(OutputSpec)`
         // when present.
@@ -616,6 +627,7 @@ impl<'a> Model<'a> {
             output_specs,
             discrete_sets,
             sparse_overrides,
+            feature_transforms,
         })
     }
 
@@ -772,6 +784,38 @@ impl<'a> Model<'a> {
             .chunks_exact(len)
             .map(bytemuck::pod_read_unaligned::<crate::OutputBound>)
             .collect()
+    }
+
+    /// Per-feature pre-standardize transforms from the
+    /// `zentrain.feature_transforms` metadata key (issue #52). Length
+    /// is exactly `n_inputs`. Returns `None` when the bake didn't
+    /// emit the key — consumers MUST treat that case as
+    /// "all-identity" (i.e. the [`Predictor::predict`] hot path
+    /// remains correct without applying any transform).
+    ///
+    /// When `Some(_)` is returned, callers MUST apply the named
+    /// transform to each feature element BEFORE the forward pass —
+    /// the trainer's `scaler_mean` / `scaler_scale` already encode
+    /// the post-transform distribution. The
+    /// [`Predictor::predict_transformed`] / [`Predictor::predict_with_specs_transformed`]
+    /// helpers do this automatically and are the recommended path
+    /// for codec runtimes.
+    ///
+    /// [`Predictor::predict`]: crate::Predictor::predict
+    /// [`Predictor::predict_transformed`]: crate::Predictor::predict_transformed
+    /// [`Predictor::predict_with_specs_transformed`]: crate::Predictor::predict_with_specs_transformed
+    pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
+        self.feature_transforms.as_deref()
+    }
+
+    /// `true` iff the bake declared a non-trivial transform for at
+    /// least one feature (i.e. anything other than `Identity`).
+    /// Convenience for runtimes that want to log whether they're on
+    /// the transformed path.
+    pub fn has_nontrivial_feature_transforms(&self) -> bool {
+        self.feature_transforms
+            .as_deref()
+            .is_some_and(|ts| ts.iter().any(|t| *t != FeatureTransform::Identity))
     }
 
     /// Length of the scratch buffers (`scratch_a`, `scratch_b`,

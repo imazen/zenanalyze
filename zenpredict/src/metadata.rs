@@ -316,6 +316,18 @@ pub mod keys {
     pub const SCHEMA_VERSION_TAG: &str = "zentrain.schema_version_tag";
     /// bytes — `[u32 count][count × (u16 len + utf8 bytes)]`.
     pub const FEATURE_COLUMNS: &str = "zentrain.feature_columns";
+    /// utf8 — newline-separated `identity` / `log` / `log1p`, parallel
+    /// to [`FEATURE_COLUMNS`]. Codec runtimes MUST apply the named
+    /// per-feature transform BEFORE the standardize step (mean/scale
+    /// stored in `scaler_mean`/`scaler_scale`); the trainer's scaler
+    /// stats already reflect the post-transform distribution, so
+    /// skipping the transform at inference produces silently-wrong
+    /// predictions. See [`crate::FeatureTransform`] and
+    /// [`crate::Predictor::predict_transformed`] for the typed view
+    /// and the runtime helper. Bakers omit the key entirely when every
+    /// feature is `identity`; consumers MUST treat absence as
+    /// "all-identity".
+    pub const FEATURE_TRANSFORMS: &str = "zentrain.feature_transforms";
     /// bytes — `#[repr(C)] { n_cells: u32, n_heads: u32, head_kinds: [u8; n_heads] }`.
     pub const HYBRID_HEADS_LAYOUT: &str = "zentrain.hybrid_heads_layout";
     /// utf8 — free-form provenance (git, corpus, sklearn, ts, host).

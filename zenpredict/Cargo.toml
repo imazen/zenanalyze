@@ -43,6 +43,13 @@ required-features = ["bake"]    # serde_json comes from the bake feature
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"], optional = true }
 serde_json = { version = "1.0.149", default-features = false, features = ["alloc"], optional = true }
+# `f32::ln` / `f32::ln_1p` are not in `core`. Use `libm` on
+# `no_std` builds for `feature_transform::FeatureTransform::apply`;
+# `std` builds use the (faster) intrinsic-backed `f32` methods. The
+# dep is unconditional because pulling it only via cfg-gated
+# features would require an extra feature flag for downstream
+# consumers.
+libm = { version = "0.2.16", default-features = false }
 
 [dev-dependencies]
 rand = { version = "0.9.2", default-features = false, features = ["std", "std_rng", "small_rng"] }

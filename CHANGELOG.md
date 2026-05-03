@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > next zenanalyze release (size-invariance discipline, patch
 > fingerprint, threshold recalibration).
 
+### Added
+
+- **zenpredict: `Predictor::predict_transformed` and
+  `Predictor::predict_with_specs_transformed`** (issue #52) —
+  apply per-feature `identity`/`log`/`log1p` transforms read from
+  the `zentrain.feature_transforms` metadata key BEFORE forward
+  pass. Closes the train/serve skew where the trainer's
+  `scaler_mean`/`scaler_scale` reflected the post-transform
+  distribution but the runtime was feeding raw (untransformed)
+  features. New public types: `FeatureTransform` enum,
+  `apply_feature_transforms` helper. New `Model::feature_transforms`
+  / `Model::has_nontrivial_feature_transforms` accessors. New
+  `keys::FEATURE_TRANSFORMS` constant. Bakes that omit the key
+  parse cleanly and the transformed entry points behave as
+  synonyms for the untransformed ones (no copy, no allocation —
+  same memory profile as 0.1.0). Bakes whose key carries unknown
+  tokens or a length that doesn't match `n_inputs` hard-fail at
+  load. New `PredictError::UnknownFeatureTransform` and
+  `PredictError::FeatureTransformsLenMismatch` variants.
+- **zenpredict: `libm` dependency** for `f32::ln` / `f32::ln_1p`
+  on `no_std` builds. `std` builds use the existing intrinsic-backed
+  methods.
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
