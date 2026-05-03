@@ -114,16 +114,71 @@ The .bin is fully usable as an external picker artifact (call
 vector to get cell predictions; map cell → encoder knobs via the
 v0.1 cell taxonomy).
 
+## Held-out re-encode A/B (cid22-val, 2026-05-04)
+
+Ran in a follow-up session via a new dev harness
+(`zenwebp/dev/picker_v0_3_holdout_ab.rs`, committed in
+`imazen/zenwebp@1f46e06`) that loads the v0.3 `.bin` externally — no
+in-runtime embed required, sidestepping the schema_hash drift call-out
+in this report's "Schema-hash drift" section.
+
+Verdict: **SHIP**. Picker beats the bucket-table baseline at every
+target on bytes, with achieved-zensim parity (+0.07pp drift in the
+picker's favor — well inside the 0.5pp tolerance band).
+
+Corpus: 41 held-out PNGs from `~/work/zentrain-corpus/mlp-validate/cid22-val/`.
+Both arms ride the encoder's `target_zensim` closed loop
+(`max_passes=3`, `max_overshoot=1.5`).
+
+| target | n | bytes_picker | bytes_bucket | Δ% (picker − bucket) | win_rate | achieved_picker | achieved_bucket |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 75 | 41 | 1.20 MB | 1.28 MB | **−5.86%** | 90% (37/41) | 75.77 | 75.74 |
+| 80 | 41 | 1.76 MB | 1.81 MB | −2.56% | 66% (27/41) | 80.60 | 80.36 |
+| 85 | 41 | 2.37 MB | 2.45 MB | −3.25% | 90% (37/41) | 84.51 | 84.46 |
+| 90 | 41 | 3.81 MB | 3.94 MB | −3.18% | 95% (39/41) | 88.01 | 88.06 |
+
+Total: picker **9.15 MB** vs bucket **9.47 MB** (Δ **−3.44%**) at
+matched achieved zensim (82.22 vs 82.15, Δ +0.068pp).
+
+Methodology:
+
+- Picker arm extracts the 36-feature zenanalyze vector in
+  `spec.rs::FEAT_COLS` order, applies the trainer's per-feature
+  pre-engineering transforms (log/log1p/identity from the v0.3 `.bin`
+  metadata; trainer applies these BEFORE engineering so cross terms
+  consume transformed values), builds the engineered 82-vec
+  (`feats[36] + size_oh[4] + poly[5] + zq*feats[36] + icc[1]`,
+  mirror of `runtime.rs::engineered_features`), runs `Predictor::predict`
+  against a patched copy of the v0.3 `.bin` (the original's
+  `feature_transforms` metadata had only 36 entries for an 82-input
+  model — a baker bug — so we strip the entry and apply transforms
+  externally).
+- Bucket arm: `classify_image_type_rgb8` →
+  `content_type_to_tuning(ct)` for `(sns, filter_strength,
+  filter_sharpness, segments)`, method pinned to `4`.
+- Both arms encode through `LossyConfig::with_target_zensim`.
+
+Artifacts:
+
+- Report: `imazen/zenwebp@1f46e06:benchmarks/picker_v0.3_holdout_ab_2026-05-04.md`
+- TSV (per-image rows, both arms): `s3://zentrain/zenwebp/pickers/picker_v0.3_holdout_ab.tsv`
+- Markdown copy: `s3://zentrain/zenwebp/pickers/picker_v0.3_holdout_ab.md`
+
+Follow-up: the in-runtime spec.rs `SCHEMA_HASH` still points at v0.1.
+A future PR can bump to `0x139d73665fb030c7` and replace
+`zenwebp_picker_v0.1.bin` with the patched v0.3 once the
+`feature_transforms` baker bug is fixed upstream
+(zentrain/tools/bake_picker.py emitting len-`n_inputs` rather than
+len-`n_feat_cols`). Patcher script lives at `/tmp/patch_v0_3_bin.py`
+(reproducible from the .bin alone).
+
 ## Limitations
 
-- **No cid22-val held-out re-encode A/B.** The brief asked for
-  encode-and-compare-bytes against `~/work/zentrain-corpus/mlp-validate/cid22-val/`
-  with picker-predicted knobs vs bucket-defaults. That requires
-  per-codec encoding harness binaries (`<codec>/dev/picker_ab_eval.rs`
-  takes a `--label picker|bucket` flag and rebuilds the codec with
-  the picker .bin embedded; the v0.3 .bin is not embeddable due to
-  the schema_hash drift documented above). The trainer's internal
-  20% val split is used as a proxy held-out.
+- ~~**No cid22-val held-out re-encode A/B.**~~ Resolved in the
+  2026-05-04 follow-up session via the harness committed in
+  `imazen/zenwebp@1f46e06`. See "Held-out re-encode A/B" section
+  above. Picker SHIPs at −3.44% bytes vs bucket on the 41-image
+  cid22-val held-out set across q∈{75,80,85,90}.
 - **Sweep is the original v0.1 grid (144 configs, 514 imgs).** The
   brief proposed re-sweeping with a richer grid + full mlp-tune-fast
   corpus; not done in this session due to time budget. The current
