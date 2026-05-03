@@ -502,11 +502,11 @@ impl<'a> Model<'a> {
             &[]
         } else {
             let raw = header.output_specs.slice("output_specs", bytes)?;
-            let expected = n_outputs.checked_mul(core::mem::size_of::<OutputSpec>()).ok_or(
-                PredictError::DimensionOverflow {
+            let expected = n_outputs
+                .checked_mul(core::mem::size_of::<OutputSpec>())
+                .ok_or(PredictError::DimensionOverflow {
                     what: "n_outputs * sizeof(OutputSpec)",
-                },
-            )?;
+                })?;
             if raw.len() != expected {
                 return Err(PredictError::SectionOutOfRange {
                     what: "output_specs",
@@ -552,9 +552,11 @@ impl<'a> Model<'a> {
             if spec.discrete_set_len > 0 {
                 let off = spec.discrete_set_offset as usize;
                 let len = spec.discrete_set_len as usize;
-                let end = off.checked_add(len).ok_or(PredictError::DimensionOverflow {
-                    what: "discrete_set_offset + discrete_set_len",
-                })?;
+                let end = off
+                    .checked_add(len)
+                    .ok_or(PredictError::DimensionOverflow {
+                        what: "discrete_set_offset + discrete_set_len",
+                    })?;
                 if end > discrete_sets.len() {
                     return Err(PredictError::SectionOutOfRange {
                         what: "OutputSpec.discrete_set range",
@@ -571,7 +573,10 @@ impl<'a> Model<'a> {
             &[]
         } else {
             let raw = header.sparse_overrides.slice("sparse_overrides", bytes)?;
-            if !raw.len().is_multiple_of(core::mem::size_of::<SparseOverride>()) {
+            if !raw
+                .len()
+                .is_multiple_of(core::mem::size_of::<SparseOverride>())
+            {
                 return Err(PredictError::SectionOutOfRange {
                     what: "sparse_overrides",
                     offset: header.sparse_overrides.offset,
@@ -579,14 +584,13 @@ impl<'a> Model<'a> {
                     file_len: bytes.len(),
                 });
             }
-            let parsed =
-                bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
-                    PredictError::SectionMisaligned {
-                        what: "sparse_overrides",
-                        offset: header.sparse_overrides.offset,
-                        required_align: core::mem::align_of::<SparseOverride>(),
-                    }
-                })?;
+            let parsed = bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
+                PredictError::SectionMisaligned {
+                    what: "sparse_overrides",
+                    offset: header.sparse_overrides.offset,
+                    required_align: core::mem::align_of::<SparseOverride>(),
+                }
+            })?;
             // Reject overrides whose index is out of range — the
             // baker checked too, but we want to fail loudly on
             // mutated inputs.

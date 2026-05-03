@@ -99,10 +99,7 @@ impl<'a> Predictor<'a> {
     /// Same as [`Self::predict`]: feature-length mismatch, etc. The
     /// spec pipeline itself is infallible — invalid (offset, len)
     /// pairs were rejected at load time.
-    pub fn predict_with_specs(
-        &mut self,
-        features: &[f32],
-    ) -> Result<&[OutputValue], PredictError> {
+    pub fn predict_with_specs(&mut self, features: &[f32]) -> Result<&[OutputValue], PredictError> {
         forward(
             &self.model,
             features,

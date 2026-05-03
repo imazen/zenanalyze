@@ -226,9 +226,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         };
         bake_v2(&req).unwrap()
     }
@@ -293,9 +293,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &metadata,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         };
         let bytes = bake_v2(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -338,9 +338,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         };
         let bytes = bake_v2(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -377,9 +377,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         };
         let bytes = bake_v2(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -418,9 +418,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &bounds,
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         };
         let bytes = bake_v2(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -532,9 +532,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -629,9 +629,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -674,9 +674,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -711,9 +711,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -761,9 +761,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -805,9 +805,9 @@ mod bake_roundtrip {
                 layers: &layers,
                 feature_bounds: &[],
                 metadata: &[],
-            output_specs: &[],
-            discrete_sets: &[],
-            sparse_overrides: &[],
+                output_specs: &[],
+                discrete_sets: &[],
+                sparse_overrides: &[],
             })
             .unwrap();
             let aligned = Aligned(bytes);
@@ -848,9 +848,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -990,9 +990,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1038,9 +1038,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1163,9 +1163,9 @@ mod bake_roundtrip {
                 kind: MetadataType::Utf8,
                 value: b"bar",
             }],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1200,9 +1200,9 @@ mod bake_roundtrip {
                 kind: MetadataType::Numeric,
                 value: &[1, 2, 3, 4], // 4 bytes
             }],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1294,9 +1294,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &entries,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1344,9 +1344,9 @@ mod bake_roundtrip {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap_err();
         assert!(matches!(
@@ -1381,9 +1381,9 @@ mod bake_roundtrip {
                 kind: MetadataType::Bytes,
                 value: b"x",
             }],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap_err();
         assert!(matches!(err, crate::bake::BakeError::MetadataKeyEmpty));
@@ -1416,9 +1416,9 @@ mod bake_roundtrip {
                 kind: MetadataType::Bytes,
                 value: b"x",
             }],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap_err();
         assert!(matches!(
@@ -1437,9 +1437,9 @@ mod bake_roundtrip {
             layers: &[],
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap_err();
         assert!(matches!(err, crate::bake::BakeError::EmptyLayers));
@@ -1562,9 +1562,9 @@ mod scorer_tests {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap()
     }
@@ -1747,9 +1747,9 @@ mod safety_summary_tests {
             layers: &layers,
             feature_bounds: &[],
             metadata: &metadata,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap()
     }
@@ -1885,9 +1885,9 @@ mod safety_summary_tests {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1922,9 +1922,9 @@ mod safety_summary_tests {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .unwrap();
         let aligned = Aligned(bytes);

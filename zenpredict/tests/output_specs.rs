@@ -2,7 +2,7 @@
 
 use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
 use zenpredict::{
-    Activation, FeatureBound, FORMAT_VERSION, Model, OutputSpec, OutputTransform, OutputValue,
+    Activation, FORMAT_VERSION, FeatureBound, Model, OutputSpec, OutputTransform, OutputValue,
     Predictor, SparseOverride, WeightDtype,
 };
 

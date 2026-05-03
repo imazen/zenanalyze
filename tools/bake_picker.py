@@ -507,16 +507,25 @@ def encode_feature_bounds(model: dict, n_inputs: int, feat_cols: list[str]) -> l
     fb = sr.get("diagnostics", {}).get("feature_bounds")
     if not isinstance(fb, dict):
         return []
+    # Use finite f32 sentinels rather than ±inf — JSON serialization
+    # rejects `Infinity` literals (they emit as `-Infinity`/`Infinity`
+    # which `serde_json` rejects as `invalid number`). The runtime
+    # treats f32 ±max as "permissive" the same way it treats ±inf.
+    sentinel_lo, sentinel_hi = -3.4028235e38, 3.4028235e38
     out: list[dict] = []
     for col in feat_cols:
         s = fb.get(col)
         if isinstance(s, dict) and s.get("p01") is not None and s.get("p99") is not None:
-            out.append({"low": float(s["p01"]), "high": float(s["p99"])})
+            lo = float(s["p01"])
+            hi = float(s["p99"])
+            lo = sentinel_lo if not (lo > float("-inf")) else max(lo, sentinel_lo)
+            hi = sentinel_hi if not (hi < float("inf")) else min(hi, sentinel_hi)
+            out.append({"low": lo, "high": hi})
         else:
-            out.append({"low": float("-inf"), "high": float("inf")})
+            out.append({"low": sentinel_lo, "high": sentinel_hi})
     # Pad to n_inputs with permissive bounds.
     while len(out) < n_inputs:
-        out.append({"low": float("-inf"), "high": float("inf")})
+        out.append({"low": sentinel_lo, "high": sentinel_hi})
     return out
 
 
