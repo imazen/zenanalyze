@@ -120,9 +120,27 @@ impl OutputTransform {
                     x
                 }
             }
-            Self::Round => x.round(),
+            Self::Round => round_no_std(x),
         }
     }
+}
+
+/// `round_ties_away_from_zero` for `f32`, available in both std and
+/// no_std builds. `f32::round` is a `std`-only method, so we
+/// reimplement it via the bit-level "add ±0.5 then truncate" pattern.
+/// Matches IEEE-754 `roundToIntegralTiesAway` semantics, which is
+/// what `f32::round` uses.
+#[inline]
+fn round_no_std(x: f32) -> f32 {
+    if x.is_nan() {
+        return x;
+    }
+    let bias = if x >= 0.0 { 0.5 } else { -0.5 };
+    // (x + bias) as i64 truncates toward zero. Cast back to f32.
+    // Saturates for values outside i64 range, but those round to
+    // ±inf in f32 anyway and the user almost certainly didn't mean
+    // to ship a picker that emits 9.2e18-ish values.
+    ((x + bias) as i64) as f32
 }
 
 #[inline]
