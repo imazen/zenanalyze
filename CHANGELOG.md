@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
      Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
+- **zenpredict bin format bumped to ZNPR v3** — adds optional
+  `output_specs`, `discrete_sets`, and `sparse_overrides` sections.
+  v2 bins error with `UnsupportedVersion` on load; downstream
+  codec crates (zenwebp, zenjpeg, zenavif, zenjxl) must rebake
+  their pickers. New POD types: `OutputSpec` (32 bytes per output
+  — bounds + transform + params + discrete-set range + sentinel)
+  and `SparseOverride` (8 bytes — `(idx, value)`). New API:
+  `Predictor::predict_with_specs` returning `&[OutputValue]`.
+  JSON bake schema gains `output_specs` and `sparse_overrides`
+  arrays.
+
 <!-- 13-redundant-pixel-count-transforms cull is COMPLETE — moved to
      "Removed" section below. -->
 
