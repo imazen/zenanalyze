@@ -41,11 +41,11 @@ PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
 # top of v2.1's 35 raw features). Total 73-feature TSV.
 # `_subset100` is the fast-iteration subset (100 of 347 images). For
 # the final v2.2 bake, point at `_v2_2.tsv` (full corpus).
-FEATURES = Path("benchmarks/zq_pareto_features_2026-05-01.tsv")
+FEATURES = Path("benchmarks/zq_pareto_features_2026-05-01_parallel.tsv")
 
 # Where to write the trained model + summary:
-OUT_JSON = Path("benchmarks/zq_bytes_hybrid_2026-05-01.json")
-OUT_LOG = Path("benchmarks/zq_bytes_hybrid_2026-05-01.log")
+OUT_JSON = Path("benchmarks/zenjpeg_hybrid_v0.3_2026-05-04.json")
+OUT_LOG = Path("benchmarks/zenjpeg_hybrid_v0.3_2026-05-04.log")
 
 
 # ---------- Schema ----------
