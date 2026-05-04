@@ -201,7 +201,7 @@ SPARSE_OVERRIDES: list = []
 # Format from zenmetrics_sweep_adapter.py: e{effort}_d{distance}_q{q}
 # Example: e5_d2.0_q75
 _CONFIG_RE = re.compile(
-    r"^e(?P<effort>\d+)_d(?P<distance>[\d.]+)_q(?P<q>\d+)$"
+    r"^e(?P<effort>\d+)_d(?P<distance>[\d.?]+)_q(?P<q>\d+)$"
 )
 
 
@@ -212,5 +212,5 @@ def parse_config_name(name: str) -> dict:
         raise ValueError(f"unparseable zenjxl v0.4 config name: {name}")
     return {
         "effort": int(m.group("effort")),
-        "distance": float(m.group("distance")),
+        "distance": float(m.group("distance")) if m.group("distance") not in ("?", "") else 1.0,
     }
