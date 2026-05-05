@@ -104,3 +104,69 @@ inversion target, not the legacy piecemeal pattern.
   to do with them.
 - Don't write multi-GB TSVs to `benchmarks/` — Parquet (zstd) is
   16× smaller AND 36× faster to load. Use `tsv_to_parquet.py`.
+
+## Picker training discipline (added 2026-05-04)
+
+Picker work has shipped two key infrastructure additions. Read these
+before training a new picker tier.
+
+### `train_hybrid.py --safety-default-cell` flag
+
+Per-row mask in `build_dataset` that hides any alternative cell whose
+min-bytes config either takes more than `--safety-speed-tol` (default
+1.05) times the default cell's encode time, OR fails to deliver
+`(1 - --safety-bytes-min-gain)` (default 0.99) bytes savings. Forces
+the picker to default unless an alternative is meaningfully smaller
+AND not slower.
+
+Result on zenjxl v0.6: student val argmin_acc jumped from 51% (v0.5
+no mask) to 79%; train→val gap dropped from +6.0pp to +1.89pp.
+
+The mask is OFF by default. Pass `--safety-default-cell <CELL_LABEL>`
+matching `cell_label_from_key`'s output (e.g. `effort7`).
+
+### Distance-aware A/B harness
+
+`tools/holdout_ab_lookup_jxl.py` now queries the picker at the zq
+the **default cell actually achieves at each distance**, not a dummy
+zq=75. The previous v0.5 harness was structurally broken — a picker
+trained for zq=75 was being graded against bands ranging zq~99 to
+zq~40. Fix shipped 2026-05-04.
+
+### Classifier picker prototypes
+
+The MLP-regress-bytes-then-argmin chain is fragile under safety
+masking. A small softmax-classifier MLP over `(image features ⊕
+log(distance))` produces cleaner picks. Prototypes at:
+
+- `tools/picker_v06_mlp_prototype.py` — PyTorch MLP, SHIP verdict on
+  v05c data (-1.51% bytes / +0.15pp zensim / -5.93% encode time)
+- `tools/picker_v06_classifier_prototype.py` — HistGradientBoosting
+  variant for ablation
+- `tools/oracle_v05c_zenjxl.py` — upper-bound oracle (only 9.1% of
+  v05c cells have a strict speed-safe win available)
+
+Classifier prototypes don't yet bake through `bake_picker.py` — that
+expects bytes-log regression. Three productionization paths
+documented at `docs/jxl-picker-v06-summary-2026-05-04.md` (option B
+recommended: add `--head-mode classifier` to trainer + baker + 1
+runtime branch).
+
+### Investigation docs
+
+- `docs/jxl-picker-investigation-2026-05-04.md` — v0.5 HOLD root cause
+- `docs/jxl-picker-v06-summary-2026-05-04.md` — v0.6 path forward
+  + productionization options A/B/C
+
+### Sweep + bug status (2026-05-04+)
+
+- v05c sweep on R2 `s3://zentrain/sweep-v05c-2026-05-04/` (no butteraugli)
+- v06 sweep on R2 `s3://zentrain/sweep-v06-2026-05-04/` (in flight; CPU
+  metrics, expanded JXL knobs via zen-metrics 0.6.0; chunks land at
+  `zenjxl/<chunk_id>.tsv` with butteraugli columns)
+- 500 representative images clustered from v05c via k-means on
+  zenanalyze features (script lives at `/tmp/cluster_v06_subset.py`
+  during the session — re-cluster as needed)
+- Decoder bug filed: `imazen/zenjxl-decoder#15` — effort=9 +
+  distance ≤ 0.5 + screen content produces files jxl-oxide accepts
+  but zenjxl-decoder rejects (decoder bug, not encoder)
