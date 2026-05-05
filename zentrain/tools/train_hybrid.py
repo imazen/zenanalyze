@@ -830,6 +830,9 @@ def build_dataset(
     time_budget_multiplier: float = 0.0,
     time_baselines: dict | None = None,
     emit_metric_head: bool = False,
+    safety_default_cell_idx: int | None = None,
+    safety_speed_tol: float = 1.05,
+    safety_bytes_min_gain: float = 0.99,
 ):
     """Per (image, size, zq) row, compute within-cell optimal:
        bytes_log[c]    = log(min bytes in cell c over configs that reach zq)
@@ -972,6 +975,48 @@ def build_dataset(
                 if apply_budget and any_unfiltered_reach:
                     infeasible[(image, size)] = True
                 continue
+
+            # Safety mask: when --safety-default-cell is set, hide
+            # alternative cells that would either slow encoding by
+            # > safety_speed_tol or fail to deliver
+            # safety_bytes_min_gain bytes savings vs the default.
+            # Forces the picker to default unless an alternative is
+            # both meaningfully smaller AND not slower. The picker
+            # learns to recognize images where a safe alternative
+            # exists (rather than blindly preferring fast effort=3
+            # cells that regress quality at non-tight distances).
+            if (
+                safety_default_cell_idx is not None
+                and 0 <= safety_default_cell_idx < n_cells
+                and cell_reach[safety_default_cell_idx]
+                and has_time
+            ):
+                d_idx = safety_default_cell_idx
+                d_bytes = cell_bytes[d_idx]
+                d_time = cell_time[d_idx]  # type: ignore[index]
+                bytes_ceiling = d_bytes * safety_bytes_min_gain
+                time_ceiling = (
+                    d_time * safety_speed_tol
+                    if not math.isinf(d_time)
+                    else math.inf
+                )
+                for c in range(n_cells):
+                    if c == d_idx or not cell_reach[c]:
+                        continue
+                    too_slow = cell_time[c] > time_ceiling  # type: ignore[index]
+                    no_real_gain = cell_bytes[c] >= bytes_ceiling
+                    if too_slow or no_real_gain:
+                        cell_bytes[c] = math.inf
+                        cell_reach[c] = False
+                        if has_time:
+                            cell_time[c] = math.inf  # type: ignore[index]
+                        if emit_metric_head:
+                            cell_metric[c] = math.nan  # type: ignore[index]
+                        for axis in SCALAR_AXES:
+                            cell_scalars[axis][c] = math.nan
+                # If masking eliminated every alternative AND default
+                # is the only reachable cell, keep going — picker will
+                # learn to pick default for this row, which is correct.
 
             zq_norm = zq / 100.0
             # Engineered input vector — same as v1.1 student to keep
@@ -1936,6 +1981,34 @@ def main():
         help="Override the strict gate even when --strict / CI is set. "
         "Use only when a violation is intentional and reviewed.",
     )
+    parser.add_argument(
+        "--safety-default-cell",
+        default=None,
+        help="Cell label (matches `cell_label_from_key` output, e.g. "
+        "'effort7' for an effort-only taxonomy) to anchor a per-row "
+        "safety mask. When set, the per-(image, zq) teacher hides "
+        "alternative cells whose min-bytes config either takes more "
+        "than --safety-speed-tol times the default's encode time, OR "
+        "fails to deliver a >= (1 - --safety-bytes-min-gain) bytes "
+        "savings vs the default. Forces the picker to default unless "
+        "an alternative is meaningfully smaller AND not slower. "
+        "Default off (preserves prior teacher behaviour).",
+    )
+    parser.add_argument(
+        "--safety-speed-tol",
+        type=float,
+        default=1.05,
+        help="Speed tolerance multiplier for the safety mask "
+        "(default 1.05 = alternative may be at most 5%% slower).",
+    )
+    parser.add_argument(
+        "--safety-bytes-min-gain",
+        type=float,
+        default=0.99,
+        help="Minimum bytes-shrink ratio for an alternative to count "
+        "as 'meaningfully smaller' under the safety mask "
+        "(default 0.99 = alternative bytes must be < 99%% of default).",
+    )
     args = parser.parse_args()
     hidden_layer_sizes = tuple(int(x) for x in args.hidden.split(","))
     is_ci = bool(os.environ.get("CI"))
@@ -2024,6 +2097,24 @@ def main():
             + "\n"
         )
 
+    safety_default_cell_idx = None
+    if args.safety_default_cell:
+        cell_labels = [c["label"] for c in cells]
+        try:
+            safety_default_cell_idx = cell_labels.index(args.safety_default_cell)
+        except ValueError:
+            sys.stderr.write(
+                f"--safety-default-cell {args.safety_default_cell!r} not in cell taxonomy "
+                f"{cell_labels}\n"
+            )
+            sys.exit(2)
+        sys.stderr.write(
+            f"  safety mask anchor: cell '{args.safety_default_cell}' "
+            f"(idx {safety_default_cell_idx}); "
+            f"speed_tol={args.safety_speed_tol}, "
+            f"bytes_min_gain={args.safety_bytes_min_gain}\n"
+        )
+
     (
         Xs,
         Xe,
@@ -2045,6 +2136,9 @@ def main():
         time_budget_multiplier=args.time_budget_multiplier,
         time_baselines=time_baselines if time_baselines else None,
         emit_metric_head=args.emit_metric_head,
+        safety_default_cell_idx=safety_default_cell_idx,
+        safety_speed_tol=args.safety_speed_tol,
+        safety_bytes_min_gain=args.safety_bytes_min_gain,
     )
     sys.stderr.write(
         f"\nDecision rows: {len(Xs)}; Xs={Xs.shape[1]}, Xe={Xe.shape[1]}, n_cells={n_cells}"

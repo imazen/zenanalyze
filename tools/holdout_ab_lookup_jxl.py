@@ -143,10 +143,14 @@ def main():
         if d <= 3.0: return "mid"
         return "loose"
 
-    # zq input to picker: still need to construct an Xe vector. We use a midpoint
-    # zq=75 since the model was trained with q=75 dummy. Picker's choice is then
-    # invariant to the zq input but conditioned on the image features. (This is
-    # a limitation we accept; the model wasn't trained with zq as a meaningful axis.)
+    # zq input to picker: query at the zq the default cell *actually* achieves at
+    # each distance, so the picker's per-distance decision is evaluated against
+    # what zq it was actually optimizing for. The previous v0.5 harness queried
+    # with zq=75 dummy once per image, which graded "what's best at zq=75"
+    # against distance bands ranging zq~99 (d=0.05) to zq~40 (d=15.0). The
+    # picker has no defense against being asked the wrong question. Re-querying
+    # per-distance fixes that, and matches what a runtime caller does — they
+    # always know the target quality before invoking the picker.
 
     rows = []
     misses = 0
@@ -156,28 +160,33 @@ def main():
             continue
         raw_vec, sc, w, h = features_by_img[img]
         feats_t = transform_row(raw_vec)
-        x = engineer_xe(feats_t, sc, 75, w, h)
-        if len(x) != n_inputs_expected:
-            print(f"[engineer] dim mismatch", file=sys.stderr)
-            sys.exit(2)
-        out = forward(model, x)
-        b_lo, b_hi = bytes_range
-        picker_cell_idx = int(np.argmin(out[b_lo:b_hi]))
-        picker_cell = cell_names[picker_cell_idx]
-
-        # For each distance level in the sweep, compare picker_cell vs default_cell
         for distance in sorted(distances_seen):
-            picker_data = sweep.get((img, picker_cell, distance))
             default_data = sweep.get((img, args.default_cell, distance))
-            if picker_data is None or default_data is None:
+            if default_data is None:
+                continue
+            db, dz = default_data
+            # Round the default's achieved zensim to the nearest int 0..100,
+            # matching the picker's training zq grid resolution.
+            zq_query = max(0, min(100, int(round(dz))))
+            x = engineer_xe(feats_t, sc, zq_query, w, h)
+            if len(x) != n_inputs_expected:
+                print(f"[engineer] dim mismatch", file=sys.stderr)
+                sys.exit(2)
+            out = forward(model, x)
+            b_lo, b_hi = bytes_range
+            picker_cell_idx = int(np.argmin(out[b_lo:b_hi]))
+            picker_cell = cell_names[picker_cell_idx]
+
+            picker_data = sweep.get((img, picker_cell, distance))
+            if picker_data is None:
                 continue
             pb, pz = picker_data
-            db, dz = default_data
             delta_bytes = (pb - db) / db if db > 0 else 0.0
             rows.append({
                 "image": img,
                 "distance": distance,
                 "band": band(distance),
+                "zq_query": zq_query,
                 "picker_cell": picker_cell,
                 "default_cell": args.default_cell,
                 "picker_bytes": pb,
