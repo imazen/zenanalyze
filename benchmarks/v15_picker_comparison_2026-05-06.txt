@@ -1,0 +1,38 @@
+# holdout: 142 cells over 40 images (seed=7, ≥2-codec filter)
+
+# holdout winner distribution: {'zenwebp': 40, 'zenpng': 7, 'zenavif': 32, 'zenjxl': 62, 'zenjpeg': 1}
+
+## Headline (holdout = same 40 images, 142 cells, ≥2-codec filter)
+
+model                  acc          bytes   Δ vs jxl   oracle Δ
+-----------------------------------------------------------------
+v0.3 (3-codec)      0.6127      9,657,051     -5.07%    -28.39%
+v0.4 (4-codec)      0.5845      9,488,670     -6.72%    -28.39%
+v0.5 (5-codec)      0.5211      9,935,485     -2.33%    -28.39%
+
+## Per-class behavior on holdout (mlp_dbytes vs always-jxl)
+
+class           n  v0.3 (3-codec)      v0.4 (4-codec)      v0.5 (5-codec)    
+-----------------------------------------------------------------------------
+document       27  acc=0.778 -14.64%    acc=0.815 -14.32%    acc=0.704  -6.73%  
+lineart        81  acc=0.506  -4.30%    acc=0.444  -6.75%    acc=0.370  -1.76%  
+screen         34  acc=0.735  -1.52%    acc=0.735  -1.52%    acc=0.735  -1.52%  
+
+## Per-codec accuracy (when each codec is the true winner)
+
+codec         n  v0.3 (3-codec)      v0.4 (4-codec)      v0.5 (5-codec)    
+---------------------------------------------------------------------------
+zenjpeg       1  acc=0.000 (n=  1)    acc=0.000 (n=  1)    acc=0.000 (n=  1)  
+zenwebp      40  acc=0.725 (n= 40)    acc=0.625 (n= 40)    acc=0.475 (n= 40)  
+zenjxl       62  acc=0.613 (n= 62)    acc=0.726 (n= 62)    acc=0.774 (n= 62)  
+zenavif      32  acc=0.625 (n= 32)    acc=0.406 (n= 32)    acc=0.188 (n= 32)  
+zenpng        7  acc=0.000 (n=  7)    acc=0.000 (n=  7)    acc=0.143 (n=  7)  
+
+## Prediction distribution on holdout
+
+  v0.3 (3-codec)     zenwebp=38.0% zenjxl=32.4% zenavif=29.6%
+  v0.4 (4-codec)     zenwebp=33.1% zenjxl=45.1% zenavif=21.8%
+  v0.5 (5-codec)     zenwebp=28.2% zenjxl=52.1% zenavif=13.4% zenpng=6.3%
+
+# oracle ceiling on this holdout: -28.39% vs always-zenjxl
+# always-zenjxl baseline bytes: 10,172,770
