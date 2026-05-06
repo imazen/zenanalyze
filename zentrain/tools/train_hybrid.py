@@ -2530,14 +2530,20 @@ def main():
         axis: float(SCALAR_SENTINELS[axis])
         for axis in SCALAR_AXES if axis in SCALAR_SENTINELS
     }
-    # Build a per-feat_col list of feature_transforms (length = len(feat_cols)).
-    # Engineered axes downstream of feat_cols (size_oh, log_px, zq_norm,
-    # interactions, icc placeholder) are passthrough; the runtime applies
-    # transforms only to the leading feat-column slice.
+    # Build a per-input list of feature_transforms (length = n_inputs).
+    # Per-feat_col transforms come from FEATURE_TRANSFORMS; the engineered
+    # axes downstream (size_oh, log_px, zq_norm, interactions, icc
+    # placeholder) get explicit `identity` entries so the runtime's
+    # parser (which strict-checks `len(transforms) == n_inputs` via
+    # parse_feature_transforms in zenpredict/src/feature_transform.rs)
+    # accepts the bake. Earlier bakes emitted a length-len(feat_cols)
+    # array and now fail to parse with `feature_transforms length 51 !=
+    # expected 112` — see the v0.6 rebake.
+    n_inputs_total = int(Xe.shape[1])
     feat_transform_list = [
         FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"
         for c in feat_cols
-    ]
+    ] + ["identity"] * (n_inputs_total - len(feat_cols))
     # Expand OUTPUT_SPECS (keyed by head name) to a per-output-index
     # array of length n_outputs, in `output_layout` order. Codecs that
     # define every head in OUTPUT_SPECS get a full per-output array;
