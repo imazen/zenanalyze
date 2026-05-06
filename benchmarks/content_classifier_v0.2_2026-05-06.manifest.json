@@ -1,0 +1,36 @@
+{
+  "configs": {
+    "0": "photo",
+    "1": "screen",
+    "2": "lineart",
+    "3": "document"
+  },
+  "extra_axes": [],
+  "feat_cols": [
+    "variance",
+    "edge_density",
+    "chroma_complexity",
+    "luma_histogram_entropy",
+    "dct_compressibility_y",
+    "dct_compressibility_uv",
+    "high_freq_energy_ratio",
+    "uniformity",
+    "colourfulness",
+    "laplacian_variance",
+    "log_pixels",
+    "aspect_min_over_max",
+    "flat_color_block_ratio",
+    "gradient_fraction",
+    "hdr_present"
+  ],
+  "n_inputs": 15,
+  "n_outputs": 4,
+  "safety_profile": "size_optimal",
+  "safety_report": {
+    "passed": true,
+    "violations": []
+  },
+  "schema_hash": "0x10429adc95a10579",
+  "schema_version_tag": "zenanalyze.content_classifier.v0.2.rebalanced",
+  "training_objective": "content_class_softmax_rebalanced"
+}
