@@ -1,0 +1,40 @@
+{
+  "configs": {
+    "0": "zenwebp",
+    "1": "zenjxl",
+    "2": "zenavif"
+  },
+  "extra_axes": [],
+  "feat_cols": [
+    "feat_aspect_min_over_max",
+    "feat_chroma_complexity",
+    "feat_colourfulness",
+    "feat_dct_compressibility_uv",
+    "feat_dct_compressibility_y",
+    "feat_edge_density",
+    "feat_flat_color_block_ratio",
+    "feat_gradient_fraction",
+    "feat_high_freq_energy_ratio",
+    "feat_laplacian_variance",
+    "feat_log_pixels",
+    "feat_luma_histogram_entropy",
+    "feat_uniformity",
+    "feat_variance",
+    "cclass_photo",
+    "cclass_screen",
+    "cclass_lineart",
+    "cclass_document",
+    "cclass_synthetic",
+    "target_band"
+  ],
+  "n_inputs": 20,
+  "n_outputs": 3,
+  "safety_profile": "size_optimal",
+  "safety_report": {
+    "passed": true,
+    "violations": []
+  },
+  "schema_hash": "0xd900d5193bee3d3c",
+  "schema_version_tag": "zenpicker.metapicker.v0.2.classbalanced",
+  "training_objective": "minimum_bytes_at_target_zensim_band_classbalanced"
+}
