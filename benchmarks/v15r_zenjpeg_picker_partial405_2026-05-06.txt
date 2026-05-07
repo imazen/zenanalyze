@@ -1,0 +1,26 @@
+v15r zenjpeg per-codec picker — 1024px sweep, partial 405/981 checkpoint
+Date: 2026-05-06
+Sweep:    s3://zentrain/sweep-v15r-2026-05-06/zenjpeg/ (405 of 981 TSVs)
+Trainer:  tools/v15_zenjpeg_picker_train.py @ ce5e268
+Sources:  Lanczos3 1024 max-dim PNG re-encodes of curated_manifest
+
+Holdout (image-disjoint 80/20, seed=7):
+
+  Bucket                            Pred Δ        Oracle floor    n
+  --------------------------------- ------------ -------------- -----
+  ALL                                  -10.59%      -15.07%      280
+  illustration_or_logo                  -7.55%      -14.83%       89
+  illustration_or_screen               -11.68%      -14.86%      104
+  photo_natural_or_detailed            -10.68%      -12.81%       28
+  photo_or_illustration                 -5.59%      -18.11%       52
+  photo_wide_gamut                     -15.52%      -19.04%        7
+
+Captures 70% of available savings overall. illustration_or_screen and
+photo_natural_or_detailed already at >80% of oracle. photo_or_illustration
+class has lots of headroom — needs the remaining ~580 chunks of data.
+
+Vs the 16MP v15 partial-187 run (prior corpus, archival-resolution): the
+1024px corpus shows lower oracle headroom (-15% vs -19%) because already-
+small files have less compression slack. But the picker reaches 70% of
+THAT smaller pie — comparable architectural performance on a more
+realistic web-traffic corpus.
