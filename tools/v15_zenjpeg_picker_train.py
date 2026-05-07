@@ -62,8 +62,8 @@ import torch.nn.functional as F
 # ---------------------------------------------------------------------------
 # Config
 
-DATA_DIR = Path("/tmp/v15-prep/data/zenjpeg")
-FEATURES_TSV = Path("/tmp/v15-prep/features_v15_combined.tsv")
+DATA_DIR = Path("/tmp/v15r-prep/data/zenjpeg")
+FEATURES_TSV = Path("/tmp/v15r-prep/features_v15r_combined.tsv")
 # 5 OpenAI-tagged content classes from the v15 curated manifest.
 CCLASSES = [
     "illustration_or_logo",
