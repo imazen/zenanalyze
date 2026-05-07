@@ -382,9 +382,13 @@ def main() -> int:
 
     EPOCHS = 600
     BATCH = 1024
+    PATIENCE = 60  # epochs without holdout-loss improvement before stopping
     n_train_cells = len(train_df)
-    print(f"[train] epochs={EPOCHS} batch={BATCH} cells={n_train_cells} n_in={n_in}", file=sys.stderr)
+    print(f"[train] max_epochs={EPOCHS} batch={BATCH} cells={n_train_cells} n_in={n_in} patience={PATIENCE}", file=sys.stderr)
 
+    best_test_loss = float("inf")
+    best_state = None
+    bad_epochs = 0
     for epoch in range(EPOCHS):
         model.train()
         perm = torch.randperm(n_train_cells)
@@ -400,17 +404,31 @@ def main() -> int:
             loss.backward()
             opt.step()
             total_loss += loss.item() * len(idx)
-        if epoch % 50 == 0 or epoch == EPOCHS - 1:
-            model.eval()
-            with torch.no_grad():
-                logits = model(X_te_n)
-                heads = model.axis_logits(logits)
-                accs = []
-                for h, an in zip(heads, AXIS_NAMES):
-                    pred = h.argmax(dim=-1)
-                    acc = (pred == Y_te[an]).float().mean().item()
-                    accs.append(acc)
-            print(f"[epoch {epoch:4d}] train-loss={total_loss/n_train_cells:.4f} test-acc={['%.3f'%a for a in accs]}", file=sys.stderr)
+        # Eval each epoch (cheap on tiny model).
+        model.eval()
+        with torch.no_grad():
+            logits = model(X_te_n)
+            heads = model.axis_logits(logits)
+            test_loss = sum(F.cross_entropy(h, Y_te[an]).item() for h, an in zip(heads, AXIS_NAMES))
+            accs = []
+            for h, an in zip(heads, AXIS_NAMES):
+                pred = h.argmax(dim=-1)
+                acc = (pred == Y_te[an]).float().mean().item()
+                accs.append(acc)
+        if test_loss < best_test_loss - 1e-4:
+            best_test_loss = test_loss
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+        if epoch % 25 == 0 or bad_epochs >= PATIENCE or epoch == EPOCHS - 1:
+            tag = " *" if bad_epochs == 0 else ""
+            print(f"[epoch {epoch:4d}] train-loss={total_loss/n_train_cells:.4f} test-loss={test_loss:.4f} test-acc={['%.3f'%a for a in accs]}{tag}", file=sys.stderr)
+        if bad_epochs >= PATIENCE:
+            print(f"[early-stop] patience exceeded at epoch {epoch} (best test-loss={best_test_loss:.4f})", file=sys.stderr)
+            break
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     # Final holdout report.
     model.eval()
