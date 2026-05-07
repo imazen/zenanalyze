@@ -205,8 +205,26 @@ def load_sweep_tsvs() -> pd.DataFrame:
     return out
 
 
+import itertools
+
+# Joint-config index: 96 ordered tuples, each is (a0,a1,a2,a3,a4,a5).
+JOINT_CONFIGS: list[tuple[int, ...]] = list(itertools.product(*[range(s) for s in AXIS_SIZES]))
+JOINT_INDEX: dict[tuple[int, ...], int] = {t: i for i, t in enumerate(JOINT_CONFIGS)}
+N_JOINT = len(JOINT_CONFIGS)  # 96
+
+
+def knob_to_joint_idx(knob: dict) -> int | None:
+    axis_idxs = []
+    for an, av in AXES:
+        i = axis_label(knob, an, av)
+        if i is None:
+            return None
+        axis_idxs.append(i)
+    return JOINT_INDEX.get(tuple(axis_idxs))
+
+
 # ---------------------------------------------------------------------------
-# Build (image, target_band) → best (q, knob_tuple) labels.
+# Build (image, target_band) → best (q, knob_tuple) labels + bytes-by-config table.
 
 def build_labels(sweep: pd.DataFrame, features: dict[str, list[float]]):
     """For each (image, band), find the min-bytes (q, knob) cell s.t.
@@ -217,6 +235,7 @@ def build_labels(sweep: pd.DataFrame, features: dict[str, list[float]]):
     n_in = 0
     n_no_feat = 0
     n_no_band = 0
+    bytes_table: list[np.ndarray] = []  # one [96] vector per (image, band) cell
     for image, df in sweep_by_image:
         if image not in features:
             n_no_feat += 1
@@ -226,31 +245,46 @@ def build_labels(sweep: pd.DataFrame, features: dict[str, list[float]]):
             if len(in_band) == 0:
                 n_no_band += 1
                 continue
-            # Take min-bytes cell.
-            best = in_band.loc[in_band["bytes"].idxmin()]
-            knob = parse_knob_json(best["knob_tuple_json"])
-            labels = []
-            ok = True
-            for axis_name, axis_values in AXES:
-                idx = axis_label(knob, axis_name, axis_values)
-                if idx is None:
-                    ok = False
-                    break
-                labels.append(idx)
-            if not ok:
+            # Per-knob min-bytes-in-band → 96-element vector. inf where
+            # that knob never reaches the band at any q.
+            tbl = np.full(N_JOINT, np.inf, dtype=np.float32)
+            min_by_knob = in_band.groupby("knob_tuple_json", sort=False)["bytes"].min()
+            for knob_str, b in min_by_knob.items():
+                k = knob_to_joint_idx(parse_knob_json(knob_str))
+                if k is not None:
+                    tbl[k] = float(b)
+            if not np.isfinite(tbl).any():
+                n_no_band += 1
                 continue
+            best_k = int(np.argmin(tbl))
+            best_axes = JOINT_CONFIGS[best_k]
+            best_bytes = int(tbl[best_k])
+            # Find a representative (q, knob_json, zensim) for this argmin
+            # config — used in evaluation lookups below.
+            best_knob = {
+                an: AXIS_VALUES[ai][best_axes[ai_pos]]
+                for ai_pos, (an, ai) in enumerate([(an, ai) for ai, an in enumerate(AXIS_NAMES)])
+            }
+            best_rows = in_band[in_band["knob_tuple_json"].map(
+                lambda s: knob_to_joint_idx(parse_knob_json(s)) == best_k
+            )]
+            best_row = best_rows.loc[best_rows["bytes"].idxmin()]
             rows.append({
                 "image": image,
                 "band": band,
-                "q": int(best["q"]),
-                "bytes_oracle": int(best["bytes"]),
-                "zensim_oracle": float(best["zensim"]),
-                "knob_json": best["knob_tuple_json"],
-                **{f"label_{n}": v for n, v in zip(AXIS_NAMES, labels)},
+                "q": int(best_row["q"]),
+                "bytes_oracle": best_bytes,
+                "zensim_oracle": float(best_row["zensim"]),
+                "knob_json": best_row["knob_tuple_json"],
+                "bytes_row": len(bytes_table),  # index into bytes_table
+                **{f"label_{an}": best_axes[ai] for ai, an in enumerate(AXIS_NAMES)},
             })
+            bytes_table.append(tbl)
             n_in += 1
     print(f"[labels] kept {n_in:,} (image,band) cells; {n_no_feat:,} images had no features; {n_no_band:,} (image,band) had no in-band config", file=sys.stderr)
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    out.attrs["bytes_table"] = np.stack(bytes_table) if bytes_table else np.zeros((0, N_JOINT), dtype=np.float32)
+    return out
 
 
 def lookup_default_baseline(sweep: pd.DataFrame, image: str, band: float) -> int | None:
@@ -329,6 +363,8 @@ def main() -> int:
     sweep = load_sweep_tsvs()
     labels = build_labels(sweep, feats)
     labels["cclass"] = labels["image"].map(cclass).fillna("unknown")
+    bytes_table_np = labels.attrs["bytes_table"]
+    print(f"[bytes-table] {bytes_table_np.shape}", file=sys.stderr)
 
     # Image-disjoint split.
     images = sorted(labels["image"].unique())
@@ -371,6 +407,20 @@ def main() -> int:
         for an in AXIS_NAMES
     }
 
+    # Bytes-table tensors for regret loss. Use bytes / bytes_oracle ratio so
+    # everything is in [1, ~3] range; +inf entries (knob never reaches band)
+    # become a very large penalty.
+    btab_tr = torch.tensor(bytes_table_np[train_df["bytes_row"].values], dtype=torch.float32)
+    btab_te = torch.tensor(bytes_table_np[test_df["bytes_row"].values], dtype=torch.float32)
+    boracle_tr = torch.tensor(train_df["bytes_oracle"].values, dtype=torch.float32)
+    boracle_te = torch.tensor(test_df["bytes_oracle"].values, dtype=torch.float32)
+    # Replace +inf with 3x oracle bytes (a hard penalty without nan-poisoning).
+    big = boracle_tr.unsqueeze(1) * 3.0
+    btab_tr = torch.where(torch.isinf(btab_tr), big, btab_tr)
+    btab_te = torch.where(torch.isinf(btab_te), boracle_te.unsqueeze(1) * 3.0, btab_te)
+    # Joint index tensor for soft-regret outer product. [N_JOINT, n_axes].
+    JOINT_IDX_T = torch.tensor(JOINT_CONFIGS, dtype=torch.long)
+
     # Standardize features (mean/std on train only).
     mu = X_tr.mean(dim=0)
     sd = X_tr.std(dim=0).clamp(min=1e-6)
@@ -383,8 +433,31 @@ def main() -> int:
     EPOCHS = 600
     BATCH = 1024
     PATIENCE = 60  # epochs without holdout-loss improvement before stopping
+    REGRET_LAMBDA = 1.0  # weight of bytes-aware regret in the joint loss
     n_train_cells = len(train_df)
-    print(f"[train] max_epochs={EPOCHS} batch={BATCH} cells={n_train_cells} n_in={n_in} patience={PATIENCE}", file=sys.stderr)
+    print(f"[train] max_epochs={EPOCHS} batch={BATCH} cells={n_train_cells} n_in={n_in} patience={PATIENCE} regret_lambda={REGRET_LAMBDA}", file=sys.stderr)
+
+    def soft_regret_loss(heads, btab, boracle):
+        """Soft regret = E[bytes_pred / bytes_oracle - 1] under per-axis softmax.
+        heads: list of [B, axis_size] logits
+        btab:  [B, N_JOINT] bytes for each joint config
+        boracle: [B] oracle bytes per cell
+        """
+        probs = [F.softmax(h, dim=-1) for h in heads]  # [B, axis_size_d]
+        # joint_prob[b, k] = prod_d probs[d][b, JOINT_CONFIGS[k][d]]
+        # Build via gather + product.
+        # Shape per axis after gather: [B, N_JOINT]
+        per_axis = [
+            probs[d].gather(1, JOINT_IDX_T[:, d].unsqueeze(0).expand(probs[d].size(0), -1))
+            for d in range(len(AXIS_NAMES))
+        ]
+        joint_prob = per_axis[0]
+        for d in range(1, len(per_axis)):
+            joint_prob = joint_prob * per_axis[d]
+        # Expected bytes / bytes_oracle. (B, N_JOINT) * (B, N_JOINT) → (B,)
+        ratios = btab / boracle.unsqueeze(1)
+        expected = (joint_prob * ratios).sum(dim=1)  # [B]
+        return (expected - 1.0).mean()
 
     best_test_loss = float("inf")
     best_state = None
@@ -399,7 +472,9 @@ def main() -> int:
             yb = {an: Y_tr[an][idx] for an in AXIS_NAMES}
             logits = model(xb)
             heads = model.axis_logits(logits)
-            loss = sum(F.cross_entropy(h, yb[an]) for h, an in zip(heads, AXIS_NAMES))
+            ce = sum(F.cross_entropy(h, yb[an]) for h, an in zip(heads, AXIS_NAMES))
+            regret = soft_regret_loss(heads, btab_tr[idx], boracle_tr[idx])
+            loss = ce + REGRET_LAMBDA * regret
             opt.zero_grad()
             loss.backward()
             opt.step()
