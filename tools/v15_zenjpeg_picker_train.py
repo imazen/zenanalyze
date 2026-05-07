@@ -369,7 +369,7 @@ def main() -> int:
             opt.zero_grad()
             loss.backward()
             opt.step()
-            total_loss += float(loss) * len(idx)
+            total_loss += loss.item() * len(idx)
         if epoch % 50 == 0 or epoch == EPOCHS - 1:
             model.eval()
             with torch.no_grad():
