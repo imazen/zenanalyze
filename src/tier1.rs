@@ -39,6 +39,7 @@ use archmage::{incant, magetypes};
 //   keeps zenanalyze unsafe-free (`unsafe_code = "forbid"`); the
 //   raw intrinsics live behind garb's safe wrappers.
 mod deinterleave_dispatch {
+    #[cfg(target_arch = "x86_64")]
     use archmage::arcane;
 
     /// Sealed trait — implemented for every token magetypes might hand
