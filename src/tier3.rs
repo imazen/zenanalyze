@@ -135,6 +135,82 @@ pub fn populate_tier3(
             out.quant_survival_uv_p25 = dct.quant_survival_uv_p25;
             out.quant_survival_uv_p50 = dct.quant_survival_uv_p50;
             out.quant_survival_uv_p75 = dct.quant_survival_uv_p75;
+            out.aq_map_p15 = dct.aq_map_p15;
+            out.aq_map_p20 = dct.aq_map_p20;
+            out.aq_map_p25 = dct.aq_map_p25;
+            out.aq_map_p30 = dct.aq_map_p30;
+            out.aq_map_p35 = dct.aq_map_p35;
+            out.aq_map_p40 = dct.aq_map_p40;
+            out.aq_map_p45 = dct.aq_map_p45;
+            out.aq_map_p55 = dct.aq_map_p55;
+            out.aq_map_p60 = dct.aq_map_p60;
+            out.aq_map_p65 = dct.aq_map_p65;
+            out.aq_map_p70 = dct.aq_map_p70;
+            out.aq_map_p80 = dct.aq_map_p80;
+            out.aq_map_p85 = dct.aq_map_p85;
+            out.noise_floor_y_p15 = dct.noise_floor_y_p15;
+            out.noise_floor_y_p20 = dct.noise_floor_y_p20;
+            out.noise_floor_y_p30 = dct.noise_floor_y_p30;
+            out.noise_floor_y_p35 = dct.noise_floor_y_p35;
+            out.noise_floor_y_p40 = dct.noise_floor_y_p40;
+            out.noise_floor_y_p45 = dct.noise_floor_y_p45;
+            out.noise_floor_y_p55 = dct.noise_floor_y_p55;
+            out.noise_floor_y_p60 = dct.noise_floor_y_p60;
+            out.noise_floor_y_p65 = dct.noise_floor_y_p65;
+            out.noise_floor_y_p70 = dct.noise_floor_y_p70;
+            out.noise_floor_y_p80 = dct.noise_floor_y_p80;
+            out.noise_floor_y_p85 = dct.noise_floor_y_p85;
+            out.noise_floor_y_p95 = dct.noise_floor_y_p95;
+            out.noise_floor_y_p99 = dct.noise_floor_y_p99;
+            out.noise_floor_uv_p1 = dct.noise_floor_uv_p1;
+            out.noise_floor_uv_p5 = dct.noise_floor_uv_p5;
+            out.noise_floor_uv_p10 = dct.noise_floor_uv_p10;
+            out.noise_floor_uv_p15 = dct.noise_floor_uv_p15;
+            out.noise_floor_uv_p20 = dct.noise_floor_uv_p20;
+            out.noise_floor_uv_p30 = dct.noise_floor_uv_p30;
+            out.noise_floor_uv_p35 = dct.noise_floor_uv_p35;
+            out.noise_floor_uv_p40 = dct.noise_floor_uv_p40;
+            out.noise_floor_uv_p45 = dct.noise_floor_uv_p45;
+            out.noise_floor_uv_p55 = dct.noise_floor_uv_p55;
+            out.noise_floor_uv_p60 = dct.noise_floor_uv_p60;
+            out.noise_floor_uv_p65 = dct.noise_floor_uv_p65;
+            out.noise_floor_uv_p70 = dct.noise_floor_uv_p70;
+            out.noise_floor_uv_p80 = dct.noise_floor_uv_p80;
+            out.noise_floor_uv_p85 = dct.noise_floor_uv_p85;
+            out.noise_floor_uv_p95 = dct.noise_floor_uv_p95;
+            out.noise_floor_uv_p99 = dct.noise_floor_uv_p99;
+            out.quant_survival_y_p15 = dct.quant_survival_y_p15;
+            out.quant_survival_y_p20 = dct.quant_survival_y_p20;
+            out.quant_survival_y_p30 = dct.quant_survival_y_p30;
+            out.quant_survival_y_p35 = dct.quant_survival_y_p35;
+            out.quant_survival_y_p40 = dct.quant_survival_y_p40;
+            out.quant_survival_y_p45 = dct.quant_survival_y_p45;
+            out.quant_survival_y_p55 = dct.quant_survival_y_p55;
+            out.quant_survival_y_p60 = dct.quant_survival_y_p60;
+            out.quant_survival_y_p65 = dct.quant_survival_y_p65;
+            out.quant_survival_y_p70 = dct.quant_survival_y_p70;
+            out.quant_survival_y_p80 = dct.quant_survival_y_p80;
+            out.quant_survival_y_p85 = dct.quant_survival_y_p85;
+            out.quant_survival_y_p90 = dct.quant_survival_y_p90;
+            out.quant_survival_y_p95 = dct.quant_survival_y_p95;
+            out.quant_survival_y_p99 = dct.quant_survival_y_p99;
+            out.quant_survival_uv_p1 = dct.quant_survival_uv_p1;
+            out.quant_survival_uv_p5 = dct.quant_survival_uv_p5;
+            out.quant_survival_uv_p15 = dct.quant_survival_uv_p15;
+            out.quant_survival_uv_p20 = dct.quant_survival_uv_p20;
+            out.quant_survival_uv_p30 = dct.quant_survival_uv_p30;
+            out.quant_survival_uv_p35 = dct.quant_survival_uv_p35;
+            out.quant_survival_uv_p40 = dct.quant_survival_uv_p40;
+            out.quant_survival_uv_p45 = dct.quant_survival_uv_p45;
+            out.quant_survival_uv_p55 = dct.quant_survival_uv_p55;
+            out.quant_survival_uv_p60 = dct.quant_survival_uv_p60;
+            out.quant_survival_uv_p65 = dct.quant_survival_uv_p65;
+            out.quant_survival_uv_p70 = dct.quant_survival_uv_p70;
+            out.quant_survival_uv_p80 = dct.quant_survival_uv_p80;
+            out.quant_survival_uv_p85 = dct.quant_survival_uv_p85;
+            out.quant_survival_uv_p90 = dct.quant_survival_uv_p90;
+            out.quant_survival_uv_p95 = dct.quant_survival_uv_p95;
+            out.quant_survival_uv_p99 = dct.quant_survival_uv_p99;
         }
         #[cfg(not(feature = "experimental"))]
         {
@@ -260,6 +336,87 @@ struct Tier3DctStats {
     quant_survival_uv_p25: f32,
     quant_survival_uv_p50: f32,
     quant_survival_uv_p75: f32,
+    /// Dense-sweep percentile companions (15th-85th) for `aq_map_*`.
+    aq_map_p15: f32,
+    aq_map_p20: f32,
+    aq_map_p25: f32,
+    aq_map_p30: f32,
+    aq_map_p35: f32,
+    aq_map_p40: f32,
+    aq_map_p45: f32,
+    aq_map_p55: f32,
+    aq_map_p60: f32,
+    aq_map_p65: f32,
+    aq_map_p70: f32,
+    aq_map_p80: f32,
+    aq_map_p85: f32,
+    /// Dense-sweep percentile companions (15th-99th) for `noise_floor_y_*`.
+    noise_floor_y_p15: f32,
+    noise_floor_y_p20: f32,
+    noise_floor_y_p30: f32,
+    noise_floor_y_p35: f32,
+    noise_floor_y_p40: f32,
+    noise_floor_y_p45: f32,
+    noise_floor_y_p55: f32,
+    noise_floor_y_p60: f32,
+    noise_floor_y_p65: f32,
+    noise_floor_y_p70: f32,
+    noise_floor_y_p80: f32,
+    noise_floor_y_p85: f32,
+    noise_floor_y_p95: f32,
+    noise_floor_y_p99: f32,
+    /// Dense-sweep percentile companions (1th-99th) for `noise_floor_uv_*`.
+    noise_floor_uv_p1: f32,
+    noise_floor_uv_p5: f32,
+    noise_floor_uv_p10: f32,
+    noise_floor_uv_p15: f32,
+    noise_floor_uv_p20: f32,
+    noise_floor_uv_p30: f32,
+    noise_floor_uv_p35: f32,
+    noise_floor_uv_p40: f32,
+    noise_floor_uv_p45: f32,
+    noise_floor_uv_p55: f32,
+    noise_floor_uv_p60: f32,
+    noise_floor_uv_p65: f32,
+    noise_floor_uv_p70: f32,
+    noise_floor_uv_p80: f32,
+    noise_floor_uv_p85: f32,
+    noise_floor_uv_p95: f32,
+    noise_floor_uv_p99: f32,
+    /// Dense-sweep percentile companions (15th-99th) for `quant_survival_y_*`.
+    quant_survival_y_p15: f32,
+    quant_survival_y_p20: f32,
+    quant_survival_y_p30: f32,
+    quant_survival_y_p35: f32,
+    quant_survival_y_p40: f32,
+    quant_survival_y_p45: f32,
+    quant_survival_y_p55: f32,
+    quant_survival_y_p60: f32,
+    quant_survival_y_p65: f32,
+    quant_survival_y_p70: f32,
+    quant_survival_y_p80: f32,
+    quant_survival_y_p85: f32,
+    quant_survival_y_p90: f32,
+    quant_survival_y_p95: f32,
+    quant_survival_y_p99: f32,
+    /// Dense-sweep percentile companions (1th-99th) for `quant_survival_uv_*`.
+    quant_survival_uv_p1: f32,
+    quant_survival_uv_p5: f32,
+    quant_survival_uv_p15: f32,
+    quant_survival_uv_p20: f32,
+    quant_survival_uv_p30: f32,
+    quant_survival_uv_p35: f32,
+    quant_survival_uv_p40: f32,
+    quant_survival_uv_p45: f32,
+    quant_survival_uv_p55: f32,
+    quant_survival_uv_p60: f32,
+    quant_survival_uv_p65: f32,
+    quant_survival_uv_p70: f32,
+    quant_survival_uv_p80: f32,
+    quant_survival_uv_p85: f32,
+    quant_survival_uv_p90: f32,
+    quant_survival_uv_p95: f32,
+    quant_survival_uv_p99: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -1245,6 +1402,70 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // read at p10/p25/p50/p75. p10 = "worst-block survival" — directly
     // proxies trellis ROI; high-survival p75 ⇒ uniformly compressible.
     #[cfg(feature = "experimental")]
+    let quant_survival_y_p15: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p20: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p30: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p35: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p40: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p45: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p55: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p60: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p65: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p70: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p80: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p85: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p90: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p95: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_y_p99: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p1: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p5: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p15: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p20: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p30: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p35: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p40: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p45: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p55: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p60: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p65: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p70: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p80: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p85: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p90: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p95: f32;
+    #[cfg(feature = "experimental")]
+    let quant_survival_uv_p99: f32;
+    #[cfg(feature = "experimental")]
     let quant_survival_y_p1: f32;
     #[cfg(feature = "experimental")]
     let quant_survival_y_p5: f32;
@@ -1294,6 +1515,38 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p25 = qs_or_nan(&quant_uv_blocks, 0.25);
         quant_survival_uv_p50 = qs_or_nan(&quant_uv_blocks, 0.50);
         quant_survival_uv_p75 = qs_or_nan(&quant_uv_blocks, 0.75);
+        quant_survival_y_p15 = qs_or_nan(&quant_y_blocks, 0.15);
+        quant_survival_y_p20 = qs_or_nan(&quant_y_blocks, 0.20);
+        quant_survival_y_p30 = qs_or_nan(&quant_y_blocks, 0.30);
+        quant_survival_y_p35 = qs_or_nan(&quant_y_blocks, 0.35);
+        quant_survival_y_p40 = qs_or_nan(&quant_y_blocks, 0.40);
+        quant_survival_y_p45 = qs_or_nan(&quant_y_blocks, 0.45);
+        quant_survival_y_p55 = qs_or_nan(&quant_y_blocks, 0.55);
+        quant_survival_y_p60 = qs_or_nan(&quant_y_blocks, 0.60);
+        quant_survival_y_p65 = qs_or_nan(&quant_y_blocks, 0.65);
+        quant_survival_y_p70 = qs_or_nan(&quant_y_blocks, 0.70);
+        quant_survival_y_p80 = qs_or_nan(&quant_y_blocks, 0.80);
+        quant_survival_y_p85 = qs_or_nan(&quant_y_blocks, 0.85);
+        quant_survival_y_p90 = qs_or_nan(&quant_y_blocks, 0.90);
+        quant_survival_y_p95 = qs_or_nan(&quant_y_blocks, 0.95);
+        quant_survival_y_p99 = qs_or_nan(&quant_y_blocks, 0.99);
+        quant_survival_uv_p1 = qs_or_nan(&quant_uv_blocks, 0.01);
+        quant_survival_uv_p5 = qs_or_nan(&quant_uv_blocks, 0.05);
+        quant_survival_uv_p15 = qs_or_nan(&quant_uv_blocks, 0.15);
+        quant_survival_uv_p20 = qs_or_nan(&quant_uv_blocks, 0.20);
+        quant_survival_uv_p30 = qs_or_nan(&quant_uv_blocks, 0.30);
+        quant_survival_uv_p35 = qs_or_nan(&quant_uv_blocks, 0.35);
+        quant_survival_uv_p40 = qs_or_nan(&quant_uv_blocks, 0.40);
+        quant_survival_uv_p45 = qs_or_nan(&quant_uv_blocks, 0.45);
+        quant_survival_uv_p55 = qs_or_nan(&quant_uv_blocks, 0.55);
+        quant_survival_uv_p60 = qs_or_nan(&quant_uv_blocks, 0.60);
+        quant_survival_uv_p65 = qs_or_nan(&quant_uv_blocks, 0.65);
+        quant_survival_uv_p70 = qs_or_nan(&quant_uv_blocks, 0.70);
+        quant_survival_uv_p80 = qs_or_nan(&quant_uv_blocks, 0.80);
+        quant_survival_uv_p85 = qs_or_nan(&quant_uv_blocks, 0.85);
+        quant_survival_uv_p90 = qs_or_nan(&quant_uv_blocks, 0.90);
+        quant_survival_uv_p95 = qs_or_nan(&quant_uv_blocks, 0.95);
+        quant_survival_uv_p99 = qs_or_nan(&quant_uv_blocks, 0.99);
     }
 
     // Batched log10(1 + ac) over `block_acs` via magetypes `ln_lowp`,
@@ -1351,6 +1604,19 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let aq_map_p90 = aq_or_nan(0.90);
     let aq_map_p95 = aq_or_nan(0.95);
     let aq_map_p99 = aq_or_nan(0.99);
+    let aq_map_p15 = aq_or_nan(0.15);
+    let aq_map_p20 = aq_or_nan(0.20);
+    let aq_map_p25 = aq_or_nan(0.25);
+    let aq_map_p30 = aq_or_nan(0.30);
+    let aq_map_p35 = aq_or_nan(0.35);
+    let aq_map_p40 = aq_or_nan(0.40);
+    let aq_map_p45 = aq_or_nan(0.45);
+    let aq_map_p55 = aq_or_nan(0.55);
+    let aq_map_p60 = aq_or_nan(0.60);
+    let aq_map_p65 = aq_or_nan(0.65);
+    let aq_map_p70 = aq_or_nan(0.70);
+    let aq_map_p80 = aq_or_nan(0.80);
+    let aq_map_p85 = aq_or_nan(0.85);
 
     // Noise-floor estimate via 10th-percentile per-block low-AC-energy.
     // Flat blocks' low-AC is residual noise; the 10th percentile
@@ -1393,6 +1659,20 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let noise_floor_y_p50 = nf_or_nan(quantile_at(&block_low_y, 0.50));
     let noise_floor_y_p75 = nf_or_nan(quantile_at(&block_low_y, 0.75));
     let noise_floor_y_p90 = nf_or_nan(quantile_at(&block_low_y, 0.90));
+    let noise_floor_y_p15 = nf_or_nan(quantile_at(&block_low_y, 0.15));
+    let noise_floor_y_p20 = nf_or_nan(quantile_at(&block_low_y, 0.20));
+    let noise_floor_y_p30 = nf_or_nan(quantile_at(&block_low_y, 0.30));
+    let noise_floor_y_p35 = nf_or_nan(quantile_at(&block_low_y, 0.35));
+    let noise_floor_y_p40 = nf_or_nan(quantile_at(&block_low_y, 0.40));
+    let noise_floor_y_p45 = nf_or_nan(quantile_at(&block_low_y, 0.45));
+    let noise_floor_y_p55 = nf_or_nan(quantile_at(&block_low_y, 0.55));
+    let noise_floor_y_p60 = nf_or_nan(quantile_at(&block_low_y, 0.60));
+    let noise_floor_y_p65 = nf_or_nan(quantile_at(&block_low_y, 0.65));
+    let noise_floor_y_p70 = nf_or_nan(quantile_at(&block_low_y, 0.70));
+    let noise_floor_y_p80 = nf_or_nan(quantile_at(&block_low_y, 0.80));
+    let noise_floor_y_p85 = nf_or_nan(quantile_at(&block_low_y, 0.85));
+    let noise_floor_y_p95 = nf_or_nan(quantile_at(&block_low_y, 0.95));
+    let noise_floor_y_p99 = nf_or_nan(quantile_at(&block_low_y, 0.99));
     let nf_uv = |q: f32| -> f32 {
         let cb = nf_scale(quantile_at(&block_low_cb, q));
         let cr = nf_scale(quantile_at(&block_low_cr, q));
@@ -1404,6 +1684,23 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let noise_floor_uv_p50 = nf_uv_or_nan(0.50);
     let noise_floor_uv_p75 = nf_uv_or_nan(0.75);
     let noise_floor_uv_p90 = nf_uv_or_nan(0.90);
+    let noise_floor_uv_p1 = nf_uv_or_nan(0.01);
+    let noise_floor_uv_p5 = nf_uv_or_nan(0.05);
+    let noise_floor_uv_p10 = nf_uv_or_nan(0.10);
+    let noise_floor_uv_p15 = nf_uv_or_nan(0.15);
+    let noise_floor_uv_p20 = nf_uv_or_nan(0.20);
+    let noise_floor_uv_p30 = nf_uv_or_nan(0.30);
+    let noise_floor_uv_p35 = nf_uv_or_nan(0.35);
+    let noise_floor_uv_p40 = nf_uv_or_nan(0.40);
+    let noise_floor_uv_p45 = nf_uv_or_nan(0.45);
+    let noise_floor_uv_p55 = nf_uv_or_nan(0.55);
+    let noise_floor_uv_p60 = nf_uv_or_nan(0.60);
+    let noise_floor_uv_p65 = nf_uv_or_nan(0.65);
+    let noise_floor_uv_p70 = nf_uv_or_nan(0.70);
+    let noise_floor_uv_p80 = nf_uv_or_nan(0.80);
+    let noise_floor_uv_p85 = nf_uv_or_nan(0.85);
+    let noise_floor_uv_p95 = nf_uv_or_nan(0.95);
+    let noise_floor_uv_p99 = nf_uv_or_nan(0.99);
 
     let gradient_fraction = if blocks_sampled > 0 {
         gradient_blocks as f32 / blocks_sampled as f32
@@ -1434,7 +1731,39 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p25,
         quant_survival_uv_p50,
         quant_survival_uv_p75,
-    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        quant_survival_y_p15,
+        quant_survival_y_p20,
+        quant_survival_y_p30,
+        quant_survival_y_p35,
+        quant_survival_y_p40,
+        quant_survival_y_p45,
+        quant_survival_y_p55,
+        quant_survival_y_p60,
+        quant_survival_y_p65,
+        quant_survival_y_p70,
+        quant_survival_y_p80,
+        quant_survival_y_p85,
+        quant_survival_y_p90,
+        quant_survival_y_p95,
+        quant_survival_y_p99,
+        quant_survival_uv_p1,
+        quant_survival_uv_p5,
+        quant_survival_uv_p15,
+        quant_survival_uv_p20,
+        quant_survival_uv_p30,
+        quant_survival_uv_p35,
+        quant_survival_uv_p40,
+        quant_survival_uv_p45,
+        quant_survival_uv_p55,
+        quant_survival_uv_p60,
+        quant_survival_uv_p65,
+        quant_survival_uv_p70,
+        quant_survival_uv_p80,
+        quant_survival_uv_p85,
+        quant_survival_uv_p90,
+        quant_survival_uv_p95,
+        quant_survival_uv_p99,
+    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,
@@ -1478,6 +1807,82 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p25,
         quant_survival_uv_p50,
         quant_survival_uv_p75,
+        aq_map_p15,
+        aq_map_p20,
+        aq_map_p25,
+        aq_map_p30,
+        aq_map_p35,
+        aq_map_p40,
+        aq_map_p45,
+        aq_map_p55,
+        aq_map_p60,
+        aq_map_p65,
+        aq_map_p70,
+        aq_map_p80,
+        aq_map_p85,
+        noise_floor_y_p15,
+        noise_floor_y_p20,
+        noise_floor_y_p30,
+        noise_floor_y_p35,
+        noise_floor_y_p40,
+        noise_floor_y_p45,
+        noise_floor_y_p55,
+        noise_floor_y_p60,
+        noise_floor_y_p65,
+        noise_floor_y_p70,
+        noise_floor_y_p80,
+        noise_floor_y_p85,
+        noise_floor_y_p95,
+        noise_floor_y_p99,
+        noise_floor_uv_p1,
+        noise_floor_uv_p5,
+        noise_floor_uv_p10,
+        noise_floor_uv_p15,
+        noise_floor_uv_p20,
+        noise_floor_uv_p30,
+        noise_floor_uv_p35,
+        noise_floor_uv_p40,
+        noise_floor_uv_p45,
+        noise_floor_uv_p55,
+        noise_floor_uv_p60,
+        noise_floor_uv_p65,
+        noise_floor_uv_p70,
+        noise_floor_uv_p80,
+        noise_floor_uv_p85,
+        noise_floor_uv_p95,
+        noise_floor_uv_p99,
+        quant_survival_y_p15,
+        quant_survival_y_p20,
+        quant_survival_y_p30,
+        quant_survival_y_p35,
+        quant_survival_y_p40,
+        quant_survival_y_p45,
+        quant_survival_y_p55,
+        quant_survival_y_p60,
+        quant_survival_y_p65,
+        quant_survival_y_p70,
+        quant_survival_y_p80,
+        quant_survival_y_p85,
+        quant_survival_y_p90,
+        quant_survival_y_p95,
+        quant_survival_y_p99,
+        quant_survival_uv_p1,
+        quant_survival_uv_p5,
+        quant_survival_uv_p15,
+        quant_survival_uv_p20,
+        quant_survival_uv_p30,
+        quant_survival_uv_p35,
+        quant_survival_uv_p40,
+        quant_survival_uv_p45,
+        quant_survival_uv_p55,
+        quant_survival_uv_p60,
+        quant_survival_uv_p65,
+        quant_survival_uv_p70,
+        quant_survival_uv_p80,
+        quant_survival_uv_p85,
+        quant_survival_uv_p90,
+        quant_survival_uv_p95,
+        quant_survival_uv_p99,
     }
 }
 
