@@ -49,3 +49,15 @@
 //! whether the 30 extra public type names are worth the compile-time
 //! gating, or whether `#[deprecated]` warnings on the enum variant +
 //! `None` at runtime is enough.
+
+/// Single-source-of-truth macro: generates the [`AnalysisFeature`]
+/// enum, its `id` / `from_u16` / `is_active` / `name` impls, the
+/// internal [`RawAnalysis`] dense struct that the SIMD tiers write
+/// into, the `RawAnalysis::into_results` translator, and the
+/// [`FeatureSet::SUPPORTED`] preset — all in lockstep so adding a
+/// feature is a one-line edit at the invocation site.
+///
+/// Per-feature row syntax:
+/// `$(#[$attr:meta])* $Variant = $id : $type => $field`
+/// The `$field` ident is the snake_case name (also used for
+/// `AnalysisFeature::name`'s string return via `stringify!`).
