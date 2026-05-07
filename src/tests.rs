@@ -1281,39 +1281,39 @@ fn tier3_zigzag_split_is_symmetric_in_horiz_vs_vert_detail() {
 #[test]
 fn large_image_completes_in_reasonable_time_with_default_budget() {
     // Loose timing assertion — defends against accidental O(N²) or
-    // missing budget plumbing. Not a benchmark — just a "did somebody
-    // disable the stride sampling" tripwire.
+    // missing budget plumbing. A 4-megapixel synth at default budget
+    // is typically <50 ms on x86-64 release. Not a benchmark — just
+    // a "did somebody disable the stride sampling" tripwire.
     //
-    // Image size and threshold tiers:
-    //   2048×2048, 3 s — native builds (x86-64, ARM64, i686).
-    //              [profile.dev] opt-level=2 means dev ≈ release speed.
-    //    512×512, 10 s — cross-emulated targets (aarch64 under QEMU via
-    //              `cross test`; i686 catches via 32-bit pointer width).
-    //              QEMU full-instruction-translation of NEON/SIMD code on
-    //              a 2-core GitHub Actions runner can be 100-300× slower
-    //              than native, so 2048² reliably exceeds 10 s even for
-    //              correct O(N) code. 512² keeps the check meaningful
-    //              (O(N²) on 262K pixels still blows past 10 s) while
-    //              staying comfortably under the threshold for correct code.
-    let is_emulated = std::env::var("CROSS_RUNTIME").is_ok() || cfg!(target_pointer_width = "32");
-    let (test_size, threshold_ms): (u32, u128) = if is_emulated {
-        (512, 10_000)
-    } else {
-        (2048, 3_000)
-    };
+    // Skipped on QEMU cross-emulated targets (CROSS_RUNTIME env var set
+    // by CI): tier3 processes up to DEFAULT_HF_MAX_BLOCKS = 1024 8×8
+    // blocks regardless of image size, and NEON instruction-translation
+    // on aarch64 QEMU takes >10 s for that block count even for correct
+    // O(N) code. The O(N²) regression this test guards against is already
+    // caught by the native ARM64 matrix entries (windows-11-arm,
+    // macos-latest) and x86-64 native (ubuntu-latest, macos-15-intel).
+    if std::env::var("CROSS_RUNTIME").is_ok() {
+        return;
+    }
 
-    let rgb = synth_rgb(test_size, test_size, 5);
+    let rgb = synth_rgb(2048, 2048, 5);
     let t0 = std::time::Instant::now();
-    let out = analyze_rgb8(&rgb, test_size, test_size);
+    let out = analyze_rgb8(&rgb, 2048, 2048);
     let elapsed = t0.elapsed();
-    assert_well_formed(&out, test_size, test_size);
+    assert_well_formed(&out, 2048, 2048);
+
+    // i686 (32-bit pointer width) runs QEMU but at near-native x86 speed
+    // since the host is x86-64 — keep a looser ceiling for it.
+    let threshold_ms: u128 = if cfg!(target_pointer_width = "32") {
+        10_000
+    } else {
+        3_000
+    };
 
     assert!(
         elapsed.as_millis() < threshold_ms,
-        "{}×{} default-budget analyze took {} ms (threshold {} ms) — \
+        "2048×2048 default-budget analyze took {} ms (threshold {} ms) — \
          stride sampling probably broken",
-        test_size,
-        test_size,
         elapsed.as_millis(),
         threshold_ms,
     );
