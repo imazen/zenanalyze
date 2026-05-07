@@ -1296,7 +1296,11 @@ fn large_image_completes_in_reasonable_time_with_default_budget() {
     //              (O(N²) on 262K pixels still blows past 10 s) while
     //              staying comfortably under the threshold for correct code.
     let is_emulated = std::env::var("CROSS_RUNTIME").is_ok() || cfg!(target_pointer_width = "32");
-    let (test_size, threshold_ms): (u32, u128) = if is_emulated { (512, 10_000) } else { (2048, 3_000) };
+    let (test_size, threshold_ms): (u32, u128) = if is_emulated {
+        (512, 10_000)
+    } else {
+        (2048, 3_000)
+    };
 
     let rgb = synth_rgb(test_size, test_size, 5);
     let t0 = std::time::Instant::now();
@@ -1308,7 +1312,10 @@ fn large_image_completes_in_reasonable_time_with_default_budget() {
         elapsed.as_millis() < threshold_ms,
         "{}×{} default-budget analyze took {} ms (threshold {} ms) — \
          stride sampling probably broken",
-        test_size, test_size, elapsed.as_millis(), threshold_ms,
+        test_size,
+        test_size,
+        elapsed.as_millis(),
+        threshold_ms,
     );
 }
 
