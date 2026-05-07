@@ -1,0 +1,45 @@
+zenjpeg per-codec picker v0.1 — final training on full v15r sweep
+Date: 2026-05-07
+Sweep:    s3://zentrain/sweep-v15r-2026-05-06/zenjpeg/  (981/981 TSVs, 0 errors)
+Sources:  Lanczos3 1024 max-dim, 981 OpenAI-tagged curated images
+Trainer:  tools/v15_zenjpeg_picker_train.py
+Architecture: 23-input → 64 LeakyReLU → 64 LeakyReLU → 13-output
+              (3+2+2+2+2+2 split into 6 multi-head softmax over knob axes)
+Features: 14 zenanalyze named + 5 cclass one-hot + 4 target-band one-hot
+Loss:     multi-head CE + bytes-aware soft regret (λ=1.0)
+Holdout:  image-disjoint 80/20 (784 train / 196 test images), seed=7
+
+Holdout report (n_eval=711 of 784 image-bands; 73 had no default-knob in band):
+
+  Bucket                            Pred Δ     Oracle   Capture
+  --------------------------------- --------- -------- --------
+  ALL                                  -8.30%  -13.08%   63%
+  illustration_or_screen              -12.23%  -15.69%   78%
+  photo_or_illustration               -11.91%  -16.30%   73%
+  photo_wide_gamut                     -6.75%  -10.70%   63%
+  photo_natural_or_detailed            -6.47%  -11.91%   54%
+  illustration_or_logo                 -6.26%  -13.72%   46%
+
+Per-axis test accuracy (final epoch):
+  subsampling=0.776  progressive_mode=0.818  effort=1.000
+  chroma_distance_scale=0.716  aq_enabled=0.741  auto_optimize=0.839
+
+Notes:
+- effort=1 is always the oracle pick (knob has near-zero byte-saving value
+  on this corpus); 100% accuracy is the trivial constant predictor.
+- chroma_distance_scale (only 0.7 vs 1.2 in this grid) is the noisiest
+  axis (72% acc) — the picker correctly notices content-dependent
+  preferences but doesn't yet capture the full signal. Worth densifying
+  the chroma_distance_scale grid in the next sweep to see if a broader
+  range (e.g. 0.5/0.8/1.0/1.4) gives a sharper signal.
+- illustration_or_logo class underfits. 46% capture vs 78% for screens.
+  The class is mostly logos/icons (gif-static converts) with sharp edges
+  + flat colors — a regime where butteraugli/zensim disagree on what's
+  "good" and the byte-savings frontier is steep but narrow. Likely needs
+  more lineart-heavy training data or a loss reweighting.
+
+vs partial-405 checkpoint (2026-05-06):
+  partial overall: pred=-10.59% oracle=-15.07% (70% capture)
+  full overall:    pred= -8.30% oracle=-13.08% (63% capture)
+  → bigger corpus surfaces harder examples; oracle headroom shrinks
+    as we sample more "default-already-near-optimal" cells.
