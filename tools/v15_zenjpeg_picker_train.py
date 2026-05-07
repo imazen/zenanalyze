@@ -180,28 +180,42 @@ def axis_label(knob: dict, axis_name: str, axis_values: list) -> int | None:
 
 
 def load_sweep_tsvs() -> pd.DataFrame:
+    """Load sweep TSVs, accepting either CPU-metric (`score_zensim`) or GPU-
+    metric (`score_zensim_gpu`) column names. CPU and GPU implementations
+    produce numerically near-identical zensim scores so cells from both
+    backends can be combined for training."""
     parts = []
     tsvs = sorted(DATA_DIR.glob("*.tsv"))
     if not tsvs:
         raise SystemExit(f"[load_sweep] no TSVs under {DATA_DIR}")
+    n_cpu = n_gpu = 0
     for tsv in tsvs:
         try:
             df = pd.read_csv(tsv, sep="\t", dtype={"q": int, "encoded_bytes": "Int64"})
         except Exception as e:
             print(f"[load_sweep] skip {tsv}: {e}", file=sys.stderr)
             continue
-        need = {"image_path", "q", "knob_tuple_json", "encoded_bytes", "score_zensim"}
+        zensim_col = None
+        if "score_zensim" in df.columns:
+            zensim_col = "score_zensim"
+            n_cpu += 1
+        elif "score_zensim_gpu" in df.columns:
+            zensim_col = "score_zensim_gpu"
+            n_gpu += 1
+        else:
+            continue
+        need = {"image_path", "q", "knob_tuple_json", "encoded_bytes", zensim_col}
         if not need.issubset(df.columns):
             continue
-        df = df.dropna(subset=["encoded_bytes", "score_zensim", "knob_tuple_json"])
+        df = df.dropna(subset=["encoded_bytes", zensim_col, "knob_tuple_json"])
         df["image"] = df["image_path"].astype(str).str.rsplit("/", n=1).str[-1]
         df["bytes"] = df["encoded_bytes"].astype("int64")
-        df["zensim"] = df["score_zensim"].astype(float)
+        df["zensim"] = df[zensim_col].astype(float)
         parts.append(df[["image", "q", "knob_tuple_json", "bytes", "zensim"]])
     if not parts:
         raise SystemExit("[load_sweep] no usable TSVs")
     out = pd.concat(parts, ignore_index=True)
-    print(f"[load_sweep] {len(out):,} cells across {out['image'].nunique()} images", file=sys.stderr)
+    print(f"[load_sweep] {len(out):,} cells across {out['image'].nunique()} images (cpu_tsvs={n_cpu} gpu_tsvs={n_gpu})", file=sys.stderr)
     return out
 
 
