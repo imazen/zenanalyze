@@ -39,6 +39,7 @@ use archmage::{incant, magetypes};
 //   keeps zenanalyze unsafe-free (`unsafe_code = "forbid"`); the
 //   raw intrinsics live behind garb's safe wrappers.
 mod deinterleave_dispatch {
+    #[cfg(target_arch = "x86_64")]
     use archmage::arcane;
 
     /// Sealed trait — implemented for every token magetypes might hand
@@ -617,6 +618,20 @@ pub(crate) fn extract_tier1_into_dispatch(
         const MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE: u64 = 1024;
         let total: u64 = stats.laplacian_histogram.iter().map(|&c| c as u64).sum();
         if total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE {
+            out.laplacian_variance_p15 = f32::NAN;
+            out.laplacian_variance_p20 = f32::NAN;
+            out.laplacian_variance_p25 = f32::NAN;
+            out.laplacian_variance_p30 = f32::NAN;
+            out.laplacian_variance_p35 = f32::NAN;
+            out.laplacian_variance_p40 = f32::NAN;
+            out.laplacian_variance_p45 = f32::NAN;
+            out.laplacian_variance_p55 = f32::NAN;
+            out.laplacian_variance_p60 = f32::NAN;
+            out.laplacian_variance_p65 = f32::NAN;
+            out.laplacian_variance_p70 = f32::NAN;
+            out.laplacian_variance_p80 = f32::NAN;
+            out.laplacian_variance_p85 = f32::NAN;
+            out.laplacian_variance_p95 = f32::NAN;
             out.laplacian_variance_p50 = f32::NAN;
             out.laplacian_variance_p75 = f32::NAN;
             out.laplacian_variance_p90 = f32::NAN;
@@ -631,6 +646,20 @@ pub(crate) fn extract_tier1_into_dispatch(
             let mut p75: u32 = 0;
             let mut p90: u32 = 0;
             let mut p99: u32 = 0;
+            let mut p15: u32 = 0;
+            let mut p20: u32 = 0;
+            let mut p25: u32 = 0;
+            let mut p30: u32 = 0;
+            let mut p35: u32 = 0;
+            let mut p40: u32 = 0;
+            let mut p45: u32 = 0;
+            let mut p55: u32 = 0;
+            let mut p60: u32 = 0;
+            let mut p65: u32 = 0;
+            let mut p70: u32 = 0;
+            let mut p80: u32 = 0;
+            let mut p85: u32 = 0;
+            let mut p95: u32 = 0;
             let mut peak: u32 = 0;
             let t1 = ((total as f64) * 0.01) as u64;
             let t5 = ((total as f64) * 0.05) as u64;
@@ -639,6 +668,20 @@ pub(crate) fn extract_tier1_into_dispatch(
             let t75 = ((total as f64) * 0.75) as u64;
             let t90 = ((total as f64) * 0.90) as u64;
             let t99 = ((total as f64) * 0.99) as u64;
+            let t15 = ((total as f64) * 0.15) as u64;
+            let t20 = ((total as f64) * 0.20) as u64;
+            let t25 = ((total as f64) * 0.25) as u64;
+            let t30 = ((total as f64) * 0.30) as u64;
+            let t35 = ((total as f64) * 0.35) as u64;
+            let t40 = ((total as f64) * 0.40) as u64;
+            let t45 = ((total as f64) * 0.45) as u64;
+            let t55 = ((total as f64) * 0.55) as u64;
+            let t60 = ((total as f64) * 0.60) as u64;
+            let t65 = ((total as f64) * 0.65) as u64;
+            let t70 = ((total as f64) * 0.70) as u64;
+            let t80 = ((total as f64) * 0.80) as u64;
+            let t85 = ((total as f64) * 0.85) as u64;
+            let t95 = ((total as f64) * 0.95) as u64;
             let mut found_1 = false;
             let mut found_5 = false;
             let mut found_10 = false;
@@ -646,6 +689,20 @@ pub(crate) fn extract_tier1_into_dispatch(
             let mut found_75 = false;
             let mut found_90 = false;
             let mut found_99 = false;
+            let mut found_15 = false;
+            let mut found_20 = false;
+            let mut found_25 = false;
+            let mut found_30 = false;
+            let mut found_35 = false;
+            let mut found_40 = false;
+            let mut found_45 = false;
+            let mut found_55 = false;
+            let mut found_60 = false;
+            let mut found_65 = false;
+            let mut found_70 = false;
+            let mut found_80 = false;
+            let mut found_85 = false;
+            let mut found_95 = false;
             for (bin, &count) in stats.laplacian_histogram.iter().enumerate() {
                 if count > 0 {
                     peak = bin as u32;
@@ -679,6 +736,62 @@ pub(crate) fn extract_tier1_into_dispatch(
                     p99 = bin as u32;
                     found_99 = true;
                 }
+                if !found_15 && acc >= t15 {
+                    p15 = bin as u32;
+                    found_15 = true;
+                }
+                if !found_20 && acc >= t20 {
+                    p20 = bin as u32;
+                    found_20 = true;
+                }
+                if !found_25 && acc >= t25 {
+                    p25 = bin as u32;
+                    found_25 = true;
+                }
+                if !found_30 && acc >= t30 {
+                    p30 = bin as u32;
+                    found_30 = true;
+                }
+                if !found_35 && acc >= t35 {
+                    p35 = bin as u32;
+                    found_35 = true;
+                }
+                if !found_40 && acc >= t40 {
+                    p40 = bin as u32;
+                    found_40 = true;
+                }
+                if !found_45 && acc >= t45 {
+                    p45 = bin as u32;
+                    found_45 = true;
+                }
+                if !found_55 && acc >= t55 {
+                    p55 = bin as u32;
+                    found_55 = true;
+                }
+                if !found_60 && acc >= t60 {
+                    p60 = bin as u32;
+                    found_60 = true;
+                }
+                if !found_65 && acc >= t65 {
+                    p65 = bin as u32;
+                    found_65 = true;
+                }
+                if !found_70 && acc >= t70 {
+                    p70 = bin as u32;
+                    found_70 = true;
+                }
+                if !found_80 && acc >= t80 {
+                    p80 = bin as u32;
+                    found_80 = true;
+                }
+                if !found_85 && acc >= t85 {
+                    p85 = bin as u32;
+                    found_85 = true;
+                }
+                if !found_95 && acc >= t95 {
+                    p95 = bin as u32;
+                    found_95 = true;
+                }
             }
             out.laplacian_variance_p1 = p1 as f32;
             out.laplacian_variance_p5 = p5 as f32;
@@ -688,6 +801,20 @@ pub(crate) fn extract_tier1_into_dispatch(
             out.laplacian_variance_p90 = p90 as f32;
             out.laplacian_variance_p99 = p99 as f32;
             out.laplacian_variance_peak = peak as f32;
+            out.laplacian_variance_p15 = p15 as f32;
+            out.laplacian_variance_p20 = p20 as f32;
+            out.laplacian_variance_p25 = p25 as f32;
+            out.laplacian_variance_p30 = p30 as f32;
+            out.laplacian_variance_p35 = p35 as f32;
+            out.laplacian_variance_p40 = p40 as f32;
+            out.laplacian_variance_p45 = p45 as f32;
+            out.laplacian_variance_p55 = p55 as f32;
+            out.laplacian_variance_p60 = p60 as f32;
+            out.laplacian_variance_p65 = p65 as f32;
+            out.laplacian_variance_p70 = p70 as f32;
+            out.laplacian_variance_p80 = p80 as f32;
+            out.laplacian_variance_p85 = p85 as f32;
+            out.laplacian_variance_p95 = p95 as f32;
         }
         // LumaKurtosis (#116): excess kurtosis of `|∇²L|` from the
         // 256-bin histogram. Centered on the histogram mean for

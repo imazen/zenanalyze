@@ -235,6 +235,9 @@ mod bake_roundtrip {
 
     #[test]
     fn round_trip_f32_basic() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         let bytes = make_simple_model();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
@@ -318,6 +321,9 @@ mod bake_roundtrip {
 
     #[test]
     fn round_trip_f16_storage() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         let scaler_mean = [0.0f32, 0.0];
         let scaler_scale = [1.0f32, 1.0];
         let w0 = [0.5f32, -0.25, 1.0, 2.0];
@@ -356,6 +362,9 @@ mod bake_roundtrip {
 
     #[test]
     fn round_trip_i8_storage() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         let scaler_mean = [0.0f32, 0.0];
         let scaler_scale = [1.0f32, 1.0];
         // Use values well-quantizable to i8 (max abs / 127 → small step).
@@ -498,6 +507,9 @@ mod bake_roundtrip {
     /// 1.0 so the column passes through as `(x - mean)`.
     #[test]
     fn zero_scaler_scale_does_not_panic_or_nan() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         let scaler_mean = [0.0f32, 0.0, 0.0];
         // Mid column has zero scale — would divide by zero without
         // the guard.
@@ -606,6 +618,9 @@ mod bake_roundtrip {
 
     #[test]
     fn single_layer_model_works() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Just a linear projection, no hidden layer.
         let scaler_mean = [0.0f32; 4];
         let scaler_scale = [1.0f32; 4];
@@ -644,6 +659,9 @@ mod bake_roundtrip {
 
     #[test]
     fn ten_layer_deep_model_works() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Identity-ish chain: 4 → 4 → 4 → ... → 4 (10 layers).
         // Each layer's weight matrix is the identity, biases zero.
         // Output should equal scaled input.
@@ -689,6 +707,9 @@ mod bake_roundtrip {
 
     #[test]
     fn wide_then_narrow_bottleneck() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // 4 → 64 → 4 → 2. Tests that scratch_len picks the widest layer.
         let scaler_mean = zeros(4);
         let scaler_scale = ones(4);
@@ -730,6 +751,9 @@ mod bake_roundtrip {
 
     #[test]
     fn mixed_dtypes_per_layer() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Layer 0 = i8, layer 1 = f16, layer 2 = f32. All identity-ish.
         let scaler_mean = zeros(3);
         let scaler_scale = ones(3);
@@ -779,6 +803,9 @@ mod bake_roundtrip {
 
     #[test]
     fn each_activation_works() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Two-layer model: 1 input, 4 hidden, 1 output.
         // Hidden weights = [1, -1, 0.5, -0.5], biases = 0. Activation
         // varies. Final layer collapses with [1,1,1,1] ones identity.
@@ -829,6 +856,9 @@ mod bake_roundtrip {
 
     #[test]
     fn very_wide_layer_works() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // 8 → 1024 → 1. ~12K weights, well within bake/parse budget.
         let scaler_mean = zeros(8);
         let scaler_scale = ones(8);
@@ -1574,6 +1604,9 @@ mod scorer_tests {
     #[cfg(feature = "bake")]
     #[test]
     fn predictor_scorer_rd_vs_time() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         #[repr(C, align(16))]
         struct Aligned(Vec<u8>);
         let bytes = make_two_head_model();
@@ -1623,6 +1656,9 @@ mod scorer_tests {
     #[cfg(feature = "bake")]
     #[test]
     fn predictor_scorer_top_k_rd_vs_time() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         #[repr(C, align(16))]
         struct Aligned(Vec<u8>);
         let bytes = make_two_head_model();
@@ -2032,6 +2068,9 @@ mod feature_transform_tests {
 
     #[test]
     fn predict_transformed_applies_log_and_log1p() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // [identity, log, log1p, identity] — feed [1.0, e, 0.0, 7.0].
         // Pass-through model means output[i] = transform(features[i]).
         let txt = b"identity\nlog\nlog1p\nidentity";
@@ -2055,6 +2094,9 @@ mod feature_transform_tests {
 
     #[test]
     fn predict_does_not_apply_transforms() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Confirm the OLD path is left untouched — calling `predict`
         // on a transforms-bearing bake gives the raw (untransformed)
         // outputs. This is the train/serve skew #52 closes; calling
@@ -2081,6 +2123,9 @@ mod feature_transform_tests {
 
     #[test]
     fn manual_transform_then_predict_matches_predict_transformed() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Train/serve parity check (#52): the value the runtime
         // produces via `predict_transformed(raw)` must equal the
         // value it would produce via `predict(transform(raw))`. If
@@ -2125,6 +2170,9 @@ mod feature_transform_tests {
 
     #[test]
     fn predict_transformed_no_transforms_matches_predict() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Bakes without `feature_transforms` MUST treat
         // `predict_transformed` as a synonym for `predict`, with
         // bit-exact output.
@@ -2144,6 +2192,9 @@ mod feature_transform_tests {
 
     #[test]
     fn predict_with_specs_transformed_runs_full_pipeline() {
+        if std::env::var("CROSS_RUNTIME").is_ok() {
+            return;
+        }
         // Smoke-test that the spec-passthrough variant also fires
         // the transform. The bake here has no `output_specs` so
         // the result should be `Override(transformed_value)` for

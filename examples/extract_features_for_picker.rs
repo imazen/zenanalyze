@@ -262,7 +262,7 @@ fn main() -> ExitCode {
     let mut total_failed = 0usize;
 
     for (idx, entry) in manifest.iter().enumerate() {
-        let dyn_img = match ImageReader::open(&entry.path).and_then(|r| Ok(r.decode())) {
+        let dyn_img = match ImageReader::open(&entry.path).map(|r| r.decode()) {
             Ok(Ok(img)) => img,
             _ => {
                 eprintln!("skip (decode fail): {}", entry.path.display());

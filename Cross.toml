@@ -1,0 +1,6 @@
+[build.env]
+# Pass CROSS_RUNTIME into the QEMU container so that tests can detect
+# emulated execution and apply the loose 10 s timing threshold.
+# Without this, aarch64 (64-bit, no pointer-width fallback) uses the
+# 3 s native threshold and fails on QEMU.
+passthrough = ["CROSS_RUNTIME"]

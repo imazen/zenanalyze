@@ -1120,6 +1120,296 @@ features_table! {
     /// That id is reserved retired.
     #[cfg(feature = "experimental")]
     PaletteLog2Size = 121 : u32 => palette_log2_size,
+
+    // ---------------- Dense percentile sweep (2026-05-07) ------------
+    // 5-percentile-step grid filling gaps in the existing p25/50/75/90/95/99
+    // grid for: LaplacianVariance, AqMap, NoiseFloorY/Uv, QuantSurvivalY/Uv.
+    // IDs 122-211 (additive, experimental gate). Purpose: ablation via
+    // `feature_ablation.py --method permutation` to find the minimal
+    // percentile set capturing >= 95% of cumulative importance.
+    // See `benchmarks/dense_percentile_sweep_2026-05-07.md`.
+
+    // --- LaplacianVariance dense percentiles (122-135) ---
+    /// `f32`. LaplacianVariance p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP15 = 122 : f32 => laplacian_variance_p15,
+    /// `f32`. LaplacianVariance p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP20 = 123 : f32 => laplacian_variance_p20,
+    /// `f32`. LaplacianVariance p25 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP25 = 124 : f32 => laplacian_variance_p25,
+    /// `f32`. LaplacianVariance p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP30 = 125 : f32 => laplacian_variance_p30,
+    /// `f32`. LaplacianVariance p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP35 = 126 : f32 => laplacian_variance_p35,
+    /// `f32`. LaplacianVariance p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP40 = 127 : f32 => laplacian_variance_p40,
+    /// `f32`. LaplacianVariance p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP45 = 128 : f32 => laplacian_variance_p45,
+    /// `f32`. LaplacianVariance p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP55 = 129 : f32 => laplacian_variance_p55,
+    /// `f32`. LaplacianVariance p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP60 = 130 : f32 => laplacian_variance_p60,
+    /// `f32`. LaplacianVariance p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP65 = 131 : f32 => laplacian_variance_p65,
+    /// `f32`. LaplacianVariance p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP70 = 132 : f32 => laplacian_variance_p70,
+    /// `f32`. LaplacianVariance p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP80 = 133 : f32 => laplacian_variance_p80,
+    /// `f32`. LaplacianVariance p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP85 = 134 : f32 => laplacian_variance_p85,
+    /// `f32`. LaplacianVariance p95 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    LaplacianVarianceP95 = 135 : f32 => laplacian_variance_p95,
+
+    // --- AqMap dense percentiles (136-148) ---
+    /// `f32`. AqMap p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP15 = 136 : f32 => aq_map_p15,
+    /// `f32`. AqMap p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP20 = 137 : f32 => aq_map_p20,
+    /// `f32`. AqMap p25 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP25 = 138 : f32 => aq_map_p25,
+    /// `f32`. AqMap p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP30 = 139 : f32 => aq_map_p30,
+    /// `f32`. AqMap p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP35 = 140 : f32 => aq_map_p35,
+    /// `f32`. AqMap p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP40 = 141 : f32 => aq_map_p40,
+    /// `f32`. AqMap p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP45 = 142 : f32 => aq_map_p45,
+    /// `f32`. AqMap p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP55 = 143 : f32 => aq_map_p55,
+    /// `f32`. AqMap p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP60 = 144 : f32 => aq_map_p60,
+    /// `f32`. AqMap p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP65 = 145 : f32 => aq_map_p65,
+    /// `f32`. AqMap p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP70 = 146 : f32 => aq_map_p70,
+    /// `f32`. AqMap p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP80 = 147 : f32 => aq_map_p80,
+    /// `f32`. AqMap p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    AqMapP85 = 148 : f32 => aq_map_p85,
+
+    // --- NoiseFloorY dense percentiles (149-162) ---
+    /// `f32`. NoiseFloorY p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP15 = 149 : f32 => noise_floor_y_p15,
+    /// `f32`. NoiseFloorY p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP20 = 150 : f32 => noise_floor_y_p20,
+    /// `f32`. NoiseFloorY p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP30 = 151 : f32 => noise_floor_y_p30,
+    /// `f32`. NoiseFloorY p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP35 = 152 : f32 => noise_floor_y_p35,
+    /// `f32`. NoiseFloorY p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP40 = 153 : f32 => noise_floor_y_p40,
+    /// `f32`. NoiseFloorY p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP45 = 154 : f32 => noise_floor_y_p45,
+    /// `f32`. NoiseFloorY p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP55 = 155 : f32 => noise_floor_y_p55,
+    /// `f32`. NoiseFloorY p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP60 = 156 : f32 => noise_floor_y_p60,
+    /// `f32`. NoiseFloorY p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP65 = 157 : f32 => noise_floor_y_p65,
+    /// `f32`. NoiseFloorY p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP70 = 158 : f32 => noise_floor_y_p70,
+    /// `f32`. NoiseFloorY p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP80 = 159 : f32 => noise_floor_y_p80,
+    /// `f32`. NoiseFloorY p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP85 = 160 : f32 => noise_floor_y_p85,
+    /// `f32`. NoiseFloorY p95 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP95 = 161 : f32 => noise_floor_y_p95,
+    /// `f32`. NoiseFloorY p99 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorYP99 = 162 : f32 => noise_floor_y_p99,
+
+    // --- NoiseFloorUv dense percentiles (163-179) ---
+    /// `f32`. NoiseFloorUv p1 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP1 = 163 : f32 => noise_floor_uv_p1,
+    /// `f32`. NoiseFloorUv p5 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP5 = 164 : f32 => noise_floor_uv_p5,
+    /// `f32`. NoiseFloorUv p10 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP10 = 165 : f32 => noise_floor_uv_p10,
+    /// `f32`. NoiseFloorUv p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP15 = 166 : f32 => noise_floor_uv_p15,
+    /// `f32`. NoiseFloorUv p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP20 = 167 : f32 => noise_floor_uv_p20,
+    /// `f32`. NoiseFloorUv p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP30 = 168 : f32 => noise_floor_uv_p30,
+    /// `f32`. NoiseFloorUv p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP35 = 169 : f32 => noise_floor_uv_p35,
+    /// `f32`. NoiseFloorUv p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP40 = 170 : f32 => noise_floor_uv_p40,
+    /// `f32`. NoiseFloorUv p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP45 = 171 : f32 => noise_floor_uv_p45,
+    /// `f32`. NoiseFloorUv p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP55 = 172 : f32 => noise_floor_uv_p55,
+    /// `f32`. NoiseFloorUv p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP60 = 173 : f32 => noise_floor_uv_p60,
+    /// `f32`. NoiseFloorUv p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP65 = 174 : f32 => noise_floor_uv_p65,
+    /// `f32`. NoiseFloorUv p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP70 = 175 : f32 => noise_floor_uv_p70,
+    /// `f32`. NoiseFloorUv p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP80 = 176 : f32 => noise_floor_uv_p80,
+    /// `f32`. NoiseFloorUv p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP85 = 177 : f32 => noise_floor_uv_p85,
+    /// `f32`. NoiseFloorUv p95 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP95 = 178 : f32 => noise_floor_uv_p95,
+    /// `f32`. NoiseFloorUv p99 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    NoiseFloorUvP99 = 179 : f32 => noise_floor_uv_p99,
+
+    // --- QuantSurvivalY dense percentiles (180-194) ---
+    /// `f32`. QuantSurvivalY p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP15 = 180 : f32 => quant_survival_y_p15,
+    /// `f32`. QuantSurvivalY p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP20 = 181 : f32 => quant_survival_y_p20,
+    /// `f32`. QuantSurvivalY p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP30 = 182 : f32 => quant_survival_y_p30,
+    /// `f32`. QuantSurvivalY p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP35 = 183 : f32 => quant_survival_y_p35,
+    /// `f32`. QuantSurvivalY p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP40 = 184 : f32 => quant_survival_y_p40,
+    /// `f32`. QuantSurvivalY p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP45 = 185 : f32 => quant_survival_y_p45,
+    /// `f32`. QuantSurvivalY p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP55 = 186 : f32 => quant_survival_y_p55,
+    /// `f32`. QuantSurvivalY p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP60 = 187 : f32 => quant_survival_y_p60,
+    /// `f32`. QuantSurvivalY p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP65 = 188 : f32 => quant_survival_y_p65,
+    /// `f32`. QuantSurvivalY p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP70 = 189 : f32 => quant_survival_y_p70,
+    /// `f32`. QuantSurvivalY p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP80 = 190 : f32 => quant_survival_y_p80,
+    /// `f32`. QuantSurvivalY p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP85 = 191 : f32 => quant_survival_y_p85,
+    /// `f32`. QuantSurvivalY p90 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP90 = 192 : f32 => quant_survival_y_p90,
+    /// `f32`. QuantSurvivalY p95 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP95 = 193 : f32 => quant_survival_y_p95,
+    /// `f32`. QuantSurvivalY p99 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalYP99 = 194 : f32 => quant_survival_y_p99,
+
+    // --- QuantSurvivalUv dense percentiles (195-211) ---
+    /// `f32`. QuantSurvivalUv p1 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP1 = 195 : f32 => quant_survival_uv_p1,
+    /// `f32`. QuantSurvivalUv p5 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP5 = 196 : f32 => quant_survival_uv_p5,
+    /// `f32`. QuantSurvivalUv p15 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP15 = 197 : f32 => quant_survival_uv_p15,
+    /// `f32`. QuantSurvivalUv p20 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP20 = 198 : f32 => quant_survival_uv_p20,
+    /// `f32`. QuantSurvivalUv p30 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP30 = 199 : f32 => quant_survival_uv_p30,
+    /// `f32`. QuantSurvivalUv p35 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP35 = 200 : f32 => quant_survival_uv_p35,
+    /// `f32`. QuantSurvivalUv p40 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP40 = 201 : f32 => quant_survival_uv_p40,
+    /// `f32`. QuantSurvivalUv p45 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP45 = 202 : f32 => quant_survival_uv_p45,
+    /// `f32`. QuantSurvivalUv p55 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP55 = 203 : f32 => quant_survival_uv_p55,
+    /// `f32`. QuantSurvivalUv p60 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP60 = 204 : f32 => quant_survival_uv_p60,
+    /// `f32`. QuantSurvivalUv p65 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP65 = 205 : f32 => quant_survival_uv_p65,
+    /// `f32`. QuantSurvivalUv p70 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP70 = 206 : f32 => quant_survival_uv_p70,
+    /// `f32`. QuantSurvivalUv p80 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP80 = 207 : f32 => quant_survival_uv_p80,
+    /// `f32`. QuantSurvivalUv p85 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP85 = 208 : f32 => quant_survival_uv_p85,
+    /// `f32`. QuantSurvivalUv p90 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP90 = 209 : f32 => quant_survival_uv_p90,
+    /// `f32`. QuantSurvivalUv p95 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP95 = 210 : f32 => quant_survival_uv_p95,
+    /// `f32`. QuantSurvivalUv p99 -- dense-sweep variant.
+    #[cfg(feature = "experimental")]
+    QuantSurvivalUvP99 = 211 : f32 => quant_survival_uv_p99,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1633,6 +1923,91 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP25);
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
+        // Dense sweep variants (IDs 136-211) — same per-block buffers.
+        s = s.with(AnalysisFeature::AqMapP1);
+        s = s.with(AnalysisFeature::AqMapP5);
+        s = s.with(AnalysisFeature::AqMapP10);
+        s = s.with(AnalysisFeature::AqMapP15);
+        s = s.with(AnalysisFeature::AqMapP20);
+        s = s.with(AnalysisFeature::AqMapP25);
+        s = s.with(AnalysisFeature::AqMapP30);
+        s = s.with(AnalysisFeature::AqMapP35);
+        s = s.with(AnalysisFeature::AqMapP40);
+        s = s.with(AnalysisFeature::AqMapP45);
+        s = s.with(AnalysisFeature::AqMapP55);
+        s = s.with(AnalysisFeature::AqMapP60);
+        s = s.with(AnalysisFeature::AqMapP65);
+        s = s.with(AnalysisFeature::AqMapP70);
+        s = s.with(AnalysisFeature::AqMapP80);
+        s = s.with(AnalysisFeature::AqMapP85);
+        s = s.with(AnalysisFeature::NoiseFloorYP1);
+        s = s.with(AnalysisFeature::NoiseFloorYP5);
+        s = s.with(AnalysisFeature::NoiseFloorYP10);
+        s = s.with(AnalysisFeature::NoiseFloorYP15);
+        s = s.with(AnalysisFeature::NoiseFloorYP20);
+        s = s.with(AnalysisFeature::NoiseFloorYP30);
+        s = s.with(AnalysisFeature::NoiseFloorYP35);
+        s = s.with(AnalysisFeature::NoiseFloorYP40);
+        s = s.with(AnalysisFeature::NoiseFloorYP45);
+        s = s.with(AnalysisFeature::NoiseFloorYP55);
+        s = s.with(AnalysisFeature::NoiseFloorYP60);
+        s = s.with(AnalysisFeature::NoiseFloorYP65);
+        s = s.with(AnalysisFeature::NoiseFloorYP70);
+        s = s.with(AnalysisFeature::NoiseFloorYP80);
+        s = s.with(AnalysisFeature::NoiseFloorYP85);
+        s = s.with(AnalysisFeature::NoiseFloorYP95);
+        s = s.with(AnalysisFeature::NoiseFloorYP99);
+        s = s.with(AnalysisFeature::NoiseFloorUvP1);
+        s = s.with(AnalysisFeature::NoiseFloorUvP5);
+        s = s.with(AnalysisFeature::NoiseFloorUvP10);
+        s = s.with(AnalysisFeature::NoiseFloorUvP15);
+        s = s.with(AnalysisFeature::NoiseFloorUvP20);
+        s = s.with(AnalysisFeature::NoiseFloorUvP30);
+        s = s.with(AnalysisFeature::NoiseFloorUvP35);
+        s = s.with(AnalysisFeature::NoiseFloorUvP40);
+        s = s.with(AnalysisFeature::NoiseFloorUvP45);
+        s = s.with(AnalysisFeature::NoiseFloorUvP55);
+        s = s.with(AnalysisFeature::NoiseFloorUvP60);
+        s = s.with(AnalysisFeature::NoiseFloorUvP65);
+        s = s.with(AnalysisFeature::NoiseFloorUvP70);
+        s = s.with(AnalysisFeature::NoiseFloorUvP80);
+        s = s.with(AnalysisFeature::NoiseFloorUvP85);
+        s = s.with(AnalysisFeature::NoiseFloorUvP95);
+        s = s.with(AnalysisFeature::NoiseFloorUvP99);
+        s = s.with(AnalysisFeature::QuantSurvivalYP1);
+        s = s.with(AnalysisFeature::QuantSurvivalYP5);
+        s = s.with(AnalysisFeature::QuantSurvivalYP15);
+        s = s.with(AnalysisFeature::QuantSurvivalYP20);
+        s = s.with(AnalysisFeature::QuantSurvivalYP30);
+        s = s.with(AnalysisFeature::QuantSurvivalYP35);
+        s = s.with(AnalysisFeature::QuantSurvivalYP40);
+        s = s.with(AnalysisFeature::QuantSurvivalYP45);
+        s = s.with(AnalysisFeature::QuantSurvivalYP55);
+        s = s.with(AnalysisFeature::QuantSurvivalYP60);
+        s = s.with(AnalysisFeature::QuantSurvivalYP65);
+        s = s.with(AnalysisFeature::QuantSurvivalYP70);
+        s = s.with(AnalysisFeature::QuantSurvivalYP80);
+        s = s.with(AnalysisFeature::QuantSurvivalYP85);
+        s = s.with(AnalysisFeature::QuantSurvivalYP90);
+        s = s.with(AnalysisFeature::QuantSurvivalYP95);
+        s = s.with(AnalysisFeature::QuantSurvivalYP99);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP1);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP5);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP15);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP20);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP30);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP35);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP40);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP45);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP55);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP60);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP65);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP70);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP80);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP85);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP90);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP95);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP99);
     }
     s
 };
@@ -1689,6 +2064,91 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP25);
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
+        // Dense sweep variants (IDs 136-211) — same per-block buffers.
+        s = s.with(AnalysisFeature::AqMapP1);
+        s = s.with(AnalysisFeature::AqMapP5);
+        s = s.with(AnalysisFeature::AqMapP10);
+        s = s.with(AnalysisFeature::AqMapP15);
+        s = s.with(AnalysisFeature::AqMapP20);
+        s = s.with(AnalysisFeature::AqMapP25);
+        s = s.with(AnalysisFeature::AqMapP30);
+        s = s.with(AnalysisFeature::AqMapP35);
+        s = s.with(AnalysisFeature::AqMapP40);
+        s = s.with(AnalysisFeature::AqMapP45);
+        s = s.with(AnalysisFeature::AqMapP55);
+        s = s.with(AnalysisFeature::AqMapP60);
+        s = s.with(AnalysisFeature::AqMapP65);
+        s = s.with(AnalysisFeature::AqMapP70);
+        s = s.with(AnalysisFeature::AqMapP80);
+        s = s.with(AnalysisFeature::AqMapP85);
+        s = s.with(AnalysisFeature::NoiseFloorYP1);
+        s = s.with(AnalysisFeature::NoiseFloorYP5);
+        s = s.with(AnalysisFeature::NoiseFloorYP10);
+        s = s.with(AnalysisFeature::NoiseFloorYP15);
+        s = s.with(AnalysisFeature::NoiseFloorYP20);
+        s = s.with(AnalysisFeature::NoiseFloorYP30);
+        s = s.with(AnalysisFeature::NoiseFloorYP35);
+        s = s.with(AnalysisFeature::NoiseFloorYP40);
+        s = s.with(AnalysisFeature::NoiseFloorYP45);
+        s = s.with(AnalysisFeature::NoiseFloorYP55);
+        s = s.with(AnalysisFeature::NoiseFloorYP60);
+        s = s.with(AnalysisFeature::NoiseFloorYP65);
+        s = s.with(AnalysisFeature::NoiseFloorYP70);
+        s = s.with(AnalysisFeature::NoiseFloorYP80);
+        s = s.with(AnalysisFeature::NoiseFloorYP85);
+        s = s.with(AnalysisFeature::NoiseFloorYP95);
+        s = s.with(AnalysisFeature::NoiseFloorYP99);
+        s = s.with(AnalysisFeature::NoiseFloorUvP1);
+        s = s.with(AnalysisFeature::NoiseFloorUvP5);
+        s = s.with(AnalysisFeature::NoiseFloorUvP10);
+        s = s.with(AnalysisFeature::NoiseFloorUvP15);
+        s = s.with(AnalysisFeature::NoiseFloorUvP20);
+        s = s.with(AnalysisFeature::NoiseFloorUvP30);
+        s = s.with(AnalysisFeature::NoiseFloorUvP35);
+        s = s.with(AnalysisFeature::NoiseFloorUvP40);
+        s = s.with(AnalysisFeature::NoiseFloorUvP45);
+        s = s.with(AnalysisFeature::NoiseFloorUvP55);
+        s = s.with(AnalysisFeature::NoiseFloorUvP60);
+        s = s.with(AnalysisFeature::NoiseFloorUvP65);
+        s = s.with(AnalysisFeature::NoiseFloorUvP70);
+        s = s.with(AnalysisFeature::NoiseFloorUvP80);
+        s = s.with(AnalysisFeature::NoiseFloorUvP85);
+        s = s.with(AnalysisFeature::NoiseFloorUvP95);
+        s = s.with(AnalysisFeature::NoiseFloorUvP99);
+        s = s.with(AnalysisFeature::QuantSurvivalYP1);
+        s = s.with(AnalysisFeature::QuantSurvivalYP5);
+        s = s.with(AnalysisFeature::QuantSurvivalYP15);
+        s = s.with(AnalysisFeature::QuantSurvivalYP20);
+        s = s.with(AnalysisFeature::QuantSurvivalYP30);
+        s = s.with(AnalysisFeature::QuantSurvivalYP35);
+        s = s.with(AnalysisFeature::QuantSurvivalYP40);
+        s = s.with(AnalysisFeature::QuantSurvivalYP45);
+        s = s.with(AnalysisFeature::QuantSurvivalYP55);
+        s = s.with(AnalysisFeature::QuantSurvivalYP60);
+        s = s.with(AnalysisFeature::QuantSurvivalYP65);
+        s = s.with(AnalysisFeature::QuantSurvivalYP70);
+        s = s.with(AnalysisFeature::QuantSurvivalYP80);
+        s = s.with(AnalysisFeature::QuantSurvivalYP85);
+        s = s.with(AnalysisFeature::QuantSurvivalYP90);
+        s = s.with(AnalysisFeature::QuantSurvivalYP95);
+        s = s.with(AnalysisFeature::QuantSurvivalYP99);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP1);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP5);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP15);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP20);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP30);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP35);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP40);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP45);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP55);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP60);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP65);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP70);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP80);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP85);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP90);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP95);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP99);
     }
     s
 };
@@ -2126,9 +2586,11 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the palette redefinition (id 121
-        // is now `PaletteLog2Size`).
+        // ID 122 is `LaplacianVarianceP15` when experimental is enabled.
+        #[cfg(not(feature = "experimental"))]
         assert!(AnalysisFeature::from_u16(122).is_none());
+        #[cfg(feature = "experimental")]
+        assert!(AnalysisFeature::from_u16(122).is_some());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -2188,7 +2650,7 @@ mod tests {
         // the upper bound when new ids land — `assert_eq!` below
         // catches drift between SUPPORTED.len() and this loop's
         // walked range.
-        for id in 0..128u16 {
+        for id in 0..256u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }
