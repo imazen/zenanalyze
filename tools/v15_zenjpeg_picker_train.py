@@ -63,7 +63,15 @@ import torch.nn.functional as F
 # Config
 
 DATA_DIR = Path("/tmp/v15-prep/data/zenjpeg")
-FEATURES_TSV = Path("/tmp/v15-prep/features_v15.tsv")
+FEATURES_TSV = Path("/tmp/v15-prep/features_v15_combined.tsv")
+# 5 OpenAI-tagged content classes from the v15 curated manifest.
+CCLASSES = [
+    "illustration_or_logo",
+    "illustration_or_screen",
+    "photo_natural_or_detailed",
+    "photo_or_illustration",
+    "photo_wide_gamut",
+]
 JOINED_CACHE = Path("/tmp/v15-prep/zenjpeg_joined.parquet")
 OUT_JSON = Path(
     sys.argv[1] if len(sys.argv) > 1 else "/tmp/v15-prep/v15_zenjpeg_picker_model.json"
@@ -120,13 +128,18 @@ DEFAULT_KNOB = {
 # ---------------------------------------------------------------------------
 # Loaders
 
-def load_features() -> dict[str, list[float]]:
-    """Read zenanalyze named-features TSV. Key is basename(image_path)."""
+def load_features() -> tuple[dict[str, list[float]], dict[str, str]]:
+    """Read zenanalyze features TSV → (feats, cclass).
+
+    Key is basename(image_path), with extension-fallback (.gif↔.png) since
+    failing-to-decode gifs were converted to PNGs and re-extracted with .png
+    basenames. The sweep TSV uses the original .gif basename, so we register
+    feature rows under both extensions when applicable.
+    """
     feats: dict[str, list[float]] = {}
+    cclass: dict[str, str] = {}
     with open(FEATURES_TSV) as f:
         rdr = csv.DictReader(f, delimiter="\t")
-        # Accept either bare named cols or `feat_<name>` prefixed cols
-        # (extract_features_for_picker uses `feat_<name>` schema).
         for r in rdr:
             try:
                 vec = [
@@ -139,9 +152,19 @@ def load_features() -> dict[str, list[float]]:
             if not stem:
                 continue
             stem = Path(stem).name
+            cls = r.get("content_class", "")
             feats[stem] = vec
+            cclass[stem] = cls
+            # Extension fallback: register .png feature rows for gif-static
+            # entries under their original .gif basename (sweep TSV uses .gif).
+            if stem.endswith(".png"):
+                gif_stem = stem[: -4] + ".gif"
+                feats[gif_stem] = vec
+                cclass[gif_stem] = cls
     print(f"[features] loaded {len(feats)} stems × {len(NAMED_FEATS)} feats", file=sys.stderr)
-    return feats
+    cls_counts = Counter(cclass.values())
+    print(f"[features] cclass: {dict(cls_counts)}", file=sys.stderr)
+    return feats, cclass
 
 
 def parse_knob_json(s: str) -> dict:
@@ -302,9 +325,10 @@ def main() -> int:
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    feats = load_features()
+    feats, cclass = load_features()
     sweep = load_sweep_tsvs()
     labels = build_labels(sweep, feats)
+    labels["cclass"] = labels["image"].map(cclass).fillna("unknown")
 
     # Image-disjoint split.
     images = sorted(labels["image"].unique())
@@ -315,13 +339,19 @@ def main() -> int:
     print(f"[split] {len(train_images)} train / {len(test_images)} test images (image-disjoint, seed={SEED})", file=sys.stderr)
 
     # Build features matrix per (image, band).
+    # Layout: [14 named feats] + [5 cclass one-hot] + [4 target-band one-hot]
     band_to_idx = {b: i for i, b in enumerate(BANDS)}
+    cclass_to_idx = {c: i for i, c in enumerate(CCLASSES)}
+
     def row_features(r) -> list[float]:
         f = list(feats[r["image"]])
-        # Append target-band one-hot (so the same MLP serves all bands).
-        oh = [0.0] * len(BANDS)
-        oh[band_to_idx[r["band"]]] = 1.0
-        return f + oh
+        cls_oh = [0.0] * len(CCLASSES)
+        ci = cclass_to_idx.get(r["cclass"])
+        if ci is not None:
+            cls_oh[ci] = 1.0
+        band_oh = [0.0] * len(BANDS)
+        band_oh[band_to_idx[r["band"]]] = 1.0
+        return f + cls_oh + band_oh
 
     labels["feat_vec"] = labels.apply(row_features, axis=1)
 
@@ -329,7 +359,7 @@ def main() -> int:
     test_df = labels[labels["image"].isin(test_images)].copy()
     print(f"[split] {len(train_df):,} train cells / {len(test_df):,} test cells", file=sys.stderr)
 
-    n_in = len(NAMED_FEATS) + len(BANDS)
+    n_in = len(NAMED_FEATS) + len(CCLASSES) + len(BANDS)
     X_tr = torch.tensor(np.stack(train_df["feat_vec"].values), dtype=torch.float32)
     X_te = torch.tensor(np.stack(test_df["feat_vec"].values), dtype=torch.float32)
     Y_tr = {
@@ -396,6 +426,11 @@ def main() -> int:
     n_eval = 0
     n_no_def = 0
     n_no_pred = 0
+    # Per-(cclass, band) bytes accumulators for slicing.
+    slice_pred = defaultdict(int)
+    slice_def = defaultdict(int)
+    slice_oracle = defaultdict(int)
+    slice_n = defaultdict(int)
     for i, (_, r) in enumerate(test_df.iterrows()):
         knob_pred = {
             an: AXIS_VALUES[k][int(preds_per_axis[k][i])]
@@ -408,29 +443,48 @@ def main() -> int:
             n_no_def += 1
             continue
         if b_pred is None:
-            # Predicted config doesn't reach the band → fall back to next q
-            # at the predicted knob (already covered by lookup_predicted_bytes
-            # returning None). Penalize: treat as default bytes (i.e. the
-            # picker effectively gives up to default).
+            # Predicted config doesn't reach the band → caller would have to
+            # bump q on the predicted knob until it does, or fall back to
+            # default. Charge the default bytes (no-improvement penalty).
             n_no_pred += 1
             b_pred = b_def
         total_pred_bytes += b_pred
         total_def_bytes += b_def
         total_oracle_bytes += b_oracle
         n_eval += 1
+        slice_pred[(r["cclass"], r["band"])] += b_pred
+        slice_def[(r["cclass"], r["band"])] += b_def
+        slice_oracle[(r["cclass"], r["band"])] += b_oracle
+        slice_n[(r["cclass"], r["band"])] += 1
+        slice_pred[("ALL", r["band"])] += b_pred
+        slice_def[("ALL", r["band"])] += b_def
+        slice_oracle[("ALL", r["band"])] += b_oracle
+        slice_n[("ALL", r["band"])] += 1
+        slice_pred[(r["cclass"], "ALL")] += b_pred
+        slice_def[(r["cclass"], "ALL")] += b_def
+        slice_oracle[(r["cclass"], "ALL")] += b_oracle
+        slice_n[(r["cclass"], "ALL")] += 1
     delta_pred = (total_pred_bytes / total_def_bytes - 1.0) * 100.0
     delta_oracle = (total_oracle_bytes / total_def_bytes - 1.0) * 100.0
     print(f"[holdout] n_eval={n_eval} (skipped {n_no_def} no-default-in-band, {n_no_pred} predicted-knob-out-of-band)", file=sys.stderr)
-    print(f"[holdout] bytes Δ vs default-knob baseline:", file=sys.stderr)
+    print(f"[holdout] bytes Δ vs default-knob baseline (overall):", file=sys.stderr)
     print(f"          predicted: {delta_pred:+.2f}%", file=sys.stderr)
     print(f"          oracle:    {delta_oracle:+.2f}%   (floor)", file=sys.stderr)
+    print(f"[holdout] slice (cclass × band): bytes Δ% pred / oracle  (n cells)", file=sys.stderr)
+    keys = sorted(slice_n.keys(), key=lambda k: (k[0] != "ALL", str(k[0]), str(k[1])))
+    for k in keys:
+        if slice_def[k] == 0:
+            continue
+        dp = (slice_pred[k] / slice_def[k] - 1.0) * 100.0
+        do = (slice_oracle[k] / slice_def[k] - 1.0) * 100.0
+        print(f"          {str(k[0]):28s} band={k[1]:>4}  pred={dp:+6.2f}%  oracle={do:+6.2f}%  n={slice_n[k]}", file=sys.stderr)
 
     # Emit model JSON for bake_picker.py.
     state = model.state_dict()
     model_json = {
         "schema": "zenpicker-multihead-v1",
         "knob_axes": [{"name": n, "values": [str(v).lower() if isinstance(v, bool) else v for v in vs]} for n, vs in AXES],
-        "input_features": NAMED_FEATS + [f"target_band_{b}" for b in BANDS],
+        "input_features": NAMED_FEATS + [f"cclass_{c}" for c in CCLASSES] + [f"target_band_{b}" for b in BANDS],
         "feature_means": mu.tolist(),
         "feature_stds": sd.tolist(),
         "activation": "leakyrelu",
