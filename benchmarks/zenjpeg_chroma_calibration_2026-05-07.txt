@@ -1,0 +1,112 @@
+zenjpeg chroma_distance_scale calibration (v15rc deep-dive sweep)
+Date: 2026-05-07
+Sweep: s3://zentrain/sweep-v15rc-2026-05-07/ (902/981 chunks landed; killed at 92%)
+Sources: 1024-px Lanczos3, 902 OpenAI-tagged web images
+Grid:
+  chroma_distance_scale: [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0]
+  subsampling: [444, 422, 420]
+  q: 5..95 step 5
+  all other knobs: jpegli defaults (progressive, AQ on, deringing on, effort=Balanced)
+Encoder default: chroma_distance_scale=1.0
+Total cells analyzed: 514,140
+
+========================================================================================
+Per (content class × subsampling × zensim band) recommended chroma_distance_scale
+(median across images; bytes saved vs encoder default chroma=1.0)
+========================================================================================
+
+class                         subs band  rec-chroma   bytes vs default     n
+----------------------------------------------------------------------------------------
+illustration_or_logo           420   70        0.80             -4.25%   146
+illustration_or_logo           420   75        0.90             -4.48%   146
+illustration_or_logo           420   80        0.80             -7.75%   144
+illustration_or_logo           420   85        1.20            -10.49%   135
+illustration_or_logo           422   70        0.50             -7.78%   148
+illustration_or_logo           422   75        0.50             -8.80%   147
+illustration_or_logo           422   80        0.50            -10.29%   145
+illustration_or_logo           422   85        0.70            -15.77%   142
+illustration_or_logo           444   70        0.70             -5.77%   149
+illustration_or_logo           444   75        0.70             -4.63%   149
+illustration_or_logo           444   80        0.70             -6.78%   149
+illustration_or_logo           444   85        0.80            -10.41%   148
+
+illustration_or_screen         420   70        0.80             -4.96%   263
+illustration_or_screen         420   75        0.90             -5.44%   253
+illustration_or_screen         420   80        0.80             -5.02%   222
+illustration_or_screen         420   85        1.00             -5.28%   189
+illustration_or_screen         422   70        0.60             -8.91%   271
+illustration_or_screen         422   75        0.60             -8.01%   263
+illustration_or_screen         422   80        0.60             -8.81%   248
+illustration_or_screen         422   85        0.60            -12.21%   208
+illustration_or_screen         444   70        0.70             -5.99%   277
+illustration_or_screen         444   75        0.80             -5.66%   277
+illustration_or_screen         444   80        0.70             -6.82%   277
+illustration_or_screen         444   85        0.70             -6.05%   275
+
+photo_natural_or_detailed      420   70        0.90             -2.79%   162
+photo_natural_or_detailed      420   75        0.80             -4.20%   162
+photo_natural_or_detailed      420   80        0.90             -4.32%   162
+photo_natural_or_detailed      420   85        0.80             -8.07%   159
+photo_natural_or_detailed      422   70        0.50             -4.63%   162
+photo_natural_or_detailed      422   75        0.60             -6.43%   162
+photo_natural_or_detailed      422   80        0.60             -8.35%   162
+photo_natural_or_detailed      422   85        0.60            -11.17%   162
+photo_natural_or_detailed      444   70        0.70             -4.31%   162
+photo_natural_or_detailed      444   75        0.70             -4.17%   162
+photo_natural_or_detailed      444   80        0.70             -4.77%   162
+photo_natural_or_detailed      444   85        0.80             -6.89%   162
+
+photo_or_illustration          420   70        0.70             -5.27%   236
+photo_or_illustration          420   75        0.80             -4.85%   228
+photo_or_illustration          420   80        0.80             -6.74%   212
+photo_or_illustration          420   85        1.00             -9.67%   181
+photo_or_illustration          422   70        0.60             -9.12%   238
+photo_or_illustration          422   75        0.50            -10.18%   236
+photo_or_illustration          422   80        0.50            -10.98%   225
+photo_or_illustration          422   85        0.60            -13.69%   201
+photo_or_illustration          444   70        0.70             -7.76%   240
+photo_or_illustration          444   75        0.70             -5.75%   240
+photo_or_illustration          444   80        0.70             -6.06%   240
+photo_or_illustration          444   85        0.70             -7.42%   240
+
+photo_wide_gamut               420   70        0.90             -3.99%    73
+photo_wide_gamut               420   75        0.90             -6.34%    73
+photo_wide_gamut               420   80        0.90             -6.40%    73
+photo_wide_gamut               420   85        0.95             -8.20%    68
+photo_wide_gamut               422   70        0.50             -9.36%    73
+photo_wide_gamut               422   75        0.60             -8.16%    73
+photo_wide_gamut               422   80        0.50             -8.81%    73
+photo_wide_gamut               422   85        0.60            -10.86%    72
+photo_wide_gamut               444   70        0.70             -5.55%    73
+photo_wide_gamut               444   75        0.70             -5.48%    73
+photo_wide_gamut               444   80        0.80             -6.25%    73
+photo_wide_gamut               444   85        0.70             -7.07%    73
+
+
+========================================================================================
+Production recommendations
+========================================================================================
+
+Default knob (encoder ships): chroma_distance_scale=1.0, subsampling=4:2:0
+
+Smart static defaults by content class (zero ML required):
+
+  Class                          → recommended (subsampling, chroma_scale)
+  illustration_or_logo           → (4:2:2, 0.5)  saves  9-15% across q-bands
+  illustration_or_screen         → (4:2:2, 0.6)  saves  8-12%
+  photo_natural_or_detailed      → (4:2:0, 0.85) saves  3-8%   [smallest gain]
+  photo_or_illustration          → (4:2:2, 0.5)  saves 10-13%
+  photo_wide_gamut               → (4:2:2, 0.55) saves  8-11%
+
+Notes:
+  - 4:2:2 + low chroma is the dominant pattern across non-natural classes.
+    Raising subsampling from 4:2:0 to 4:2:2 keeps full vertical chroma but
+    chroma_distance_scale absorbs the bytes back via aggressive chroma RD.
+  - photo_natural_or_detailed prefers 4:2:0 + slightly-reduced chroma. Photos
+    have smooth chroma gradients where 4:2:0 already does the right thing.
+  - illustration_or_logo at 4:2:2/q=85: -15.8% bytes — largest single-knob
+    win in the dataset. Sharp-edge content with crushed chroma is free.
+
+Per-image picker would refine further (continuous chroma instead of bin),
+but the static-default table above captures the bulk of the available bytes
+savings — directly deployable as content-classifier-gated encoder defaults.
