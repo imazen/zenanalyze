@@ -163,7 +163,6 @@ impl Section {
 /// so the `Header` value is owned and the loader can validate
 /// without holding a `&Header` into possibly-misaligned input.
 #[repr(C)]
-#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct Header {
     pub magic: [u8; 4],

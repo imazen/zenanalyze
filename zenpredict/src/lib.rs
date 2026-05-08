@@ -60,9 +60,18 @@
 //!     weights: &weights,
 //!     biases: &biases,
 //! }];
-//! let bytes = BakeRequest::builder(0, 0, &scaler_mean, &scaler_scale, &layers)
-//!     .bake()
-//!     .unwrap();
+//! let bytes = bake_v2(&BakeRequest {
+//!     schema_hash: 0,
+//!     flags: 0,
+//!     scaler_mean: &scaler_mean,
+//!     scaler_scale: &scaler_scale,
+//!     layers: &layers,
+//!     feature_bounds: &[],
+//!     metadata: &[],
+//!     output_specs: &[],
+//!     discrete_sets: &[],
+//!     sparse_overrides: &[],
+//! }).unwrap();
 //!
 //! // Load and predict. Real consumers wrap the bytes in
 //! // `#[repr(C, align(16))]` to guarantee zero-copy alignment;

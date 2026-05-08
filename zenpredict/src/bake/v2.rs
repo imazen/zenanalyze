@@ -14,7 +14,6 @@ use crate::output_spec::{OutputSpec, OutputTransform, SparseOverride};
 /// Errors raised by [`bake_v2`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
 /// issues.
-#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BakeError {
     EmptyLayers,
@@ -174,12 +173,7 @@ pub struct BakeMetadataEntry<'a> {
     pub value: &'a [u8],
 }
 
-/// All inputs to a v3 bake. Construct via field-by-field assignment
-/// on a [`BakeRequest::default`]-style helper if downstream needs
-/// forward compatibility — the struct is `#[non_exhaustive]` so
-/// future v3.x bakes can add optional sections without breaking
-/// callers.
-#[non_exhaustive]
+/// All inputs to a v3 bake.
 pub struct BakeRequest<'a> {
     pub schema_hash: u64,
     pub flags: u16,
@@ -202,120 +196,6 @@ pub struct BakeRequest<'a> {
     /// `value = f32::NAN` to force [`crate::OutputValue::Default`]
     /// for that output.
     pub sparse_overrides: &'a [SparseOverride],
-}
-
-impl<'a> BakeRequest<'a> {
-    /// Build a bake request with the v3 mandatory fields set and
-    /// every optional section empty (no feature bounds, no metadata,
-    /// no output specs, no discrete sets, no sparse overrides). Set
-    /// the optional fields by direct assignment after construction —
-    /// the struct is `#[non_exhaustive]`, which blocks struct-literal
-    /// construction outside this crate, but field assignment on a
-    /// `mut` binding works.
-    ///
-    /// Prefer [`Self::builder`] when chaining several optional
-    /// sections; it returns a fluent [`BakeRequestBuilder`] with one
-    /// setter per optional field.
-    pub fn new(
-        schema_hash: u64,
-        flags: u16,
-        scaler_mean: &'a [f32],
-        scaler_scale: &'a [f32],
-        layers: &'a [BakeLayer<'a>],
-    ) -> Self {
-        Self {
-            schema_hash,
-            flags,
-            scaler_mean,
-            scaler_scale,
-            layers,
-            feature_bounds: &[],
-            metadata: &[],
-            output_specs: &[],
-            discrete_sets: &[],
-            sparse_overrides: &[],
-        }
-    }
-
-    /// Start a fluent builder. The five required arguments mirror
-    /// [`Self::new`]; chain `.feature_bounds(...)`, `.metadata(...)`,
-    /// `.output_specs(...)`, `.discrete_sets(...)`,
-    /// `.sparse_overrides(...)` to populate optional sections, then
-    /// `.build()` to return the `BakeRequest` (or pass the builder
-    /// directly to [`bake_v2`] via `.bake()`).
-    ///
-    /// ```ignore
-    /// let bytes = BakeRequest::builder(0, 0, &mean, &scale, &layers)
-    ///     .metadata(&entries)
-    ///     .output_specs(&specs)
-    ///     .discrete_sets(&pool)
-    ///     .bake()?;
-    /// ```
-    pub fn builder(
-        schema_hash: u64,
-        flags: u16,
-        scaler_mean: &'a [f32],
-        scaler_scale: &'a [f32],
-        layers: &'a [BakeLayer<'a>],
-    ) -> BakeRequestBuilder<'a> {
-        BakeRequestBuilder {
-            inner: Self::new(schema_hash, flags, scaler_mean, scaler_scale, layers),
-        }
-    }
-}
-
-/// Fluent builder for [`BakeRequest`]. Construct via
-/// [`BakeRequest::builder`]; finalize with [`Self::build`] or
-/// [`Self::bake`].
-pub struct BakeRequestBuilder<'a> {
-    inner: BakeRequest<'a>,
-}
-
-impl<'a> BakeRequestBuilder<'a> {
-    /// Per-input `[low, high]` pairs. Pass an empty slice (the
-    /// default) to omit the section.
-    pub fn feature_bounds(mut self, bounds: &'a [crate::bounds::FeatureBound]) -> Self {
-        self.inner.feature_bounds = bounds;
-        self
-    }
-
-    /// Typed-TLV metadata entries.
-    pub fn metadata(mut self, entries: &'a [BakeMetadataEntry<'a>]) -> Self {
-        self.inner.metadata = entries;
-        self
-    }
-
-    /// Per-output `OutputSpec` table. Length must equal `n_outputs`
-    /// (validated at bake time).
-    pub fn output_specs(mut self, specs: &'a [OutputSpec]) -> Self {
-        self.inner.output_specs = specs;
-        self
-    }
-
-    /// f32 pool referenced by `OutputSpec::{discrete_set_offset,
-    /// discrete_set_len}`.
-    pub fn discrete_sets(mut self, pool: &'a [f32]) -> Self {
-        self.inner.discrete_sets = pool;
-        self
-    }
-
-    /// Sparse `(idx, value)` overrides applied after the per-output
-    /// spec pipeline.
-    pub fn sparse_overrides(mut self, overrides: &'a [SparseOverride]) -> Self {
-        self.inner.sparse_overrides = overrides;
-        self
-    }
-
-    /// Finalize the builder and return the underlying `BakeRequest`.
-    pub fn build(self) -> BakeRequest<'a> {
-        self.inner
-    }
-
-    /// Convenience: finalize and bake in one call. Equivalent to
-    /// `bake_v2(&builder.build())`.
-    pub fn bake(self) -> Result<alloc::vec::Vec<u8>, BakeError> {
-        bake_v2(&self.inner)
-    }
 }
 
 const HEADER_SIZE: usize = 128;

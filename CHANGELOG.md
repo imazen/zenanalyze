@@ -7,58 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> **Cross-crate cadence:** zenpredict and zenanalyze publish
-> independently from this workspace. Each crate has its own
-> per-crate subsection below; tag the dated section per crate when
-> shipping. Most QUEUED items have shipped — moved to the
-> per-crate "Changed (breaking — landed since 0.1.0)" sections.
-
-## zenpredict (Unreleased)
-
-### Changed (breaking — landed since 0.1.0)
-
-> The 0.1.0 → next-patch transition is structurally breaking on the
-> binary wire format and on a small number of public types. zenpredict
-> shipped on 2026-05-01; downstream consumers are still all in-tree at
-> the time of writing, so the break is contained — but a one-time
-> rebake is required for every consumer.
-
-- **ZNPR format bumped v2 → v3.** `FORMAT_VERSION = 3`. v2 bins
-  fail to load with `PredictError::UnsupportedVersion`. The
-  formerly-reserved bytes 72..96 of the header now carry three
-  optional sections: `output_specs` (per-output activation / clamp /
-  snap-to-discrete pipeline), `discrete_sets` (f32 pool referenced
-  by OutputSpecs), and `sparse_overrides` (hand-tune `(idx, value)`
-  patches). All three sections are optional; bakes that omit them
-  parse and predict identically to a 0.1.0 bake. Downstream codec
-  crates (zenwebp, zenjpeg, zenavif, zenjxl) must rebake their
-  pickers.
-- **`pub struct Header` shape changed and is now `#[non_exhaustive]`.**
-  `reserved` shrank from `[u32; 14]` to `[u32; 8]`; new public
-  fields `output_specs: Section`, `discrete_sets: Section`,
-  `sparse_overrides: Section`. Direct construction was never the
-  supported path (`Header` is `#[repr(C)] Pod, Zeroable` and is
-  read by the zero-copy parser); `#[non_exhaustive]` blocks
-  external struct-literal construction so future v3.x section
-  additions don't repeat this break. Consumers that pattern-matched
-  `Header` exhaustively need a wildcard arm.
-- **`pub struct BakeRequest<'a>` is now `#[non_exhaustive]` and
-  gained 3 fields** (`output_specs`, `discrete_sets`,
-  `sparse_overrides`). External struct-literal construction is no
-  longer permitted; use the new `BakeRequest::builder(schema_hash,
-  flags, scaler_mean, scaler_scale, layers)` fluent builder (or the
-  lower-level `BakeRequest::new(...)` + field assignment on a `mut`
-  binding). `#[non_exhaustive]` seals future v3.x section additions
-  against the same break.
-- **`pub enum BakeError` is now `#[non_exhaustive]` and gained 4
-  variants:** `OutputSpecsLengthMismatch`,
-  `OutputSpecDiscreteOutOfRange`, `UnknownOutputTransform`,
-  `SparseOverrideIndexOutOfRange`. Downstream exhaustive matches
-  need a wildcard arm.
+> **Note on cross-crate releases:** the workspace publishes its
+> member crates independently. The zenpredict 0.1.0 entries that
+> were under `[Unreleased]` during development are now in the dated
+> [`## [zenpredict 0.1.0] - 2026-05-01`](#zenpredict-010---2026-05-01)
+> section below. Items remaining under `[Unreleased]` belong to the
+> next zenanalyze release (size-invariance discipline, patch
+> fingerprint, threshold recalibration).
 
 ### Added
 
-- **`Predictor::predict_transformed` and
+- **zenpredict: `Predictor::predict_transformed` and
   `Predictor::predict_with_specs_transformed`** (issue #52) —
   apply per-feature `identity`/`log`/`log1p` transforms read from
   the `zentrain.feature_transforms` metadata key BEFORE forward
@@ -67,8 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distribution but the runtime was feeding raw (untransformed)
   features. New public types: `FeatureTransform` enum,
   `apply_feature_transforms` helper. New `Model::feature_transforms`
-  / `Model::has_nontrivial_feature_transforms` /
-  `Predictor::feature_transforms` accessors. New
+  / `Model::has_nontrivial_feature_transforms` accessors. New
   `keys::FEATURE_TRANSFORMS` constant. Bakes that omit the key
   parse cleanly and the transformed entry points behave as
   synonyms for the untransformed ones (no copy, no allocation —
@@ -76,209 +34,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tokens or a length that doesn't match `n_inputs` hard-fail at
   load. New `PredictError::UnknownFeatureTransform` and
   `PredictError::FeatureTransformsLenMismatch` variants.
-- **`Predictor::predict_with_specs`** — runs forward pass then
-  applies the per-output `OutputSpec` pipeline (activation, clamp,
-  snap-to-discrete, sentinel) and finally the `SparseOverride`
-  patches. Returns `&[OutputValue]` — `Override(f32)` carrying the
-  post-processed value or `Default` indicating "use the codec's
-  built-in default for this parameter". Bakes without
-  `output_specs` get raw passthrough wrapped in `Override`; sparse
-  overrides still apply.
-- **`output_spec` module (public).** New types: `OutputSpec`
-  (32-byte POD: bounds + transform + params + discrete-set range +
-  sentinel), `OutputTransform` enum (Identity / Sigmoid /
-  SigmoidScaled / Exp / Round), `OutputValue` enum
-  (`Override(f32)` / `Default`), `SparseOverride` (8-byte POD
-  `(idx, value)`), `apply_spec` helper.
-- **JSON bake schema additions.** `BakeRequestJson` now accepts
-  `output_specs` and `sparse_overrides` arrays. New types:
-  `OutputSpecJson`, `OutputTransformJson`, `SparseOverrideJson`.
-- **`BakeRequest::new(...)` constructor + `BakeRequest::builder(...)`
-  fluent builder.** `new` initializes the v3 mandatory fields and
-  zeroes the optional sections; `builder` returns a
-  `BakeRequestBuilder` with one setter per optional section
-  (`feature_bounds` / `metadata` / `output_specs` / `discrete_sets`
-  / `sparse_overrides`) and a terminating `.build()` or `.bake()`.
-  Both APIs are how external callers construct a `BakeRequest` now
-  that the struct is `#[non_exhaustive]`.
-- **`libm` dependency** for `f32::ln` / `f32::ln_1p` on `no_std`
-  builds (used by `feature_transform::FeatureTransform::apply`).
-  `std` builds use the existing intrinsic-backed methods.
+- **zenpredict: `libm` dependency** for `f32::ln` / `f32::ln_1p`
+  on `no_std` builds. `std` builds use the existing intrinsic-backed
+  methods.
 
-### Internal
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that will ship together in the next major (or minor for 0.x) release.
+     Add items here as you discover them. Do NOT ship these piecemeal — batch them. -->
 
-- `Predictor::new` allocates a `spec_output: Vec<OutputValue>` of
-  length `n_outputs` and a `feat_scratch: Vec<f32>` of length
-  `n_inputs` only when the bake declares `feature_transforms`
-  (otherwise zero). Old (no-transforms, no-specs) bakes keep the
-  same memory profile they had at 0.1.0.
-- `Model::from_bytes` now pre-parses `feature_transforms` and
-  validates `output_specs` / `discrete_sets` / `sparse_overrides`
-  ranges before returning. Adversarial bakes whose specs slice
-  outside the discrete pool fail at load time, not at prediction.
+- **zenpredict bin format bumped to ZNPR v3** — adds optional
+  `output_specs`, `discrete_sets`, and `sparse_overrides` sections.
+  v2 bins error with `UnsupportedVersion` on load; downstream
+  codec crates (zenwebp, zenjpeg, zenavif, zenjxl) must rebake
+  their pickers. New POD types: `OutputSpec` (32 bytes per output
+  — bounds + transform + params + discrete-set range + sentinel)
+  and `SparseOverride` (8 bytes — `(idx, value)`). New API:
+  `Predictor::predict_with_specs` returning `&[OutputValue]`.
+  JSON bake schema gains `output_specs` and `sparse_overrides`
+  arrays.
 
-## zenanalyze (Unreleased)
+<!-- 13-redundant-pixel-count-transforms cull is COMPLETE — moved to
+     "Removed" section below. -->
 
-### Changed (breaking — landed since 0.1.0)
-
-> Stable feature ids retired below are reserved forever
-> (`RESERVED_RETIRED_IDS` in `feature.rs`); they are never recycled.
-> Picker configs in `tools/` and `zentrain/FOR_NEW_CODECS.md` have
-> been updated.
-
-- **`composites` cargo feature removed.** Five `AnalysisFeature`
-  variants gone with it: `TextLikelihood` (id 27),
-  `ScreenContentLikelihood` (28), `NaturalLikelihood` (29),
-  `LineArtScore` (45), and `IndexedPaletteWidth` (30, replaced by
-  `PaletteLog2Size` — see Added). The composite scores were
-  hand-tuned weighted sums whose coefficients drifted faster than
-  the API could usefully expose; empirically `PatchFraction`
-  (AUC 0.88) outperformed `ScreenContentLikelihood` as a single
-  discriminator. Migration: consume raw signals directly
-  (LumaHistogramEntropy, EdgeDensity, ChromaComplexity,
+- **`feat_indexed_palette_width` (id 30) replaced by
+  `feat_palette_log2_size` (id 121).** The 2026-05-02 cross-codec
+  ablation flagged `IndexedPaletteWidth` as Tier 0 redundant against
+  `PaletteFitsIn256` on all 4 codecs (min |r| 0.9680–0.9972,
+  `n_unique = 4` everywhere) — but the n_unique=4 was the feature's
+  full codomain, not a corpus gap. The old codomain `{0, 2, 4, 8}`
+  also lacked the 1-BPP case for binary content (PNG-1 saves a
+  measurable bit/pixel vs PNG-2 on monochrome scans) and didn't
+  surface JXL Modular palette breakpoints at 9..15 (≤512..32768
+  colours). The replacement emits `ceil(log2(distinct))` clamped to
+  `[1, 15]` with **`24` as the truecolor saturation sentinel**
+  (replaced the original `0` after picker-training analysis: a
+  discontinuous `..., 14, 15, 0` jump fights the trained MLP's
+  gradient signal; `24` keeps the scale monotonic with a meaningful
+  9-unit gap that itself encodes "we saturated the 5-bit binning;
+  this is unambiguously truecolor"). 24 is the bit-width the source
+  would need with no palette compression at all (8 bits × 3
+  channels), so it's a defensible upper bound. The empty-image edge
+  case folds to `1` rather than producing a separate sentinel.
+  `PaletteLog2Size` is in `PALETTE_FULL_FEATURES`, so requesting it
+  forces the full-scan path and the full 1..15 ∪ {24} resolution is
+  always available — callers do NOT need to manually co-request
+  `DistinctColorBins`. Both old and new variants are
+  `#[cfg(feature = "experimental")]` with no in-tree consumer at
+  the time of the swap; stable feature id 30 is reserved retired.
+- **5-bit-per-channel bin storage bias documented on
+  `feat_distinct_color_bins` and `feat_palette_fits_in_256`.** The
+  32 KB / 32 768-cell bin array (chosen so it fits in one L1D way)
+  under-counts the true 8-bit distinct-colour count whenever colours
+  fold into the same 5-bit cell. Bias is always toward undercount,
+  never over. Quantitative collision rate at uniform distribution:
+  ~1 % at 256 colours, ~12 % at 4 096, saturates at 32 768.
+  Consequence for `feat_palette_fits_in_256`: false-positive rate at
+  C ∈ [257, ~300] true 8-bit colours where collisions pull the
+  binned count back under 257. Encoders consuming the boolean would
+  attempt indexed mode and fall back on the failed fit — correctness
+  preserved, one wasted attempt per false positive. Callers who
+  can't tolerate the false-positive rate should run their own exact
+  8-bit pass on borderline cases.
+- **Remove 3 redundant new shape/smoothness features**
+  (`AnalysisFeature::ChromaKurtosis` = 117,
+  `AnalysisFeature::UniformitySmooth` = 118,
+  `AnalysisFeature::FlatColorSmooth` = 119). Cross-codec ablation
+  (zenjpeg + zenwebp + zenavif + zenjxl, 2026-05-01) showed all three
+  Tier-0 redundant on ≥3/4 codecs against existing features (`Uniformity`,
+  `FlatColorBlockRatio`, the chroma_grad_sum-derived sharpness signals).
+  The two new features that EARNED their keep — `LumaKurtosis` (116)
+  and `GradientFractionSmooth` (120) — remain. Stable feature ids 117,
+  118, 119 stay reserved (never recycled).
+- **Remove the `composites` cargo feature and its 4 enum variants**
+  (`AnalysisFeature::TextLikelihood` = 27,
+  `AnalysisFeature::ScreenContentLikelihood` = 28,
+  `AnalysisFeature::NaturalLikelihood` = 29,
+  `AnalysisFeature::LineArtScore` = 45). The composite scores are
+  hand-tuned weighted sums of stable raw signals; their coefficients
+  drift faster than the API can usefully expose. Empirically
+  `PatchFraction` (AUC = 0.88) outperforms `ScreenContentLikelihood`
+  as a single discriminator anyway. Stable feature ids 27, 28, 29, 45
+  stay reserved (never recycled). Migration: consume raw signals
+  directly (LumaHistogramEntropy, EdgeDensity, ChromaComplexity,
   PatchFraction, FlatColorBlockRatio, DistinctColorBins) or train a
   small zenpredict model on a labeled corpus and ship the `.bin`.
-- **`tier_depth` module gating moved from `experimental` to a new
-  `hdr` cargo feature.** All 10 HDR / wide-gamut / depth features
-  (ids 32–39, 46, 47) are now `cfg(feature = "hdr")`. Default
-  builds skip the depth tier walk entirely. SDR-only callers see
-  no behavioural change; HDR callers must enable `hdr`.
-- **`AnalysisFeature` variants removed for cross-codec Tier-0
-  redundancy.** `ChromaKurtosis` (117), `UniformitySmooth` (118),
-  `FlatColorSmooth` (119) — Tier-0 redundant on ≥3/4 codecs in the
-  2026-05-01 ablation against existing features (`Uniformity`,
-  `FlatColorBlockRatio`, the chroma_grad_sum-derived sharpness
-  signals). The two replacements that EARNED their keep
-  (`LumaKurtosis` 116, `GradientFractionSmooth` 120) remain — see
-  Added.
-- **`AnalysisFeature` block-misalignment variants collapsed.**
-  `BlockMisalignment16` (64), `BlockMisalignment64` (66) collapsed
-  into the kept `_8` (63) and `_32` (65) anchors — Spearman
-  0.96 / 0.998 with the kept variants on zenavif's non-power-of-2
-  corpus.
-- **`AnalysisFeature` pixel-count transforms removed.**
-  `Log2Pixels` (94), `Log10Pixels` (95), `LogPixelsRounded` (96),
-  `SqrtPixels` (97), `LogBitmapBytes` (98), `LogMinDim` (99),
-  `LogMaxDim` (100), `LogPaddedPixels64` (104). All recoverable by
-  a tiny ReLU MLP from `LogPixels` / `PixelCount` at constant
-  factor; `LogPaddedPixels64` separately dropped on a 13.6 pp LOO
-  retrain regression on zenwebp.
-- **`tier3::populate_tier3` signature change** (crate-internal —
-  module is `pub(crate)`): added `run_dct: bool` parameter to gate
-  the per-block DCT walk. `tier3::compute_derived_likelihoods`
-  removed (it computed the now-deleted composite features). No
-  public-API impact.
-
-### Added — cargo features
-
-- **`hdr` cargo feature.** Off by default. Opts in to the
-  `tier_depth` module and the 10 HDR / wide-gamut / depth features
-  (ids 32–39, 46, 47). SDR-only callers see no behavioural change.
-
-### Added — internal modules
-
-- **`src/dimensions.rs`** — pure descriptor math for dimension /
-  aspect / block-padding / channel features (always populated; the
-  `into_results` filter drops fields the caller didn't request).
-  ~10 ns per call. Implements `block_loss(N)` for 8/16/32 grids.
-- **`src/grayscale.rs`** — strict `R == G == B` classifier with
-  early exit per row. `#[autoversion(v4x, v4, v3, neon, scalar)]`
-  per-row OR-reduction of `(r ^ g) | (g ^ b)`. Codec selectors use
-  `feat_is_grayscale` to drop chroma planes entirely (YUV400 /
-  single-plane JXL / monochrome JPEG). Zero-copy on Native RGB8
-  sources; ~6 µs on colored content (exits row 1).
-
-### Added — AnalysisFeature variants
-
-Stable feature ids reserve their slot when retired; new features
-slot in at the next free id. All `experimental` unless noted.
-
-- **Dimension features** (default-on; pure descriptor math, ~10 ns):
-  `PixelCount` (56), `LogPixels` (57), `MinDim` (58), `MaxDim` (59),
-  `BitmapBytes` (60), `AspectMinOverMax` (61), `LogAspectAbs` (62
-  — deprecated, see below), `BlockMisalignment8` (63),
-  `BlockMisalignment32` (65), `ChannelCount` (67).
-- **`IsGrayscale`** (55, `bool`, default-on) — strict `R == G == B`
-  classifier; see `grayscale` module note above.
-- **`PatchFractionFast`** (52, `f32`) — 64-bit dHash → 32-bit folded
-  per-block fingerprint. ~10× cheaper per block than DCT-based
-  `PatchFraction`; AUC 0.852 (vs 0.880 DCT), peak F1 **0.779**
-  (vs 0.763 DCT) on the 219-image labeled corpus, Pearson 0.99
-  with `PatchFraction`. Pick on cost.
-- **`QuantSurvivalY`** (53, `f32`) and **`QuantSurvivalUv`** (54,
-  `f32`) — mean fraction of luma / chroma AC coefficients surviving
-  jpegli-default quantization at d=2.0 (q≈75). See
-  imazen/zenanalyze#1.
-- **`PaletteLog2Size`** (121, `u32`) — replacement for retired
-  `IndexedPaletteWidth` (30). Emits `ceil(log2(distinct))` clamped
-  to `[1, 15]` with **`24` as the truecolor saturation sentinel**.
-  Adds the 1-BPP case for binary content (PNG-1) and surfaces JXL
-  Modular palette breakpoints at 9..15 (≤512..32768 colors). In
-  `PALETTE_FULL_FEATURES` so requesting it forces the full-scan
-  path; callers do NOT need to manually co-request
-  `DistinctColorBins`.
-- **`LumaKurtosis`** (116, `f32`) — kept after the 2026-05-01
-  cross-codec ablation. Replacement for the retired
-  `ChromaKurtosis` (117).
-- **`GradientFractionSmooth`** (120, `f32`) — kept after the
-  2026-05-01 cross-codec ablation.
-- **AqMap percentiles** (68–72): `AqMapP{50,75,90,95,99}`. Drives
-  picker training — the multi-codec ablations want the full
-  distributional shape, not just the mean.
-- **AqMap low-tail percentiles** (108–110):
-  `AqMapP{1,5,10}`.
-- **NoiseFloor luma percentiles** (73–76):
-  `NoiseFloorYP{25,50,75,90}`.
-- **NoiseFloor luma low-tail** (111–113): `NoiseFloorYP{1,5,10}`.
-- **NoiseFloor chroma percentiles** (77–80):
-  `NoiseFloorUvP{25,50,75,90}`.
-- **LaplacianVariance percentiles** (81–85):
-  `LaplacianVarianceP{50,75,90,99}` and `LaplacianVariancePeak`.
-- **LaplacianVariance low-tail** (105–107):
-  `LaplacianVarianceP{1,5,10}`.
-- **QuantSurvival luma percentiles** (86–89):
-  `QuantSurvivalYP{10,25,50,75}`.
-- **QuantSurvival luma low-tail** (114, 115):
-  `QuantSurvivalYP{1,5}`.
-- **QuantSurvival chroma percentiles** (90–93):
-  `QuantSurvivalUvP{10,25,50,75}`.
-- **`LogPaddedPixels{8,16,32}`** (101, 102, 103) — restored from
-  the 2026-05-01 cull (see "Restored 2026-05-02" below). Encodes
-  the codec's actual encoded surface area at each transform-block
-  grid (JPEG 8×8, JXL DCT16/32, AV1 32×32 superblocks). The 64
-  variant (id 104) stays retired — 13.6 pp negative LOO on zenwebp.
-
-### Added — public-API additions
-
-- **`feature::FeatureValue::as_u64()`** — convenience accessor
-  matching the existing `as_*` family.
-- **`feature::FeatureSet::ZENJPEG_PICKER_V1_1`** — preset feature
-  set for the v1.1 zenjpeg picker. Avoids hand-rolling the same
-  `with(...)` chain at every call site.
-
-### Added — dispatch + crate hygiene
-
-- **`feature::DCT_NEEDED_BY` const-bool axis.** `analyze_features`
-  now skips Tier 3's per-block DCT pass when no DCT-derived feature
-  is requested. The cheap luma-histogram pass (entropy / line-art)
-  still runs whenever any T3 feature is asked for. Saves ~0.97
-  ms/Mpx for callers that only want the histogram-derived signals.
-- **`Cargo.toml` hardening.** `unsafe_code = "forbid"` (was
-  `"allow"`); `garb` bumped to `0.2.7`; repository URL corrected
-  from `imazen/zenjpeg` to `imazen/zenanalyze`. Workspace declares
-  `zenpicker, zenpredict` as members. New `[profile.dev]
-  opt-level = 2` so debug builds still exercise SIMD codegen — the
-  perf tripwire on `2048×2048 default-budget analyze` was firing
-  spuriously on weaker runners under `opt-level=0`.
-
-### Deprecated (still emitted in 0.1.x)
-
-- **`PaletteDensity`** (id 12, `f32`). Use `DistinctColorBins`
-  (raw count) or `PaletteLog2Size` (discrete BPP). Density is
-  corpus-bound redundant per the 2026-05-02 cross-codec Tier 0 +
-  multi-seed LOO. Stable id stays reserved when retired.
-- **`LogAspectAbs`** (id 62, `f32`). Use `AspectMinOverMax` —
-  same signal, bounded `[0, 1]`.
+  `tier3::compute_derived_likelihoods` and the four variants now
+  emit `#[deprecated]` warnings in 0.1.x to surface the migration.
 
 ### Removed — 13 mathematical transforms of `feat_pixel_count` (cull complete 2026-05-02)
 
@@ -548,18 +389,38 @@ hard one's tree-friendly threshold are different inductive biases).
   `patch_fraction_fast`. ID reserved so future wire-format compat
   isn't broken if a different WHT-shaped feature wants the slot.
 
-### Changed (operating thresholds — superseded by composites removal)
+### Changed (operating thresholds — read this before upgrading consumers)
 
-> **All three composite features and `LineArtScore` were removed**
-> in the `composites` cargo-feature cull above (variants `TextLikelihood`,
-> `ScreenContentLikelihood`, `NaturalLikelihood`, `LineArtScore`).
-> The threshold work below is preserved as historical context only —
-> the recalibrated composites never shipped to a published patch and
-> there is no longer a feature to threshold against. Consumers that
-> wanted the scores should consume the raw signals
-> (`PatchFraction` for screen content, `EdgeDensity` /
-> `LumaHistogramEntropy` for text vs natural) or train a small
-> `zenpredict` classifier and ship the `.bin`.
+- **Calibrated `text_likelihood` / `screen_content_likelihood` / `natural_likelihood`
+  to saturate at 1.0 on real content** (previously capped at 0.71 / 0.70 / 0.69 on
+  the 219-image labeled corpus because the sub-components don't co-fire to their
+  individual maxima). Each composite now divides its raw value by its empirical
+  saturation point, then re-clamps to `[0, 1]`. **AUC is preserved** (rank order
+  unchanged) — only the scale stretches.
+- **Reformulated `screen_content_likelihood`** when `experimental` is enabled:
+  the old `palette_small`-based formula collapsed to 0 on real screens (charts /
+  anti-aliased UIs routinely exceed 4000 distinct color bins). Replaced with
+  `0.6 * patch_fraction + 0.4 * flat_high`, which lifts AUC from 0.831 to **0.845**
+  and peak F1 from 0.59 to **0.78** on the same labeled corpus. When `experimental`
+  is off, the legacy formula remains (still stretched by the same divisor).
+- **Operating thresholds shifted** — divide old thresholds by the per-composite
+  saturation point to translate, or use the recommended new thresholds:
+
+  | Composite | Old threshold | **New threshold** | New F1 | New AUC |
+  |---|---:|---:|---:|---:|
+  | `text_likelihood` | 0.30 | **0.35** | 0.585 | 0.713 |
+  | `screen_content_likelihood` | 0.60 | **0.80** | **0.779** | **0.845** |
+  | `natural_likelihood` | 0.06 | **0.10** | **0.923** | 0.814 |
+
+  The `screen_content_likelihood >= 0.80` threshold reflects both the formula
+  reshape AND the saturation stretch.
+- **Dependency change:** `screen_content_likelihood` now requires Tier 3 to run
+  (it reads `patch_fraction` when `experimental` is enabled). Previously it only
+  required the palette pass. `T3_NEEDED_BY` updated to include
+  `ScreenContentLikelihood` so the dispatcher activates Tier 3 automatically.
+  Callers requesting only `ScreenContentLikelihood` will see the analysis pay an
+  extra Tier 3 pass; callers already requesting any other Tier 3 feature pay
+  nothing extra.
 
 ## [zenpredict 0.1.0] - 2026-05-01
 
