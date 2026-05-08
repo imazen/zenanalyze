@@ -58,10 +58,10 @@ mod deinterleave_dispatch {
     #[cfg(target_arch = "x86_64")]
     #[arcane]
     fn rgb24_chunk8_via_garb_v3(
-        token: archmage::X64V3Token,
+        _token: archmage::X64V3Token,
         chunk: &[u8; 24],
     ) -> ([f32; 8], [f32; 8], [f32; 8]) {
-        garb::deinterleave::rgb24_chunk8_to_planes_v3(token, chunk)
+        garb::deinterleave::rgb24_chunk8_to_planes_tokenless_v3(chunk)
     }
 
     #[cfg(target_arch = "x86_64")]
