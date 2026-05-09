@@ -111,8 +111,7 @@ fn bake_codec_picker() -> Vec<u8> {
         },
     ];
 
-    let mut req =
-        BakeRequest::new(0xfeedf00d_deadbeef, 0, &scaler_mean, &scaler_scale, &layers);
+    let mut req = BakeRequest::new(0xfeedf00d_deadbeef, 0, &scaler_mean, &scaler_scale, &layers);
     req.feature_bounds = &feature_bounds;
     req.metadata = &metadata;
     bake_v2(&req).unwrap()
