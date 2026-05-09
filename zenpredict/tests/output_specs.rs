@@ -35,18 +35,13 @@ fn build_identity_model() -> Vec<u8> {
         weights: &weights,
         biases: &biases,
     }];
-    bake_v2(&BakeRequest {
-        schema_hash: 0xfeed,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
+    bake_v2(&BakeRequest::new(
+        0xfeed,
+        0,
+        &scaler_mean,
+        &scaler_scale,
+        &layers,
+    ))
     .unwrap()
 }
 
@@ -103,19 +98,11 @@ fn build_full_spec_model(
         weights: &weights,
         biases: &biases,
     }];
-    bake_v2(&BakeRequest {
-        schema_hash: 0xfeed,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: specs,
-        discrete_sets,
-        sparse_overrides: overrides,
-    })
-    .unwrap()
+    let mut req = BakeRequest::new(0xfeed, 0, &scaler_mean, &scaler_scale, &layers);
+    req.output_specs = specs;
+    req.discrete_sets = discrete_sets;
+    req.sparse_overrides = overrides;
+    bake_v2(&req).unwrap()
 }
 
 #[test]
@@ -298,19 +285,9 @@ fn unknown_output_transform_byte_rejected_at_bake() {
         weights: &weights,
         biases: &biases,
     }];
-    let err = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &specs,
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
-    .unwrap_err();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.output_specs = &specs;
+    let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
         zenpredict::bake::BakeError::UnknownOutputTransform { .. }
@@ -333,19 +310,9 @@ fn output_specs_length_mismatch_rejected_at_bake() {
         weights: &weights,
         biases: &biases,
     }];
-    let err = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &specs,
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
-    .unwrap_err();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.output_specs = &specs;
+    let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
         zenpredict::bake::BakeError::OutputSpecsLengthMismatch {
@@ -384,19 +351,10 @@ fn discrete_set_out_of_range_rejected_at_bake() {
         weights: &weights,
         biases: &biases,
     }];
-    let err = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &specs,
-        discrete_sets: &pool,
-        sparse_overrides: &[],
-    })
-    .unwrap_err();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.output_specs = &specs;
+    req.discrete_sets = &pool;
+    let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
         zenpredict::bake::BakeError::OutputSpecDiscreteOutOfRange { .. }
@@ -418,19 +376,9 @@ fn sparse_override_index_out_of_range_rejected_at_bake() {
         weights: &weights,
         biases: &biases,
     }];
-    let err = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &overrides,
-    })
-    .unwrap_err();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.sparse_overrides = &overrides;
+    let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
         zenpredict::bake::BakeError::SparseOverrideIndexOutOfRange { idx: 99, .. }

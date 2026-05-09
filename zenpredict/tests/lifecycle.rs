@@ -111,19 +111,11 @@ fn bake_codec_picker() -> Vec<u8> {
         },
     ];
 
-    bake_v2(&BakeRequest {
-        schema_hash: 0xfeedf00d_deadbeef,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &feature_bounds,
-        metadata: &metadata,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
-    .unwrap()
+    let mut req =
+        BakeRequest::new(0xfeedf00d_deadbeef, 0, &scaler_mean, &scaler_scale, &layers);
+    req.feature_bounds = &feature_bounds;
+    req.metadata = &metadata;
+    bake_v2(&req).unwrap()
 }
 
 #[test]
@@ -252,18 +244,13 @@ fn end_to_end_perceptual_scorer_lifecycle() {
             biases: &b1,
         },
     ];
-    let bytes = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
+    let bytes = bake_v2(&BakeRequest::new(
+        0,
+        0,
+        &scaler_mean,
+        &scaler_scale,
+        &layers,
+    ))
     .unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
@@ -348,19 +335,9 @@ fn metadata_namespace_convention_works() {
             value: b"opaque",
         },
     ];
-    let bytes = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &entries,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
-    .unwrap();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.metadata = &entries;
+    let bytes = bake_v2(&req).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     let md = model.metadata();
@@ -386,18 +363,13 @@ fn empty_metadata_does_not_break_load() {
         weights: &w,
         biases: &b,
     }];
-    let bytes = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &[],
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
+    let bytes = bake_v2(&BakeRequest::new(
+        0,
+        0,
+        &scaler_mean,
+        &scaler_scale,
+        &layers,
+    ))
     .unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
@@ -434,19 +406,9 @@ fn metadata_iteration_returns_all_entries() {
             value: b"yes",
         },
     ];
-    let bytes = bake_v2(&BakeRequest {
-        schema_hash: 0,
-        flags: 0,
-        scaler_mean: &scaler_mean,
-        scaler_scale: &scaler_scale,
-        layers: &layers,
-        feature_bounds: &[],
-        metadata: &entries,
-        output_specs: &[],
-        discrete_sets: &[],
-        sparse_overrides: &[],
-    })
-    .unwrap();
+    let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
+    req.metadata = &entries;
+    let bytes = bake_v2(&req).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     let md: &Metadata<'_> = model.metadata();

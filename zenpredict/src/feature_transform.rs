@@ -122,9 +122,10 @@ pub(crate) fn parse_feature_transforms(
     }
     // Validated as UTF-8 at parse time, but go through `from_utf8`
     // again so a future refactor can't regress the invariant.
-    let text = core::str::from_utf8(entry.value).map_err(|_| PredictError::MetadataValueNotUtf8 {
-        key_len: crate::keys::FEATURE_TRANSFORMS.len(),
-    })?;
+    let text =
+        core::str::from_utf8(entry.value).map_err(|_| PredictError::MetadataValueNotUtf8 {
+            key_len: crate::keys::FEATURE_TRANSFORMS.len(),
+        })?;
     // Split on '\n' only — bake_picker.py emits newline-separated
     // exactly. An empty trailing line (text ending with '\n') would
     // produce a stray empty entry; reject that as malformed rather
