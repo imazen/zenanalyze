@@ -259,3 +259,13 @@ End-to-end CID22+KADID+TID eval results (full datasets, n=4292 + 10125 + 3000):
 - TV=10 mixed-sup with safesyn218k (already eval'd Tick 12 prior step): KADID 0.8609, TID 0.7971, **CID22 0.8661**, non-mono 5.98 — best CID22 of all new variants but still 0.023 below V0_5.
 - Baked all 3 (TV={0,3,30}) candidates. Queued background eval pipeline; results in `/tmp/zensim_loop/results/eval_h128_tv*_safesyn218k_kt.log`. Signal `safesyn218k_done`.
 - Next tick: read all 3 evals, declare champion if any hits CID22 ≥ V0_5's 0.8893 + non-mono ≤ 4.86. If TV=30 doesn't reach CID22 0.8893, try humw=0 (no KADID/TID) since that's the literal V0_5 ssim2-proxy recipe.
+
+### Tick 13 — 2026-05-10T07:50Z — D.8 partial eval reads + humw=0 sweep launched
+
+- **TV=0 safesyn218k+kt eval landed**: KADID 0.8280 / TID 0.7920 / **CID22 0.8518** — Python trainer drift confirmed: same data + arch as V0_5 still produces -0.037 CID22 vs the original Rust mlp_train.rs bake (V0_5 = 0.8893). The trainer plumbing is the bottleneck, not the data.
+- TV=3 safesyn218k+kt eval still running.
+- TV=30 humw=0 (218k safesyn ONLY, NO KADID/TID, NO unified parquets human MOS) trained — **val_srocc 0.9845** vs mixed-sup's 0.8991. Removing human-MOS regularization recovers ~0.09 on synthetic val. This matches V0_5's training pattern (synth-only).
+- TV=10 humw=0 still training.
+- Candidate to test: bake h128_tv30_safesyn218k_only and run end-to-end eval. If CID22 ≥ V0_5's 0.8893 with non-mono < 4.86%, that's the champion. Hypothesis: removing human-MOS lets safesyn distribution dominate, which generalizes to CID22 (also a real-world quality-rated set).
+- Eval pipeline (tv0/tv3/tv30 with KADID+TID) at ~50% complete; humw=0 evals queued for next tick.
+- Next tick: read tv3 + tv30 mixed-sup evals; if humw=0 trainings done, bake + run eval. Identify champion; if any candidate beats V0_5 on CID22 with smoothness < 4.86%, swap into shipped slot.
