@@ -589,3 +589,23 @@ AdamW Kaiming val-mean TV=10`:
 - Saved bake + eval log to `zensim/benchmarks/h192x128_ep300_dataset_only_2026-05-10.{bin,eval.log}` for the record.
 - Pushed to zensim main.
 - **Next tick**: implement KonJND-1k anchor loss (zensim CLAUDE.md goal #3) — calibrate at-PJND pairs to score ≈ 63 (CID22 paper Table 4). This is the highest-priority remaining unimplemented goal. ~20-30 LOC. Won't necessarily move CID22, but will fix visually-lossless calibration.
+
+### Tick 32 — 2026-05-10T17:00Z — KonJND eval on CHAMPION — anchor IS needed (mean=36, target=63)
+
+Ran `dataset_metric_baseline --konjnd /mnt/v/datasets/KonJND-1k/KonJND-1k --v04-bake benchmarks/h192x128_ep300_safesyn218k_kt_2026-05-10.bin --max-pairs 1500 --per-pair-output ...`. 1008 pairs valid in 23.7s.
+
+| metric | JPEG@PJND mean ± std (n=504) | BPG@PJND mean ± std (n=504) | CID22 paper Table 4 |
+|---|---|---|---|
+| **CHAMPION V0_4 score** | **37.42 ± 5.19** | **34.52 ± 5.58** | (target 63 ± 5) |
+| fast-ssim2 score | 62.55 ± 5.03 | 65.38 ± 5.42 | 63.10 ± 4.65 / 65.38 ± 5.10 |
+| butteraugli 3-norm | 1.6993 ± 0.227 | 1.5283 ± 0.191 | 1.699 ± 0.229 / 1.528 ± 0.192 |
+
+- **Pure offset miscalibration**: stdev (5.19 / 5.58) is consistent with paper (4.65 / 5.10), but **mean is ~26 points too low**. The MLP is too pessimistic at threshold quality.
+- **Cause**: the trainer optimizes ranking (`mse_rank`) — invariant under monotone shifts. Without an absolute anchor it can land in any output range; ssim2 sets the relative shape, no constraint pins zero-noise PJND ≈ 63.
+- **Implication for the user-facing dial**: a user typing "give me zensim 63" is currently getting much *higher* quality than visually-lossless threshold (because the model only emits 63 for genuinely better-than-PJND pairs). Bytes wasted.
+- Persisted log to `zensim/benchmarks/champion_konjnd_eval_2026-05-10.log`. The fast-ssim2 / butteraugli aggregates exactly match CID22 Table 4 — pipeline cross-validation passed, the gap is purely in the MLP head.
+- Per-pair CSV is empty (`--per-pair-output` doesn't tee KonJND rows — separate bug; not blocking). Aggregate table is the source of truth.
+- **Next tick**: implement `--konjnd-anchor-csv PATH:WEIGHT` flag in `train_v_next_mlp.py` that adds an MSE term targeting score=63 at PJND pairs. Two implementation steps:
+  1. Tool to extract 1008-pair AT-PJND features. Either (a) extend `dataset_metric_baseline.rs` with a `--features-csv-output` mode that writes one row per (PJND pair, target=63), or (b) write a small Rust binary in `zensim-bench/examples/` for it. ~30 LOC.
+  2. Plumb the anchor CSV into the trainer's loss as a fourth group with constant target_human=63 and a small weight (start at 0.1, sweep up). Use the existing `--human-csv` infrastructure (load_human_csv accepts arbitrary target_human values).
+- Anti-pattern guard: do NOT use the existing `KonJND-1k.features.20260501_095545.bin` (76,104 pairs = per-q sweep, not AT-PJND only) — its scope is wrong for this anchor.
