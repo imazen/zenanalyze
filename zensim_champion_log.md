@@ -431,3 +431,25 @@ Loss-function sweep at h=[192,128] + ep=300 + TV=10 + humw=0.3:
 - Background job `boj1bqhix`. ~10 min wall.
 - **Hypothesis**: pure ranknet + cosine + TV=10 should reproduce the V0_5 Rust trainer's recipe most faithfully. If it hits CID22 ≥ 0.885 with non-mono close to 1.59% (the ranknet ultra-smooth baseline), that's the answer.
 - Next tick: read background results, bake winners, run end-to-end CID22 evals.
+
+### Tick 24 — 2026-05-10T10:55Z — D.19 cosine LR shipped; V0_5-faithful recipe probes — gap remains structural
+
+End-to-end results for cosine LR variants:
+
+| Recipe | KADID | TID | CID22 | non-mono% |
+|---|---|---|---|---|
+| V0_5 (Rust ground truth) | 0.8432 | 0.8401 | **0.8893** | ~8.26 |
+| CHAMPION (mse_rank constant [192,128] ep=300) | 0.9309 | 0.8861 | 0.8803 | 4.56 |
+| pure ranknet [192,128] cosine | 0.8954 | 0.8687 | 0.8610 | 1.66 |
+| **V0_5-faithful (h=64 ranknet cosine TV=0)** | 0.8773 | 0.8798 | **0.8549** | 4.50 |
+| h=64 ranknet TV=10 cosine (ultra-smooth) | 0.8688 | 0.8579 | 0.8237 | **1.33** ★★★ |
+
+- **Cosine LR alone gives +0.008 CID22** (h=[192,128] ranknet: 0.8534 → 0.8610) — confirms the deleted Rust trainer's docstring ("Adam with cosine annealing") was real. But +0.008 isn't enough to close the gap.
+- The V0_5-faithful Rust recipe in Python: CID22 **0.8549** vs V0_5's actual 0.8893 = -0.034 still. Architecture (h=64), loss (pure ranknet), schedule (cosine), TV (0), corpus (218k clean), humw (0.3) all matched — yet -0.034 remains.
+- **Conclusion**: there's a non-docstring ingredient in the Rust trainer that gives V0_5 its CID22. Cannot be recovered from documented config alone. Phase 4 future work needs to:
+  1. Recover Rust source via `git show e613224 -- mlp_train.rs`
+  2. Diff line-by-line against `train_v_next_mlp.py`
+  3. Find the missing piece (feature standardization handling? Adam init? data sampling?)
+- Champion **mse_rank constant LR h=[192,128] ep=300** remains the right ship: aggregate +0.042 SROCC vs V0_5 with smoothness floor crossed.
+- **The smoothness leaderboard** — pure ranknet variants achieved 1.33-1.66% non-mono, **3-4× smoother than ssim2 GT's 5.08%**. These are unprecedented for the project.
+- Loop has now exhausted the Python-trainer Pareto frontier across loss / schedule / architecture / capacity / epochs / regularization / corpus / mixing / humw axes. The remaining CID22 gap requires source-level recovery.
