@@ -1162,3 +1162,33 @@ Audited safesyn corpus (218,089 rows) by score band. `human_score` is in [0, 1] 
 - Multi-target loss still useful for B0/B1 (where supervisor weakness is the bottleneck, per Table 7).
 
 **Next tick**: add PieAPP loader to `dataset_metric_baseline.rs`. PieAPP has 200 pristine refs × 20,280 distorted images — much larger than CID22's 4292. Will give much sharper B3 CIs.
+
+### Tick 53 — 2026-05-10T22:30Z — PieAPP missing, CSIQ jpeg/jp2k CSV prepped (33% B3 share!)
+
+**PieAPP**: directory `/mnt/v/dataset/pieapp/` exists but is **empty**. Not on disk.
+
+**PIPAL**: available at `/mnt/v/dataset/pipal/` with 23,200 distorted images across 4 chunks. MOS is Elo-style (~1500 baseline). Conversion to ssim2-1:1 scale would require empirical calibration — non-trivial, skip for now.
+
+**CSIQ**: available at `/mnt/v/dataset/csiq/` with `csiq.DMOS.xlsx` containing 838 distorted images (30 refs × 6 distortion types × 4-5 levels). DMOS in [0, ~0.5] format.
+
+Wrote `/mnt/v/dataset/csiq/csiq_compression_pairs.csv` filtering to **jpeg + jpeg2000 only** (compression-relevant): **145 pairs**.
+
+Band distribution (compression-only CSIQ, score = (1 - DMOS) × 100):
+
+| Band | rows | % |
+|---|---:|---:|
+| B0 (<50) | 59 | 40.7% |
+| B1 [50,65) | 10 | 6.9% |
+| B2 [65,90) | 28 | 19.3% |
+| **B3 (≥90)** | **48** | **33.1%** |
+
+**Notable**: CSIQ has **more B3 pairs (48) than CID22 (43)** in absolute count. Combined CID22 + CSIQ would give 91 B3 pairs — still thin but doubles eval power.
+
+**Artifacts produced**:
+- `/mnt/v/dataset/csiq/csiq_compression_pairs.csv` (145 rows × 5 cols, header `reference,distorted,distortion_type,distortion_level,dmos`)
+
+**Caveats**:
+- CSIQ JPEG and JPEG2000 are older codec versions. Not directly comparable to modern AVIF/JXL/HEIC but still meaningful for SROCC ranking.
+- CSIQ DMOS calibration may not be 1:1 with CID22 MCOS — band boundaries are heuristic (mapped via `score = (1 - DMOS) × 100`).
+
+**Next tick**: implement `--csiq <data_dir>` loader in `dataset_metric_baseline.rs`. Will load 145 pairs, score, report per-band SROCC + CI. Then re-eval seed=0/3/4/7 on combined CID22+CSIQ B3.
