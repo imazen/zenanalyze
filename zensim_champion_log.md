@@ -289,3 +289,22 @@ End-to-end CID22+KADID+TID eval results (full datasets, n=4292 + 10125 + 3000):
 - **DECISION REQUIRED**: swapping V0_5 for this candidate gains smoothness + KADID big-time but costs CID22 0.020. Asking user before promoting to `zensim/weights/v0_4_2026-04-30.bin` slot. The CID22 regression is the user's gold standard.
 - Diagnosis: Python trainer (AdamW + the train_v_next_mlp.py recipe) produces -0.02 to -0.04 CID22 vs the original Rust trainer that produced V0_5. To match V0_5's CID22, we'd need to port the Rust trainer's exact recipe (deleted in PR #29).
 - Pushed `zensim/benchmarks/champion_candidate_2026-05-10.{md,bin,.eval.log}` to zensim main.
+
+### Tick 16 — 2026-05-10T08:25Z — D.11 deeper/longer training pushes val_min above 0.92
+
+Capacity + epoch + humw sweep on top of the safesyn218k+kt+TV=10 recipe:
+
+| arch | epochs | humw | val_min | kadid_val | tid_val | non-mono% |
+|---|---|---|---|---|---|---|
+| [192,128] (prev champion) | 50 | 0.3 | 0.9101 | 0.8841 | 0.7795 | 4.93 |
+| **[192,128]** | **100** | 0.3 | **0.9257** | **0.9070** | **0.8183** | 5.16 |
+| [256,192] | 50 | 0.3 | 0.9203 | 0.8988 | 0.8070 | 5.04 |
+| **[192,128,64]** (3 layers) | 50 | 0.3 | 0.9204 | 0.9034 | 0.8055 | **4.74** ★ |
+| [192,128] | 50 | 0.5 | 0.9195 | 0.8977 | 0.8043 | 4.94 |
+| [192,128] | 50 | 0.7 | 0.9185 | 0.8996 | 0.7976 | 5.32 |
+
+- **`h192x128_ep100`** has highest val_min (0.9257) — KADID 0.9070 (would beat V0_5 by +0.064!) and TID 0.8183 (close to V0_5 0.8401).
+- **`h192x128x64`** (3-layer) hits non-mono **4.74%**, beating V0_2's 4.86% target.
+- Higher humw (0.5/0.7) didn't add value — humw=0.3 is the sweet spot at this architecture.
+- Baked all 3 (ep100, [192,128,64], [256,192]) and queued sequential CID22+KADID+TID eval pipeline (background, ~12 min total).
+- Next tick: read 3 results. If `h192x128_ep100` hits CID22 ≥ 0.88 with non-mono ≤ 5.2%, **that's the new shipping candidate** — only -0.01 CID22 from V0_5 with massive smoothness + KADID gains.
