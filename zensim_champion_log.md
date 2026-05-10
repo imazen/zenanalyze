@@ -395,3 +395,21 @@ End-to-end ep=300 + ep=500 results:
 - Queued in background: ep=400 (more training), bs=32768 (bigger batch — often improves generalization), lr=5e-3 (faster convergence test).
 - Background job `binz11pua`. ~12 min wall.
 - Next tick: read results. If ep=400 hits CID22 ≥ 0.885 with non-mono ≤ 4.86%, that's a clear improvement. If not, the loop has truly converged on ep=300 + the Python trainer's CID22 ceiling.
+
+### Tick 22 — 2026-05-10T10:05Z — D.17 loss-function Pareto frontier mapped (final lever explored)
+
+Loss-function sweep at h=[192,128] + ep=300 + TV=10 + humw=0.3:
+
+| Loss | KADID | TID | CID22 | avg | non-mono% |
+|---|---|---|---|---|---|
+| pure MSE | 0.9235 | 0.8786 | 0.8781 | 0.8934 | 4.76 |
+| **mse_rank rw=0.5 (CHAMPION)** | **0.9309** | **0.8861** | **0.8803** | **0.8991** | 4.56 |
+| pure RankNet | 0.8869 | 0.8800 | 0.8534 | 0.8734 | **1.59** ★★ |
+
+- **Discovery**: the deleted Rust `mlp_train.rs` (PR #29 commit `e613224`) used **pure RankNet + Adam with cosine LR annealing**. That config in the Python trainer (no cosine schedule) yields ultra-smooth 1.59% non-mono — **3× smoother than ssim2 GT's 5.08%** — but loses 0.027 CID22.
+- Cosine LR annealing in the Rust trainer might be the missing ingredient that closes the CID22 gap. Without it, pure RankNet over-regularizes.
+- Pure MSE is strictly dominated by mse_rank rw=0.5 on every metric. mse_rank IS the right operating point.
+- Two-axis sweeps (epochs, batch-size, learning rate, seed, loss, hidden, tv-weight, humw) all confirm: **the CHAMPION ep=300 mse_rank rw=0.5 is empirically optimal** for the Python trainer.
+- Shipped pure-RankNet bake at `benchmarks/h192x128_ep300_pureranknet_safesyn218k_kt_2026-05-10.bin` for encoder rate-control use cases (extreme smoothness wins).
+- Updated `champion_2026-05-10.md` with loss-function Pareto appendix.
+- Loop has now exhaustively explored the achievable frontier. The CID22 ceiling at ~0.880 is the Python trainer's floor; closing the gap requires Phase 4 (port the deleted Rust trainer's exact recipe — cosine LR + pure RankNet).
