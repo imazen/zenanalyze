@@ -771,3 +771,32 @@ Trained CHAMPION recipe + bs=2048 + `--lr-schedule cosine`. 985s on RTX 5070 (CU
 - **User question**: "wouldn't Rust be faster?" — yes, by 10-100× on the inner Adam loop. Recovered Rust trainer at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs` (885 LOC) needs ~150 LOC of enhancements (multi-layer MLP, TV regularizer, concordance filter as preprocess) to match Python recipe. CubeCL acceleration would help if we batch pair gradients on GPU (50-100× over scalar CPU); for a 228→192→128 MLP, scalar CPU Rust is already plenty (~30s per 300 epochs).
 - Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_bs2048_cosine*`.
 - **Next tick** (assuming user authorizes): begin Rust trainer restoration in `zensim/zensim-validate/src/`. Step 1: re-add multi-layer MLP support (~50 LOC) + smoke-test against existing single-layer behavior. Step 2: TV regularizer + concordance preprocessing. Step 3: train V0_5-recipe + measure CID22.
+
+### Tick 41 — 2026-05-10T19:05Z — Path A authorized + Rust trainer restored to compiling state
+
+**User authorized full Path A** ("hes, do a, full impl!"). Also asked to check zentrain for Rust — no Rust there, only Python. Recovered Rust source at `docs/phase4_reference/mlp_train_rust_e3f8748.rs` is the only Rust trainer asset.
+
+**Step 1 done**: file restored at `zensim/zensim-validate/src/mlp_train.rs` (885 LOC).
+- Patched `use zensim::mlp::bake::*` → `use zenpredict::bake::*` (post-e6132243 the bake API moved from zensim to zenpredict).
+- Patched `use zensim::mlp::{Activation, WeightDtype}` → `use zenpredict::{Activation, WeightDtype}`.
+- Replaced struct-literal `BakeRequest { ... }` → `BakeRequest::new(...)` (struct is now `#[non_exhaustive]`).
+- Added `zenpredict = { path = "../../zenanalyze/zenpredict" }` to `zensim-validate/Cargo.toml`.
+- Added `mod mlp_train;` to `main.rs` with `#[allow(dead_code)]` (CLI dispatch deferred to next tick).
+
+`cargo build -p zensim-validate` now passes in 10.13s (no errors, no warnings about mlp_train).
+
+**Concurrent**: bs=2048+cosine_cyclic T=50 training running (PID 1159067, ~80% done). Will read result next tick.
+
+**Path A roadmap** (remaining steps):
+| Step | LOC | Tick budget |
+|---|---|---|
+| 2. Wire CLI dispatch (TrainAlgorithm::Mlp + arg parsing + MLP-only helpers) | ~150 | 1-2 |
+| 3. Multi-layer MLP support (Vec<Layer> instead of (w1,b1,w2,b2)) | ~50 | 1 |
+| 4. TV regularizer (per-curve adjacent-q monotonicity) | ~30 | 1 |
+| 5. Concordance filter (or just preprocess data Python-side to filtered TSV) | ~30 | 1 |
+| 6. Train + bake + eval against KADID/TID/CID22 | — | 1 |
+| 7. (Optional) CubeCL pair-batch GPU acceleration | ~200 | 3-5 |
+
+Total ~260 LOC across 5-6 ticks for full functional parity with Python CHAMPION recipe.
+
+**Next tick**: bake + eval bs=2048+cyclic, then begin Step 2 (CLI dispatch — re-add Args fields and TrainAlgorithm::Mlp variant).
