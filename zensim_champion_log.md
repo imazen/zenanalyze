@@ -752,3 +752,22 @@ Trained CHAMPION recipe + bs=2048 in 968s (vs CHAMPION ~180s — 5.4× slower be
 - This validates the structural hypothesis: more Adam steps per epoch DOES help CID22, just not at this hyperparameter combination. The next test: bs=2048 + `--lr-schedule cosine` (full annealing) to damp the late-epoch noise. Or: increase epochs to 600 with the noise to let it settle.
 - Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_bs2048*`.
 - **Next tick**: bs=2048 + cosine LR. Targets: preserve CID22 +0.0011, recover most of KADID/TID losses. ~16 min training.
+
+### Tick 40 — 2026-05-10T18:50Z — bs=2048+cosine — KADID/TID jump big, CID22 flat
+
+Trained CHAMPION recipe + bs=2048 + `--lr-schedule cosine`. 985s on RTX 5070 (CUDA was already auto-detected, just under-utilized at small batch — 18% util). Baked to `benchmarks/h192x128_ep300_bs2048_cosine_2026-05-10.bin`.
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| **CHAMPION** (bs=16384) | 0.9309 | 0.8861 | 0.8803 |
+| bs=2048 | 0.9093 | 0.8668 | 0.8814 |
+| **bs=2048 + cosine** | **0.9468** ★ | **0.9035** ★ | 0.8774 |
+| Δ vs CHAMPION | **+0.0159** | **+0.0174** | -0.0029 |
+| V0_5 (CID22 target) | 0.8432 | 0.8401 | **0.8893** |
+
+- **KADID and TID hit new highs** — best of any candidate this loop has produced. Cosine LR damped the bs=2048 noise as expected, and the more-Adam-steps-per-epoch effect helped both human-MOS metrics significantly.
+- CID22 essentially flat (-0.0029 vs CHAMPION) — the structural gap remains.
+- **User intervention**: corrected my earlier claim that the box has no CUDA. Confirmed RTX 5070 + CUDA 13.2 + driver 596.21; PyTorch already auto-detects via the `device = torch.device("cuda" if torch.cuda.is_available() else "cpu")` pattern at trainer line 682. GPU IS used at 18% util — bottleneck is host-side Python/PyTorch overhead at small batch, not GPU compute.
+- **User question**: "wouldn't Rust be faster?" — yes, by 10-100× on the inner Adam loop. Recovered Rust trainer at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs` (885 LOC) needs ~150 LOC of enhancements (multi-layer MLP, TV regularizer, concordance filter as preprocess) to match Python recipe. CubeCL acceleration would help if we batch pair gradients on GPU (50-100× over scalar CPU); for a 228→192→128 MLP, scalar CPU Rust is already plenty (~30s per 300 epochs).
+- Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_bs2048_cosine*`.
+- **Next tick** (assuming user authorizes): begin Rust trainer restoration in `zensim/zensim-validate/src/`. Step 1: re-add multi-layer MLP support (~50 LOC) + smoke-test against existing single-layer behavior. Step 2: TV regularizer + concordance preprocessing. Step 3: train V0_5-recipe + measure CID22.
