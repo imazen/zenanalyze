@@ -1389,3 +1389,45 @@ Audited `training_safe_synthetic.csv` (218,089 rows) for monotonicity violations
 **Saved**: `benchmarks/rust_v05_monotonic_h64_seed3_2026-05-10.{bin,train.log}`, `benchmarks/monotonic_seed3_4ds_2026-05-10.log`.
 
 **Next tick**: per user, **drop zenwebp-m4** entirely. Generate `safe_synth_filtered_no_webp.csv`. Train seed=3. Compare against both originals and monotonic.
+
+### Tick 59 — 2026-05-10T23:35Z — Drop WebP-m4 FALSIFIED: hurts CID22 across all bands (agg -0.012)
+
+Filtered `zenwebp-default-m4` from safesyn (kept 190,745 of 218,089 rows = 87.5%). Trained Rust seed=3 with the no-WebP corpus. 165s, early-stop at epoch 75 (much faster — less data + supervisor noise removed).
+
+**Three-way comparison** for seed=3:
+
+| Metric | Original | Monotonic | **No-WebP** | Δ no-WebP vs orig |
+|---|---|---|---|---|
+| KADID agg | 0.9397 | 0.9421 | **0.9418** | +0.002 |
+| TID agg | 0.9498 | 0.9535 | 0.9496 | -0.000 |
+| **CID22 agg** | **0.8823** | 0.8820 | 0.8705 | **-0.012** ✗ |
+| CSIQ agg | 0.9652 | 0.9629 | **0.9677** | +0.003 |
+
+**CID22 per-band breakdown (no-WebP)**:
+| Band | Original | No-WebP | Δ |
+|---|---|---|---|
+| B0 (<50) | 0.4127 | 0.3851 | -0.028 |
+| B1 (50-65) | 0.4169 | 0.3910 | -0.026 |
+| B2 (65-90) | 0.7699 | 0.7612 | -0.009 |
+| **B3 (≥90)** | 0.2599 | 0.1767 | **-0.083** |
+| Near-PJND | 0.3327 | 0.3026 | -0.030 |
+
+**Verdict**: dropping WebP-m4 HURTS CID22 in EVERY band. CSIQ + KADID/TID slightly gain. Net: bad trade for the primary target (CID22 is the user-facing dial dataset).
+
+**Root cause**: CID22 includes real WebP encodes in its distortion set. Removing WebP-m4 supervision from training means the model loses calibration for an artifact family CID22 directly measures.
+
+**Conclusion**: keep WebP-m4 in training. The 1.14% supervisor noise is preferable to the -0.012 CID22 aggregate loss.
+
+**Saved**: `benchmarks/rust_no_webp_h64_seed3_2026-05-10.{bin,train.log}`, `benchmarks/no_webp_seed3_4ds_2026-05-10.log`.
+
+**Decision matrix recap**:
+| Intervention | CID22 effect | KADID/TID effect | CSIQ effect | Recommend? |
+|---|---|---|---|---|
+| **Original** seed=3 (baseline) | 0.8823 | 0.9397/0.9498 | 0.9652 | — |
+| Monotonic-envelope | flat | slight + | slight - | mixed |
+| Drop WebP-m4 | **-0.012** | flat | slight + | **NO** |
+
+**Next tick** (more promising directions):
+1. **Monotonic-envelope ONLY on WebP rows** — preserve non-WebP signal, denoise just the problem codec. Compromise approach.
+2. **Multi-target loss** (DSSIM + butter) — still queued; directly attacks B0/B1 supervisor weakness.
+3. **Adopt seed=3 monotonic as the dial-safe ship** — TID B3 +0.022, CSIQ B3 +0.018, KADID B1 +0.040 are real gains for the dial property; CID22 B3 -0.10 has CI [0, 0.5] so likely noise.
