@@ -1283,3 +1283,43 @@ All four picks are within bootstrap-CI overlap of each other. The structural tak
 3. **Per-band reporting for KADID/TID** — currently CID22/CSIQ only
 4. **Default plot generation** (scatter + candlestick, CID22 paper style)
 5. **Adopt paper rigor** — bias correction, monotonicity check on training data
+
+### Tick 56 — 2026-05-10T22:59Z — Per-band reporting extended to KADID + TID (Table 5 cuts)
+
+Generalized per-band block in `dataset_metric_baseline.rs` to use a per-dataset bands lookup. Band cuts derived from CID22 Table 5 alignment:
+
+| Dataset | scale | cuts (normalized human_score) |
+|---|---|---|
+| CID22 / CSIQ | MCOS/100 (or 1-DMOS) | 0.50 / 0.65 / 0.90 |
+| KADID | (DMOS-1)/4 | 0.675 / 0.825 / 0.875 (DMOS 3.7/4.3/4.5) |
+| TID | MOS/9 | 0.500 / 0.611 / 0.667 (MOS 4.5/5.5/6.0) |
+
+Full per-band eval of **seed=3** across all 4 datasets:
+
+| Dataset | n | B0 | B1 | B2 | B3 | aggregate |
+|---|---|---|---|---|---|---|
+| KADID | 10125 | **0.8721** (n=6620) | 0.4031 (n=1671) | 0.2409 (n=787) | 0.2542 (n=1047) | 0.9397 |
+| TID | 3000 | **0.8782** (n=1418) | 0.6422 (n=797) | 0.3374 (n=556) | **0.0601** (n=229) | 0.9498 |
+| CID22 | 4292 | 0.4127 (n=324) | 0.4169 (n=1010) | **0.7699** (n=2915) | 0.2599 (n=43) | 0.8823 |
+| CSIQ | 150 | 0.7857 (n=61) | 0.6121 (n=10) | **0.8256** (n=29) | **0.6376** (n=50) | 0.9652 |
+
+**Several structural findings**:
+
+1. **Model is GREAT at KADID/TID/CSIQ B0** (low quality). SROCC 0.79-0.88 across these. Strong supervisor signal for analytical distortions.
+2. **Model is BAD at TID B3** (SROCC 0.06, n=229). TID's high-quality region is mild artifacts where the model's per-pixel features don't separate them.
+3. **CID22 B2 is the model's sweet spot** (SROCC 0.77, n=2915). Makes sense — V0_5 trained on ssim2 of compression artifacts, which is exactly the CID22 B2 distribution.
+4. **CSIQ B3 SROCC = 0.64** (n=50, tight CI) — confirms model IS predictive at visually-lossless. Real, not the CID22 B3 statistical artifact.
+5. **Aggregate SROCC is heavily band-mix-dependent**:
+   - KADID aggregate 0.94 looks great BUT only because n=6620 is in B0 (where the model is strong); the high-q bands are weak.
+   - CID22 aggregate 0.88 reflects B2 dominance.
+   - CSIQ aggregate 0.97 is genuinely strong across bands.
+
+**The per-band view reveals that "aggregate SROCC" hides band-mix-of-test-set effects**. KADID's high aggregate isn't because the model is universally great — it's because KADID's test set is 65% B0 where any model wins.
+
+**Saved**: `benchmarks/seed3_4datasets_perband_2026-05-10.log`.
+
+**Next tick options** (queued from user roadmap, none of which need authorization):
+1. Re-eval all 11 seeds × 4 datasets → comprehensive Pareto frontier (would take ~30 min concurrent)
+2. **Multi-target DSSIM loss** in Rust trainer — directly targets the weakness bands (B2/B3 TID)
+3. **Default plotting** — generate Figure 8-style bpp-vs-MCOS for each dataset
+4. **Adopt paper rigor** — monotonicity-constraint check on synth training pairs
