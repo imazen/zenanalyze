@@ -490,3 +490,23 @@ End-to-end results:
 - **Conclusion**: the missing 2 ingredients (#4 per-step pair sampling, #5 explicit pairs_per_epoch budget) are the dominant gap source. The 3 ingredients I just ported don't independently improve things.
 - Trainer code shipped on zensim main: 3 new flags. Future Phase 4 work needs the per-step pair sampling implementation (~30 LOC, biggest change).
 - **The CHAMPION (mse_rank rw=0.5 constant AdamW Kaiming val-mean h=[192,128] ep=300) remains the right ship.** Loop has truly explored everything reachable without the structural pair-sampling change.
+
+### Tick 27 — 2026-05-10T12:05Z — D.22 seed=42 (Rust default) + cyclic LR investigation
+
+Discovered in the Rust source:
+- `seed: u64 = 42` (not 0 as my default)
+- Cyclic cosine LR every 50 epochs:
+  `lr = initial_lr * 0.5 * (1 + cos(pi * (epoch % 50) / 50))`
+  (not the full-run CosineAnnealingLR I implemented)
+- Per-step group-weighted pair sampling (50,000 pairs/epoch)
+- Inverse-CDF sampling on cumulative `train_weight` for group selection
+- Indices ia, ib uniform within selected group
+
+Queued in background:
+- ep=300 seed=42 CHAMPION recipe (mse_rank constant AdamW Kaiming val-mean)
+- ep=300 seed=42 V0_5-EXACT recipe (h=32 ranknet cosine adam glorot val-min)
+- Both with bake + CID22+KADID+TID eval
+
+Background job `baloxuhmj`. ~15 min wall.
+
+Next tick: read results. If seed=42 closes some of the gap, we know seed-variance was masking the recipe ingredients. Otherwise the per-step pair sampling (#4 in gap analysis) is necessary.
