@@ -1134,3 +1134,31 @@ The B3 problem is **data-bound, not seed-bound**: n=43 is fundamentally too smal
 **Next tick**: focus on B3 data expansion since seed-level optimization is noise-bounded. Two options:
 1. Add PieAPP loader to eval harness (paper §"Related Work" mentions; covers wide quality range)
 2. Compute the actual share of B3 in safesyn training corpus — if low, **upsample** B3 rows in training without adding new sources.
+
+### Tick 52 — 2026-05-10T22:22Z — Safesyn B3 audit: training data is FINE, eval data is the bottleneck
+
+Audited safesyn corpus (218,089 rows) by score band. `human_score` is in [0, 1] (= ssim2 score / 100):
+
+| Band | rows | % of total |
+|---|---:|---:|
+| B0 (<50) | 62,712 | **28.76%** |
+| B1 [50,65) | 35,452 | 16.26% |
+| B2 [65,90) | 92,944 | 42.62% |
+| **B3 (≥90)** | **26,981** | **12.37%** |
+
+**Hypothesis falsified**: training corpus has substantial B3 data (27k rows = 12.4%). Not a training-data scarcity problem.
+
+**Real bottleneck**: **CID22 has only 43 B3 pairs (= 1.0% of 4292)**. The CID22 paper's MCOS distribution (Figure 3) tapers steeply above 85 — visually-lossless pairs are inherently rare in the dataset. So we can't statistically measure B3 quality from CID22 alone.
+
+**Implications**:
+1. The model probably DOES learn B3 from training (27k rows of supervision), but we can't validate it from CID22's 43 pairs.
+2. The Rust V0_4 bake output at B3 is also likely saturating (cluster around the high end), making SROCC unstable. Verifying this requires per-pair score dump.
+3. **PieAPP, KonFiG-IQA, KonJND-1k all have richer B3 coverage** — adding them to eval is the fastest path to discriminative B3 measurement.
+
+**Pivot for the user's roadmap**:
+- ~~Upsample B3 in training~~ — not needed, plenty there.
+- **+ Add PieAPP eval support** — paper §"Related Work" lists it; we have data at `/mnt/v/dataset/pieapp/`. Loader work.
+- **+ Add CSIQ eval** — already at `/mnt/v/dataset/csiq/` (5 distortion types).
+- Multi-target loss still useful for B0/B1 (where supervisor weakness is the bottleneck, per Table 7).
+
+**Next tick**: add PieAPP loader to `dataset_metric_baseline.rs`. PieAPP has 200 pristine refs × 20,280 distorted images — much larger than CID22's 4292. Will give much sharper B3 CIs.
