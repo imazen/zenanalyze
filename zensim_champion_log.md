@@ -1098,3 +1098,39 @@ User message (during this tick): "do all of these, add more data sets, including
 This is 5-10 ticks of structured work. Will queue.
 
 **Next tick (immediate)**: ship seed=3 as the dial-safest champion and start the multi-target loss implementation (DSSIM in Rust trainer).
+
+### Tick 51 — 2026-05-10T22:20Z — Bootstrap CI proves B3 is statistically undiscriminable (overlap)
+
+Implemented 200-iteration bootstrap 95% CI in `dataset_metric_baseline.rs` (~40 LOC, xorshift64 with deterministic seed). Updated per-band table to include V0_4 SROCC's CI.
+
+Re-evaluated 4 candidate champions with CIs:
+
+| Seed | B0 SROCC | B1 SROCC | B2 SROCC | **B3 SROCC** | **B3 95% CI** |
+|---|---|---|---|---|---|
+| 0 | 0.4310 | 0.4457 | 0.7768 | 0.0923 | **[0.01, 0.41]** |
+| 3 | 0.4127 | 0.4169 | 0.7699 | **0.2599** | **[0.04, 0.55]** |
+| 4 | 0.3616 | 0.4056 | 0.7826 | 0.2042 | **[0.01, 0.50]** |
+| 7 | 0.4170 | 0.4275 | 0.7832 | 0.1433 | **[0.01, 0.47]** |
+
+**CRITICAL FINDING**: All 4 B3 CIs overlap from [~0, ~0.45]. The point-estimate ordering (seed=3 > seed=4 > seed=7 > seed=0) is **statistically meaningless** — seed=3's "champion" claim from Tick 50 is **within bootstrap noise**.
+
+The B3 problem is **data-bound, not seed-bound**: n=43 is fundamentally too small to discriminate model quality at visually-lossless. Need more B3 evaluation data.
+
+**Per-band CI width**:
+- B2 (n=2915): CI width ≈ 0.03 — sharp, can rank seeds
+- B1 (n=1010): CI width ≈ 0.10
+- B0 (n=324): CI width ≈ 0.19
+- **B3 (n=43)**: CI width ≈ 0.45 — too wide to meaningfully rank
+
+**Implications**:
+1. **Revoke Tick 50's seed=3 recommendation as "statistically significant"** — it's not. Pick still defensible (best point estimate at B3) but doesn't reliably beat seed=0.
+2. **Tick 49's "champion fails at B3" finding remains true** — even the upper CI bound at B3 is ~0.5, far from ssim2's ~0.71 at B2.
+3. **More B3 data is the highest-priority next step**. The user's planned PieAPP/LIVE/KonFiG-IQA datasets directly address this.
+
+**Bootstrap CI is now mandatory in per-band reports** — adds CID22 paper-level statistical rigor. Per `zensim/CLAUDE.md` per-band rule, future evals should report (point, CI) not just point.
+
+**Saved**: `benchmarks/rust_v05_recipe_h64_4seeds_ci_2026-05-10.log`.
+
+**Next tick**: focus on B3 data expansion since seed-level optimization is noise-bounded. Two options:
+1. Add PieAPP loader to eval harness (paper §"Related Work" mentions; covers wide quality range)
+2. Compute the actual share of B3 in safesyn training corpus — if low, **upsample** B3 rows in training without adding new sources.
