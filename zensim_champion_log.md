@@ -884,3 +884,28 @@ Investigated V0_5 May-1 actual recipe — found that V0_5 trained on **synth + K
 Saved bake + eval log to `benchmarks/rust_synth_only_h64_2026-05-10.{bin,train.log,eval.log}` for the record.
 
 **Next tick**: try **higher pairs_per_epoch=100000** with Rust V0_5 recipe. Cheap, tests if the model just needs more update budget to find a better basin. ~14 min.
+
+### Tick 45 — 2026-05-10T20:26Z — Rust 100k pairs/ep — KADID/TID marginal +, CID22 REGRESSES
+
+Doubled `--pairs-per-epoch 50000 → 100000` with the same V0_5 recipe (synth + KADID@0.3 + TID@0.3, h=64, ep=300, lr=1e-3, val-policy=Min, seed=42). Trained 859s (14.3 min CPU), early-stopped at epoch 195/300. best val_min = 0.9495 (vs 50k's 0.9477).
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| Rust 50k pairs/ep | **0.9477** | **0.9611** | **0.8814** |
+| **Rust 100k pairs/ep** | 0.9495 | 0.9614 | **0.8792** ← regression |
+| Δ | +0.0018 | +0.0003 | **-0.0022** |
+| V0_5 (target) | 0.8432 | 0.8401 | 0.8893 |
+
+- **More Adam steps HURT CID22** (-0.0022). KADID/TID barely budge.
+- Hypothesis FALSIFIED: more update budget doesn't close the V0_5 CID22 gap; if anything, it widens it. The model is overfitting to KADID/TID rankings at the expense of CID22 generalization.
+- Saved bake + train.log + eval.log to `benchmarks/rust_v05_recipe_h64_p100k_2026-05-10.*`.
+
+**Updated leverboard for closing the -0.0079 CID22 gap from V0_5**:
+- ~~50k vs 100k pairs/ep~~ — falsified, regresses
+- ~~Synth-only~~ — falsified, regresses
+- KonJND_train as 4th group — needs target reconstruction (~30 min work to score 76k pairs with ssim2)
+- Higher capacity (h=128 single-layer) — not yet tried in Rust
+- Multi-layer Rust (Step 3 of Path A, ~50 LOC) — not yet tried
+- Different seed sweep — cheap to test (3 runs × 7min = 20 min)
+
+**Next tick**: 3-seed sweep on Rust V0_5 recipe (seeds 0, 1, 2). Tests if seed=42 was a bad sample of the seed-variance distribution. Quick: 3 × 442s = ~22 min total wall, but each can run sequentially across ticks if needed.
