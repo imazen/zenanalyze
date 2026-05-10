@@ -609,3 +609,20 @@ Ran `dataset_metric_baseline --konjnd /mnt/v/datasets/KonJND-1k/KonJND-1k --v04-
   1. Tool to extract 1008-pair AT-PJND features. Either (a) extend `dataset_metric_baseline.rs` with a `--features-csv-output` mode that writes one row per (PJND pair, target=63), or (b) write a small Rust binary in `zensim-bench/examples/` for it. ~30 LOC.
   2. Plumb the anchor CSV into the trainer's loss as a fourth group with constant target_human=63 and a small weight (start at 0.1, sweep up). Use the existing `--human-csv` infrastructure (load_human_csv accepts arbitrary target_human values).
 - Anti-pattern guard: do NOT use the existing `KonJND-1k.features.20260501_095545.bin` (76,104 pairs = per-q sweep, not AT-PJND only) — its scope is wrong for this anchor.
+
+### Tick 33 — 2026-05-10T17:05Z — KonJND anchor features CSV generator shipped (1008 rows × 230 cols)
+
+Extended `dataset_metric_baseline.rs` with two flags (`--konjnd-features-csv PATH`, `--konjnd-anchor-target SCORE`) that emit a trainer-compatible CSV (`ref_basename, human_score, f0..f227`) from the AT-PJND pair set. Cold rebuild 9.76s. Run on the full 1008 KonJND pairs (504 JPEG + 504 BPG) in 23s.
+
+- Artifact: `/mnt/v/output/zensim/synthetic-v2/konjnd_anchor_features_2026-05-10.csv` (2.05 MB, 1009 lines = 1 header + 1008 data rows). All `human_score=0.630000` (scales to 63.0 in the trainer's load_human_csv → score_zensim=63).
+- Verified shape: 230 columns (1 + 1 + 228 features). Matches the trainer's `--human-csv` expectation byte-for-byte.
+- Pushed: zensim main `527d1b97 → 9e8635ce` (`feat(zensim-bench): KonJND anchor features CSV emitter for trainer`).
+- **Next tick**: train CHAMPION recipe + KonJND anchor. Single command:
+  ```
+  python3 zensim/scripts/v_next/train_v_next_mlp.py \
+      <CHAMPION recipe args from zensim/benchmarks/champion_2026-05-10.md> \
+      --human-csv KonJND:/mnt/v/output/zensim/synthetic-v2/konjnd_anchor_features_2026-05-10.csv:0.1:0.0
+  ```
+  The `:0.1:0.0` suffix is `train_weight=0.1, val_frac=0.0` — anchor-only, no validation tracking (constant target gives meaningless SROCC).
+- Sweep parameters worth running (small 3×3 grid): `train_weight ∈ {0.05, 0.1, 0.3}`. Want the smallest weight that pulls JPEG@PJND mean from ~37 toward ~63 without harming CID22 SROCC. Each run ~3-4 min.
+- After train: re-eval via `dataset_metric_baseline --konjnd ...` and compare against CHAMPION's 37.42/34.52 baseline. Target: 63 ± 5 / 65 ± 5.
