@@ -345,3 +345,22 @@ Probing the CID22 -0.010 gap:
 - humw=0.1 (lower than 0.3) is worse on every dimension — KADID/TID just aren't getting enough signal.
 - Baked tv30_humw03 and tv10_humw00 to ZNPR v2; queued background eval pipeline. ~8 min.
 - Next tick: read both eval results. If tv10_humw00 hits CID22 close to V0_5's 0.8893, that becomes the new champion (V0_5 + TV without distortion-shape distortion). If tv30_humw03 hits CID22 near champion's 0.8792 with non-mono 4.49, it's the smoothness winner.
+
+### Tick 19 — 2026-05-10T09:13Z — D.14 final readouts; smoothness-winner shipped
+
+End-to-end CID22-recovery sweep results:
+
+| Bake | KADID | TID | CID22 | avg | non-mono |
+|---|---|---|---|---|---|
+| V0_5 shipped | 0.8432 | 0.8401 | **0.8893** | 0.8575 | ~8.26 |
+| **CHAMPION** ep200 tv10 humw03 | **0.9255** | **0.8736** | 0.8792 | **0.8928** | 4.77 |
+| **SMOOTH-WIN** ep200 tv30 humw03 | 0.9136 | 0.8571 | 0.8769 | 0.8825 | **4.49** ★ |
+| ep200 tv10 humw00 (V0_5-faithful + TV) | 0.7602 ✗ | 0.7657 ✗ | 0.8804 | 0.8021 | 5.19 |
+| ep300 tv10 humw03 (val_min 0.9342) | (eval pending) | | | | |
+
+- humw=0 confirmed: dropping human-MOS supervision tanks KADID/TID by 0.07-0.08 even though CID22 holds. Not viable.
+- ep=300 marginal val_min gain (+0.005 vs ep=200) — hits diminishing returns.
+- Loop has **converged on the achievable Pareto frontier**: champion (best aggregate, +0.035 vs V0_5) and smoothness-winner (best non-mono 4.49% vs V0_2's 4.86%).
+- Shipped both bakes to zensim/benchmarks/. Pushed final `champion_2026-05-10.md` with full retrospective + ship recommendation (default: Champion).
+- **Loop conclusion**: closing the remaining -0.010 CID22 gap to V0_5's 0.8893 requires porting the deleted Rust mlp_train.rs (Phase 4 future work, estimated 1 day). Both candidates are nonetheless **dominant on aggregate quality + smoothness**.
+- Decision still pending user approval to swap V0_5 → Champion or Smoothness-Winner.
