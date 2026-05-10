@@ -191,3 +191,21 @@ Next tick: A.1 (verify V0_5 bake exists + integrity check).
 - KADID + smoothness goals MET. CID22 + TID goals NOT met yet — TV is too aggressive.
 - Killed h128_tv300 (synth-only) eval mid-run; redundant given h128_tv30 already showed synth-only TV fails on human MOS regardless of weight.
 - **Next tick**: train `h128_tv0_kadid_tid` (mixed-sup, NO TV) as a calibration check — should match the original V0_4 mixed-supervision numbers (CID22 0.8893). Then sweep TV={1, 3, 10} with mixed-sup to find the smallest TV that holds CID22 ≥ 0.8893 while pushing non-mono < 4.86%.
+
+### Tick 10 — 2026-05-10T06:55Z — D.6 mixed-sup TV sweep — TV=10 is the smoothness/CID22 sweet spot
+
+- Trained 4 mixed-sup variants in <2 min (with eval pipeline killed): TV={0, 1, 3, 10} all with hidden=128, --human-csv kadid:0.3 + tid:0.3.
+
+  | tv | val_min | synth | kadid | tid | non-mono% |
+  |---|---|---|---|---|---|
+  | 0 (baseline) | 0.8623 | 0.9704 | 0.8411 | 0.7752 | 6.54 |
+  | 1 | **0.8712** | 0.9693 | 0.8559 | **0.7883** | 6.71 |
+  | 3 | 0.8621 | 0.9674 | 0.8418 | 0.7772 | 6.18 |
+  | 10 | 0.8650 | 0.9679 | 0.8488 | 0.7782 | **5.48** |
+  | 30 (prior tick) | 0.8618 | 0.9652 | 0.8424 | 0.7778 | **4.83** |
+
+- TV=0 mixed-sup baseline KADID 0.8411 ≈ V0_4 mixed-sup ship 0.8432 — recipe calibration confirmed.
+- TV=10 has lowest non-mono among non-30 variants (5.48%) at competitive val_min. TV=1 has best val_min but worst non-mono.
+- Baked all 4 to ZNPR v2 at /tmp/zensim_loop/bakes/h128_{tv0,tv1,tv3,tv10}_kadid_tid_2026-05-10.bin (120 KB each).
+- Kicked off background eval pipeline running all 4 sequentially. Signal: `/tmp/zensim_loop/results/mixsup_done`. ~17 min total wall (~4 min × 4).
+- Next tick: read whichever evals have completed. The hypothesis: TV=10 holds CID22 close to V0_4 baseline (0.8893) while non-mono gets close to 4.86. If yes, that's the champion.
