@@ -626,3 +626,25 @@ Extended `dataset_metric_baseline.rs` with two flags (`--konjnd-features-csv PAT
   The `:0.1:0.0` suffix is `train_weight=0.1, val_frac=0.0` — anchor-only, no validation tracking (constant target gives meaningless SROCC).
 - Sweep parameters worth running (small 3×3 grid): `train_weight ∈ {0.05, 0.1, 0.3}`. Want the smallest weight that pulls JPEG@PJND mean from ~37 toward ~63 without harming CID22 SROCC. Each run ~3-4 min.
 - After train: re-eval via `dataset_metric_baseline --konjnd ...` and compare against CHAMPION's 37.42/34.52 baseline. Target: 63 ± 5 / 65 ± 5.
+
+### Tick 34 — 2026-05-10T17:15Z — Anchor weight=0.1 trained + evaluated — too weak; needs much higher weight
+
+Trained CHAMPION recipe + KonJND anchor at `--human-csv konjnd:...:0.1:0.0`. 171s, ep=300. Baked to `benchmarks/h192x128_ep300_konjnd_anchor_w0_1_2026-05-10.bin` (278 KB ZNPR v2).
+
+Full eval (KADID 10125 / TID 3000 / CID22 4292 / KonJND 1008):
+
+| Bake                  | KADID | TID | CID22 | JPEG@PJND mean | BPG@PJND mean |
+|---|---|---|---|---|---|
+| **CHAMPION** (no anchor) | 0.9309 | **0.8861** | **0.8803** | 37.42 | 34.52 |
+| **anchor w=0.1**         | **0.9345** | 0.8832 | 0.8799 | **37.44** | **34.99** |
+| target (CID22 paper)     | — | — | — | 63 ± 5 | 65 ± 5 |
+
+- **Anchor w=0.1 had no meaningful effect on PJND means** (+0.02 JPEG / +0.47 BPG). SROCC essentially flat: KADID +0.0036, TID -0.0029, CID22 -0.0004.
+- The 1008 KonJND pairs at train_weight=0.1 vs ~232k other rows at train_weight=1.0 = ~2300x lower influence. With MSE around 35² (bias) + 5² (variance) ≈ 1250 per anchor row vs typical synth MSE ~2-30, the anchor contributes ~0.05 to the loss budget — irrelevant.
+- **Need much higher weight or a separate fixed-weight loss term**. Quick triage options:
+  1. **Sweep weight up**: try 0.5, 1.0, 3.0. Each ~3 min. Risk: at high weight the anchor wins and degrades synth/CID22 SROCC.
+  2. **Replicate konjnd anchor rows** so it's not dominated. ~80x replicas at weight=0.1 ≈ effective weight=8 without changing the loss math.
+  3. **Add dedicated anchor loss term** (next-tick implementation). Independent of `--human-csv` weight scaling. Cleanest but ~30 LOC.
+- Saved bake + train log + eval log to `zensim/benchmarks/h192x128_ep300_konjnd_anchor_w0_1_2026-05-10.{bin,train.log,eval.log}`.
+- **Caveat noted**: trainer's `val_srocc=-1.0000` because konjnd group's SROCC is nan (constant target). Final-epoch save instead of best-epoch. The bake is still the model from epoch 300 — usable, but selection logic needs updating to skip nan groups.
+- **Next tick**: sweep anchor weight {0.5, 1.0, 3.0} OR implement dedicated anchor loss term. Pre-empted: user message arrived requesting a much larger synthetic-corpus expansion (multi-year CLIC + multi-codec + multi-metric + parquet) — that becomes a parallel longer-term track.
