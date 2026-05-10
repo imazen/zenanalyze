@@ -510,3 +510,11 @@ Queued in background:
 Background job `baloxuhmj`. ~15 min wall.
 
 Next tick: read results. If seed=42 closes some of the gap, we know seed-variance was masking the recipe ingredients. Otherwise the per-step pair sampling (#4 in gap analysis) is necessary.
+
+### Tick 28 — 2026-05-10T12:25Z — D.23 seed=42 partial readout — KADID/TID look strong, CID22 pending
+
+- seed=42 CHAMPION recipe: KADID **0.9269**, TID 0.8691, CID22 (in flight). val_min 0.9329 (vs seed=0's 0.9342, near-identical).
+- seed=42 V0_5-EXACT recipe trained: val_min 0.8813. Eval pending.
+- The seed-stability hypothesis: seed=42 gives +0.011 KADID over seed=0's 0.9255 (within typical seed variance) but val_min is identical — not the seed-favorable basin we hoped for.
+- Wait task `b0iw3mgyw` armed; will notify when CID22 evals finish.
+- Next tick: read final CID22 numbers. If seed=42 CID22 ≥ 0.882, gap closes meaningfully. If ≤ 0.880, the CHAMPION's seed=0 result IS empirically the operating point.
