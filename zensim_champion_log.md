@@ -940,3 +940,45 @@ Ran 3 concurrent Rust V0_5-recipe trainings with seeds 0, 1, 2 (alongside seed=4
 1. Run 7 more seeds (3, 4, 5, 6, 7, 8, 9) to bound the right tail of the CID22 distribution. With ±0.006 spread, p95 estimate ≈ 0.896. Worth checking if any seed ≥ 0.8934 exists.
 2. Score-quality (non-monotonic) regression on seed=0 bake.
 3. (Pending user authorization) Consider promoting seed=0 bake to shipped V0_4 slot.
+
+### Tick 47 — 2026-05-10T21:25Z — 11-seed sweep — CID22 distribution settles, target 0.8934 unreached
+
+Ran 7 more seeds (3-9) in addition to 0,1,2,42. All 11 trainings concurrent on 16-core CPU.
+
+| Seed | KADID | TID | **CID22** | val_min |
+|---|---|---|---|---|
+| **0** ★ | 0.9467 | 0.9594 | **0.8905** | 0.9467 |
+| 7 | 0.9490 | 0.9601 | **0.8898** | 0.9490 |
+| 9 | 0.9434 | 0.9534 | 0.8880 | 0.9434 |
+| 4 | 0.9441 | 0.9508 | 0.8872 | 0.9441 |
+| 3 | 0.9397 | 0.9498 | 0.8823 | 0.9397 |
+| 42 | 0.9477 | 0.9611 | 0.8814 | 0.9477 |
+| 1 | 0.9478 | 0.9587 | 0.8806 | 0.9477 |
+| 2 | 0.9488 | 0.9611 | 0.8794 | 0.9488 |
+| 5 | 0.9460 | 0.9545 | 0.8784 | 0.9460 |
+| 8 | 0.9457 | 0.9549 | 0.8736 | 0.9457 |
+| 6 | 0.9429 | 0.9534 | 0.8724 | 0.9429 |
+
+**Distribution (CID22)**: min 0.8724, p25 0.8794, median 0.8814, p75 0.8880, p90 0.8902, max 0.8905, mean 0.8821 ± stdev 0.0061.
+
+- **2 seeds ≥ V0_5's 0.8893 (seeds 0, 7)** — seed=0 is +0.0012, seed=7 is +0.0005.
+- **No seed hit target CID22 > 0.8934**. The 11-seed distribution suggests the recipe's right tail plateaus around 0.89 — the target 0.8934 is ~2.4σ above the median, plausibly reachable with ~30-50 seeds but not within easy reach.
+- KADID and TID are STABLE across seeds (KADID 0.940-0.949, TID 0.950-0.961). The recipe's KADID/TID performance is settled at 0.94-0.95 / 0.95-0.96.
+
+**Champion bakes by metric**:
+- KADID best: seed=7 (0.9490)
+- TID best: seed=2 (0.9611) — also seed=7 (0.9601), seed=42 (0.9611)
+- CID22 best: seed=0 (0.8905)
+- Aggregate avg: seed=7 at 0.9330, seed=0 at 0.9322
+
+For the user-facing dial (CID22-primary), **seed=0 is the new champion**.
+
+Saved bakes + train.logs for seeds 3-9 to `benchmarks/rust_v05_recipe_h64_seed{3..9}_2026-05-10.{bin,train.log}`. eval_7seeds.log committed too.
+
+**Next tick (deferred to address user follow-ups)**:
+1. Read Table 2 of CID22 paper (per user ask) — not yet in distilled notes.
+2. Add per-CID22-band reporting to eval (per user ask): segments at MCOS 0-50 / 50-65 / 65-90 / ≥90 (medium/high/visually-lossless cuts from Table 5).
+3. Set up DSSIM-guided training for low-quality band (per user ask) — DSSIM is "best in low-q" per Table 7.
+4. Plot generation in CID22 paper style (per user ask).
+5. Multi-codec corpus expansion (still pending authorization from earlier; corpus state has NOT changed since Tick 40).
+6. everything.md update — has NOT been refreshed with Ticks 32-47.
