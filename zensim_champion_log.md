@@ -364,3 +364,22 @@ End-to-end CID22-recovery sweep results:
 - Shipped both bakes to zensim/benchmarks/. Pushed final `champion_2026-05-10.md` with full retrospective + ship recommendation (default: Champion).
 - **Loop conclusion**: closing the remaining -0.010 CID22 gap to V0_5's 0.8893 requires porting the deleted Rust mlp_train.rs (Phase 4 future work, estimated 1 day). Both candidates are nonetheless **dominant on aggregate quality + smoothness**.
 - Decision still pending user approval to swap V0_5 → Champion or Smoothness-Winner.
+
+### Tick 20 — 2026-05-10T09:30Z — D.15 final champion ep=300 — aggregate +0.042 SROCC vs V0_5
+
+End-to-end ep=300 + ep=500 results:
+
+| Bake | KADID | TID | CID22 | avg | non-mono% |
+|---|---|---|---|---|---|
+| V0_5 shipped | 0.8432 | 0.8401 | **0.8893** | 0.8575 | ~8.26 |
+| ep=200 (prior champion) | 0.9255 | 0.8736 | 0.8792 | 0.8928 | 4.77 |
+| **ep=300 (FINAL CHAMPION)** | **0.9309** ★ | **0.8861** ★ | 0.8803 | **0.8991** ★ | **4.56** |
+| ep=500 (plateau probe) | 0.9305 | 0.8917 | 0.8806 | 0.9009 | 4.80 |
+
+- ep=300 dominates ep=200 on every metric. ep=500 plateaus and worsens smoothness — diminishing returns confirmed.
+- val_min growth: 0.9101 (ep50) → 0.9257 (ep100) → 0.9294 (ep200) → 0.9342 (ep300) → 0.9349 (ep500). ep=300 is the operating point.
+- Updated `champion_2026-05-10.md` with ep=300 as final + ship instructions + 20-tick retrospective.
+- **CHAMPION**: `benchmarks/h192x128_ep300_safesyn218k_kt_2026-05-10.bin` (278 KB ZNPR v2).
+- Shipped with both bakes (champion + smoothness-winner) durably committed to zensim/benchmarks/.
+- Ship/hold decision still pending user approval. The aggregate gain (+0.042) and smoothness floor crossing (4.56% < V0_2's 4.86%) make this strong; CID22 -0.009 is the only cost.
+- Loop has converged. Cron `b55bf342` will keep firing every 4 min until 7-day expiry or user `CronDelete b55bf342`.
