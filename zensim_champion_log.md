@@ -1014,3 +1014,39 @@ Plot styles to replicate (per `docs/CID22_TABLES_2_4_2026-05-10.md`):
 - `zensim/CLAUDE.md` updated with per-band reporting rule
 
 **Next tick**: implement per-band reporting in `dataset_metric_baseline.rs` (~80 LOC). Then re-eval the 11-seed sweep with band breakdowns to see which seed is best per band (not just aggregate).
+
+### Tick 49 — 2026-05-10T21:55Z — Per-band reporting implemented — CHAMPION FAILS at dial extremes
+
+Added per-band SROCC + MAE computation to `dataset_metric_baseline.rs` (~60 LOC). Triggered automatically for CID22 (the dataset whose human MOS is on the canonical SSIMULACRA 2 scale per Table 5).
+
+Re-evaluated CHAMPION (seed=0, rust_v05_recipe_h64_seed0):
+
+| Band | n | V0_4 SROCC | V0_4 MAE† | ssim2 SROCC |
+|---|--:|:--:|--:|:--:|
+| **B0 below medium (<50)** | 324 | **0.4310** | 59.4 | 0.4418 |
+| **B1 medium [50,65)** | 1010 | **0.4457** | 47.6 | 0.4694 |
+| B2 high [65,90) | 2915 | **0.7768** | 31.9 | 0.7722 |
+| **B3 visually-lossless (≥90)** | 43 | **0.0923** ★★ | 24.5 | 0.1121 |
+| Near-PJND [58,68] | 787 | 0.3673 | 43.6 | 0.3908 |
+| (aggregate) | 4292 | 0.8905 | — | 0.8895 |
+
+† MAE values are inflated because the Rust trainer's bake outputs a distance-like quantity in a weird unit (RankNet target without flip_output). SROCC is still rank-meaningful.
+
+**Catastrophic finding**: aggregate SROCC = 0.8905 mostly measures **B2** (n=2915, dominates 68% of data, SROCC 0.7768). **B3** (visually lossless, n=43) is essentially random at SROCC **0.0923**.
+
+**Implications for the user-facing dial**:
+- A user asking for "zensim 93" gets near-random encoder picks.
+- B0/B1 (below high quality) also disappointing at ~0.44 SROCC.
+- The model is well-calibrated **only in the middle band** (B2 = 65-90 score).
+- This vindicates the user's per-band rule completely — aggregate SROCC was hiding the failure.
+
+**For comparison, ssim2 itself** (the supervisor) is similarly weak at B3 (0.1121) — so this is partly an artifact of ssim2's training distribution skew, not just zensim. But that's not an excuse to ship.
+
+**Implementation**: `zensim-bench/examples/dataset_metric_baseline.rs:236-292` adds the per-band block. Triggers only for CID22 (load_kadid/load_tid produce a different scale; banding for those is a follow-up).
+
+**Pushed**: `zensim/benchmarks/rust_v05_recipe_h64_seed0_2026-05-10_perband.log`.
+
+**Next tick** — priorities driven by per-band failure modes:
+1. **DSSIM-guided multi-target loss** (user ask). Per Table 7, DSSIM is "best in low-q" — adding it to the loss should help B0/B1.
+2. **Re-eval all 11 seeds per-band** to find the seed with best B0+B1+B3 (not just aggregate B2). Different seed may be the right champion.
+3. **More B3 data**: corpus expansion at high q (= visually lossless range). Synth corpus currently weighted toward B2.
