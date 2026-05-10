@@ -173,3 +173,21 @@ Next tick: A.1 (verify V0_5 bake exists + integrity check).
 - **Diagnosis**: the 2026-04-30 V0_4 mixed-supervision bake (which V0_5 inherited the numbers of) was trained with `synth + KADID_train@0.3 + TID_train@0.3`. The new TV-trained models train ONLY on synthetic ssim2 — no human-MOS supervision. The TV regularizer makes things *worse* on human-MOS by overfitting the synthetic q-curve smoothness.
 - Kicked off background sequential eval of h128_tv30 + h128_tv300 (eval pipeline PID `$EVAL_PID`, results in `/tmp/zensim_loop/results/`, signal file `/all_done` when complete). ~8 min wall.
 - **Next tick**: read the two pending eval results. Then: train a new set of candidates **with `--human-csv` mixing KADID_train + TID_train** (matching the V0_4 mixed-supervision recipe) **+ TV regularizer at moderate weight**. The target is: CID22 SROCC > 0.8893 AND non-mono < 4.86%, simultaneously. This is the actual user goal.
+
+### Tick 9 — 2026-05-10T06:50Z — D.5 mixed-supervision rescues KADID + smoothness, costs CID22
+
+- Trained `h128_tv30_kadid_tid` with `--human-csv kadid:.../kadid_features.csv:0.3 + tid:.../tid_features.csv:0.3 --tv-weight 30 --hidden 128`. Wall 260s (slowed by parallel CPU eval; alone would be ~30s).
+- **End-to-end full-dataset eval result** (256 s wall):
+
+  | Bake | KADID | TID | CID22 | non-mono q-step % |
+  |---|---|---|---|---|
+  | V0_5 (currently shipped) | 0.8432 | 0.8401 | 0.8893 | ~8.26 (V0_4-equiv) |
+  | h128_tv1000 (synth-only TV=100) | 0.5380 | 0.7609 | 0.8519 | 4.26 ★ |
+  | h128_tv30 (synth-only TV=30) | 0.4411 | 0.6630 | 0.8651 | 5.81 |
+  | **h128_tv30_kadid_tid** (mixed-sup) | **0.8564** ★ | 0.7913 | 0.8462 | **4.83** ★ |
+
+- **Mixed-supervision rescued KADID** (0.4411 → 0.8564, beating V0_5 baseline by +0.013) and helped TID (0.6630 → 0.7913, but still below baseline). **TV=30 at hidden=128 cost CID22** (0.8893 → 0.8462, -0.043) — TV regularization conflicts with what CID22 SROCC favors.
+- Smoothness goal MET: 4.83% beats V0_2's 4.86% floor.
+- KADID + smoothness goals MET. CID22 + TID goals NOT met yet — TV is too aggressive.
+- Killed h128_tv300 (synth-only) eval mid-run; redundant given h128_tv30 already showed synth-only TV fails on human MOS regardless of weight.
+- **Next tick**: train `h128_tv0_kadid_tid` (mixed-sup, NO TV) as a calibration check — should match the original V0_4 mixed-supervision numbers (CID22 0.8893). Then sweep TV={1, 3, 10} with mixed-sup to find the smallest TV that holds CID22 ≥ 0.8893 while pushing non-mono < 4.86%.
