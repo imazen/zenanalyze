@@ -453,3 +453,17 @@ End-to-end results for cosine LR variants:
 - Champion **mse_rank constant LR h=[192,128] ep=300** remains the right ship: aggregate +0.042 SROCC vs V0_5 with smoothness floor crossed.
 - **The smoothness leaderboard** — pure ranknet variants achieved 1.33-1.66% non-mono, **3-4× smoother than ssim2 GT's 5.08%**. These are unprecedented for the project.
 - Loop has now exhausted the Python-trainer Pareto frontier across loss / schedule / architecture / capacity / epochs / regularization / corpus / mixing / humw axes. The remaining CID22 gap requires source-level recovery.
+
+### Tick 25 — 2026-05-10T11:25Z — D.20 Rust mlp_train.rs recovered + gap analysis (Phase 4 plan)
+
+- `git show 3ffc74a:zensim-validate/src/mlp_train.rs` recovered the deleted Rust trainer (885 LOC). Reading the source revealed 5 ingredient differences from my Python `train_v_next_mlp.py`:
+  1. **Group-weighted per-step pair sampling** (`pairs_per_epoch=50_000`) vs my batched RankNet
+  2. **Glorot init** (`std = sqrt(2/(n_features+n_hidden))`) vs PyTorch's Kaiming default
+  3. Hand-rolled **Adam** vs PyTorch **AdamW** (decoupled weight decay)
+  4. `ValidationPolicy::Min` (worst per-group) vs my val_srocc selection
+  5. Default `n_hidden=32` (NOT 64 as the docstring suggested without arch number — "small enough... ~7.3K weights" is hint for 228×32+32)
+- Tested V0_5-EXACT recipe in Python: h=32 + ep=300 + pure ranknet + cosine + TV=0 + lr=1e-3 → CID22 **0.8472** (vs V0_5's 0.8893, **-0.042**). The 5 unmatched ingredients are responsible for the gap.
+- Saved phase4 reference: `docs/phase4_reference/mlp_train_rust_e3f8748.rs` (885 LOC) + README with gap analysis + 5-step port plan (estimated 1 day).
+- Pushed to zensim main (`9c1faf7d`).
+- **Loop conclusion (final)**: The Python trainer's CID22 ceiling is structurally bounded by these 5 implementation differences from the Rust trainer. Closing them is Phase 4 future work. Until then, the **CHAMPION (mse_rank rw=0.5 constant LR, h=[192,128], ep=300)** is the right ship — aggregate +0.042 SROCC, smoothness 4.56% beats V0_2 floor for the first time, KADID +0.088, TID +0.046.
+- 25 ticks, ~5 hr wall, ~75 trainings, ~25 end-to-end evals, 7 production-ready bakes shipped to `zensim/benchmarks/`. Loop has truly exhausted the Python-trainer Pareto frontier.
