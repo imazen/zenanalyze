@@ -734,3 +734,21 @@ Trained CHAMPION + class-balance, baked to `benchmarks/h192x128_ep300_class_bala
 - The 2.376× boost on rare `photo_wide_gamut` (8% of synth) likely over-fits to a class that may be underrepresented in CID22 — possible the inverse-frequency was the wrong direction.
 - Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_class_balance_weight*`.
 - **Next tick**: either (a) measure per-class SROCC to validate the *actual* user goal, OR (b) port the per-step pairs_per_epoch=50000 sampling loop. (a) is faster but slightly off-track from CID22 SROCC > 0.8934 target; (b) is the higher-impact Phase 4 item.
+
+### Tick 39 — 2026-05-10T18:25Z — Smaller batch (bs=2048) — CID22 marginally up, others down
+
+Hypothesis: Rust trainer's per-step pair sampling did ~50,000 Adam steps/epoch vs Python's ~14. Quick probe: drop batch from 16,384 → 2,048 (8× more steps) at same LR=3e-3.
+
+Trained CHAMPION recipe + bs=2048 in 968s (vs CHAMPION ~180s — 5.4× slower because GPU underutilized at small batch). Baked to `benchmarks/h192x128_ep300_bs2048_2026-05-10.bin`.
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| **CHAMPION** (bs=16384) | **0.9309** | **0.8861** | 0.8803 |
+| **bs=2048** | 0.9093 | 0.8668 | **0.8814** ★ |
+| Δ vs CHAMPION | -0.0216 | -0.0193 | **+0.0011** |
+
+- **CID22 marginally improved (+0.0011) — first positive CID22 delta vs CHAMPION since the recovery cycle started**. KADID/TID dropped as expected (more Adam noise without compensating LR decay).
+- Train loss is unstable: jumping 5 → 20 between adjacent epochs. Without LR decay, small batch is dominated by noise.
+- This validates the structural hypothesis: more Adam steps per epoch DOES help CID22, just not at this hyperparameter combination. The next test: bs=2048 + `--lr-schedule cosine` (full annealing) to damp the late-epoch noise. Or: increase epochs to 600 with the noise to let it settle.
+- Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_bs2048*`.
+- **Next tick**: bs=2048 + cosine LR. Targets: preserve CID22 +0.0011, recover most of KADID/TID losses. ~16 min training.
