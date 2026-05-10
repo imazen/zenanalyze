@@ -413,3 +413,21 @@ Loss-function sweep at h=[192,128] + ep=300 + TV=10 + humw=0.3:
 - Shipped pure-RankNet bake at `benchmarks/h192x128_ep300_pureranknet_safesyn218k_kt_2026-05-10.bin` for encoder rate-control use cases (extreme smoothness wins).
 - Updated `champion_2026-05-10.md` with loss-function Pareto appendix.
 - Loop has now exhaustively explored the achievable frontier. The CID22 ceiling at ~0.880 is the Python trainer's floor; closing the gap requires Phase 4 (port the deleted Rust trainer's exact recipe — cosine LR + pure RankNet).
+
+### Tick 23 — 2026-05-10T10:25Z — D.18 added cosine LR annealing to trainer (V0_5-faithful step)
+
+- The deleted Rust mlp_train.rs docstring revealed the missing recipe ingredient: **Adam with cosine annealing**. My Python trainer used constant lr.
+- Patched `scripts/v_next/train_v_next_mlp.py`:
+  - Added `--lr-schedule {constant, cosine}` flag (default constant for back-compat)
+  - Added `TrainConfig.lr_schedule` field
+  - Wired `torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr*0.01)`
+  - Added `sched.step()` after each epoch's train loop
+- Pushed to zensim main as `feat(v_next/trainer): add --lr-schedule cosine`.
+- Queued background training of 4 cosine variants:
+  1. ep=300 pure ranknet TV=10 cosine
+  2. ep=300 mse_rank TV=10 cosine
+  3. ep=500 pure ranknet TV=10 cosine
+  4. ep=300 pure ranknet TV=30 cosine
+- Background job `boj1bqhix`. ~10 min wall.
+- **Hypothesis**: pure ranknet + cosine + TV=10 should reproduce the V0_5 Rust trainer's recipe most faithfully. If it hits CID22 ≥ 0.885 with non-mono close to 1.59% (the ranknet ultra-smooth baseline), that's the answer.
+- Next tick: read background results, bake winners, run end-to-end CID22 evals.
