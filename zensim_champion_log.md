@@ -714,3 +714,23 @@ Implemented `--lr-schedule cosine_cyclic --lr-cycle-period 50` in `train_v_next_
 - Trainer log shows the warm-restart spike pattern is real (loss jumped from 1.8 → 2.5 at epoch 50, 100, 150...) — implementation is correct. The model just doesn't benefit from it on this loss landscape.
 - **Pushed**: zensim main with bake + train.log + eval.log + trainer code update (`scripts/v_next/train_v_next_mlp.py:368-385` and 609-619).
 - **Next tick**: implement per-step pairs_per_epoch=50000 budget loop. This is the most architecturally distinct Rust ingredient (different sampling pattern, not just hyperparameter). Estimated 30-50 LOC. Likely the one that closes the -0.009 CID22 gap if any single Phase 4 item does.
+
+### Tick 38 — 2026-05-10T18:00Z — Class-balance weight FALSIFIED for aggregate SROCC
+
+User asked for content-class labelling + weight/sample balancing. Found `content_class` already in unified parquets (5 classes, 30/26/20/15/8% distribution). Implemented `--class-balance weight` (~25 LOC, inverse-frequency multiplier on `train_weight`).
+
+Per-class multipliers applied: illustration_or_screen 0.658×, photo_or_illustration 0.776×, photo_natural_or_detailed 1.006×, illustration_or_logo 1.289×, photo_wide_gamut 2.376×.
+
+Trained CHAMPION + class-balance, baked to `benchmarks/h192x128_ep300_class_balance_weight_2026-05-10.bin`.
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| **CHAMPION** | **0.9309** | **0.8861** | **0.8803** |
+| class_balance_weight | 0.9236 | 0.8792 | 0.8730 |
+| Δ vs CHAMPION | **-0.0073** | **-0.0069** | **-0.0073** |
+
+- Class balance via training weight **HURTS aggregate SROCC** by ~0.007 across all metrics — not the desired direction.
+- Caveat: this is *aggregate* SROCC. The user's stated goal was balanced **per-class** performance. To validate that, need: (a) zenanalyze pass on CID22/KADID/TID references to label classes; (b) per-class SROCC computation in eval. Aggregate SROCC drop doesn't preclude reduced **variance** in per-class — that's the actual deliverable.
+- The 2.376× boost on rare `photo_wide_gamut` (8% of synth) likely over-fits to a class that may be underrepresented in CID22 — possible the inverse-frequency was the wrong direction.
+- Saved bake + train.log + eval.log to `zensim/benchmarks/h192x128_ep300_class_balance_weight*`.
+- **Next tick**: either (a) measure per-class SROCC to validate the *actual* user goal, OR (b) port the per-step pairs_per_epoch=50000 sampling loop. (a) is faster but slightly off-track from CID22 SROCC > 0.8934 target; (b) is the higher-impact Phase 4 item.
