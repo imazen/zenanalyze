@@ -209,3 +209,35 @@ Next tick: A.1 (verify V0_5 bake exists + integrity check).
 - Baked all 4 to ZNPR v2 at /tmp/zensim_loop/bakes/h128_{tv0,tv1,tv3,tv10}_kadid_tid_2026-05-10.bin (120 KB each).
 - Kicked off background eval pipeline running all 4 sequentially. Signal: `/tmp/zensim_loop/results/mixsup_done`. ~17 min total wall (~4 min × 4).
 - Next tick: read whichever evals have completed. The hypothesis: TV=10 holds CID22 close to V0_4 baseline (0.8893) while non-mono gets close to 4.86. If yes, that's the champion.
+
+### Tick 11 — 2026-05-10T07:25Z — humw + safesyn experiments — CID22 not yet reproduced
+
+End-to-end CID22+KADID+TID eval results (full datasets, n=4292 + 10125 + 3000):
+
+| Bake | KADID | TID | CID22 | non-mono % |
+|---|---|---|---|---|
+| **V0_5 (currently shipped)** | **0.8432** | **0.8401** | **0.8893** | ~8.26 |
+| h128_tv0_kt_humw03 (no TV, calib check) | 0.8520 | 0.7855 | 0.8555 | 6.54 |
+| h128_tv1_kt_humw03 | 0.8583 | 0.7926 | 0.8584 | 6.71 |
+| h128_tv3_kt_humw03 | 0.8535 | (in flight) | — | 6.18 |
+| h128_tv10_kt_humw03 | 0.8601 | 0.7955 | 0.8598 | 5.48 |
+| h128_tv30_kt_humw03 | 0.8564 | 0.7913 | 0.8462 | 4.83 ★ |
+| **h128_tv30_kt_humw20** | **0.9041** ★ | 0.8352 | **0.8246** ✗ | 4.84 ★ |
+| h128_tv10_safesyn_kadid_tid | 0.8537 | 0.7651 | 0.7850 ✗ | 6.89 |
+
+**Findings**:
+1. None of the new TV+mixed-sup variants reproduce V0_5's CID22 0.8893. They lose 0.03-0.06 SROCC.
+2. `h128_tv0_kt_humw03` (mixed-sup, no TV) gets KADID 0.8520 vs V0_4's 0.8432 — close but not exact replication of V0_4 mixed-sup recipe. Python trainer differs from the original Rust trainer in subtle ways.
+3. **High humw (2.0) maximizes KADID/synth val_min but TANKS CID22** (0.8246) — model over-fits human-MOS distribution, losing CID22 discriminative power.
+4. Adding the 340k `safe_synth_ssim2_features.csv` as the canonical training base (humw=1.0) HURT CID22 to 0.7850. That CSV includes the **abandoned V0_7 e1-fill 122k rows** per zensim CLAUDE.md; using them as training base introduces the JPEG-bias drift the V0_7 ablation already documented as bad.
+5. The 218k clean safe-synthetic only exists as `training_safe_synthetic.csv.features.20260308_162434.bin` (legacy binary), NOT in `--human-csv` format. Using it requires either a converter or trainer changes.
+
+**Strategic decision**:
+- All current variants regress on CID22. **Don't swap the shipped V0_5 yet.**
+- The recovery handoff said the original V0_4 mixed-sup achieved 0.8893 via the Rust trainer — there's something the Python `train_v_next_mlp.py` doesn't reproduce.
+- Two paths to CID22 ≥ 0.8893:
+  a. Convert 218k `training_safe_synthetic.csv.features.bin` → `(ref_basename, ssim2, f0..f227)` CSV, train against it directly without unified parquets.
+  b. Reverse-engineer the Rust trainer's exact recipe (different optimizer? different feature extraction?) to match V0_4 mixed-sup's CID22.
+- Path (a) is simpler. The features.bin is a binary blob — needs decode. The original `training_safe_synthetic.csv` has 218,089 rows with `cpu_ssimulacra2` and `gpu_ssimulacra2` columns, paired with the .features.bin. Need to cross-reference.
+
+**Next tick**: write a small Python script to convert 218k features.bin + CSV → `(ref_basename, ssim2, f0..f227)` format, then train hybrid: 218k safesyn (humw=1.0) + KADID (0.3) + TID (0.3) + TV=10. This faithfully replicates V0_5's training base + adds smoothness lever.
