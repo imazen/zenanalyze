@@ -1050,3 +1050,51 @@ Re-evaluated CHAMPION (seed=0, rust_v05_recipe_h64_seed0):
 1. **DSSIM-guided multi-target loss** (user ask). Per Table 7, DSSIM is "best in low-q" — adding it to the loss should help B0/B1.
 2. **Re-eval all 11 seeds per-band** to find the seed with best B0+B1+B3 (not just aggregate B2). Different seed may be the right champion.
 3. **More B3 data**: corpus expansion at high q (= visually lossless range). Synth corpus currently weighted toward B2.
+
+### Tick 50 — 2026-05-10T22:12Z — 11-seed per-band reveals seed=3 is dial-safest (best B3 = 0.26 vs seed=0's 0.09)
+
+Re-evaluated all 11 trained bakes (seeds 0,1,2,3,4,5,6,7,8,9,42) with the new per-band reporting. Took ~15 min (11 × 80s evals).
+
+Per-band SROCC by seed (CID22, n=4292):
+
+| Seed | B0 (<50) | B1 [50,65) | B2 [65,90) | B3 (≥90) | Near-PJND | Aggregate | Min-band |
+|---|---|---|---|---|---|---|---|
+| **3** | 0.4127 | 0.4169 | 0.7699 | **0.2599** ★ | 0.3327 | 0.8823 | **0.2599** ★ |
+| 4 | 0.3616 | 0.4056 | 0.7826 | 0.2042 | 0.3326 | 0.8872 | 0.2042 |
+| 9 | 0.4179 | 0.4427 | 0.7788 | 0.2004 | 0.3417 | 0.8880 | 0.2004 |
+| 5 | 0.4028 | 0.4130 | 0.7658 | 0.1638 | 0.3302 | 0.8784 | 0.1638 |
+| 42 | 0.4084 | 0.4205 | 0.7702 | 0.1473 | 0.3349 | 0.8814 | 0.1473 |
+| 7 | 0.4170 | 0.4275 | 0.7832 | 0.1433 | 0.3607 | 0.8898 | 0.1433 |
+| 2 | 0.4028 | 0.4197 | 0.7684 | 0.1407 | 0.3325 | 0.8794 | 0.1407 |
+| 1 | 0.4113 | 0.4266 | 0.7635 | 0.1303 | 0.3340 | 0.8806 | 0.1303 |
+| 8 | 0.4159 | 0.4088 | 0.7515 | 0.1087 | 0.3250 | 0.8736 | 0.1087 |
+| 6 | 0.3888 | 0.4122 | 0.7487 | 0.0998 | 0.3343 | 0.8724 | 0.0998 |
+| **0** | 0.4310 | 0.4457 | 0.7768 | **0.0923** | 0.3673 | **0.8905** | **0.0923** |
+
+**Headline shift**: under the per-band rule, **seed=3** is the **dial-safest** champion (highest min-band SROCC 0.26). Seed=0 has the highest aggregate but the WORST B3 (0.09 — random). For the user-facing dial, seed=3 is the right ship.
+
+| Pick | Trade-off |
+|---|---|
+| **seed=0** (current "champion") | Aggregate-max (0.8905), but B3=0.09 (broken dial at visually lossless) |
+| **seed=3** (dial-safest) | Aggregate -0.008, but B3=0.26 (almost 3× better at visually lossless) |
+| seed=7 | Aggregate close (0.8898), but B3=0.14 (still weak) |
+
+The val-policy=Min principle from V0_5's recipe argues for seed=3.
+
+**Saved**: `benchmarks/rust_v05_recipe_h64_11seeds_perband_2026-05-10.log`.
+
+### Tick 50 user-driven roadmap
+
+User message (during this tick): "do all of these, add more data sets, including ones mentioned in the paper for lower quality stuff. bring butteruagli 2 and 3 norm (you can add 2 norm to both bhtter crates as builtins for speed) expand the data set - keeping it free of cid22 validation set derived images - purge those - so we can train better in all ranges. add graphs by default, scatter and candlestick both, so we can visualize by range. make the paper rigorous procedures our default way to eval and measure."
+
+**Multi-tick plan**:
+1. **+ datasets** (per paper §"Related Work"): LIVE IQA, PieAPP, KonFiG-IQA. Already have: KADID, TID2013, CID22 (49 refs val), KonJND-1k.
+2. **butter 2-norm + 3-norm built-in** to `butteraugli` and `fast-ssim2` crates for speed. Current 3-norm is via `libjxl_pnorm(diffmap, 3.0)` in dataset_metric_baseline — needs upstream.
+3. **CID22 validation purge**: verify all training corpora exclude the 49 CID22 validation refs. Safe-synthetic is filtered, but need to re-verify after adding new datasets.
+4. **Multi-target loss** (DSSIM + butter-2/3-norm in addition to ssim2). Per Table 7 + paper, this should fix B0/B1.
+5. **Default plotting** (scatter + candlestick): per-band score histograms, per-band scatter, per-codec encode curves. Replicate paper Figures 3/8/9/10/11/13 styles.
+6. **Adopt paper rigor**: honeypot screening equivalent, bias correction, monotonicity constraint in synth scoring.
+
+This is 5-10 ticks of structured work. Will queue.
+
+**Next tick (immediate)**: ship seed=3 as the dial-safest champion and start the multi-target loss implementation (DSSIM in Rust trainer).
