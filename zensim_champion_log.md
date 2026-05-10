@@ -1358,3 +1358,34 @@ Audited `training_safe_synthetic.csv` (218,089 rows) for monotonicity violations
 1. **Generate monotonic-envelope safesyn CSV** (~30 LOC Python). Train Rust on it. Compare CID22+CSIQ per-band SROCC against current bakes.
 2. **Filter zenwebp-m4 rows only** (alternative). Train + compare.
 3. 11-seed × 4-dataset full sweep (option from prior tick, still queued).
+
+### Tick 58 — 2026-05-10T23:18Z — Monotonic-envelope safesyn — MIXED result + user authorizes WebP drop
+
+**Pipeline executed**:
+1. Generated monotonic source CSV: per (source, codec) curve, replaced `gpu_ssimulacra2` with cumulative-max-along-q (and `gpu_butteraugli` with cumulative-min). **16,567 pairs modified (7.6%)** — the cum-max propagation effect (single dip causes all subsequent low-q rows to be lifted to the running max).
+2. Re-converted via `convert_features_bin.py` → `safe_synth_218k_features_monotonic.csv` (745 MB).
+3. Trained Rust V0_5 recipe seed=3 with monotonic CSV. 600s, early-stop at epoch 275/300. val_min=0.9421 (orig seed=3 was 0.9460).
+4. Eval across 4 datasets. Bake: `benchmarks/rust_v05_monotonic_h64_seed3_2026-05-10.bin`.
+
+**Mixed result vs original seed=3**:
+
+| Dataset/Band | Original | Monotonic | Δ |
+|---|---|---|---|
+| KADID B1 | 0.4031 | **0.4429** | +0.040 ✓ |
+| KADID Near-PJND | 0.1767 | **0.2064** | +0.030 ✓ |
+| TID B0 | 0.8782 | **0.8890** | +0.011 ✓ |
+| TID B2 | 0.3374 | **0.3737** | +0.036 ✓ |
+| TID B3 (n=229) | 0.0601 | 0.0820 | +0.022 ✓ |
+| CSIQ B3 (n=50) | 0.6376 | **0.6558** | +0.018 ✓ |
+| **CID22 B3 (n=43)** | 0.2599 | 0.1580 | **-0.102** ✗ |
+| CID22 B0 | 0.4127 | 0.4017 | -0.011 ✗ |
+| CID22 B1 | 0.4169 | 0.4053 | -0.012 ✗ |
+| CSIQ B0 | 0.7857 | 0.7406 | -0.045 ✗ |
+
+**Net assessment**: KADID/TID gain modestly; CID22/CSIQ B0 lose. CID22 B3 lost 0.10 but CI [0.00, 0.46] is wide. **Hypothesis NOT clearly validated**.
+
+**User intervention** (during eval): "we can drop webp". WebP-m4 is the 86% violation source. Alternative cleanup: filter zenwebp-m4 rows entirely (~9.5k rows = 4.4% of corpus). Cleaner than the monotonic-envelope projection (which modifies 7.6% of rows but PRESERVES the noisy ones with overridden labels).
+
+**Saved**: `benchmarks/rust_v05_monotonic_h64_seed3_2026-05-10.{bin,train.log}`, `benchmarks/monotonic_seed3_4ds_2026-05-10.log`.
+
+**Next tick**: per user, **drop zenwebp-m4** entirely. Generate `safe_synth_filtered_no_webp.csv`. Train seed=3. Compare against both originals and monotonic.
