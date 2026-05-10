@@ -829,3 +829,31 @@ The aggregate-best is `bs=2048 + cosine` (no cyclic). For shipping, that's the n
 - ⏳ Step 6: full V0_5-recipe training + bake + eval — ~25 min single-thread
 
 **Next tick**: run a full V0_5-recipe training with the EXISTING single-layer Rust trainer (no multi-layer or TV needed for parity test). Args: `--hidden 64 --epochs 300 --pairs-per-epoch 50000 --lr 1e-3 --val-policy min --early-stop-patience 50`. Plus 3 groups (safesyn @ 1.0, kadid @ 0.3, tid @ 0.3). ETA ~25 min. If CID22 jumps to ~0.89, the V0_5 mechanism is validated and we can pivot to multi-layer Step 3.
+
+### Tick 43 — 2026-05-10T19:55Z — Rust V0_5 recipe trained — KADID/TID huge gains, CID22 +0.0011
+
+Trained the full V0_5 recipe in Rust: `safesyn @ 1.0 / kadid @ 0.3 / tid @ 0.3`, hidden=64, epochs=300, pairs_per_epoch=50000, lr=1e-3, val-policy=Min, early-stop=50, seed=42, max_features=228. Early-stopped at epoch 195/300 in **442s (7.4 min single-thread CPU)**. Bake **60,932 bytes — exact byte-size match to V0_5**.
+
+Two false starts before this success — both useful records:
+1. **300-feature bake** (`*_300feat_WRONG_INPUTS_2026-05-10.bin.bak`): trained without `--max-features`. Eval reported "0 valid" because zensim's runtime supplies 228 features but bake had 300 input slots.
+2. **v3-format bake** (`*_v3format_2026-05-10.bin.bak`): trained with the local `zenanalyze/zenpredict` path-dep — that `bake_v2` writes ZNPR v3 (despite the function name). zensim-bench depends on published `zenpredict 0.1.0` which is v2-only. Switched zensim-validate to `workspace zenpredict`, retrained → 60,932 bytes ZNPR v2 ✓.
+
+| Bake | KADID | TID | CID22 | non-mono |
+|---|---|---|---|---|
+| V0_5 (shipped) | 0.8432 | 0.8401 | **0.8893** | ~8.26% |
+| CHAMPION (Python h192x128 bs=16k) | 0.9309 | 0.8861 | 0.8803 | 4.56% |
+| Python bs=2048 + cosine | 0.9468 | 0.9035 | 0.8774 | (n/a) |
+| **Rust V0_5 recipe (h64, 50k pairs/ep)** | **0.9477** ★ | **0.9611** ★★ | **0.8814** | (eval TBD) |
+
+- **TID +0.121 vs V0_5** — massive. Per-step pair sampling DOES help, especially on TID (where CHAMPION was at 0.886).
+- **CID22 +0.0011 vs CHAMPION, -0.0079 vs V0_5** — same delta as Python bs=2048 (essentially flat). The CID22 -0.008 gap from V0_5 0.8893 stays open.
+- **Train speed**: 442s = 50,000 pairs × 195 epochs = 9.75M Adam steps in 442s = 22k steps/sec. About 3× faster than my earlier estimate (must be CPU caching the data fits hot).
+- **Bake quirk**: Rust bake outputs are negative-distance (mean ≈ -6.4 at PJND), not 0..100 distance. The Rust trainer doesn't do `flip_output`-equivalent. SROCC is rank-invariant so the eval works, but for shipping we'd need to either add a flip or document the convention.
+- **Saved**: `benchmarks/rust_v05_recipe_h64_2026-05-10.{bin,train.log,eval.log}` (3.2 KB eval log).
+
+**What this confirms**:
+- Per-step Adam sampling at 50k pairs/epoch IS a real lever for KADID/TID (huge gains).
+- CID22's -0.0079 from V0_5 is NOT closed by per-step sampling alone. Likely the V0_5 0.8893 also depended on KonJND-1k-as-training-mix (May-1 log: `train group 3: 'konjnd1k_train' n=52960 train_w=0.500`).
+- Multi-layer is not required to beat CHAMPION on aggregate (h=64 single-layer Rust > h=192,128 Python on KADID/TID).
+
+**Next tick**: train Rust with **synth + KADID + TID + KonJND-1k** (matching V0_5's actual train mix). KonJND adds ~1008 calibration anchors. If CID22 jumps to ~0.89, V0_5 mechanism reproduced. ETA ~10 min.
