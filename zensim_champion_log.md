@@ -668,3 +668,33 @@ Trained CHAMPION recipe + `--human-csv konjnd:...:3.0:0.0`. 181s, ep=300. Baked 
   1. **Post-hoc affine calibration** (fast, 30 LOC). Fit `score' = α + β·score` from training-set PJND pairs to map predicted mean → 63. Bake α, β into ZNPR metadata; runtime applies them. Preserves all SROCC numbers (rank-invariant). Will break the "100 = identical" semantic at the upper bound — needs sigmoid/clip to keep score ≤ 100.
   2. **Dedicated anchor loss term** (proper, 60 LOC). Add `--anchor-target SCORE --anchor-csv PATH --anchor-weight FLOAT` flags that compute MSE only against the target value and combine via separate scaling that doesn't get diluted by synth row count. Pull mean directly via gradient on a separate constant-target term.
 - **Recommendation**: ship post-hoc calibration as v0_5_calibrated bake variant — preserves CHAMPION's KADID/TID/CID22 SROCC exactly while anchoring PJND mean to 63. Validate upper-bound clamping doesn't break "100 = identical" predicate (test with src=src pair).
+
+### Tick 36 — 2026-05-10T17:37Z — CORRECTION: Ticks 32-35 chased a phantom; CHAMPION was already calibrated
+
+While implementing the affine calibration, discovered the eval-harness label for CHAMPION's predict() output was misread. The "V0_4 raw distance" column at PJND = 37.42 is the post-`flip_output` MLP output, which equals `100 - score`. So:
+
+- raw_distance 37.42 → **score = 100 - 37.42 = 62.58**
+- CID22 paper target JPEG = 63.10 → **gap is 0.52 (within noise; fast-ssim2 itself was 62.55)**
+- raw_distance 34.52 → score 65.48 vs paper 65.38 — already on target for BPG too.
+
+**The CHAMPION model is already correctly calibrated for the user-facing dial. There was no offset miscalibration.**
+
+Key context I missed in Tick 32:
+1. `bake_to_znpr.py` defaults `flip_output=True` (line 167) which rewrites the final layer to emit `100 - (W·x + b)` — a "distance" representation in 0-100 (higher = worse). Explained at `bake_to_znpr.py:71-77`.
+2. `dataset_metric_baseline.rs` reports the bake's raw `predict()` output as "V0_4 raw distance". The number 37 is NOT a score — it's the flipped-output value.
+3. Score = 100 - raw = 62.58 vs ssim2 score 62.55 — they match closely, as expected (V0_4 trained on ssim2 target).
+
+**Tick 36 mistake**: I applied an affine calibration `α=27, β=1` to push raw_distance 37 → 10, intending to "shift score 37 → 63". But the model output is already distance, so I shifted in the WRONG DIRECTION (effective score moved 62.58 → 89.6, making PJND-quality look like high-quality). Renamed the broken bake to `benchmarks/h192x128_ep300_calibrated_a27_b1_2026-05-10.WRONG_DIRECTION.bin.bak`.
+
+**What still has value from ticks 32-35**:
+- The KonJND features CSV (`konjnd_anchor_features_2026-05-10.csv`, 1008 × 230) is a useful artifact for any future per-PJND analysis (still a clean per-image feature snapshot).
+- The dataset_metric_baseline `--konjnd-features-csv` flag (Tick 33) is a good general tool, ship as-is.
+- The two anchor bakes (w=0.1 and w=3.0) are no worse than CHAMPION on aggregate. Keep on disk for the record but mark as "not needed".
+
+**What I should have caught earlier**: SROCC is rank-invariant. If CHAMPION had a PJND offset problem, SROCC vs ssim2 would NOT be 0.9618 — it would diverge. But CHAMPION's SROCC matches ssim2 closely, indicating the model output and ssim2 are monotonically related — which only holds if the score is ALSO well-calibrated.
+
+**Pivot for next tick**: refocus on the actual targets (CID22 SROCC > 0.8934, non-mono < 4.86%). The structural -0.009 CID22 gap remains. Still-unimplemented items from `phase4_reference/README.md`:
+- Per-step pairs_per_epoch=50000 budget loop (Rust trainer's outer loop)
+- Cyclic cosine LR with 50-epoch period (vs full-run cosine)
+
+OR continue the multi-codec corpus expansion the user proposed (awaiting decision).
