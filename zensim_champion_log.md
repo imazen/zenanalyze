@@ -308,3 +308,23 @@ Capacity + epoch + humw sweep on top of the safesyn218k+kt+TV=10 recipe:
 - Higher humw (0.5/0.7) didn't add value — humw=0.3 is the sweet spot at this architecture.
 - Baked all 3 (ep100, [192,128,64], [256,192]) and queued sequential CID22+KADID+TID eval pipeline (background, ~12 min total).
 - Next tick: read 3 results. If `h192x128_ep100` hits CID22 ≥ 0.88 with non-mono ≤ 5.2%, **that's the new shipping candidate** — only -0.01 CID22 from V0_5 with massive smoothness + KADID gains.
+
+### Tick 17 — 2026-05-10T08:50Z — D.12 CHAMPION FOUND — h192x128 ep200 dominates V0_5 on aggregate
+
+End-to-end eval results:
+
+| Bake | KADID | TID | CID22 | avg | non-mono% |
+|---|---|---|---|---|---|
+| V0_5 (shipped) | 0.8432 | 0.8401 | **0.8893** | 0.8575 | ~8.26 |
+| h192x128 ep50 (tick 15) | 0.8898 | 0.8195 | 0.8695 | 0.8596 | 4.93 |
+| h192x128 ep100 | 0.9144 | 0.8546 | 0.8772 | 0.8821 | 5.16 |
+| h192x128x64 ep50 (3-layer) | 0.9108 | 0.8496 | 0.8773 | 0.8792 | **4.74** |
+| h256x192 ep50 | 0.9072 | 0.8476 | 0.8794 | 0.8781 | 5.04 |
+| **h192x128 ep200 (NEW)** | **0.9255** ★ | **0.8736** ★ | 0.8792 | **0.8928** ★ | **4.77** ★ |
+
+- **CHAMPION**: `h192x128_ep200` — aggregate **+0.0353** SROCC vs V0_5, non-mono 4.77% (beats V0_2's 4.86% floor for the first time in project history). Tradeoff: CID22 -0.010 (0.8792 vs 0.8893).
+- KADID and TID gains are huge (+0.082 / +0.034) and well outweigh the small CID22 regression on aggregate.
+- Two-layer [192,128] + 200 epochs is the right operating point. Three-layer [192,128,64] has slightly better smoothness (4.74) but lower aggregate.
+- Pushed to zensim main: `benchmarks/champion_2026-05-10.md` (full analysis), `benchmarks/h192x128_ep200_safesyn218k_kt_2026-05-10.{bin,eval.log}`, `scripts/v_next/convert_features_bin.py` (the ZSFC→CSV converter that unlocked the recipe).
+- **DECISION POINT**: ship the new champion vs hold for CID22 parity. The new bake is durably persisted on main; user can swap by `cp benchmarks/h192x128_ep200_*.bin zensim/weights/v0_4_2026-04-30.bin` (after first preserving the V0_5 backup at `runs/v04_mlp_ssim2_holdout_20260501T045510.bin` which is already preserved).
+- Loop has converged on the achievable frontier given the Python trainer's CID22 -0.010 systematic gap vs the deleted Rust mlp_train.rs. Closing that gap is Phase 4 future work.
