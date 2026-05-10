@@ -543,3 +543,25 @@ Final aggregate ranking (sorted by avg SROCC):
 **`CronDelete b55bf342` executed.** 29-tick loop converged. The achievable Pareto frontier has been mapped exhaustively across loss / LR-schedule / optimizer / init / val-policy / capacity / epochs / seeds / TV / humw / corpus axes. Closing the remaining CID22 -0.009 requires source-level recovery (Phase 4 future work).
 
 Pushed seed=42 bake + final retrospective to zensim main. The **CHAMPION at benchmarks/h192x128_ep300_safesyn218k_kt_2026-05-10.bin** is the right ship — pending user approval.
+
+### Tick 30 — 2026-05-10T13:25Z — Phase 4 ingredients + CLAUDE.md goals locked
+
+User clarified the priority structure:
+1. **CID22 is the gold standard** — KADID/TID are non-compression noise, not optimization targets
+2. Smoothness + monotonicity are first-class (zensim is the user-facing dial)
+3. KonJND-1k anchoring at perceptibility thresholds
+4. CID22 paper governs ssim2-accuracy regions (50–90 q-band reliable)
+5. Filter synth corpus by ssim2 ↔ butteraugli concordance (drop curves where they disagree)
+
+Implemented:
+- Updated `zensim/CLAUDE.md` with the 5-priority "Training goals" section
+- Added `--ranknet-group {image, dataset}`: dataset matches Rust trainer's per-dataset pair sampling, allows cross-image absolute ranking
+- Added `--concordance-filter {none, ssim2_butter}`: drops curves where Spearman(ssim2, -butter) < 0.6 within (image, codec, knob) groups
+- Smoke test passed with all 4 phase-4 flags: cosine + adam + glorot + val-min + dataset-group + concordance-filter
+
+Pushed:
+- `e902d519` zensim main (CLAUDE.md goals + 2 new trainer flags)
+
+Background phase 4 full training started (PID 989643): 4 candidates exploring image-vs-dataset RankNet × concordance × pure-RankNet vs mse_rank. ~25 min wall.
+
+Next tick: read results, bake winners, run end-to-end CID22 evals. The hypothesis: **dataset-level RankNet + concordance filter** unblocks CID22 generalization that per-image RankNet over-constrained.
