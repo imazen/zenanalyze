@@ -467,3 +467,26 @@ End-to-end results for cosine LR variants:
 - Pushed to zensim main (`9c1faf7d`).
 - **Loop conclusion (final)**: The Python trainer's CID22 ceiling is structurally bounded by these 5 implementation differences from the Rust trainer. Closing them is Phase 4 future work. Until then, the **CHAMPION (mse_rank rw=0.5 constant LR, h=[192,128], ep=300)** is the right ship — aggregate +0.042 SROCC, smoothness 4.56% beats V0_2 floor for the first time, KADID +0.088, TID +0.046.
 - 25 ticks, ~5 hr wall, ~75 trainings, ~25 end-to-end evals, 7 production-ready bakes shipped to `zensim/benchmarks/`. Loop has truly exhausted the Python-trainer Pareto frontier.
+
+### Tick 26 — 2026-05-10T11:55Z — D.21 Phase 4 partial port (3 of 5 ingredients) — no win
+
+Added to `scripts/v_next/train_v_next_mlp.py`:
+- `--init {kaiming, glorot}` flag (default kaiming for back-compat)
+- `--optimizer {adamw, adam}` flag (default adamw)
+- `--val-policy {mean, min}` flag (default mean)
+
+End-to-end results:
+
+| Recipe | KADID | TID | CID22 | non-mono% |
+|---|---|---|---|---|
+| V0_5 (Rust ground truth) | 0.8432 | 0.8401 | **0.8893** | ~8.26 |
+| CHAMPION (mse_rank constant AdamW Kaiming) | 0.9309 | 0.8861 | 0.8803 | 4.56 |
+| V5-EXACT prior (cosine only) | 0.8773 | 0.8798 | 0.8549 | 4.50 |
+| **V5-EXACT NEW** (h=32 + adam + glorot + val-min + cosine) | 0.8538 | 0.8649 | 0.8387 | **4.44** |
+| **CHAMP-V5** (h=[192,128] + adam + glorot + val-min + cosine) | 0.9212 | 0.8709 | **0.8755** | 4.97 |
+
+- **The 3 ported ingredients (Adam+Glorot+val-min) made V0_5-EXACT WORSE**, not better. CID22 0.8387 vs prior 0.8549.
+- **CHAMP-V5 is also slightly worse** than CHAMPION on every metric. The CHAMPION's recipe is empirically tuned for AdamW + Kaiming + val-mean.
+- **Conclusion**: the missing 2 ingredients (#4 per-step pair sampling, #5 explicit pairs_per_epoch budget) are the dominant gap source. The 3 ingredients I just ported don't independently improve things.
+- Trainer code shipped on zensim main: 3 new flags. Future Phase 4 work needs the per-step pair sampling implementation (~30 LOC, biggest change).
+- **The CHAMPION (mse_rank rw=0.5 constant AdamW Kaiming val-mean h=[192,128] ep=300) remains the right ship.** Loop has truly explored everything reachable without the structural pair-sampling change.
