@@ -857,3 +857,30 @@ Two false starts before this success — both useful records:
 - Multi-layer is not required to beat CHAMPION on aggregate (h=64 single-layer Rust > h=192,128 Python on KADID/TID).
 
 **Next tick**: train Rust with **synth + KADID + TID + KonJND-1k** (matching V0_5's actual train mix). KonJND adds ~1008 calibration anchors. If CID22 jumps to ~0.89, V0_5 mechanism reproduced. ETA ~10 min.
+
+### Tick 44 — 2026-05-10T20:05Z — Rust synth-only — confirms mixed supervision IS needed
+
+Investigated V0_5 May-1 actual recipe — found that V0_5 trained on **synth + KonJND_train (n=52960)** with KADID + TID + KonJND_val as val-only. Different from my previous Rust V0_5 recipe (synth + KADID@0.3 + TID@0.3). Need the 76104-pair konjnd1k features.bin → CSV but the paired-targets ground truth from May-1 isn't on disk; would require recomputing ssim2 per pair.
+
+**This tick's pivot**: smaller test — train Rust with `synth-only` (no KADID/TID, no KonJND) to bound the contribution of mixed supervision. 161s, early-stop at epoch 70.
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| Rust V0_5 recipe (synth + KADID + TID) | **0.9477** | **0.9611** | **0.8814** |
+| **Rust synth-only** | 0.8287 | 0.8169 | 0.8762 |
+| Δ vs Rust mix | **-0.119** | **-0.144** | **-0.005** |
+| V0_5 (shipped, with KonJND) | 0.8432 | 0.8401 | 0.8893 |
+
+- Synth-only HURTS every metric, including CID22 (-0.005).
+- **Mixed supervision IS necessary**. The KADID/TID human-MOS rows transfer signal even to held-out CID22.
+- Synth-only KADID is 0.8287 — basically on the floor (V0_2 weights = 0.8192). The model essentially didn't generalize beyond synth.
+
+**CID22 -0.0079 from V0_5 ceiling remains unclosed**. Possible remaining levers:
+1. **KonJND_train as 4th group** (V0_5's actual recipe). Requires reconstructing per-pair targets — non-trivial without the May-1 paired CSV.
+2. **Higher capacity** (h=128 single-layer in Rust, or multi-layer h=192,128). Not yet tried in Rust.
+3. **More pairs_per_epoch** (100k or 200k) — cheap to test (~14-28 min training).
+4. **Different seed** — sample from seed variance band.
+
+Saved bake + eval log to `benchmarks/rust_synth_only_h64_2026-05-10.{bin,train.log,eval.log}` for the record.
+
+**Next tick**: try **higher pairs_per_epoch=100000** with Rust V0_5 recipe. Cheap, tests if the model just needs more update budget to find a better basin. ~14 min.
