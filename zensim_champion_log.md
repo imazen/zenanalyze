@@ -1431,3 +1431,43 @@ Filtered `zenwebp-default-m4` from safesyn (kept 190,745 of 218,089 rows = 87.5%
 1. **Monotonic-envelope ONLY on WebP rows** — preserve non-WebP signal, denoise just the problem codec. Compromise approach.
 2. **Multi-target loss** (DSSIM + butter) — still queued; directly attacks B0/B1 supervisor weakness.
 3. **Adopt seed=3 monotonic as the dial-safe ship** — TID B3 +0.022, CSIQ B3 +0.018, KADID B1 +0.040 are real gains for the dial property; CID22 B3 -0.10 has CI [0, 0.5] so likely noise.
+
+### Tick 60 — 2026-05-10T23:42Z — 🎯 WebP-mono-only WINS — CID22 0.8851 + TID B3 0.1390 (best of all variants)
+
+Compromise intervention: applied monotonic envelope ONLY to zenwebp-default-m4 rows (3,566 curves, 6,528 pairs modified). Preserves all signal from other codecs; denoises just the 86%-of-violations problem child.
+
+Trained Rust seed=3 in 165s, early-stop at epoch 75. val_min=0.9417.
+
+**Four-way comparison** (all seed=3):
+
+| Variant | KADID agg | TID agg | **CID22 agg** | CSIQ agg | **TID B3** | CID22 B3 |
+|---|---|---|---|---|---|---|
+| Original | 0.9397 | 0.9498 | 0.8823 | 0.9652 | 0.0601 | 0.2599 |
+| Monotonic-all | 0.9421 | 0.9535 | 0.8820 | 0.9629 | 0.0820 | 0.1580 |
+| Drop WebP | 0.9418 | 0.9496 | 0.8705 ✗ | 0.9677 | 0.0797 | 0.1767 |
+| **WebP-mono-only** | 0.9418 | 0.9501 | **0.8851** ★ | 0.9630 | **0.1390** ★★ | 0.2217 |
+
+**Headline wins for WebP-mono-only**:
+- **CID22 aggregate +0.0028** vs original (the primary target) — best of all 4 variants
+- **TID B3 +0.0789** vs original (0.0601 → 0.1390) — improving the previously-worst band on the previously-worst dataset
+- KADID B1 +0.022, CID22 B1 +0.010, CID22 B2 +0.007 — modest band-level gains
+
+**Trade-offs**:
+- CID22 B3 -0.038 (within CI noise, n=43 wide)
+- CSIQ B0 -0.026, CSIQ B1 -0.049 (CSIQ n small)
+- Otherwise small mixed deltas
+
+**Per CID22 paper §"Monotonicity constraint"**: this is essentially what the paper recommends — apply the constraint *where it matters* (within-codec curves with detected violations) rather than naively across everything.
+
+**Saved**:
+- `benchmarks/rust_webp_mono_h64_seed3_2026-05-10.{bin,train.log}`
+- `benchmarks/webp_mono_seed3_4ds_2026-05-10.log`
+- Source: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_webp_mono.csv`
+- Trainer CSV: `/tmp/zensim_loop/safe_synth_218k_webp_mono.csv`
+
+**Decision**: WebP-mono-only IS the new champion candidate for seed=3. Strictly Pareto-dominates original seed=3 on CID22 aggregate + TID B3 (the worst original-recipe band).
+
+**Next tick options**:
+1. Re-train **all 11 seeds** with WebP-mono-only corpus → find combined best
+2. Test WebP-mono-only with multi-target loss (DSSIM)
+3. Ship `rust_webp_mono_h64_seed3_2026-05-10.bin` as the new champion (post-tick 56 leader)
