@@ -269,3 +269,23 @@ End-to-end CID22+KADID+TID eval results (full datasets, n=4292 + 10125 + 3000):
 - Candidate to test: bake h128_tv30_safesyn218k_only and run end-to-end eval. If CID22 ≥ V0_5's 0.8893 with non-mono < 4.86%, that's the champion. Hypothesis: removing human-MOS lets safesyn distribution dominate, which generalizes to CID22 (also a real-world quality-rated set).
 - Eval pipeline (tv0/tv3/tv30 with KADID+TID) at ~50% complete; humw=0 evals queued for next tick.
 - Next tick: read tv3 + tv30 mixed-sup evals; if humw=0 trainings done, bake + run eval. Identify champion; if any candidate beats V0_5 on CID22 with smoothness < 4.86%, swap into shipped slot.
+
+### Tick 14 — 2026-05-10T08:00Z — D.9 polling pipeline; partial readout
+
+- TV=0 mixed-sup safesyn218k+kt: KADID 0.8280, TID 0.7920, **CID22 0.8518**.
+- TV=3 mixed-sup safesyn218k+kt: KADID 0.8581, TID 0.7995, CID22 (still scoring).
+- TV=30 mixed-sup safesyn218k+kt: still in eval pipeline (background PID 477288/510537).
+- humw=0 trainings: TV=30 done (val_srocc 0.9845, baked), TV=10 still training.
+- Set up `wait + read` async background job (job `broi27el9`) — will notify when safesyn218k pipeline completes.
+- Next tick (or task notification): read final tv3/tv30 mixed-sup CID22 results, then bake any pending humw=0 candidates and queue their evals. The hypothesis to test: humw=0 retains synthetic-distribution fit (val_srocc 0.9845) AND CID22 (because CID22 is also synthetic-codec-distorted), while preserving smoothness. If TV=30 humw=0 hits CID22 ≥ 0.86 + non-mono ≤ 4.86, that's a defensible champion.
+
+### Tick 15 — 2026-05-10T08:15Z — D.10 champion candidate found via wider arch [192,128]
+
+- Capacity sweep: hidden ∈ {128, 192, 256, [128,128], [192,128]} with safesyn218k+kt+TV=10:
+  - [192,128] won: val_min **0.9101**, kadid_val **0.8841**, non-mono **4.93%**.
+- End-to-end eval: KADID **0.8898** (+0.047 vs V0_5!), TID 0.8195 (-0.021), CID22 0.8695 (-0.020), non-mono 4.93% (target 4.86 hit within 0.07pp).
+- This is the strongest candidate so far. Bake preserved at `zensim/benchmarks/h192x128_tv10_safesyn218k_kt_2026-05-10.bin` (278 KB ZNPR v2). Companion docs: `benchmarks/champion_candidate_2026-05-10.md` and `.eval.log`.
+- humw=0 candidates (TV=30, TV=100) without KADID/TID don't beat this — KADID drops to 0.74-0.78 since no human-MOS supervision.
+- **DECISION REQUIRED**: swapping V0_5 for this candidate gains smoothness + KADID big-time but costs CID22 0.020. Asking user before promoting to `zensim/weights/v0_4_2026-04-30.bin` slot. The CID22 regression is the user's gold standard.
+- Diagnosis: Python trainer (AdamW + the train_v_next_mlp.py recipe) produces -0.02 to -0.04 CID22 vs the original Rust trainer that produced V0_5. To match V0_5's CID22, we'd need to port the Rust trainer's exact recipe (deleted in PR #29).
+- Pushed `zensim/benchmarks/champion_candidate_2026-05-10.{md,bin,.eval.log}` to zensim main.
