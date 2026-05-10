@@ -383,3 +383,15 @@ End-to-end ep=300 + ep=500 results:
 - Shipped with both bakes (champion + smoothness-winner) durably committed to zensim/benchmarks/.
 - Ship/hold decision still pending user approval. The aggregate gain (+0.042) and smoothness floor crossing (4.56% < V0_2's 4.86%) make this strong; CID22 -0.009 is the only cost.
 - Loop has converged. Cron `b55bf342` will keep firing every 4 min until 7-day expiry or user `CronDelete b55bf342`.
+
+### Tick 21 — 2026-05-10T09:50Z — D.16 multi-seed averaging fails / ep=400 + bs=32k queued
+
+- Multi-seed weight averaging FAILED: averaged seeds {0,1,3} model.pt files; average diverged 75.5% from seed=0. The 3 seeds converge to different loss basins (PyTorch random init drift). Eval: KADID 0.6605, TID 0.7181, CID22 0.6577 — catastrophic.
+- Per-seed at ep=300 (for reference):
+  - seed=0: val_min 0.9342, non-mono 4.56% (champion)
+  - seed=1: val_min 0.9243, non-mono 7.00%
+  - seed=3: val_min 0.9340, non-mono 5.11%
+- Weight-averaging only works when models start from same init + see different data shuffles. PyTorch random init breaks that.
+- Queued in background: ep=400 (more training), bs=32768 (bigger batch — often improves generalization), lr=5e-3 (faster convergence test).
+- Background job `binz11pua`. ~12 min wall.
+- Next tick: read results. If ep=400 hits CID22 ≥ 0.885 with non-mono ≤ 4.86%, that's a clear improvement. If not, the loop has truly converged on ep=300 + the Python trainer's CID22 ceiling.
