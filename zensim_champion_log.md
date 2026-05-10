@@ -565,3 +565,27 @@ Pushed:
 Background phase 4 full training started (PID 989643): 4 candidates exploring image-vs-dataset RankNet × concordance × pure-RankNet vs mse_rank. ~25 min wall.
 
 Next tick: read results, bake winners, run end-to-end CID22 evals. The hypothesis: **dataset-level RankNet + concordance filter** unblocks CID22 generalization that per-image RankNet over-constrained.
+
+### Tick 31 — 2026-05-10T18:50Z (post-mindwipe resume) — dataset-RankNet hypothesis FALSIFIED
+
+After the mindwipe + branch, resumed via `/loop 4m` (cron `75d1bea9`). Read
+`zensim_champion_log.md` to recover state. Phase 4 background pipeline (PID
+989643) had completed — but only h32 of the 4 candidates produced output
+(other 3 silently died after concordance filter, before training Final).
+
+Cleanly isolated the dataset-RankNet flag (CHAMPION recipe + ONLY
+`--ranknet-group dataset` changed) at `[192,128] ep=300 mse_rank constant
+AdamW Kaiming val-mean TV=10`:
+
+| Bake | KADID | TID | CID22 | non-mono |
+|---|---|---|---|---|
+| V0_5 (shipped) | 0.8432 | 0.8401 | **0.8893** | ~8.26% |
+| CHAMPION (image-ranknet) | **0.9309** | **0.8861** | **0.8803** | **4.56%** |
+| dataset-ranknet only | 0.9251 | 0.8829 | 0.8782 | 5.06% |
+
+- Dataset-RankNet is slightly worse on EVERY metric (CID22 -0.002, non-mono +0.50pp). Hypothesis FALSIFIED.
+- The CHAMPION recipe's per-image RankNet IS optimal at this loss/optimizer/init combination.
+- The CID22 -0.009 gap vs V0_5 is **structural beyond recipe tweaks**. Per-step pair sampling, dataset grouping, concordance filter, cosine LR, Adam vs AdamW, Glorot vs Kaiming, val-min vs val-mean — none of them independently or jointly close it in the Python AdamW pipeline.
+- Saved bake + eval log to `zensim/benchmarks/h192x128_ep300_dataset_only_2026-05-10.{bin,eval.log}` for the record.
+- Pushed to zensim main.
+- **Next tick**: implement KonJND-1k anchor loss (zensim CLAUDE.md goal #3) — calibrate at-PJND pairs to score ≈ 63 (CID22 paper Table 4). This is the highest-priority remaining unimplemented goal. ~20-30 LOC. Won't necessarily move CID22, but will fix visually-lossless calibration.
