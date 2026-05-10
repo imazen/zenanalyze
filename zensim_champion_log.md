@@ -698,3 +698,19 @@ Key context I missed in Tick 32:
 - Cyclic cosine LR with 50-epoch period (vs full-run cosine)
 
 OR continue the multi-codec corpus expansion the user proposed (awaiting decision).
+
+### Tick 37 — 2026-05-10T17:48Z — Cyclic cosine LR (T_0=50) — HYPOTHESIS FALSIFIED
+
+Implemented `--lr-schedule cosine_cyclic --lr-cycle-period 50` in `train_v_next_mlp.py` (~10 LOC: PyTorch's `CosineAnnealingWarmRestarts(T_0=50, T_mult=1)`). Trained CHAMPION recipe with this swapped in. 177s, ep=300. Baked to `benchmarks/h192x128_ep300_cyclic_cosine_t50_2026-05-10.bin`.
+
+| Bake | KADID | TID | CID22 | non-mono |
+|---|---|---|---|---|
+| **CHAMPION** (constant LR) | **0.9309** | **0.8861** | **0.8803** | **4.56%** |
+| cyclic_cosine T=50 | 0.9026 | 0.8451 | 0.8770 | (eval-pending) |
+| Δ vs CHAMPION | **-0.0283** | **-0.0410** | -0.0033 | — |
+
+- **Cyclic cosine LR alone HURTS every metric**. KADID -0.028, TID -0.041, CID22 -0.003. Not a way to close the CID22 -0.009 gap vs V0_5.
+- The deleted Rust trainer used cyclic cosine + pure RankNet + Adam (not AdamW) + Glorot init + per-step pair sampling **as a bundle**. Isolating just the LR schedule isn't sufficient — possibly only effective in combination with the other ingredients.
+- Trainer log shows the warm-restart spike pattern is real (loss jumped from 1.8 → 2.5 at epoch 50, 100, 150...) — implementation is correct. The model just doesn't benefit from it on this loss landscape.
+- **Pushed**: zensim main with bake + train.log + eval.log + trainer code update (`scripts/v_next/train_v_next_mlp.py:368-385` and 609-619).
+- **Next tick**: implement per-step pairs_per_epoch=50000 budget loop. This is the most architecturally distinct Rust ingredient (different sampling pattern, not just hyperparameter). Estimated 30-50 LOC. Likely the one that closes the -0.009 CID22 gap if any single Phase 4 item does.
