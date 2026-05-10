@@ -800,3 +800,32 @@ Trained CHAMPION recipe + bs=2048 + `--lr-schedule cosine`. 985s on RTX 5070 (CU
 Total ~260 LOC across 5-6 ticks for full functional parity with Python CHAMPION recipe.
 
 **Next tick**: bake + eval bs=2048+cyclic, then begin Step 2 (CLI dispatch — re-add Args fields and TrainAlgorithm::Mlp variant).
+
+### Tick 42 — 2026-05-10T19:14Z — Rust trainer end-to-end working + Python cyclic falsified (again)
+
+**Rust trainer works**:
+- Created `zensim/zensim-validate/src/bin/zensim_mlp_train.rs` (~270 LOC) — standalone binary wrapping the existing `train_mlp(groups, ...)` API. Skipped retrofitting the legacy CLI integration (would have required ~150 LOC of Args mods); the standalone binary is cleaner.
+- Reads CSV (`ref_basename, human_score, f0..f<N-1>`) directly — same shape as Python trainer's `--human-csv` input.
+- Smoke test: `target/release/zensim_mlp_train --group "kadid:.../kadid_features.csv:1.0:1.0" --hidden 32 --epochs 3 --pairs-per-epoch 1000`. Loaded 10125 pairs × 300 features, trained 3 epochs in **0.3s**, KADID val_srocc=0.9147.
+- Throughput: 10,000 pair-Adam-steps/sec single-threaded. At full V0_5 recipe (50k × 300 = 15M pairs), extrapolates to ~25 min single-threaded (similar to Python+CUDA at bs=2048). To be FASTER, need rayon parallelism (~3 min) or CubeCL (~30s).
+- Output: 41284-byte ZNPR v2 bake — confirms bake_v2 round-trips.
+
+**Python bs=2048 + cosine_cyclic** (concurrent training): bake `benchmarks/h192x128_ep300_bs2048_cyclic_2026-05-10.bin`. KADID 0.9299, TID 0.8848, CID22 0.8776. Cyclic restarts UNDID the cosine gains (-0.017 KADID vs cosine, -0.019 TID, +0.0002 CID22 — flat). Cyclic is FALSIFIED as an additive axis again.
+
+| Bake | KADID | TID | CID22 |
+|---|---|---|---|
+| CHAMPION | 0.9309 | 0.8861 | 0.8803 |
+| **bs=2048 + cosine** ★ | **0.9468** | **0.9035** | 0.8774 |
+| bs=2048 + cosine_cyclic | 0.9299 | 0.8848 | 0.8776 |
+
+The aggregate-best is `bs=2048 + cosine` (no cyclic). For shipping, that's the new aggregate champion (KADID/TID huge); CID22 still below V0_5 0.8893 ceiling.
+
+**Path A roadmap update**:
+- ✅ Step 1 (Tick 41): mlp_train.rs restored + compiles
+- ✅ **Step 2** (Tick 42): standalone CLI binary (300 LOC including CSV parser) — done in one tick, half the budget I'd estimated
+- ⏳ Step 3: multi-layer MLP (Vec<Layer>) — ~50 LOC
+- ⏳ Step 4: TV regularizer — ~30 LOC  
+- ⏳ Step 5: Concordance filter (or preprocessing) — ~30 LOC
+- ⏳ Step 6: full V0_5-recipe training + bake + eval — ~25 min single-thread
+
+**Next tick**: run a full V0_5-recipe training with the EXISTING single-layer Rust trainer (no multi-layer or TV needed for parity test). Args: `--hidden 64 --epochs 300 --pairs-per-epoch 50000 --lr 1e-3 --val-policy min --early-stop-patience 50`. Plus 3 groups (safesyn @ 1.0, kadid @ 0.3, tid @ 0.3). ETA ~25 min. If CID22 jumps to ~0.89, the V0_5 mechanism is validated and we can pivot to multi-layer Step 3.
