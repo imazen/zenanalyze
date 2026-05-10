@@ -648,3 +648,23 @@ Full eval (KADID 10125 / TID 3000 / CID22 4292 / KonJND 1008):
 - Saved bake + train log + eval log to `zensim/benchmarks/h192x128_ep300_konjnd_anchor_w0_1_2026-05-10.{bin,train.log,eval.log}`.
 - **Caveat noted**: trainer's `val_srocc=-1.0000` because konjnd group's SROCC is nan (constant target). Final-epoch save instead of best-epoch. The bake is still the model from epoch 300 — usable, but selection logic needs updating to skip nan groups.
 - **Next tick**: sweep anchor weight {0.5, 1.0, 3.0} OR implement dedicated anchor loss term. Pre-empted: user message arrived requesting a much larger synthetic-corpus expansion (multi-year CLIC + multi-codec + multi-metric + parquet) — that becomes a parallel longer-term track.
+
+### Tick 35 — 2026-05-10T17:26Z — Anchor weight=3.0 — variance shrinks, mean doesn't shift
+
+Trained CHAMPION recipe + `--human-csv konjnd:...:3.0:0.0`. 181s, ep=300. Baked to `benchmarks/h192x128_ep300_konjnd_anchor_w3_0_2026-05-10.bin`.
+
+| Bake | KADID | TID | CID22 | JPEG mean ± std | BPG mean ± std | konjnd test MSE |
+|---|---|---|---|---|---|---|
+| CHAMPION | 0.9309 | **0.8861** | **0.8803** | **37.42** ± **5.19** | **34.52** ± **5.58** | (untrained) |
+| anchor w=0.1 | 0.9345 | 0.8832 | 0.8799 | 37.44 ± 5.14 | 34.99 ± 5.58 | 34.60 |
+| **anchor w=3.0** | 0.9325 | 0.8751 | 0.8787 | **37.48 ± 4.15** | **36.01 ± 4.31** | **24.65** |
+| target | — | — | — | 63 ± 5 | 65 ± 5 | — |
+
+- **Mean barely shifted** (+0.06 JPEG, +1.49 BPG) but **stdev dropped 20-22%** (5.19→4.15 / 5.58→4.31). The MSE loss term is being satisfied by *tightening variance* around the existing predicted mean ~37, not by *shifting the mean to 63*.
+- This is structural: with rank-invariant `mse_rank` driving the synth/kadid/tid groups, the loss landscape rewards "make at-PJND pairs identical" much more than "shift them to 63" because the mean shift conflicts with the synth ordering gradient. Tightening 5.19 → 4.15 is "cheap" (~5 MSE points reduction); shifting 37→63 would cost orders of magnitude more in synth/kadid loss.
+- TID -0.0110 SROCC regression at w=3.0 — anchor is starting to interfere with non-synth groups.
+- **Verdict**: `--human-csv` MSE-anchor approach **fundamentally cannot fix the offset miscalibration** at any weight that preserves SROCC. Needs a different mechanism.
+- **Two options for next tick**:
+  1. **Post-hoc affine calibration** (fast, 30 LOC). Fit `score' = α + β·score` from training-set PJND pairs to map predicted mean → 63. Bake α, β into ZNPR metadata; runtime applies them. Preserves all SROCC numbers (rank-invariant). Will break the "100 = identical" semantic at the upper bound — needs sigmoid/clip to keep score ≤ 100.
+  2. **Dedicated anchor loss term** (proper, 60 LOC). Add `--anchor-target SCORE --anchor-csv PATH --anchor-weight FLOAT` flags that compute MSE only against the target value and combine via separate scaling that doesn't get diluted by synth row count. Pull mean directly via gradient on a separate constant-target term.
+- **Recommendation**: ship post-hoc calibration as v0_5_calibrated bake variant — preserves CHAMPION's KADID/TID/CID22 SROCC exactly while anchoring PJND mean to 63. Validate upper-bound clamping doesn't break "100 = identical" predicate (test with src=src pair).
