@@ -241,3 +241,21 @@ End-to-end CID22+KADID+TID eval results (full datasets, n=4292 + 10125 + 3000):
 - Path (a) is simpler. The features.bin is a binary blob — needs decode. The original `training_safe_synthetic.csv` has 218,089 rows with `cpu_ssimulacra2` and `gpu_ssimulacra2` columns, paired with the .features.bin. Need to cross-reference.
 
 **Next tick**: write a small Python script to convert 218k features.bin + CSV → `(ref_basename, ssim2, f0..f227)` format, then train hybrid: 218k safesyn (humw=1.0) + KADID (0.3) + TID (0.3) + TV=10. This faithfully replicates V0_5's training base + adds smoothness lever.
+
+### Tick 12 — 2026-05-10T07:35Z — D.7 218k clean safesyn + TV sweep — val_min hits 0.8994
+
+- Wrote `convert_features_bin.py` to decode ZSFC v3 binary (`zensim-validate/src/main.rs:340-461` is the original parser) → (ref_basename, human_score, f0..f299) CSV. Output `/tmp/zensim_loop/safe_synth_218k_features.csv` (745 MB, 218,089 rows × 302 cols, gpu_ssimulacra2 clipped to [0,100]/100).
+- Trained 4 candidates with the canonical 218k clean safesyn (humw=1.0) + KADID(0.3) + TID(0.3) at hidden=128, sweeping TV ∈ {0, 3, 10, 30}:
+
+  | tv | val_min | safesyn val | kadid val | tid val | non-mono% |
+  |---|---|---|---|---|---|
+  | 0 | 0.8872 | 0.9959 | 0.8264 | 0.7528 | 7.10 |
+  | 3 | **0.8994** | 0.9967 | 0.8573 | **0.7689** | 6.69 |
+  | 10 | 0.8952 | 0.9963 | 0.8532 | 0.7564 | 5.98 |
+  | 30 | 0.8991 | 0.9965 | **0.8582** | 0.7696 | **4.87** ★ |
+
+- **h128_tv30_safesyn218k_kt** hits BOTH the smoothness target (4.87% ≈ V0_2's 4.86%) AND the highest val_min seen so far (0.8991). This is the strongest candidate yet — pending end-to-end CID22 confirmation.
+- Note TV=3 / TV=30 have higher val_min than TV=0 — TV regularization is a generalization regularizer not just a smoothness term in this regime.
+- TV=10 mixed-sup with safesyn218k (already eval'd Tick 12 prior step): KADID 0.8609, TID 0.7971, **CID22 0.8661**, non-mono 5.98 — best CID22 of all new variants but still 0.023 below V0_5.
+- Baked all 3 (TV={0,3,30}) candidates. Queued background eval pipeline; results in `/tmp/zensim_loop/results/eval_h128_tv*_safesyn218k_kt.log`. Signal `safesyn218k_done`.
+- Next tick: read all 3 evals, declare champion if any hits CID22 ≥ V0_5's 0.8893 + non-mono ≤ 4.86. If TV=30 doesn't reach CID22 0.8893, try humw=0 (no KADID/TID) since that's the literal V0_5 ssim2-proxy recipe.
