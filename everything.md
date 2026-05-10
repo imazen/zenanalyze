@@ -1,13 +1,301 @@
 # everything.md — zen training/picker/metric ecosystem
 
-**Compiled 2026-05-09. Forensic reconstruction across `zenmetrics`, `zenanalyze`
-(zenpicker + zenpredict + zentrain), and `zensim`. Cross-references the
-`RECOVERY_PLAN_2026-05-08.md` / `RECOVERY_HANDOFF_2026-05-08.md` recovery cycle.**
+**Compiled 2026-05-09. Latest substantive update: 2026-05-10 (zensim
+champion training cycle). Forensic reconstruction across `zenmetrics`,
+`zenanalyze` (zenpicker + zenpredict + zentrain), and `zensim`.
+Cross-references the `RECOVERY_PLAN_2026-05-08.md` /
+`RECOVERY_HANDOFF_2026-05-08.md` recovery cycle.**
 
 This is the central tracking doc for what's shipping, what's in flight, what's
 parked, and what needs to happen next. Always cross-check `git log` and the
 per-repo `docs/RECOVERY_REGISTER_2026-05-08.md` files before acting on anything
 here — recovery cycles are still landing.
+
+---
+
+## 0a. Latest state (2026-05-10) — zensim champion cycle
+
+**Read this first if you're returning to the project.**
+
+### Goal lock (per zensim/CLAUDE.md "Training goals" section, 2026-05-10)
+
+zensim is the **user-facing quality dial**. Five priorities, in order:
+
+1. **CID22 SROCC is the gold standard.** KADID-10k and TID2013 are
+   **NOT compression-tuned** (KADID is ~95% non-compression
+   distortions; TID similar) — use them as integrity guards, not
+   optimization targets. Optimize CID22.
+2. **Smoothness AND monotonicity** are first-class objectives. Target
+   non-monotone q-step rate ≤ V0_2's **4.86%** (project floor); ssim2
+   GT is 5.08%. TV regularization (`--tv-weight 10..30`) is the lever.
+3. **KonJND-1k anchoring** at perceptibility thresholds (mean PJND ≈
+   ssim2-63 per CID22 paper Table 4). A trained model must score
+   at-PJND pairs 63 ± 5; saturating to 100 means visually-lossless
+   calibration is broken.
+4. **Filter synth corpus by ssim2 ↔ butteraugli concordance.** Drop
+   curves where Spearman(ssim2, -butter) < 0.6 — noisy ranking labels.
+   The CID22 paper Tables 3 & 6 flag ssim2 as less reliable in
+   q-extremes; butter-concordance is the simplest cross-check
+   without human MOS.
+5. **CID22 paper governs ssim2-accuracy regions:** ssim2 most
+   reliable in q-band 50..90; less so at q > 95 (saturation) and q < 30
+   (extreme distortion outside training distribution).
+
+**Anti-goals** (do NOT optimize for):
+- Aggregate (KADID + TID + CID22) / 3 SROCC. The aggregate hides CID22
+  regressions behind compression-irrelevant gains.
+- Synthetic ssim2-target val_srocc. It tracks the trainer's own loss,
+  not held-out human judgement (>0.99 across most runs while CID22
+  stayed 0.85–0.88).
+- Metrics in q < 30 or q > 95 bands.
+
+### Current shipped state (zensim main `e902d519`, 2026-05-10)
+
+`zensim/weights/v0_4_2026-04-30.bin` is **V0_5 SSIM2-proxy MLP**
+(swapped in by tick 2 of the champion loop). Numbers (full-dataset
+eval): KADID 0.8432 / TID 0.8401 / **CID22 0.8893** / non-mono ~8.26%.
+
+This is the Rust-mlp_train.rs-trained bake from
+`/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_ssim2_holdout_20260501T045510.bin`.
+The Rust trainer was deleted in PR #29 (commit `e613224`, 2026-05-07);
+its source is recovered at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs`
+(885 LOC).
+
+### Loop session champion candidates (NOT YET SWAPPED — pending user approval)
+
+After 30 ticks of automated training (2026-05-10, ~6 hr wall, 75+
+trainings, 25+ end-to-end evals), three production-ready bakes are
+in `zensim/benchmarks/`:
+
+| File | KADID | TID | **CID22** | non-mono | When to ship |
+|---|---|---|---|---|---|
+| **CHAMPION** `h192x128_ep300_safesyn218k_kt_2026-05-10.bin` | 0.9309 | 0.8861 | 0.8803 | 4.56% | Default — aggregate +0.042 vs V0_5, smoothness floor crossed, **CID22 -0.009** |
+| Smoothness-Winner `h192x128_ep200_tv30_humw03_safesyn218k_2026-05-10.bin` | 0.9136 | 0.8571 | 0.8769 | **4.49%** | Encoder rate-control loops |
+| Ultra-Smooth `h192x128_ep300_pureranknet_safesyn218k_kt_2026-05-10.bin` | 0.8954 | 0.8687 | 0.8610 | **1.66%** | Extreme-smoothness use cases (pays -0.024 vs V0_5 CID22) |
+
+**Decision pending user approval to ship.** The CHAMPION's only
+shortcoming vs V0_5 is **CID22 -0.009** (0.8803 vs 0.8893). Per
+locked goal #1, CID22 is the gold standard — don't auto-swap. Ship
+ONLY when:
+- A bake reaches CID22 ≥ 0.8893 (V0_5 floor) AND non-mono ≤ 4.86%
+- OR user explicitly approves the CHAMPION's -0.009 trade for
+  smoothness 4.56% + KADID +0.088
+
+### Phase 4 trainer infrastructure (zensim main, after 2026-05-10)
+
+`scripts/v_next/train_v_next_mlp.py` now has 7 flags ported from
+the deleted Rust trainer:
+
+| Flag | Default | Rust-faithful value |
+|---|---|---|
+| `--lr-schedule {constant, cosine}` | constant | cosine (T_max=epochs, eta_min=lr·0.01) |
+| `--optimizer {adamw, adam}` | adamw | adam (no decoupled weight decay) |
+| `--init {kaiming, glorot}` | kaiming | glorot (std=sqrt(2/(in+out))) |
+| `--val-policy {mean, min}` | mean | min (worst per-group SROCC drives selection) |
+| `--ranknet-group {image, dataset}` | image | dataset (cross-image absolute ranking, matches CID22 evaluation) |
+| `--concordance-filter {none, ssim2_butter}` | none | ssim2_butter (drop curves where Spearman(ssim2, -butter) < 0.6) |
+| `--tv-weight FLOAT` | 0.0 | 10..30 (smoothness regularizer; bug fix `dd79a3c` for last-partial-batch slice) |
+
+**Companion script**: `scripts/v_next/convert_features_bin.py` —
+ZSFC v3 binary → human-csv format converter. Built in tick 12 to
+unlock the canonical 218k clean safe-synthetic training base
+(`/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv.features.20260308_162434.bin`).
+
+**Output of converter**: `/tmp/zensim_loop/safe_synth_218k_features.csv`
+(745 MB; ephemeral — re-run convert script if /tmp wiped). The
+canonical 218k training base in trainer-compatible format.
+
+### Phase 4 outstanding work (unimplemented as of 2026-05-10)
+
+1. **Per-step group-weighted pair sampling** with explicit
+   `pairs_per_epoch=50000` budget (Rust trainer's outer loop). The
+   `--ranknet-group dataset` flag captures the spirit but not the
+   per-step inverse-CDF sampling; the Rust trainer also runs each pair
+   through `forward + backprop` independently rather than batching.
+   Estimated 30 LOC.
+2. **KonJND-1k anchor loss term** — add `--konjnd-anchor-csv PATH:WEIGHT`
+   that mixes in 504 JPEG + 504 BPG pairs at PJND with target score ≈
+   63 (CID22 paper Table 4). Validates "visually-lossless" calibration
+   without using KADID/TID compression-irrelevant signal. Estimated
+   20 LOC.
+3. **Cyclic cosine LR with 50-epoch period** (Rust uses
+   `lr · 0.5 · (1 + cos(pi · (epoch % 50) / 50))`) vs my full-run
+   `CosineAnnealingLR(T_max=epochs)`. The Rust schedule restarts
+   every 50 epochs, mine decays once over the full run. Estimated 5
+   LOC.
+
+### Background pipelines as of 2026-05-10 (mind-wipe time)
+
+A 4-candidate Phase 4 training was running in background (`PID 989643`,
+script `/tmp/zensim_loop/phase4_full_train.sh`). Output dirs (when it
+finishes) at:
+`/mnt/v/zen/zensim-training/2026-05-07/runs/2026051*v_next_h*ssim2_butter*/`.
+Signal file: `/tmp/zensim_loop/results/phase4_full_done`.
+
+The 4 candidates exercise the new flags:
+1. `[192,128] mse_rank TV=10 image group + concordance` — concordance alone
+2. `[192,128] mse_rank TV=10 dataset group + concordance` — dataset-RankNet + concordance
+3. `[192,128] ranknet TV=10 dataset group + concordance` — pure RankNet + everything
+4. `[32] ranknet TV=0 dataset group + concordance` — V0_5-EXACT + dataset-group + concordance
+
+When picking up after wipe: check `pgrep -f phase4_full_train`. If
+still running, wait for `phase4_full_done`; if not, find the run dirs
+that match the wildcard above. Bake any winners via
+`scripts/v_next/bake_to_znpr.py` and eval via
+`zensim-bench/examples/dataset_metric_baseline`.
+
+### Trainer command for the CHAMPION (canonical, reproduces 0.8991 avg / 4.56% non-mono)
+
+```bash
+cd ~/work/zen/zensim
+python3 scripts/v_next/convert_features_bin.py \
+  --bin /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv.features.20260308_162434.bin \
+  --csv /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv \
+  --out /tmp/zensim_loop/safe_synth_218k_features.csv \
+  --target-col gpu_ssimulacra2
+
+python3 scripts/v_next/train_v_next_mlp.py \
+  --sweeps v15r,v15rc \
+  --target ssim2 \
+  --loss mse_rank \
+  --hidden 192,128 \
+  --epochs 300 \
+  --batch-size 16384 \
+  --lr 3e-3 \
+  --weight-decay 1e-5 \
+  --rank-weight 0.5 \
+  --tv-weight 10 \
+  --human-csv "safesyn:/tmp/zensim_loop/safe_synth_218k_features.csv:1.0" \
+  --human-csv "kadid:/mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv:0.3" \
+  --human-csv "tid:/mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv:0.3" \
+  --seed 0 \
+  --tag v_next_h192x128_ep300_safesyn218k_kt_2026-05-10 \
+  --out-dir /mnt/v/zen/zensim-training/2026-05-07/runs
+
+# Bake
+python3 scripts/v_next/bake_to_znpr.py \
+  --run-dir /mnt/v/zen/zensim-training/2026-05-07/runs/<TS>_v_next_h192x128_ep300_safesyn218k_kt_2026-05-10 \
+  --out /tmp/zensim_loop/bakes/champion.bin
+
+# Eval (~4 min)
+cargo build --release -p zensim-bench --example dataset_metric_baseline
+target/release/examples/dataset_metric_baseline \
+  --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
+  --kadid /mnt/v/dataset/kadid10k \
+  --tid /mnt/v/dataset/tid2013 \
+  --v04-bake /tmp/zensim_loop/bakes/champion.bin \
+  --max-pairs 999999
+```
+
+Wall: ~7 min on RTX 5070 + 7950X (60s for converter, 5 min for training,
+5s for bake, 4 min for eval).
+
+### Loop session full transcript
+
+`~/work/zen/zenanalyze/zensim_champion_log.md` — 30+ ticks across
+2026-05-10. Each tick documents what was tried, why, what landed, what
+broke. Read this if you need to know the "why" behind any choice in the
+champion recipe.
+
+### Cron loop status
+
+`b55bf342` was a `*/4 * * * *` cron firing the `/loop` skill that
+drove ticks 1–30. **Cancelled at tick 29** via `CronDelete`. Future
+training continuation should be manual (the loop has converged on the
+achievable Pareto frontier given the Python trainer's structural
+limitations).
+
+### Ship instructions when CID22 ≥ 0.8893 candidate is found
+
+```bash
+# Backup the current shipped V0_5 (also durable at runs/v04_mlp_ssim2_holdout_20260501T045510.bin)
+cp ~/work/zen/zensim/zensim/weights/v0_4_2026-04-30.bin \
+   ~/work/zen/zensim/zensim/weights/v0_4_2026-04-30.v0_5.bak.bin
+
+# Promote champion
+cp ~/work/zen/zensim/benchmarks/<champion>.bin \
+   ~/work/zen/zensim/zensim/weights/v0_4_2026-04-30.bin
+
+# Update profile.rs:160-181 docstring with new lineage
+# Run cargo test --features __experimental_versions
+# jj describe + push
+```
+
+### Resume-after-mind-wipe protocol
+
+When a fresh Claude Code session opens this repo and wants to continue
+the champion training cycle, run this `/loop` command verbatim. It
+will (re)create a 4-minute cron tick that drives the next experiment
+each iteration:
+
+```
+/loop 4m Continue zensim champion training session.
+
+Step 1 — Read `~/work/zen/zenanalyze/zensim_champion_log.md` to see the goal, phase plan, and the last tick. The phase plan is the working order; do not skip phases without recording why.
+
+Step 2 — Refresh `.workongoing` markers in `~/work/zen/zensim`, `~/work/zen/zenanalyze`, `~/work/zen/zenmetrics` with current UTC timestamp + agent-id `claude-zensim-champ-loop`. If a different agent's marker is fresher than 5 minutes, STOP and append a "skipped: collision with <agent>" tick to the log.
+
+Step 3 — Pick the smallest useful next step from the phase plan (5–10 minutes of focused work). Targets: CID22 SROCC > 0.8934, non-monotonic q-step rate < 4.86%. Constraint: no CID22 training data leak; no `cargo publish`. Use synth-only training data on `/mnt/v`.
+
+Step 4 — Execute that step. Tools available include: cargo build/test/run, file edits, jj commit, R2 sync, the existing trainers (`zensim/scripts/v_next/train_v_next_mlp.py` with `--tv-weight`), the eval harness (`zensim-bench/examples/dataset_metric_baseline.rs`), the synth generator binary (`coefficient/examples/generate_zensim_training`), the unified parquets (`/mnt/v/zen/zensim-training/2026-05-07/unified/`).
+
+Step 5 — Append one tick to the log under `## Tick log`. Format: `### Tick N — <UTC timestamp> — <one-line summary>` plus 2–4 bullets of what changed and what's next. Always state concrete artifacts produced (file paths, hashes, numbers).
+
+Step 6 — If a concrete file/artifact was produced, commit via jj on main (`jj describe -m '<msg>' && jj git push --bookmark main` if appropriate). NEVER touch user WIP. If the next step requires user authorization (publishing, removing files, big sweeps that cost money), document the request in the log and stop.
+
+Anti-patterns: don't restart from an ancient branch; don't ignore the prior 10 iterations the recovery register catalogs; don't relax thresholds; don't run cargo publish; don't add CID22 training data.
+```
+
+**Before starting fresh ticks**, the resumed session should:
+
+1. **Check live processes**: `pgrep -f phase4_full_train` (PID 989643 was running at wipe). If alive, let it finish; bake winners via `scripts/v_next/bake_to_znpr.py`. If dead/no run dirs created, re-launch via `/tmp/zensim_loop/phase4_full_train.sh`.
+
+2. **Re-create the converter output if /tmp wiped**:
+   ```bash
+   cd ~/work/zen/zensim
+   python3 scripts/v_next/convert_features_bin.py \
+     --bin /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv.features.20260308_162434.bin \
+     --csv /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv \
+     --out /tmp/zensim_loop/safe_synth_218k_features.csv \
+     --target-col gpu_ssimulacra2
+   ```
+
+3. **Re-build the eval binary** if `target/release/examples/dataset_metric_baseline` is gone:
+   `cargo build --release -p zensim-bench --example dataset_metric_baseline` (~30s on warm cache, ~28s cold).
+
+4. **Recover the loop log + champion docs** by reading:
+   - `~/work/zen/zenanalyze/zensim_champion_log.md` — full 30-tick session
+   - `~/work/zen/zensim/benchmarks/champion_2026-05-10.md` — champion + smoothness-winner + ultra-smooth
+   - `~/work/zen/zensim/benchmarks/tv_smoothness_sweep_2026-05-10.md` — TV+capacity sweep findings
+   - `~/work/zen/zensim/docs/phase4_reference/README.md` — gap analysis + Phase 4 plan
+   - This file (`everything.md` §0a) — the latest state
+
+5. **Stop the cron** when next round of work is done: `CronDelete <id>`. If
+   you don't want a cron at all, just run the prompt by hand.
+
+### Phase 4 priority backlog (after resume)
+
+In this order, given goal #1 is CID22:
+
+1. **Wait for `pgrep -f phase4_full_train`**, bake 4 candidates, run
+   end-to-end CID22 evals. If any hits CID22 ≥ 0.8893 with non-mono ≤
+   4.86, ship it (replaces CHAMPION).
+2. **Implement KonJND-1k anchor loss term** (~20 LOC, goal #3). Add
+   `--konjnd-anchor-csv PATH:WEIGHT` flag to `train_v_next_mlp.py`.
+   Target: at-PJND pairs score 63 ± 5 (CID22 paper Table 4).
+3. **Implement explicit pairs_per_epoch=50000 budget loop** (~30 LOC,
+   the last unported Rust ingredient). The existing `--ranknet-group
+   dataset` captures the spirit; this adds the explicit budget +
+   inverse-CDF group-weighted sampling. May or may not move CID22
+   further — the dataset-group flag may already be sufficient.
+4. **Implement cyclic cosine LR (50-epoch period)** instead of full-run
+   `CosineAnnealingLR` (~5 LOC). Subtle but documented as Rust's choice.
+5. **If all four above don't hit CID22 ≥ 0.8893**, the next lever is
+   training-data quality: the 218k clean safe-synthetic was generated
+   by an older zensim version's gpu_ssimulacra2 column. Re-scoring
+   with the V0_5 (current shipping) bake's ssim2 outputs as targets
+   might give cleaner labels, but this is non-trivial (regenerate
+   features.bin too if zensim feature definitions changed).
 
 ---
 
