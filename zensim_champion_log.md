@@ -328,3 +328,20 @@ End-to-end eval results:
 - Pushed to zensim main: `benchmarks/champion_2026-05-10.md` (full analysis), `benchmarks/h192x128_ep200_safesyn218k_kt_2026-05-10.{bin,eval.log}`, `scripts/v_next/convert_features_bin.py` (the ZSFC→CSV converter that unlocked the recipe).
 - **DECISION POINT**: ship the new champion vs hold for CID22 parity. The new bake is durably persisted on main; user can swap by `cp benchmarks/h192x128_ep200_*.bin zensim/weights/v0_4_2026-04-30.bin` (after first preserving the V0_5 backup at `runs/v04_mlp_ssim2_holdout_20260501T045510.bin` which is already preserved).
 - Loop has converged on the achievable frontier given the Python trainer's CID22 -0.010 systematic gap vs the deleted Rust mlp_train.rs. Closing that gap is Phase 4 future work.
+
+### Tick 18 — 2026-05-10T08:55Z — D.13 CID22-recovery sweep — TV=30 ep=200 hits 4.49% non-mono
+
+Probing the CID22 -0.010 gap:
+
+| variant | val_min | kadid | tid | safesyn | non-mono% |
+|---|---|---|---|---|---|
+| ep=200 tv=10 humw=0.3 (CHAMPION) | 0.9294 | 0.9124 | 0.8285 | 0.9986 | 4.77 |
+| ep=200 tv=30 humw=0.3 | 0.9247 | 0.9083 | 0.8143 | 0.9984 | **4.49** ★ |
+| ep=200 tv=10 humw=0.1 | 0.9194 | 0.8979 | 0.8013 | 0.9987 | 5.07 |
+| ep=200 tv=10 humw=0.0 (V0_5-faithful) | **0.9868** | (n/a) | (n/a) | 0.9987 | 5.19 |
+
+- TV=30 at ep=200 cuts non-mono further (4.49 vs 4.77) at -0.04 val_min — possibly the smoothness winner if CID22 holds.
+- humw=0 (no KADID/TID at all) jumps val_srocc to 0.9868 since holdout is only safesyn + synth — could be the V0_5-faithful + TV variant if CID22 lands strongly.
+- humw=0.1 (lower than 0.3) is worse on every dimension — KADID/TID just aren't getting enough signal.
+- Baked tv30_humw03 and tv10_humw00 to ZNPR v2; queued background eval pipeline. ~8 min.
+- Next tick: read both eval results. If tv10_humw00 hits CID22 close to V0_5's 0.8893, that becomes the new champion (V0_5 + TV without distortion-shape distortion). If tv30_humw03 hits CID22 near champion's 0.8792 with non-mono 4.49, it's the smoothness winner.
