@@ -982,3 +982,35 @@ Saved bakes + train.logs for seeds 3-9 to `benchmarks/rust_v05_recipe_h64_seed{3
 4. Plot generation in CID22 paper style (per user ask).
 5. Multi-codec corpus expansion (still pending authorization from earlier; corpus state has NOT changed since Tick 40).
 6. everything.md update — has NOT been refreshed with Ticks 32-47.
+
+### Tick 48 — 2026-05-10T21:50Z — Read CID22 Tables 2/4/5, added per-band reporting rule
+
+Read full CID22 paper (20 pages via `Read` tool's PDF support). Extracted:
+
+**Table 2** — Agreement between MCOS and TSBPC pairwise opinions: ΔMCOS ≈ 2 × ΔTSBPC. **10 MCOS points = robust majority** (96.8% agreement); **5 points = narrow majority** (70-77%); **2 points = below human noise floor** (54-65%). This bounds *meaningful* score differences for the zensim dial — a 2-point shift is below human discrimination.
+
+**Table 4** — Per-metric scores at KonJND-1k mean PJND: SSIMULACRA 2 = 63.10 ± 4.65 (JPEG), 65.38 ± 5.10 (BPG). Confirms my Tick 32 misread (CHAMPION's "37 raw distance" = 63 score after `100 - distance`).
+
+**Table 5** — Quality scale alignment: **CID22 MCOS** and **SSIMULACRA 2** are 1:1 on the same numerical scale. Bands: medium=50, high=65, visually lossless=90.
+
+**Per-band reporting rule added to `zensim/CLAUDE.md`** (mandatory, locked 2026-05-10):
+- B0: below medium (< 50)
+- B1: medium (50-65)
+- B2: high (65-90)
+- B3: visually lossless (≥ 90)
+- Near-PJND sub-band: 58-68
+
+Required reporting: per-band SROCC, MAE, non-monotonic q-step rate, n.
+
+Plot styles to replicate (per `docs/CID22_TABLES_2_4_2026-05-10.md`):
+- Fig 3: stacked histogram of zensim score by codec
+- Fig 8/9: median + p5 score vs bpp per encoder
+- Fig 10: encoder visual consistency (stdev vs mean)
+- Fig 11: per-content-class score-bpp curves
+- Fig 13: 2D histogram of zensim score vs CID22 MCOS with PJND line
+
+**Artifacts produced**:
+- `zensim/docs/CID22_TABLES_2_4_2026-05-10.md` (new 145-line summary)
+- `zensim/CLAUDE.md` updated with per-band reporting rule
+
+**Next tick**: implement per-band reporting in `dataset_metric_baseline.rs` (~80 LOC). Then re-eval the 11-seed sweep with band breakdowns to see which seed is best per band (not just aggregate).
