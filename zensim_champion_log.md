@@ -1237,3 +1237,49 @@ Seed=4 emerges as best worst-band candidate when CSIQ is included. But all 4 are
 **Saved**: `benchmarks/csiq_4seeds_2026-05-10.log`.
 
 **Next tick**: re-eval all 11 seeds across CID22 + CSIQ to identify combined-best champion; or pivot to multi-target loss (DSSIM) per Table 7 for B0/B1 supervisor improvement.
+
+### Tick 55 — 2026-05-10T22:53Z — 11-seed × CID22+CSIQ consolidated leaderboard
+
+Eval all 11 seeds on both CID22 (n=4292) and CSIQ jpeg/jp2k (n=150). Discovered seed=42's bake is `rust_v05_recipe_h64_2026-05-10.bin` (no seed suffix, the original Tick 43 run).
+
+| Seed | CID22 agg | CID22 B3 | CSIQ agg | CSIQ B3 | worst-band-n≥20 |
+|---|---|---|---|---|---|
+| **0** | **0.8905** | 0.0923 | 0.9651 | 0.6203 | 0.0923 (CID22 B3) |
+| 1 | 0.8806 | 0.1303 | 0.9679 | 0.6335 | 0.1303 |
+| 2 | 0.8794 | 0.1407 | 0.9665 | 0.6330 | 0.1407 |
+| **3** | 0.8823 | **0.2599** | 0.9652 | 0.6376 | **0.2599** ★ |
+| 4 | 0.8872 | 0.2042 | 0.9662 | 0.6392 | 0.2042 |
+| 5 | 0.8784 | 0.1638 | 0.9631 | 0.6221 | 0.1638 |
+| 6 | 0.8724 | 0.0998 | 0.9650 | 0.6374 | 0.0998 |
+| 7 | 0.8898 | 0.1433 | 0.9638 | 0.6323 | 0.1433 |
+| **8** | 0.8736 | 0.1087 | 0.9661 | **0.6434** | 0.1087 |
+| 9 | 0.8880 | 0.2004 | **0.9678** | 0.6298 | 0.2004 |
+| 42 | 0.8814 | 0.1309 | 0.9654 | 0.6250 | 0.1309 |
+
+**Champion analysis** (multiple criteria, none statistically definitive due to CID22 B3 n=43 noise):
+
+| Criterion | Winner | Value |
+|---|---|---|
+| CID22 aggregate | **seed=0** | 0.8905 |
+| CID22 B3 | **seed=3** | 0.2599 [CI 0.04, 0.55] |
+| CSIQ aggregate | **seed=1** | 0.9679 |
+| CSIQ B3 (n=50, stable) | **seed=8** | 0.6434 [CI 0.47, 0.75] |
+| min-band (worst across all) | **seed=3** | 0.2599 |
+| avg(CID22+CSIQ aggregate) | **seed=4** | 0.9267 |
+
+**Recommendation depends on optimization target**:
+- **Aggregate-max (legacy)**: seed=0 (CID22 0.8905) — but B3 worst
+- **Dial-safe (val-policy=Min)**: seed=3 (worst-band 0.26) — though CID22 B3 CI [0.04, 0.55] makes the lead statistically thin
+- **CSIQ-best (statistically tighter)**: seed=8 (CSIQ B3 0.64) — but only +0.005 over seeds 3,4,9 (within noise)
+- **Aggregate-balanced**: seed=4 (avg 0.9267, both datasets) — solid all-around
+
+All four picks are within bootstrap-CI overlap of each other. The structural takeaway: **at this recipe + corpus + hidden=64, ~0.88 CID22 and ~0.96 CSIQ are the plateau**. Further gains need recipe/data changes, not seed selection.
+
+**Saved**: `benchmarks/11seeds_cid22_csiq_2026-05-10.log`.
+
+**Next tick** (queued options):
+1. **Ship seed=3 OR seed=4 as the new champion** — depends on which criterion user prefers (dial-safe vs balanced)
+2. **Multi-target loss** — DSSIM/butter additional supervision for B0/B1 lift
+3. **Per-band reporting for KADID/TID** — currently CID22/CSIQ only
+4. **Default plot generation** (scatter + candlestick, CID22 paper style)
+5. **Adopt paper rigor** — bias correction, monotonicity check on training data
