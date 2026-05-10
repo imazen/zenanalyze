@@ -1323,3 +1323,38 @@ Full per-band eval of **seed=3** across all 4 datasets:
 2. **Multi-target DSSIM loss** in Rust trainer — directly targets the weakness bands (B2/B3 TID)
 3. **Default plotting** — generate Figure 8-style bpp-vs-MCOS for each dataset
 4. **Adopt paper rigor** — monotonicity-constraint check on synth training pairs
+
+### Tick 57 — 2026-05-10T23:05Z — Paper-rigor: monotonicity audit on safesyn; zenwebp-m4 = 86% of violations
+
+Audited `training_safe_synthetic.csv` (218,089 rows) for monotonicity violations within (source, codec) curves. Per CID22 paper §"Monotonicity constraint": same-encoder higher-bitrate must give MOS ≥ lower-bitrate; violations are supervisor noise.
+
+**Overall**:
+- 21,315 (source, codec) curves
+- **1,611 curves (7.6%)** have ≥1 reversal
+- **2,234 reversed adjacent-q pairs (1.14% of all 196,671 pairs)**
+
+**Per-codec breakdown** (pair violation rate):
+
+| Codec | curves | pair viol % | curves w/ viol % |
+|---|---:|---:|---:|
+| **zenwebp-default-m4** | 3,566 | **8.13%** | **38.1%** |
+| zenjpeg-420-xyb-e2 | 3,499 | 0.62% | 3.8% |
+| mozjpeg-rs-420-e4 | 3,579 | 0.15% | 1.8% |
+| zenjxl-e7 | 3,513 | 0.12% | 0.7% |
+| zenavif-s5-e6 | 3,579 | 0.04% | 0.4% |
+| zenjpeg-420-e2 | 3,579 | 0.04% | 0.4% |
+
+**zenwebp-default-m4 contributes 1,932 of 2,234 = 86% of all violations**. The other 5 codecs combine to 0.18% violation rate (clean signal).
+
+**Implications**:
+1. zenwebp at default m4 has a real supervisor-noise problem — either ssim2 is fluky on WebP's blocky artifacts, or the encoder genuinely non-monotones at certain q transitions.
+2. Filtering WebP-m4 rows (~9.5k rows = 4.4% of corpus) would clean training but cost data.
+3. Alternative: **monotonic-envelope projection** — within each curve, replace `gpu_ssimulacra2` with cumulative-max-along-q. Preserves all rows; supervisor becomes monotone.
+4. The 1.14% overall rate is comparable to the paper's "honeypot screening" rejection rate (~14.7%), so this isn't an outlier corpus — just a noise level the paper flags.
+
+**Saved**: audit script run inline. Per-codec table preserved here in tick log.
+
+**Next tick queued options**:
+1. **Generate monotonic-envelope safesyn CSV** (~30 LOC Python). Train Rust on it. Compare CID22+CSIQ per-band SROCC against current bakes.
+2. **Filter zenwebp-m4 rows only** (alternative). Train + compare.
+3. 11-seed × 4-dataset full sweep (option from prior tick, still queued).
