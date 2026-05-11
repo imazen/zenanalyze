@@ -2474,3 +2474,25 @@ Args: `--hidden 128 --tv-weight 10 --seed 1 --groups safesyn(1.0:0.0)+kadid(0.3:
 **Prediction**: CID22 ~0.887 / non-mono ~5.2%. Will inform decision: does h=128 ever earn its training cost over h=64 in the KonJND-aligned recipe? If no, the conclusion in Tick 89 holds firm: **V0_5 is the achievable Pareto frontier**.
 
 **Next tick**: harvest h=128+TV=10 bake; non-mono eval (1 min); if non-mono < 4.86% (unlikely), launch CID22 SROCC eval (5 min). Otherwise update Pareto map and conclude cycle.
+
+### Tick 91 — 2026-05-11T01:42Z — Audit: Tick 82 TV=10/TV=20 CID22 numbers had NO eval.log on disk
+
+**Discovery during eval audit**: Tick 82 reported CID22 0.8841 (TV=10) and 0.8812 (TV=20) but neither has a `.eval.log` companion file. Possible Tick 82 reported predicted/training-log values rather than running the full CID22 eval. **Re-running full CID22 eval on TV=10 h64** now (PID 2342178, ~5 min wall) — output to `benchmarks/rust_v05recipe_konjnd_tv10_h64_seed1_2026-05-11.eval.log`.
+
+**Concurrently extended the h=128 TV-curve**: launched h=128+TV=5 in parallel (PID 2342030). Currently 3 background jobs:
+- PID 2341484: h=128+TV=10+KonJND training (2:01 elapsed)
+- PID 2342030: h=128+TV=5+KonJND training (0:48 elapsed)
+- PID 2342178: CID22 eval on TV=10 h64 (0:14 elapsed, 16-core)
+
+All 3 will complete within next /loop firing or two. The combined data will close the (h × TV) map for KonJND-aligned at:
+| TV | h=64 (existing) | h=128 (new) |
+|---|---|---|
+| 0 | 0.8921 / 5.46% ✓ | (not run; TV=0 should match h=64) |
+| 5 | 0.8880 / 5.14% (seed=1) | NEW (PID 2342030) |
+| 10 | 0.8841?/5.09% (CID22 unverified) | NEW (PID 2341484) |
+| 20 | 0.8812?/5.29% (CID22 unverified) | (not run) |
+| 30 | (not run) | 0.8803 / 5.39% (Tick 89) |
+
+**Why this audit matters**: if Tick 82's CID22 numbers were unmeasured estimates, the Pareto-bound conclusion in Tick 89 is still valid (since TV=0 = 0.8921 and TV=30 h128 = 0.8803 are confirmed) but the gradient through the (h, TV) space is less reliable than reported. The new measurements either tighten the bound or reveal a sweet spot.
+
+**Next tick**: harvest TV=10 h64 CID22 (~3 min from now). Then check h=128+TV=10 and h=128+TV=5 trainings. Build complete (h × TV) Pareto map.
