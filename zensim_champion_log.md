@@ -2137,3 +2137,39 @@ Removing the val_min trap made it WORSE. So the converter's `clip(0, 100)` issue
 **Hypothesis from Tick 76 still NOT TESTED** — both attempts failed for the converter bug, not the actual question of whether KonJND helps.
 
 **Next tick**: fix the converter (either skip clip, or per-corpus rescale). Re-convert KonJND CSV. Retrain. This is the THIRD attempt at the V0_5-recipe-with-KonJND hypothesis.
+
+### Tick 80 — 2026-05-11T06:16Z — KonJND raw100 fix also fails — hypothesis ABANDONED
+
+Added `--clip-mode {clip01, raw100, minmax}` flag to `convert_features_bin.py` (~15 LOC). Re-converted KonJND with `raw100` (no clip) — target range now [-0.657, 0.962] preserving negative ssim2 for very-low-quality BPG.
+
+Trained seed=1 with the new CSV: CID22 0.5906, non-mono 22.88%. **Still degenerate.**
+
+**Three-attempt summary** (all with safesyn@1.0 + KADID@0.3 + TID@0.3 + KonJND@0.5):
+| Attempt | KonJND mode | CID22 | non-mono |
+|---|---|---|---|
+| Tick 78 | clip01, val_w=1 | 0.69 / 0.59 | 21.7% / 21.9% |
+| Tick 79 | clip01, val_w=0 | 0.56 / 0.41 | 24.7% / 26.4% |
+| Tick 80 | raw100, val_w=0 | 0.59 | 22.88% |
+| **V0_5 (target)** | (unknown KonJND target) | **0.8893** | **4.57%** |
+
+**Hypothesis ABANDONED**: my Rust trainer + KonJND training data + safesyn/KADID/TID mix cannot reach V0_5 in any obvious configuration. The V0_5 deleted-Rust-trainer + same-input setup somehow worked; my replication doesn't. The clipping isn't the bottleneck — even with negatives preserved, the model is degenerate.
+
+**Plausible reasons V0_5 was different**:
+1. **Different target column** — V0_5's konjnd1k_train might have used PJND-derived target, not raw ssim2. The May-1 log doesn't disclose this.
+2. **Different per-pair Adam dynamics** — the deleted Rust trainer's per-pair sampling may have been more aggressive at distinct ranges (our `train_w=0.5` may oversaturate).
+3. **Different convergence** — V0_5 may have used different lr/epoch schedule for the KonJND-mix run specifically.
+
+**Cycle final final answer (Tick 80)**:
+- V0_5 stays ship (CID22 0.8893 + non-mono 4.57%, both targets met).
+- The +0.004 CID22 gap to target 0.8934 is genuinely unsolvable with the data/tools I have without access to V0_5's exact konjnd1k_train target format.
+- 3 KonJND-mix attempts all failed; the hypothesis remains unfalsified but also unvalidatable from this end.
+
+**Saved**:
+- `scripts/v_next/convert_features_bin.py` — added `--clip-mode` flag (useful improvement regardless)
+- `benchmarks/rust_v05recipe_konjnd_raw100_h64_seed1_2026-05-11.bin` (3rd failed attempt)
+- `/tmp/zensim_loop/konjnd_full_features_raw100.csv` (KonJND target preserved, may be useful elsewhere)
+
+**Loop closure**: V0_5 stays ship. The recovery cycle's empirical limit is reached. Pivoting to other priorities makes sense:
+1. **Plot generation** (CID22 paper style) — useful artifact for the user
+2. **Multi-codec corpus expansion** (still pending user auth)
+3. **Stop the cron** and declare cycle complete
