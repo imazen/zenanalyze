@@ -2772,3 +2772,17 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 **Saved**: `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.konjnd.log`.
 
 **Next tick**: harvest h=192 first (lands first). Non-mono + CID22 eval.
+
+### Tick 102 — 2026-05-11T02:25Z — h=192 hit new best at epoch 90 (extended); seed=42 still running
+
+**h=192 + TV=10 + KonJND-aligned** (PID 2414374): 15:48 elapsed, epoch 100. **Hit new best val_mean=0.9423 at epoch 90** (previous was 0.9412 at epoch 40). The +0.0011 improvement is marginal but resets the early-stop patience — training continues until epoch 140 if no further improvement. Per-epoch ~9s → ETA ~5-6 more min.
+
+**h=128 seed=42** (PID 2420220): 7:50 elapsed, epoch 60, best val_mean=0.9406 at epoch 40 (matches seed=1's epoch 40 best of 0.9412 within noise — confirms training trajectory is consistent across seeds). Patience 50 → expected early-stop at epoch 90 (~3-4 min more).
+
+**Observation about h=192 trajectory**: best val_mean=0.9423 vs h=128's 0.9416 and h=64 TV=10's 0.9380. The val_mean (internal SROCC mean) does monotonically grow with capacity, but the lift is small (+0.0007 at h=192 over h=128). If CID22 scales similarly: h=128 0.8900 + 0.0007 ≈ 0.8907 — still below 0.8934 target.
+
+**Predicted h=192 CID22 0.8905-0.8910**: not a champion candidate by aggregate, but might continue to win product-critical bands (B2, B3) by larger margins.
+
+**Both trainings will land within next 1-2 cron firings**. Pareto-bound conclusion remains likely: the recipe space is tightly bound; nothing dual-clears.
+
+**Next tick**: harvest h=128 seed=42 first (lands sooner), then h=192. Run non-mono + CID22 eval. Update Pareto table.
