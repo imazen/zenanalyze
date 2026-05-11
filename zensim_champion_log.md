@@ -2800,3 +2800,24 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 **Disk**: `/tmp/zensim_loop` at 3.7 GB (mostly the feature CSVs); `/mnt/v` at 89% (watching, not critical yet).
 
 **Next tick**: harvest both bakes when they early-stop. Run non-mono + CID22 evals in sequence. If h=192 lands at CID22 0.892+, ensemble with V0_5 might cross targets via averaging — worth one more experiment. Otherwise close cycle.
+
+### Tick 104 — 2026-05-11T02:33Z — Capacity ceiling confirmed: both h=192 and h=128 seed=42 converge to val_mean 0.9424
+
+**h=192** (PID 2414374): 23:42 elapsed, epoch 160, best val_mean=**0.9424** at epoch 140.
+**h=128 seed=42** (PID 2420220): 15:44 elapsed, epoch 120, best val_mean=**0.9424** at epoch 90.
+
+**🔑 Both bakes converge to the same val_mean (0.9424)** — independent of capacity (h=128 vs h=192) and seed (1 vs 42 — and seed=1 was 0.9416). The val_mean is plateauing at the recipe's intrinsic ceiling.
+
+**Implication**: h=192 capacity is not expected to break CID22 ≥ 0.8934 either. The val_mean ceiling at this recipe is ~0.9424, which based on prior measurements maps to CID22 ~0.890. The capacity hypothesis (Tick 97) holds at h=64 → h=128 (+0.0036 val_mean, +0.0059 CID22) but **saturates by h=128 to h=192**.
+
+**Why**: 228 input features is the actual information bottleneck, not hidden width. Doubling hidden capacity beyond 128 doesn't extract more signal from the 228 features. To break the ceiling, need either (a) more features (zentrain INVERSION.md path) or (b) different model class.
+
+**Both trainings still going** but expected to early-stop within next ~5 min (h=192 at epoch 190, h=128 seed=42 at epoch 140).
+
+**Strategic implication**: this cycle is complete. The recipe space is mapped. Per Tick 89's conclusion + Tick 99's per-band finding + this val_mean convergence:
+- V0_5 stays as Pareto-optimal on (CID22, non-mono) joint
+- TV=10 h128 KonJND-aligned wins product-critical bands (B2 + B3) and KADID/TID all bands
+- h=192 won't bring CID22 across 0.8934 — capacity has saturated
+- Feature-space extension is the only remaining lever
+
+**Next tick**: harvest both bakes, do final non-mono + CID22 evals, formally close cycle.
