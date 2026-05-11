@@ -174,6 +174,45 @@ wrapper. End Phase 1 with a smoke test that uses synthetic features
 to produce a tiny ZNPR v2 bake and verifies the predictor can read
 it back.
 
+### Tick 264 — 2026-05-11T19:17Z — Parity/methodology/holdout plan + Goal-5 inventory
+
+User raised scope from "smoke tests" to a 5-goal parity-and-
+methodology effort:
+
+1. Rust ↔ Python trainer parity (ZNPR v2 byte match w/ fp32 tolerance)
+2. Methodology matches each of the 30 paper pages
+3. Reproduce CID22 paper SSIM2 numbers on 49-ref held-out
+4. Balanced extensive synth-corpus holdout testing
+5. Holdout-overlap detector incl cropped variants
+
+Drafted `zensim/docs/PARITY_AND_METHODOLOGY_PLAN_2026-05-11.md`
+(zensim commit `78392387`) — per-goal definition, subtasks, success
+criteria, owning artifacts. Phasing: Goals 5 & 3 first (overlap audit
++ SSIM2 reproduction); Goal 2 page-walk interleaved; Goals 1 & 4
+follow. WASM trainer plan continues as parallel workstream but its
+deliverable is now upgraded to require Goal-1 parity tests, not
+just smoke tests.
+
+**Goal-5 inventory (critical finding):**
+
+- CID22 validation refs at `/mnt/v/dataset/cid22/CID22_validation_set/`
+  (49 refs, 512×512 each per paper p.22).
+- Training corpus at `/mnt/v/input/zensim/sources/` — **17,565
+  source images** with names like
+  `<hexhash>_<W>x<H>_512sq_512sq_512sq_512sq.png`. The `_512sq`
+  suffixes mean **the source corpus is already heavily cropped**.
+- `safe_synthetic.csv` (218,089 pairs across 3,579 distinct sources)
+  was filtered by `CID22_VALIDATION_41` filename-hash blocklist —
+  but cropped tiles get NEW hashes, so any CID22-ref-cropped variant
+  pre-existing in the source corpus would have slipped through.
+- This is exactly the leak vector the user flagged.
+
+Next concrete tick: build stage-1 perceptual-hash detector
+(`zensim-validate/src/bin/check_holdout_overlap.rs`) that compares
+49 CID22 refs against all 17,565 training sources. Stage 2 (sliding-
+window cropped-variant detection) follows once stage-1 results are
+in hand.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
