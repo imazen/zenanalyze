@@ -33,6 +33,39 @@ User-driven cascade of changes after a long pending-authorization window:
 
 **Next tick**: start Phase 1 of WASM trainer — port `zensim-validate/src/mlp_train.rs` to a new `zensim-train-core` library crate that's WASM-compatible.
 
+### Tick 258 — 2026-05-11T18:55Z — Phase 1 scaffold landed on zensim main
+
+`zensim-train-core` crate scaffolded — first concrete step of the WASM
+trainer plan. Pushed as zensim commit `49832a68`.
+
+- **Workspace member added**: `zensim/Cargo.toml` now lists
+  `zensim-train-core`. `publish = false`, MIT.
+- **Dependencies**: `zenpredict` (workspace), `web-time` 1.x (cross-platform
+  `Instant`), `rayon` optional behind `parallel` feature. No `std::fs`,
+  no rayon-by-default — clean WASM compile target.
+- **Bit-exact ports** (from `zensim-validate/src/mlp_train.rs`):
+  - `SplitMix64` RNG (Vigna constants, same byte sequence per seed)
+  - `AdamState` two-layer MLP optimizer with β1=0.9 / β2=0.999 / eps=1e-8
+  - `pearson` / `ranks` / `spearman` correlation helpers (pub API)
+- **Public surface**: `MlpHyperparams`, `ValidationPolicy`, plus
+  re-exports of `Activation` and `WeightDtype` from `zenpredict`.
+- **4 unit tests passing**: default hparams sanity, splitmix
+  seed-stability across 1000 calls, pearson on perfect linear (r=1.0),
+  spearman on perfect monotone (r=1.0).
+- **Build**: `cargo build -p zensim-train-core` clean, `cargo test -p
+  zensim-train-core` 4/4 green.
+
+**Process slip**: had a working-dir drift bug — first attempt to land
+this tick described an empty commit in zensim main (`4abb8267`) before
+realizing the cwd had stuck on zensim. The wrong commit is empty
+no-op, benign. Lesson: explicit `cd` in every Bash call when
+multi-repo, even though jj snapshots make recovery cheap.
+
+**Next concrete tick**: port `TrainingGroup<'a>` and the `train_mlp`
+body so we can run a smoke test from `zensim-train-core` and verify
+bit-identical output to `zensim-validate`'s trainer on a fixed seed.
+That seals Phase 1.
+
 ## Targets
 
 | Property | Target | Reference |
