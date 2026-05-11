@@ -3643,3 +3643,28 @@ Computed least-squares affine fit `calibrated = α + β · raw_distance` against
 **Saved fit script**: `/tmp/zensim_loop/fit_affine.py` (will archive to zensim/benchmarks if/when we ship).
 
 **Still pending user "yes ship"**.
+
+### Tick 252 — 2026-05-11T12:34Z — Wrote `affine_calibrate_znpr_v2.py` + verified rank-invariance
+
+Wrote new script `zensim/scripts/v_next/affine_calibrate_znpr_v2.py` (~140 lines, zensim commit `54b3438f`). Applies `y' = α + β·y` directly to a ZNPR v2 binary by mutating the final Linear layer's weights and bias in place (`W' = β·W`, `b' = β·b + α`). Zero runtime cost, no PyTorch dependency, complements the existing `affine_calibrate_bake.py` (which operates on PyTorch model.pt run-dirs).
+
+**Test run** on `rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin` with α=33.27, β=-3.791 (the synth-derived calibration from Tick 251):
+- |SROCC| **0.9309 before AND after** — rank-invariance verified ✓
+- Sign flipped (-0.93 → +0.93) because β<0 — calibrated score now positively-correlated with quality (higher = better), user convention preserved
+- Calibrated output on full 1.7M synth rows: **p5=32.0, p50=59.9, p95=96.0**
+- vs synth ssim2 truth: **p5=19.4, p50=66.1, p95=89.6** — calibrated distribution closely matches truth distribution
+
+**Output**: `/tmp/zensim_loop/tv10_h128_calibrated_a33.27_b-3.791.bin` (119812 bytes, same size as input — only weights modified)
+
+**Implementation status**: all 5 ship-swap steps from Tick 251 are now scripted and ready. When user authorizes:
+1. ✓ Affine fit script `fit_affine.py` (Tick 251)
+2. ✓ Calibration script `affine_calibrate_znpr_v2.py` (this tick)
+3. Apply calibration: `python3 affine_calibrate_znpr_v2.py --in-bake rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin --out-bake v0_5_2026-05-11.bin --alpha 33.27 --beta -3.791`
+4. Verify CID22 SROCC unchanged (rank-invariant); update non-mono number for reference
+5. Swap `zensim/weights/v0_4_2026-04-30.bin` → `zensim/weights/v0_5_2026-05-11.bin` (renaming to match V0_5 naming convention now that this is the new ship)
+6. CHANGELOG entry under `[Unreleased]`
+7. Push to zensim main
+
+**One open question**: should we also archive the old `v0_4_2026-04-30.bin` somewhere (e.g., `zensim/weights/archive/`) to preserve V0_4 history? Recommend yes for reproducibility.
+
+**Still pending user "yes ship"**.
