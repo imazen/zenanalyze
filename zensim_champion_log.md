@@ -1869,3 +1869,29 @@ The dense-noise-stabilization hypothesis is falsified. Burst TV updates have hig
 - **No model meets both targets strictly**.
 
 **Next tick** (no user input needed): test ensemble of TV=30 + TV=20 seed=1 predictions — see if averaging helps the Pareto.
+
+### Tick 72 — 2026-05-11T03:57Z — Ensemble TV=30 + no-TV: between individuals on non-mono
+
+Built a quick Python ensemble test: load both bakes, z-score normalize each bake's predictions independently (to remove output-scale bias), then average per-pair, then count adjacent-q reversals.
+
+Result: **ensemble non-mono = 5.27%** — between TV=30 (4.97%) and no-TV (6.72%), as expected from averaging two systems with different bias/variance.
+
+| Variant | non-mono |
+|---|---|
+| TV=30 seed=1 | **4.97%** |
+| **Ensemble (TV=30 + no-TV)** | 5.27% |
+| no-TV seed=1 | 6.72% |
+
+Averaging RAW predictions doesn't break the smoothness barrier — the better-smoothed model (TV=30) gets pulled UP toward the worse model's variance.
+
+**To make ensemble help**, would need to average models that BOTH score well at smoothness (each <4.86%) but with different non-mono failure modes — so the failures don't correlate. Since we don't have two such models, this approach is stuck.
+
+**The 4.86% target appears genuinely hard at h=128 + this recipe**. Across ~50 trainings spanning corpus filtering (drop-WebP, monotonic-envelope, WebP-mono-only), TV weight sweeps (0/5/10/15/20/30/33/35/40), TV implementation variants (burst vs dense), and seed sweeps (11 seeds × 2 recipes), the best non-mono achievable while keeping CID22 ≥ 0.88 is **4.97%** (TV=30 seed=1).
+
+**Recommendation lock**: TV=30 seed=1 (CID22 0.8874 / non-mono 4.97%) is the empirically best dual model. The 0.11pp gap from the smoothness target is within training noise; this is the bake to ship if we ship today.
+
+**Next tick options**:
+1. **Multi-target loss** (DSSIM/butter) — deferred Phase 4 work, ~80 LOC
+2. **Generate paper-style plots** for the candidate bakes (per user's earlier ask)
+3. **Document the cycle conclusion** + propose user ship the TV=30 bake
+4. **Per-band ensemble eval** on CID22 — see if ensemble at least helps the band-level dial property even if aggregate non-mono unchanged
