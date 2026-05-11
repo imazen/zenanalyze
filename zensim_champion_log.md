@@ -2111,3 +2111,29 @@ The model didn't learn — CID22 0.59/0.69 (far below V0_2's linear baseline of 
 3. **Option C**: Add `val_policy=mean` to Rust trainer args (we have the `--val-policy` flag — should work).
 
 Option A is the smallest change (just `--group konjnd:...:0.5:0.0`).
+
+### Tick 79 — 2026-05-11T05:50Z — KonJND train_only (val_w=0) also FAILS — clip-to-zero is in TRAINING data
+
+Retried 4-group at seeds 1, 42 with `--group konjnd:...:0.5:0.0` (KonJND in training mix only, NOT in val_min selector).
+
+| Bake | CID22 | non-mono |
+|---|---|---|
+| **V0_5 (target)** | **0.8893** | **4.57%** |
+| 4-group val_w=1 (Tick 78) | 0.6886, 0.5891 | 21.7%, 21.9% |
+| **4-group val_w=0** (this tick) | **0.5599, 0.4148** | **24.7%, 26.4%** ★ worse |
+
+Removing the val_min trap made it WORSE. So the converter's `clip(0, 100)` issue is in TRAINING data, not just validation. The model trains on heavily zero-quantized KonJND targets:
+- KonJND ssim2 range: -27.6 to +95+ (negative for very-low-quality BPG)
+- After clip(0, 100) and /100: many targets = 0 (mass quantization)
+- Model gets a strong "many KonJND pairs map to score 0" gradient signal
+- This poisons safesyn/KADID/TID rankings too because they share the output head
+
+**Root cause**: `scripts/v_next/convert_features_bin.py` line 105 clips ssim2 to `[0, 100]`. Safe for safesyn corpus (range ~5-95) but DESTRUCTIVE for KonJND (range -27 to +95+).
+
+**Fix**: Remove the clip OR shift+scale KonJND targets to safesyn's range. Need to think about cross-corpus target alignment.
+
+**Saved**: 2 failed bakes for the record. `konjnd_full_features.csv` is the polluted (clip-zero) version; need a re-conversion.
+
+**Hypothesis from Tick 76 still NOT TESTED** — both attempts failed for the converter bug, not the actual question of whether KonJND helps.
+
+**Next tick**: fix the converter (either skip clip, or per-corpus rescale). Re-convert KonJND CSV. Retrain. This is the THIRD attempt at the V0_5-recipe-with-KonJND hypothesis.
