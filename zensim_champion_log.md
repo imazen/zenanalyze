@@ -768,6 +768,33 @@ breakdown extraction to `build_site_data.py` (currently aggregates
 across codecs — paper's Tables 3/6 don't break out by codec but
 our internal pipeline can).
 
+### Tick 280 — 2026-05-11T23:21Z — CHANGELOG entries for 2026-05-11 cycle; sweep epoch 70
+
+V0_7 sweep at epoch 70 (~6 min in). Bests unchanged:
+- seed=0 best=0.9418 (tied V0_6)
+- seed=1 best=0.9408
+- seed=2 best=0.9376
+- seed=7 best=0.9409
+
+Cyclic LR will peak again at epoch 100 and 150. V0_6 hit its best
+at epoch 90 (bottom of second cosine cycle). Patterns expect peak
+val_mean to land in 90-140 range.
+
+Added CHANGELOG entries under `[Unreleased]/Added` covering this
+session's work (zensim `4b7844a7`):
+- Stage-1 + stage-2 overlap detectors
+- TV-pair regenerator
+- zensim-train-core WASM-trainer scaffold (Phase 1)
+- Parity-and-methodology plan + page-by-page methodology checklist
+- Holdout overlap audit + V0_6 eval doc
+- Goal 6 GH Pages site scaffold + workflow
+
+Each entry references the commit hashes for traceability.
+
+Next concrete tick: monitor sweep at epoch 100 (~3 min); if any
+seed beats V0_6's 0.9418, evaluate that bake on CID22 to see if
+the CID22 SROCC gap to ssim2 closes.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
