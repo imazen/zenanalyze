@@ -3613,3 +3613,33 @@ The 2D hexbins in the new plot show ranking IS correct (clouds slope correctly),
 **Pending user**: "yes ship" → execute the weight swap + run affine_calibrate_bake.py to produce a properly-scaled output.
 
 **Archived**: `make_distribution_plot.py` is in /tmp; will copy to zensim/benchmarks if we ship.
+
+### Tick 251 — 2026-05-11T12:30Z — Affine calibration parameters computed for both bakes
+
+Computed least-squares affine fit `calibrated = α + β · raw_distance` against ground truth:
+
+| Bake | Dataset | α | β | R² | RMSE | Calibrated range |
+|---|---|---|---|---|---|---|
+| V0_5 shipped | synth (ssim2) | 44.25 | **-0.882** | **0.883** | 7.41 | -29 to +97 |
+| V0_5 shipped | CID22 (MCOS) | 46.17 | -0.872 | 0.772 | 6.35 | 34 to 95 |
+| **TV=10 h128 KonJND** | synth | 33.27 | **-3.791** | 0.778 | 10.21 | 12 to 152 |
+| TV=10 h128 KonJND | CID22 | 42.37 | -3.226 | 0.756 | 6.57 | 44 to 102 |
+
+**Findings**:
+1. V0_5 has tighter R² on synth (0.883) because it was synth-trained. Both converge to R²≈0.77 on CID22.
+2. TV=10 h128's β is ~4× larger than V0_5's because of its narrower raw range (Tick 250).
+3. **CID22 RMSE ~6-7 percentile points** after best linear fit — irreducible per-pair noise; ranking remains the actual quality story.
+4. **For shipping**: synth-derived α/β (no CID22 leak). TV=10 h128: α=33.27, β=-3.791. Cap final output to [0,100].
+
+**Math**: `y' = α + β·y` ≡ `W' = β·W, b' = β·b + α` on the final Linear layer. Zero-runtime-cost.
+
+**Implementation path** (when user authorizes ship):
+1. Write Python script reading ZNPR v2, mod final layer's weights/bias, write back. ~30 lines.
+2. Apply α=33.27, β=-3.791 to `rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin` → produce `v0_5_2026-05-11.bin`.
+3. Verify post-calibration eval: SROCC should be IDENTICAL (rank-invariant); only absolute score range changes.
+4. Swap `zensim/weights/v0_4_2026-04-30.bin` → new calibrated bin.
+5. Bump CHANGELOG, commit.
+
+**Saved fit script**: `/tmp/zensim_loop/fit_affine.py` (will archive to zensim/benchmarks if/when we ship).
+
+**Still pending user "yes ship"**.
