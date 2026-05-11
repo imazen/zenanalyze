@@ -438,6 +438,43 @@ Two follow-ups surfaced:
 Next concrete tick: paper pages 11-15 (IQA metric overview + Table 2
 + Table 3 ssim2 numbers we need to reproduce for Goal 3).
 
+### Tick 271 — 2026-05-11T19:35Z — Goal 6 added: interactive GH Pages site
+
+User added Goal 6 mid-loop: publish results as an interactive
+GitHub Pages site at `imazen.github.io/zensim/` (or similar) with:
+
+- Per-5-band SROCC bar charts (B0/B1/B2/B3 cuts) for each shipped bake
+- Drill-into scatter plots (predicted vs truth) per band per metric
+- CID22 paper Tables 3 / 5 / 6 reproduction with delta column
+- Per-codec breakdowns (JPEG / JXL / WebP / AVIF / HEIC / JPEG 2000)
+- Per-content-class breakdowns (paper's 15 categories)
+- V_X champion progression time-series
+
+Tech stack picked: **Plotly.js + Python data-generation script** +
+GH Actions for nightly rebuilds. Lightest moving-parts option.
+Yew/Leptos+plotters-rs is the long-term direction once the WASM
+trainer (long-term Goal 1) is closer to ready.
+
+Plan doc updated in zensim main: 6 goals instead of 5, Goal 6
+spec'd out with subtasks + success criteria + dependencies.
+
+Goal 6 dependencies:
+- Goal 3 must produce reproduced paper numbers first (the parity
+  column has no data without them)
+- Goal 4 helpful for per-content-class breakdown (but not blocking)
+- Goal 1 independent
+
+Priority list now:
+1. Goal 5 — DONE (stage 1+2 shipped; remediation in flight)
+2. Goal 2 — in progress (10/30 paper pages walked)
+3. Goal 3 — high (reproduce paper SSIM2 numbers)
+4. Goal 6 — MEDIUM-HIGH after Goal 3
+5. Goal 1 — medium
+6. Goal 4 — medium
+
+Next concrete tick: continue paper pages 11-15 (Tables 2-3 covering
+the SROCC numbers we'll reproduce for Goal 3 and display in Goal 6).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
