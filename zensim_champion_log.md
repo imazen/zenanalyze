@@ -1664,3 +1664,28 @@ Ran on **the new champion** (`rust_webp_mono_h128_seed1_2026-05-10.bin`) over `u
 **Saved**: `scripts/v_next/score_unified_with_bake.py` (new tool).
 
 **Next tick**: implement TV regularizer in Rust trainer (per-curve adjacent-q penalty), retrain seed=1 h=128 with TV, measure both targets.
+
+### Tick 66 — 2026-05-11T01:37Z — TV-pairs file generated (196,671 adjacent-q pairs)
+
+Generated `/tmp/zensim_loop/safe_synth_webpmono_tv_pairs.tsv` (2.5 MB, 196,671 lines + header). Each line: `lo_trainer_idx \t hi_trainer_idx`, where indices reference rows in `safe_synth_218k_webp_mono.csv` (the trainer CSV used for the WebP-mono champion).
+
+**Generation process**:
+1. Parse features.bin valid_idx (trainer row → source row mapping)
+2. Group source rows by (source_path, codec)
+3. Sort by q ascending within each curve
+4. Emit adjacent-q pair (lo, hi) for every consecutive q step
+5. Map back to trainer row indices
+
+**Stats**: 21,418 (source, codec) curves → 196,671 adjacent-q pairs (= 218,089 rows - 21,418 curves, matching the count from monotonicity audit in Tick 57).
+
+**Rust trainer integration plan** (~30 LOC for next tick):
+1. Add `--tv-pairs-file PATH --tv-weight FLOAT` CLI flags
+2. Load pairs file at startup → Vec<(usize, usize)>
+3. In the training loop, every N pair-updates (e.g. every 50), sample K=20 TV pairs, forward both endpoints, compute penalty `mean(max(0, pred[hi] - pred[lo]))` (Rust output convention: lower-q should have HIGHER pred than higher-q since output is distance-like)
+4. Backprop + accumulate gradient before adam.step()
+
+**Polarity verification**: Rust trainer's predictions at PJND mean ≈ -6.4 (Tick 43); the RankNet loss pushes higher-quality pairs to LOWER pred. So adjacent-q (lo, hi) with lo < hi (lower-q, higher-q): pred[lo] should be > pred[hi]. Violation = pred[hi] > pred[lo].
+
+**Saved**: `/tmp/zensim_loop/safe_synth_webpmono_tv_pairs.tsv` (2.5 MB, 196,671 pairs ready for Rust consumption).
+
+**Next tick**: add TV regularizer to `mlp_train.rs` (~30 LOC), retrain h=128 + WebP-mono + TV (weight 5-30 sweep), measure non-mono via `score_unified_with_bake.py`.
