@@ -2293,3 +2293,29 @@ Total eval cycle for both seeds: ~12-15 min. Likely completes inside next /loop 
 - `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed42_2026-05-11.bin` (PID 2279630)
 
 **Next tick**: harvest both bakes, run eval, compare to Pareto. Decision criterion: if both seeds land below CID22 0.8893 AND non-mono > 4.86%, h64+KonJND is exhausted — pivot to h=128 + KonJND-mix next.
+
+### Tick 85 — 2026-05-11T01:13Z — Baseline non-mono reproduced + h192x128 spot-check (4.53%)
+
+While TV=5 bakes are still training (seed=1 epoch 130 t=362s, seed=42 epoch 90 t=258s), used the eval window to:
+
+**1. Reproduce Tick 82 non-mono table on JPEG unified parquet** (1,785,696 rows / 93,984 curves):
+
+| Bake | Non-mono | Curves-with-≥1-violation | CID22 (from log) |
+|---|---|---|---|
+| **V0_5 shipped** | **4.57%** ★ | **51.94%** | 0.8893 |
+| TV=0 (Tick 81 KonJND-aligned) | 5.46% | 59.13% | 0.8921 |
+| TV=10 (Tick 82) | 5.09% | 54.75% | 0.8841 |
+| TV=20 (Tick 82) | 5.29% | 57.22% | 0.8812 |
+
+All four reproduce exactly. Saved to `/tmp/zensim_loop/tick85_baseline_nonmono.log`.
+
+**2. Spot-check on prev champion candidate** `h192x128_tv10_safesyn218k_kt_2026-05-10.bin`:
+- Non-mono: **4.53%** (better than V0_5's 4.57%!)
+- Curves-with-≥1-violation: **50.31%** (lowest seen)
+- CID22 (from Tick 79 log): 0.8695 (well below V0_5)
+
+**Insight**: the **h=192x128 architecture** (2-layer hidden 192→128) lands at 4.53% non-mono naturally — the SMOOTHEST bake we have. The reason that bake never shipped is CID22 0.8695 (no KonJND in mix). This suggests a viable Pareto explorer: **h=192x128 + KonJND-mix (aligned) + TV={5,10}**. The architecture itself contributes smoothness; KonJND contributes CID22; TV is the dial. Queue for ticks 86-88.
+
+**No new training launched this tick** — both TV=5 seeds still running, eval window will land in next /loop firing.
+
+**Next tick**: when TV=5 bakes arrive, run unified-parquet non-mono on both. If both ≥ 5.0%, h64+KonJND is firmly Pareto-bound; launch h192x128+KonJND-aligned+TV=5 next.
