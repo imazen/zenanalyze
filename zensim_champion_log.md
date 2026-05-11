@@ -2664,3 +2664,38 @@ While h=128 trainings still go (TV=10 at epoch 170, TV=5 at epoch 160, both earl
 - (a) Stop the cycle (data comprehensive; V0_5 stays ship)
 - (b) Launch h=192 single-layer + KonJND-aligned + TV=10 (capacity hypothesis says this should be even better than TV=10 h128)
 - (c) Launch h=128 + TV=10 + KonJND-aligned with multiple seeds (Pareto neighborhood variance probe)
+
+### Tick 98 — 2026-05-11T02:08Z — TV=5 h128 = 0.8871; TV=10 sweet spot at h=128 confirmed; h=192 launched
+
+**TV=5 h128 CID22 full eval landed**:
+- KADID: 0.9434
+- TID2013: 0.9540
+- **CID22: 0.8871** (worse than h64 TV=5's 0.8880 and h128 TV=10's 0.8900)
+- Non-mono: 5.44%
+
+**TV-curve at h=128 is unimodal at TV=10**:
+- TV=5 h128: 0.8871
+- TV=10 h128: **0.8900** ★ (h=128's CID22 maximum)
+- TV=30 h128: 0.8803
+
+This contrasts with h=64 where the CID22 maximum is at TV=0 (0.8921). Doubling capacity shifts the optimum TV from 0 to 10 — h=128 *prefers* mild TV regularization while h=64 was hurt by it.
+
+**Updated full Pareto** (CID22 sorted):
+
+| Bake | CID22 | non-mono | KADID | TID |
+|---|---|---|---|---|
+| h128 WebP-mono no-TV | 0.8941 | 6.72% | — | — |
+| TV=0 h64 KonJND | 0.8921 | 5.46% | 0.9395 | 0.9490 |
+| **TV=10 h128 KonJND** | **0.8900** | 5.36% | 0.9434 | 0.9553 |
+| V0_5 shipped | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 |
+| TV=5 h64 KonJND | 0.8880 | 5.14% | 0.9449 | 0.9536 |
+| TV=5 h128 KonJND (NEW) | 0.8871 | 5.44% | 0.9434 | 0.9540 |
+| TV=10 h64 KonJND | 0.8841 | 5.09% | 0.9380 | 0.9437 |
+| TV=20 h64 KonJND | 0.8812 | 5.29% | 0.9318 | 0.9409 |
+| TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 |
+
+**🚀 Launched h=192 + TV=10 + KonJND-aligned** (PID 2414374) — testing Tick 97's capacity hypothesis. Predicted CID22 ~0.8930 by linear extrapolation (h=64→0.8841, h=128→0.8900, slope 0.0059 per doubling, h=192→+0.0030). If this lands near 0.8934 target + non-mono < 5.4%, it's the closest to dual-clear yet.
+- Output: `benchmarks/rust_v05recipe_konjnd_tv10_h192_seed1_2026-05-11.bin`
+- Expected ~15 min wall (h=192 is 1.5× h=128 work)
+
+**Next tick**: monitor h=192 training; harvest when done. If CID22 ≥ 0.8934 AND non-mono < 4.86% → CHAMPION (will stop cron). If CID22 hits but non-mono fails, consider higher-TV h=192 (TV=15 or TV=20). If neither, formally close cycle.
