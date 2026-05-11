@@ -848,6 +848,28 @@ Next concrete tick: seed=2 + seed=7 eval results available;
 seed=0 still in training. Likely have first cross-seed CID22
 SROCC comparison in ~3 min.
 
+### Tick 283 — 2026-05-11T23:33Z — parity_table.json added; seeds 2/7 in CID22 eval
+
+Sweep + eval progress:
+- seed=0: training at epoch 170, val_mean=0.9357 (best=0.9443).
+  No improvement since epoch 140; will early-stop ~epoch 190.
+- seed=1: training at epoch 170, val_mean=0.9321 (best=0.9414).
+- seed=2: eval running, KADID 90% done, then TID/CID22/KonJND.
+- seed=7: eval running, same progress.
+
+Added `site/data/parity_table.json` (zensim `c25b1a5b`) capturing
+the Goal 3 reproduction numbers extracted from V0_6 eval:
+- KonJND PJND BPG: ours 65.38±5.42 vs paper 65.38±5.10
+- KonJND PJND JPEG: ours 62.55±5.03 vs paper 63.10±4.65
+- Butter BPG/JPEG: 3-sig-fig match to paper
+- CID22 aggregate per bake (V0_5 leaked / V0_6 clean / fast-ssim2)
+
+The site/index.html will render this as a parity panel in a
+follow-up commit.
+
+Next concrete tick: read seeds 2/7 CID22 SROCC + finalize seed=0
+training. Identify ship candidate.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
