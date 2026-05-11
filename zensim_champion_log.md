@@ -1830,3 +1830,42 @@ Variance across adjacent TV values: ~0.5-1.0pp non-mono. The averaging effect of
 2. **Multi-target loss** (DSSIM/butter) — deferred Phase 4 work
 3. **TV apply_every=1** with smaller weight — may stabilize the noise
 4. **Accept the 4.97% as close enough** — 0.11pp gap is within training noise; ship the TV=30 bake
+
+### Tick 71 — 2026-05-11T03:55Z — TV-dense (apply_every=1 batch=1 weight=0.6) — falsified
+
+Tested the hypothesis that spreading TV updates evenly across steps (vs bursting every 50) would stabilize the variance. Trained h=128 seed=1 WebP-mono with `--tv-weight 0.6 --tv-apply-every 1 --tv-batch 1` (total ~50k TV gradient contributions per epoch, matching the 50*32*1000 budget of TV=30 burst).
+
+Result: **dense is WORSE on both axes**:
+
+| Variant | CID22 | non-mono |
+|---|---|---|
+| **TV=30 burst** | **0.8874** | **4.97%** ★ |
+| TV=0.6 dense | 0.8791 | 5.51% |
+
+Training time: 346s (similar). Early-stopped at epoch 75. val_min=0.9422.
+
+The dense-noise-stabilization hypothesis is falsified. Burst TV updates have higher per-step magnitude (32 pairs × weight 30 / 32 = 30 per pair) vs dense (1 pair × weight 0.6), and the higher per-step magnitude may help break through local minima that the smoothed-out gradient can't escape.
+
+**TV=30 burst seed=1 remains the unchallenged best dual candidate** across ~50 trainings:
+- CID22 0.8874 (-0.0019 from V0_5 floor 0.8893)
+- non-mono 4.97% (+0.11pp above target 4.86%)
+- Both within training noise floor (variance ~0.5-1pp non-mono, ~0.005 CID22)
+
+**Saved**: `benchmarks/rust_webp_mono_h128_tvDense_seed1_2026-05-10.{bin,train.log}`.
+
+**The 4.86% target may be unachievable at higher CID22.** The Python Smoothness-Winner at 4.49% required dropping CID22 to 0.8769. The Pareto frontier is sharp around (0.88, 5%).
+
+**Decision matrix**:
+| Option | CID22 | non-mono | Trade |
+|---|---|---|---|
+| Ship TV=30 seed=1 | 0.8874 | 4.97% | -0.0019 from V0_5, +0.11pp above target |
+| Ship h128 seed=1 (no TV) | 0.8941 | 6.72% | +0.0048 over V0_5, smoothness +1.86pp worse |
+| Keep V0_5 | 0.8893 | ~8.26% | baseline |
+| Smoothness-Winner Python | 0.8769 | 4.49% | -0.0124 from V0_5, smoothness ✓ |
+
+**Recommendation pending user**: which trade is the right ship? My read:
+- **For dial-property primacy** (zensim/CLAUDE.md goal #2 "smoothness is first-class"): TV=30 (smoothness 0.11pp from target is within training noise).
+- **For aggregate-best**: no-TV (CID22 exceeds target).
+- **No model meets both targets strictly**.
+
+**Next tick** (no user input needed): test ensemble of TV=30 + TV=20 seed=1 predictions — see if averaging helps the Pareto.
