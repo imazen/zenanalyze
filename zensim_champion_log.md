@@ -795,6 +795,31 @@ Next concrete tick: monitor sweep at epoch 100 (~3 min); if any
 seed beats V0_6's 0.9418, evaluate that bake on CID22 to see if
 the CID22 SROCC gap to ssim2 closes.
 
+### Tick 281 — 2026-05-11T23:25Z — V0_7 sweep epoch 100; seed=0 best 0.9422 narrowly beats V0_6
+
+Sweep at epoch 100. **seed=0 is now the leader** with best=0.9422
+(+0.0004 over V0_6's 0.9418). Other seeds tracking lower:
+- seed=0: best=0.9422 ← narrowly best
+- seed=1: best=0.9409
+- seed=2: best=0.9407
+- seed=7: best=0.9415
+
+The +0.0004 val_mean delta is small; whether it translates to a
+better CID22 SROCC depends on how much of V0_6/seed=42's result
+was randomness vs systematic.
+
+Prepared `/tmp/zensim_loop/eval_v0_7_sweep.sh` — runs
+`dataset_metric_baseline` against each of the 4 seed bakes once
+they land, emits per-seed eval logs at
+`/tmp/zensim_loop/v0_7_seed{N}_eval.log`.
+
+ETA: ~5 more min for sweep to converge (V0_6 early-stopped at
+epoch 140; expect similar).
+
+Next concrete tick: wait for sweep to finish, then run the eval
+script; report CID22 SROCC for each seed; identify if any exceeds
+V0_6's 0.8839 (and ideally fast-ssim2's 0.8895).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
