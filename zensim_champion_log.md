@@ -254,6 +254,50 @@ authorizations documented at the end of the audit doc:
 Next tick: await user authorization. If unattended, draft the stage-2
 sliding-window detector code (no run) so it's ready when authorized.
 
+### Tick 266 — 2026-05-11T19:25Z — *** STAGE 2 LEAK ≈ 12% OF TRAINING PAIRS ***
+
+User authorized "Expand blocklist + full re-audit" and "Stage 2 now
+on contaminated corpus".
+
+**Stage 2 built and run** — sliding-window cropped-variant detector
+that catches sub-region matches stage 1 missed (training source
+1022×818 containing a 200×200 near-identical region of a CID22 ref):
+
+- **Strict (d≤10, window≥128px)**: **425 sources / 25,674 pairs (11.77 %)**
+- **Strict (d≤8,  window≥128px)**: **179 sources / 10,801 pairs (4.95 %)**
+- Strongest match at d=2 (62 of 64 bits agree): near-identical
+  204×204 crop of `2887497.png`.
+
+CID22 ref `2887497.png` dominates — present in tens of training
+sources under different hex-hashed crop names. Likely a popular
+public-domain image that was widely curated.
+
+**Second structural gap**: `CID22_VALIDATION_41` blocklist only
+covers **41 of 49** refs — 8 non-numeric-ID refs
+(`adriankierman-report-page`, `pexels-photo-*`, `ularapi_*`, etc.)
+are completely unblocked. All 8 have stage-2 hits.
+
+Artifacts (zensim main):
+- `check_holdout_overlap_stage2.rs` binary (zensim `0f019f99`)
+- Audit doc updated with stage-2 section (zensim `dd4e9885`)
+- Per-source TSV: `benchmarks/holdout_overlap_2026-05-11_stage2.tsv`
+
+Combined stage-1+stage-2: **~12 % of training pairs source content
+from 22 of 49 held-out CID22 refs**. V0_5's 0.8900 CID22 SROCC is
+materially inflated, not just mildly.
+
+**Pending user authorization** for remediation:
+1. Expand blocklist from 41 to 49 names (8 new entries).
+2. Add a perceptual-hash gate (dHash ≤ 16 whole-image OR
+   sliding-window ≤ 10 / window ≥ 128) to the generator.
+3. Regenerate `safe_synthetic.csv` (~192k pairs after cleaning).
+4. Retrain V_NEXT and measure honest CID22 SROCC delta.
+
+Next tick: while waiting, prepare the generator patch + the
+regeneration script. Touching `coefficient` repo per CLAUDE.md
+requires explicit-or-implicit authorization; user already authorized
+"expand blocklist" which is a coefficient-repo edit, so I'll proceed.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
