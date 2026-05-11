@@ -2922,3 +2922,23 @@ All three reach **|SROCC| ≈ 0.89** on CID22 (V0_5: 0.8893, TV=10 h128: 0.8900,
 **Cycle artifacts now total 6 plots + 2 scripts + 12 bakes + per-band tables + Pareto summary doc**. Comprehensive cycle documentation in place.
 
 **Cycle remains empirically closed**; future ticks should be doc maintenance only unless user provides new direction.
+
+### Tick 109 — 2026-05-11T03:00Z — 7th plot: per-band CID22 vs TV (4-panel)
+
+Generated `per_band_tv_trends.png` (223 KB) at `/mnt/v/output/zensim/cycle_2026-05-11/`. **4-panel per-band CID22 SROCC vs TV** with h=64 / h=128 / h=192 lines and V0_5 horizontal baseline per panel.
+
+**Product band story made visually clear**:
+- **B0 (<50)** + **B1 [50,65)**: All KonJND-mix bakes BELOW V0_5 baseline (V0_5 ~0.44; KonJND ~0.40-0.43)
+- **B2 [65,90)** — the high-quality band where most product traffic lives: **h=128 KonJND ABOVE V0_5** at TV=5 and TV=10 (TV=10 peak 0.7808 vs V0_5 0.7746)
+- **B3 [≥90]** visually-lossless (n=43, wide CI): All KonJND-mix DRAMATICALLY above V0_5 (~0.14-0.18 vs V0_5 0.0642)
+
+This is the cleanest visualization of *where* KonJND-mix wins: the high-quality bands. The aggregate-CID22 number (V0_5 0.8893 vs h=128 TV=10 0.8900) understates this because the B0+B1 disadvantages partially cancel the B2+B3 advantages in the aggregate SROCC.
+
+**Pipeline**:
+- Extracted per-band data from all eval logs (B0/B1/B2/B3 × 9 bakes)
+- `benchmarks/make_per_band_tv_plot_2026-05-11.py` (3.2 KB) committed to zensim main `7f566703`
+- pareto_2026-05-11.md plots section updated
+
+**Total cycle artifacts now**: 7 plots + 3 scripts + 13 bake binaries + per-band tables + Pareto summary doc + tick log (1-109).
+
+**Cycle remains empirically closed**. Doc maintenance only unless user redirects.
