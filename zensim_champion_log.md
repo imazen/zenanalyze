@@ -2729,3 +2729,21 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 **Pushed**: zensim main `f0871825` with updated `pareto_2026-05-11.md`.
 
 **Next tick**: continue monitoring h=192. If h=192 lands at CID22 ≥ 0.8934 and non-mono < 4.86%, that's the champion (capacity hypothesis confirmed). Otherwise, the product-level finding here — TV=10 h128 wins the bands that matter — may motivate accepting it as ship despite smoothness gap, or motivate exploring smoothness-only interventions (post-hoc filtering, anchor loss, etc.) on top of TV=10 h128.
+
+### Tick 100 — 2026-05-11T02:17Z — h=192 still training (epoch 50); launched h=128 TV=10 seed=42 noise probe
+
+**h=192 + TV=10 + KonJND-aligned status** (PID 2414374): 7:43 elapsed, epoch 50 t=409s, best val_mean=0.9412 at epoch 40. Per-epoch cost ~8s. ETA early-stop epoch ~140-200, total ~25-30 min wall. ~15-20 more min to go.
+
+**Launched seed=42 of h=128 + TV=10 + KonJND-aligned** (PID 2420220, ~10 min wall) — same recipe as Tick 97's CID22 0.8900 leader, different seed.
+
+**Rationale**: Tick 86 measured seed variance at ~0.4pp non-mono and ~0.002 CID22 at TV=5 h64. The TV=10 h128 single-seed result (0.8900 / 5.36%) is at the boundary of seed noise relative to V0_5's (0.8893 / 4.57%). A second seed at this exact recipe tells us whether the +0.0007 CID22 advantage is robust or noise.
+
+**Predicted outcomes**:
+- If seed=42 CID22 lands in [0.886, 0.894]: confirms TV=10 h128 is genuinely close to V0_5
+- If seed=42 CID22 lands ≥ 0.892: meaningful confirmation that TV=10 h128 lifts CID22
+- If seed=42 CID22 lands < 0.886: seed=1 was a noise-favorable basin; conclusion weakens
+- Non-mono expected in 5.0-5.6% range
+
+**Both trainings expected to land within next 2-3 cron firings**.
+
+**Next tick**: harvest seed=42 first (lands sooner). If non-mono < V0_5's 4.57% (highly unlikely) → run CID22 eval immediately. If non-mono in 5.0-5.6% range → run CID22 to complete the seed pair. Then check h=192 progress.
