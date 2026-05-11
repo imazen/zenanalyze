@@ -2958,3 +2958,24 @@ Anyone navigating to the plot directory from Windows will now have context for e
 **Total cycle directory** at `/mnt/v/output/zensim/cycle_2026-05-11/`: 7 plots (~1.1 MB) + README. Single-source navigation point for the cycle's deliverables.
 
 **Cycle remains empirically closed**. README is the final navigation artifact; this should be the LAST useful tick unless user redirects.
+
+### Tick 111 — 2026-05-11T03:04Z — everything.md §0b — central tracking doc updated
+
+Added **§0b "Cycle close (2026-05-11)"** to `everything.md` (zenanalyze main commit `a59ce9c8`). The existing §0a paused at Tick 75 with "V0_5 stays ship" — §0b extends that with Ticks 76-110's findings:
+
+1. **Alignment bug fix** (Tick 81): KonJND-mix now works (prior 3 attempts trained on random pairings)
+2. **Capacity peaks at h=128**: h=192 regresses CID22 — non-monotonic
+3. **MEMORY.md correction** (Tick 88): "V0_5 CID22 0.8934" was aspirational; measurement-of-record = 0.8893
+4. **Per-band analysis**: V0_5 wins B0/B1; KonJND-mix wins B2 + B3 by 2.8×
+5. **Final Pareto** (10-bake table): nothing dual-clears
+6. **Path forward**: feature-space extension, not recipe tuning
+
+This is the **central document update** that closes the cycle for future-session navigation. Any new agent picking up the project should now see consistent statuses across:
+- `~/work/zen/zenanalyze/everything.md` §0a + §0b
+- `~/work/zen/zensim/benchmarks/pareto_2026-05-11.md`
+- `~/work/zen/zenanalyze/zensim_champion_log.md` (Ticks 1-111)
+- `/mnt/v/output/zensim/cycle_2026-05-11/README.md`
+
+**Outstanding stale reference**: `~/.claude/CLAUDE.md` global imazen crate index still claims V0_5 CID22 0.8934 (user-owned content; not modifying without explicit request). All zen-repo authoritative docs now have the correct 0.8893.
+
+**Cycle is now fully wound down across all tracking artifacts.** Future ticks add no value.
