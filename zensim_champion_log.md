@@ -601,6 +601,45 @@ Next concrete tick: read full V0_6 eval; consider affine calibration
 to align scale; reach decision on whether V0_6 ships or needs
 hyperparam search.
 
+### Tick 275 — 2026-05-11T19:46Z — *** Goal 2 COMPLETE: all 30 paper pages walked ***
+
+Final pages 26-30 walked through (zensim `d574979a`):
+
+**Page 26 — Table 6 (pairwise SROCC) + ssim2 architecture**:
+
+Table 6 within-source pairwise SROCC — **THE primary operating point
+for zensim** (codec orchestrator picks among same-source siblings):
+- SSIMULACRA 2: SRCC **0.9210**, KRCC 0.7536, PCC 0.9085
+- vs Table 3 absolute (SROCC 0.882): pairwise ALWAYS higher
+- SSIM1 rises 7th→3rd; VMAF drops 5th→14th
+
+ssim2 architecture: 6 scales × 3 components × 3 maps × 2 norms = 108
+sub-scores. XYB color, linear-RGB downsampling. **Asymmetric**:
+SSIM2(a,b) ≠ SSIM2(b,a) — smoothing penalized differently than ringing.
+
+**Page 28 — false-positive/false-negative asymmetry**:
+- Butteraugli: FN-prone (under-predicts at low quality)
+- MS-SSIM: FP-prone (over-predicts at high quality)
+- ssim2: balanced
+
+**Page 29 — Table 7 (recommended quality ranges)**:
+- ssim2: "very good" across all bands ≥ medium; "good"/"mediocre"
+  at very-low → low. ← ssim2's known weakness at B0
+- This is what zensim must close: B0 SROCC > ssim2's B0 SROCC
+
+**Goal 2 = COMPLETE.** All Goal 3 reproduction targets are now in
+the doc as tables (per-dataset, per-metric KRCC/SROCC/PCC).
+
+Two new architecture-parity follow-ups for the long-term:
+- 6-vs-4 scales (zensim has 4 today; ssim2 uses 6)
+- Explicit asymmetric ringing/smoothing features
+
+V0_6 full eval (4 datasets) at epoch 110/300 of TID; finishing in
+~2 min.
+
+Next concrete tick: read V0_6 full eval results, surface complete
+4-dataset comparison vs V0_5 + ssim2; reach a ship-or-search decision.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
