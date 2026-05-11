@@ -3672,6 +3672,10 @@ Computed least-squares affine fit `calibrated = α + β · raw_distance` against
 
 Ship-pipeline fully scripted and dry-run-verified across all 3 gold standards. No further work to do without user authorization. Marker refresh only.
 
+### Tick 255 — 2026-05-11T12:46Z — SKIP (pending user ship + naming auth)
+
+Marker refresh only.
+
 ### Tick 252 — 2026-05-11T12:34Z — Wrote `affine_calibrate_znpr_v2.py` + verified rank-invariance
 
 Wrote new script `zensim/scripts/v_next/affine_calibrate_znpr_v2.py` (~140 lines, zensim commit `54b3438f`). Applies `y' = α + β·y` directly to a ZNPR v2 binary by mutating the final Linear layer's weights and bias in place (`W' = β·W`, `b' = β·b + α`). Zero runtime cost, no PyTorch dependency, complements the existing `affine_calibrate_bake.py` (which operates on PyTorch model.pt run-dirs).
