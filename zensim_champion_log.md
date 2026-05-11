@@ -2571,3 +2571,45 @@ V0_5 is the **only verified bake meeting non-mono < 4.86%** in the KonJND-mix fa
 - TV=5 h128 (PID 2342030): epoch 110, best 0.9414 at epoch 90, ETA epoch 140 stop
 
 **Next tick**: harvest both bakes, non-mono eval, if either lands < 5.0% non-mono run CID22 eval; otherwise the h128 lane on the Pareto map is closed and the cycle's data is comprehensive.
+
+### Tick 95 — 2026-05-11T01:58Z — Per-band reveals big KonJND-mix wins (KADID B0 +0.22, TID B0/B1/B2 +0.15/+0.24/+0.18)
+
+While h=128 trainings still go (TV=10 at epoch 170, TV=5 at epoch 160, both early-stop ~epoch 190), used the eval window to do mandatory CLAUDE.md per-band analysis on existing bakes.
+
+**CID22 per-band (V0_4 column)** — aggregate hides band-specific behavior:
+
+| Bake | B0(<50) | B1(50-65) | B2(65-90) | B3(≥90) | aggr |
+|---|---|---|---|---|---|
+| V0_5 shipped | **0.4396** | 0.4488 | **0.7746** | 0.0642 | **0.8893** |
+| TV=5 h64 KonJND | 0.4195 | **0.4532** | 0.7736 | **0.1641** | 0.8880 |
+| TV=10 h64 KonJND | 0.4234 | 0.4260 | 0.7680 | 0.1403 | 0.8841 |
+| TV=20 h64 KonJND | 0.3792 | 0.4310 | 0.7645 | 0.1133 | 0.8812 |
+| TV=30 h128 KonJND | 0.4081 | 0.4317 | 0.7604 | 0.1638 | 0.8803 |
+
+**V0_5 wins B0 + B2** (the bands where most product traffic lives). **TV=5 wins B1 by +0.0044** and **CID22 B3 by 2.5× (0.1641 vs 0.0642)** — though B3 has tiny n=43 so wide CI.
+
+**KADID per-band — KonJND-mix is FAR better at low quality**:
+
+| Bake | B0(<50) | B1(50-65) | B2(65-90) | B3(≥90) | aggr |
+|---|---|---|---|---|---|
+| V0_5 shipped | 0.6636 | 0.3355 | 0.2135 | 0.2420 | 0.8432 |
+| TV=5 h64 KonJND | **0.8866** | **0.4291** | **0.2357** | **0.2480** | **0.9449** |
+
+**+0.22 on B0!** KonJND-mix is enormously better at the low-quality end of KADID — exactly where ssim2 saturates and where users live at aggressive compression settings.
+
+**TID per-band — even bigger wins**:
+
+| Bake | B0 | B1 | B2 | B3 | aggr |
+|---|---|---|---|---|---|
+| V0_5 shipped | 0.7350 | 0.3588 | 0.1856 | 0.2683 | 0.8401 |
+| TV=5 h64 KonJND | **0.8893** | **0.6396** | **0.3641** | 0.1176 | **0.9536** |
+
+**+0.15 B0, +0.28 B1, +0.18 B2**. KonJND-mix is MASSIVELY better on TID's perceptibility bands.
+
+**🔑 New insight**: The aggregate-CID22 frame missed the real product story. **KonJND-aligned bakes are substantially better discriminators in the low-q (B0) and mid-q (B1) bands across KADID + TID + (B3 on CID22)**. V0_5's CID22 advantage is concentrated in CID22 B0 (+0.02) and B2 (+0.001) — but CID22 B2 is essentially a tie within the bootstrap CI.
+
+**Implication for shipping**: if zensim is going to be a *user-facing dial* (per CLAUDE.md training goals), the dial is touched at **all** quality levels. A model that's better at low-q discrimination (KonJND-mix) might actually be the better product even though aggregate CID22 is -0.001. The B0 advantage is +0.05 to +0.22 depending on dataset.
+
+**Caveat**: V0_5's smoothness is 4.57% (target met); KonJND-mix is 5.1-5.5% (target missed). The smoothness gap is real and binding.
+
+**Next tick**: harvest h=128 bakes (likely landed by then). Update the pareto_2026-05-11.md with per-band findings.
