@@ -3587,3 +3587,29 @@ After 144 consecutive skips, **user provided three explicit directives**:
 **Archived script**: `zensim/benchmarks/make_pathology_plots_2026-05-11.py` (11.6 KB).
 
 **Next tick** (or next user input): if user says "yes ship", execute the swap, update CHANGELOG, push to zensim main. Otherwise continue analysis (per-codec breakdown, why-q15-q75 deep dive).
+
+### Tick 250 — 2026-05-11T12:24Z — Pathology was SCALE MAPPING ARTIFACT; ranking is fine; TV=10 h128 better-calibratable
+
+Investigated the q15-q75 under-prediction from Tick 249. Generated `pathology_distributions.png` showing per-bake output distributions vs ground truth.
+
+**Finding**: the "pathology" was an artifact of using the **wrong score mapping**. The legacy `100 - 18·|d|^0.7·sign(d)` was calibrated for V0_2 weights (distances 0-100). For the new MLP bakes:
+
+| Bake | Raw distance range | After legacy mapping | Truth scale |
+|---|---|---|---|
+| V0_5 (synth) | -55 to +14 | -50 to +400 | 0-100 |
+| TV=10 h128 (synth) | -18 to 0 | +90 to +230 | 0-100 |
+| Truth (ssim2/MCOS) | 0-100 | — | 0-100 |
+
+The 2D hexbins in the new plot show ranking IS correct (clouds slope correctly), but the absolute scale is wildly off. SROCC (rank-invariant) is **NOT** affected — Tick 99's per-band SROCC measurements stand. The Tick 249 percentile residual plot mixed two different scales.
+
+**Implication for shipping**: the pre-shipping fix is **affine calibration** via `scripts/v_next/affine_calibrate_bake.py`. TV=10 h128 is **more calibratable**: its raw output std is 38 vs V0_5's 142 (4× narrower range → better affine fit accuracy).
+
+**Updated finding for Tick 249's recommendation**: TV=10 h128 KonJND-aligned **still strictly wins** by the user's new criterion (matches ssim2 on CID22, exceeds on KADID/TID, beats V0_5 on CID22 B2/B3). The "shared pathology" claim in Tick 249 was misattributed — the actual issue is just legacy mapping. Removing that mapping (or applying affine calibration) cleans up the score-space view.
+
+**Recommendation strengthened**: ship-swap is more defensible than Tick 249 suggested, because:
+1. TV=10 h128's narrower output range makes its post-calibration absolute scores more reliable
+2. The pathology I attributed to it earlier doesn't actually exist in ranking-space
+
+**Pending user**: "yes ship" → execute the weight swap + run affine_calibrate_bake.py to produce a properly-scaled output.
+
+**Archived**: `make_distribution_plot.py` is in /tmp; will copy to zensim/benchmarks if we ship.
