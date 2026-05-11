@@ -213,6 +213,47 @@ Next concrete tick: build stage-1 perceptual-hash detector
 window cropped-variant detection) follows once stage-1 results are
 in hand.
 
+### Tick 265 — 2026-05-11T19:21Z — *** CONFIRMED LEAK: 4,032 training pairs (1.84%) ***
+
+Stage-1 dHash-64 overlap detector built and executed against the
+full 3,579-source safe-synthetic training corpus.
+
+**Findings** (full report: `zensim/benchmarks/holdout_overlap_audit_2026-05-11.md`):
+
+- **22 of 49 CID22 holdout refs** have perceptual near-duplicates
+  in training (Hamming distance ≤ 16).
+- **67 distinct training sources** are near-duplicates of those 22
+  CID22 refs.
+- **4,032 training pairs (1.84% of 218k)** use leaked sources.
+- One strict d=8 match: `4e7208e4f81b6b0c_1022x818.png`
+  ≈ CID22 `2887497.png`. Likely the original 1022×818 image that
+  CID22 downsampled to 512×512.
+
+**Root cause**: `CID22_VALIDATION_41` blocklist in
+`coefficient/examples/generate_zensim_training.rs` matches filename
+IDs (e.g. `2887497`), but training sources are hex-hashed crops
+(e.g. `4e7208e4f81b6b0c_1022x818.png`) of the same content. The hex
+naming circumvented the blocklist entirely.
+
+**V0_5's 0.8900 CID22 SROCC is therefore mildly inflated by leakage.**
+
+Artifacts:
+- Binary: `zensim/zensim-validate/src/bin/check_holdout_overlap.rs`
+  (zensim commit `8d83f43e`)
+- Audit report: `zensim/benchmarks/holdout_overlap_audit_2026-05-11.md`
+  (zensim commit `fcc48941`)
+- Per-source TSV: `zensim/benchmarks/holdout_overlap_2026-05-11_stage1.tsv`
+
+**Surfacing to user as STOP-and-decide.** Three pending
+authorizations documented at the end of the audit doc:
+1. Authorize regenerate-and-retrain V0_5+ on cleaned data?
+2. Expand `CID22_VALIDATION_41` blocklist to cover the 22 leaked IDs?
+3. Run stage 2 (sliding-window cropped-variant detection) now or
+   after remediation?
+
+Next tick: await user authorization. If unattended, draft the stage-2
+sliding-window detector code (no run) so it's ready when authorized.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
