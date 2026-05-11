@@ -66,7 +66,43 @@ body so we can run a smoke test from `zensim-train-core` and verify
 bit-identical output to `zensim-validate`'s trainer on a fixed seed.
 That seals Phase 1.
 
-### Tick 259 — 2026-05-11T18:56Z — SKIPPED: collision with concurrent claude-zensim-champ-loop
+### Tick 260 — 2026-05-11T19:05Z — Cleaned 14 zombie polling shells; ported TrainingGroup
+
+User asked to "review running shells and do the right thing". Found
+14 zombie bash polling loops spawned by pts/4 claude session (PID
+220427) over the last 22 hours, all `until/while pgrep -f <X>; do
+sleep; refresh-marker; done` patterns waiting on jobs that completed
+or were killed long ago.
+
+- **Zombie poll targets (all verified absent)**: rust_v05_recipe_h64_seed,
+  eval_11seeds_perband (stuck at 10/11 lines forever), tv-weight 30,
+  score_konjnd_full (3 duplicate pollers), konjnd_full_features,
+  konjnd_aligned, dataset_metric_baseline, konjnd_tv10,
+  konjnd_train_only, konjnd_raw100, konjnd_tv20,
+  rust_v05recipe_konjnd_tv5_h128.
+- **PIDs killed (SIGTERM)**: 1338809, 1525894, 1957457, 2179769,
+  2181536, 2182723, 2184826, 2214022, 2449359, 2234296, 2195846,
+  2207032, 2272518, 2414968.
+- **Verified**: pgrep self-matching artifacts ruled out; marker
+  mtime stable at 19:04:31Z after kills; no remaining sleep-spawning
+  bash in any zen-related worktree. Left pts/0's jxl-encoder poller
+  (PID 699556) alone — different repo, not blocking.
+- **Markers claimed** with this session's activity description; Tick
+  259's "skipped: collision" was a false-collision caused by these
+  zombie refreshers (no other agent was actually doing zensim work).
+
+Then resumed Phase 1 work:
+
+- **`zensim-train-core::TrainingGroup<'a>` added** (zensim commit
+  `b1d190bf`): bit-exact borrowed-slice shape from
+  `zensim-validate::mlp_train`. Same field set, same docs.
+- **5/5 unit tests passing** (added `training_group_construct`).
+- `cargo test -p zensim-train-core` clean.
+
+**Next concrete tick**: port `TvRegularizer`, `train_mlp` body,
+`compute_scaler_from_groups`, and forward/backward helpers. Then
+add a seed-stable smoke test that produces a tiny ZNPK v2 bake and
+verifies bit-identical output to `zensim-validate`'s trainer.
 
 Marker collision per global CLAUDE.md protocol:
 
