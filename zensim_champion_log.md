@@ -2319,3 +2319,36 @@ All four reproduce exactly. Saved to `/tmp/zensim_loop/tick85_baseline_nonmono.l
 **No new training launched this tick** — both TV=5 seeds still running, eval window will land in next /loop firing.
 
 **Next tick**: when TV=5 bakes arrive, run unified-parquet non-mono on both. If both ≥ 5.0%, h64+KonJND is firmly Pareto-bound; launch h192x128+KonJND-aligned+TV=5 next.
+
+### Tick 86 — 2026-05-11T01:18Z — TV=5 lands; seed variance ~0.4pp confirmed; pivot needed
+
+Both TV=5 bakes landed. seed=1 (PID 2278949, 8:30 wall, 175 epochs, val_min 0.9449) at `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.bin`. seed=42 (PID 2279630, 6:30 wall, 140 epochs early stop, val_min 0.9451) at `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed42_2026-05-11.bin`. Both 60932 bytes (228→64→1 ZNPR v2).
+
+**Non-mono on JPEG unified parquet** (1,785,696 pairs / 93,984 curves):
+
+| Bake | non-mono | curves-with-violation | val_min |
+|---|---|---|---|
+| V0_5 shipped | **4.57%** ★ | 51.94% | (n/a) |
+| h192x128_tv10_safesyn218k_kt | **4.53%** ★ | 50.31% | (smoothest seen, CID22 0.8695 ✗) |
+| TV=0 (KonJND-aligned Tick 81) | 5.46% | 59.13% | 0.9395 |
+| **TV=5 seed=1 (NEW)** | **5.14%** | **56.52%** | 0.9449 |
+| **TV=5 seed=42 (NEW)** | **5.54%** | **58.67%** | 0.9451 |
+| TV=10 (Tick 82) | 5.09% | 54.75% | 0.9380 |
+| TV=20 (Tick 82) | 5.29% | 57.22% | 0.9318 |
+
+**🔑 KEY FINDING — seed variance ≈ TV-effect magnitude**:
+- TV=5 seed=1 vs seed=42 differ by **0.40pp non-mono** (5.14% vs 5.54%)
+- TV=0 → TV=10 swing is only **0.37pp** (5.46% → 5.09%)
+- **Seed noise ≈ Pareto signal**. Tick 70-71 micro-sweep noise reappears.
+- Implication: the Tick 82 TV-monotonicity table was reading noise. The TV=5 → TV=20 mean is essentially flat at ~5.3% on h=64.
+
+**CID22 SROCC eval (seed=1) launched in background** (PID 2282321, 18-core parallel rayon). Output: `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.log`. ETA ~5 min — next /loop tick will harvest.
+
+**Skipped seed=42 CID22 eval**: its non-mono (5.54%) already worse than V0_5; even a CID22 boost wouldn't make it a strict Pareto winner.
+
+**Decision criterion for next tick**: when seed=1 CID22 lands:
+- If ≥ 0.8934 AND non-mono 5.14% < 4.86%: **CHAMPION** (impossible, smoothness already missing)
+- Realistically: seed=1 CID22 will be in [0.884, 0.892]. Non-mono 5.14% > 4.86%. **No strict Pareto winner from h64+KonJND+TV=5**.
+- **Pivot**: launch h=192x128 + KonJND-aligned + TV=10 (combining the smoothness backbone of `h192x128_tv10_safesyn218k_kt` with the CID22 lift of KonJND-aligned).
+
+**Next tick**: collect seed=1 CID22 from `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.log` (V0_4 column on CID22 row), update Pareto, then launch h=192x128+KonJND-aligned+TV=10.
