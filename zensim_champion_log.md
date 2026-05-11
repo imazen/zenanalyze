@@ -1629,3 +1629,38 @@ The "Decision pending user approval" section now lists concrete steps to ship: c
 **Ship path is now clear**: the new champion bake is defensible per locked goal #1 (CID22 > V0_5 floor) and approaches the 0.8934 target. Awaiting user "ship" authorization (per global CLAUDE.md "NEVER promote without user check on weights").
 
 **Next tick**: ensemble experiment OR await user ship decision OR continue with the deferred work items (multi-target DSSIM loss, default plot generation, etc.).
+
+### Tick 65 — 2026-05-11T01:37Z — Smoothness measured: champion FAILS the 4.86% target (6.72%)
+
+Built `scripts/v_next/score_unified_with_bake.py` (~120 LOC): parses ZNPR v2 bake directly in Python (no Rust runtime needed), applies scaler + MLP forward via numpy, groups parquet rows by (image, codec, knob), counts adjacent-q reversals.
+
+Ran on **the new champion** (`rust_webp_mono_h128_seed1_2026-05-10.bin`) over `unified_v15r_zenjpeg.parquet` (1.79M pairs, 94k curves):
+
+| Metric | Value | Target |
+|---|---|---|
+| **Non-mono q-step rate** | **6.72%** | **< 4.86%** ✗ |
+| Curves with ≥1 violation | 65.08% | n/a |
+| **CID22 SROCC** | **0.8941** | > 0.8934 ✓ |
+
+**HALF-TARGET HIT**: CID22 passes, smoothness FAILS. Per the locked dual-target rule (zensim/CLAUDE.md goal #2: smoothness IS first-class, not nice-to-have), the new champion is **NOT yet ship-ready**.
+
+**Smoothness landscape recap**:
+- V0_2 shipped: 4.86% (project floor reference)
+- V0_5 shipped: ~8.26% (worse than V0_2 floor!)
+- Smoothness-winner h192x128_tv30_ep200 (Python): **4.49%** ✓
+- Ultra-smooth pure-ranknet (Python): **1.66%** ★
+- **New Rust champion h128 seed=1**: 6.72% (between V0_2 and V0_5)
+
+**Revoking Tick 64's "ship recommendation".** The new champion improves CID22 over V0_5 (+0.0048) AND improves non-mono over V0_5 (6.72% < 8.26%), but fails to cross the V0_2 floor on smoothness. The Smoothness-Winner Python bake passes smoothness (4.49%) but fails CID22 (0.8769 < 0.8893 floor).
+
+**No model in the cycle simultaneously meets**:
+- CID22 ≥ 0.8893 (V0_5 floor) — only seed=0 orig, seed=7 orig, and Rust h128 seed=1 cross this
+- non-mono ≤ 4.86% — only Smoothness-Winner and Ultra-Smooth cross this
+
+**Path forward**:
+1. Train Rust trainer with `--tv-weight` analog (the Rust trainer has no TV reg). Adding TV regularizer to mlp_train.rs is ~30 LOC.
+2. Train h=128 + WebP-mono + TV-style penalty + seed sweep. Goal: maintain CID22 ≥ 0.8893 AND drop non-mono < 4.86%.
+
+**Saved**: `scripts/v_next/score_unified_with_bake.py` (new tool).
+
+**Next tick**: implement TV regularizer in Rust trainer (per-curve adjacent-q penalty), retrain seed=1 h=128 with TV, measure both targets.
