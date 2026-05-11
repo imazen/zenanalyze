@@ -2219,3 +2219,59 @@ Hmm wait — h128 no-TV seed=1 has 0.8941 which is higher than this tick's 0.892
 Hmm — let me check: 0.8941 from h128 seed=1 ABOVE the target 0.8934. The KonJND-aligned 0.8921 is BELOW target. So h128 no-TV seed=1 actually exceeded target while this doesn't. But this is closer to V0_5's smoothness.
 
 **Next tick**: train aligned KonJND with TV regularizer (TV=10-20) to also fix smoothness; OR train at h=128 with KonJND-mix; OR seed sweep.
+
+### Tick 82 — 2026-05-11T07:05Z — KonJND+TV sweep — Pareto frontier hits but no strict V0_5 dominator
+
+Generated combined TV pairs file covering safesyn + KonJND adjacent-q pairs (`/tmp/zensim_loop/safesyn_konjnd_tv_pairs.tsv`, 271,767 pairs = 196,671 safesyn + 75,096 KonJND).
+
+Trained KonJND-aligned recipe at TV=10 and TV=20:
+
+| Recipe | CID22 | non-mono | val_min |
+|---|---|---|---|
+| V0_5 shipped | **0.8893** | **4.57%** ★ | (n/a) |
+| KonJND TV=0 (Tick 81) | **0.8921** | 5.46% | 0.9395 |
+| KonJND TV=10 | 0.8841 | 5.09% | 0.9380 |
+| KonJND TV=20 | 0.8812 | 5.29% | 0.9318 |
+
+**TV is again non-monotonic** at this granularity (TV=10's 5.09% vs TV=20's 5.29% — same noise pattern as Ticks 68-71).
+
+**Pareto frontier for h=64 + KonJND recipe**:
+- Best CID22: TV=0 at 0.8921 (smoothness 5.46%)
+- Best smoothness: TV=10 at 5.09% (CID22 0.8841)
+- Neither reaches V0_5's joint dominance (CID22 0.8893, smoothness 4.57%)
+
+**The KonJND-mix recipe Pareto-distinct from V0_5 but does NOT strictly dominate**. Two viable ships:
+1. **V0_5 (current ship)** — dial-property-safe, smoothness 4.57% < target 4.86%, CID22 0.8893
+2. **KonJND TV=0 seed=1** — higher CID22 0.8921, but smoothness 5.46% above target
+
+**Saved**:
+- `/tmp/zensim_loop/safesyn_konjnd_tv_pairs.tsv` (271k pair indices)
+- `benchmarks/rust_v05recipe_konjnd_tv{10,20}_h64_seed1_2026-05-11.{bin,train.log}`
+
+**Cycle natural conclusion (Tick 82)**: KonJND inclusion **does help CID22 substantially** when alignment is fixed (Tick 81 hypothesis VALIDATED), but TV regularization can't simultaneously close the smoothness gap. Either:
+1. The recipe needs higher capacity (h=128 with KonJND-mix)
+2. A different smoothness mechanism (e.g. larger TV apply_every batch, or different group sampling)
+3. Accept V0_5 as the dial-safe ship (current strategy)
+
+**Updated all-time CID22 ranking** (smoothness in parens):
+1. h128 no-TV seed=1 (WebP-mono): **0.8941** (6.72%)
+2. **KonJND TV=0 seed=1**: **0.8921** (5.46%)  ← NEW, closer to V0_5 smoothness
+3. V0_5 shipped: 0.8893 (4.57%) ← only dual-target-meeting
+
+**Next tick**: try h=128 with KonJND-mix (combines the two CID22-best ingredients). One last attempt to find a strict Pareto winner.
+
+### Tick 83 — 2026-05-11T01:09Z — TV=5 KonJND launched (Pareto interior triangulation)
+
+After Tick 82's finding that TV=10 (5.09%) was better than TV=20 (5.29%) on smoothness while both hurt CID22, the natural next move is to fill the TV=0 → TV=10 gap. A TV=5 point lets us either:
+1. Find a sweet spot with smaller smoothness penalty and minimal CID22 loss, or
+2. Confirm TV is structurally too noisy at h=64 to land both targets.
+
+**Launched**: `target/release/zensim_mlp_train` PID 2278949, seed=1, same recipe as TV=10 except `--tv-weight 5.0`.
+- Groups: safesyn(1.0:0.0) + kadid(0.3:1.0) + tid(0.3:1.0) + konjnd(0.5:1.0)
+- TV pairs file: `/tmp/zensim_loop/safesyn_konjnd_tv_pairs.tsv` (271,767 pairs)
+- Hidden=64, val_policy=Min, max_features=228, apply_every=50, batch=32
+- Output: `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.{bin,train.log}`
+- Stdout: `/tmp/zensim_loop/tv5_seed1_train.stdout`
+- Expected runtime: ~8 min (parallel to TV=10's 471s)
+
+**Next tick**: when bake lands (next /loop firing or two), run the unified scorer + non-mono auditor on CID22 features and compare to TV={0,10,20} on the (CID22, non-mono) Pareto. If TV=5 lands in the interior (e.g. CID22 0.888, non-mono 5.2%), the conclusion is the recipe is intrinsically Pareto-frontier-bound; pivot to h=128 + KonJND-mix instead.
