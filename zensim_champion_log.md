@@ -2069,3 +2069,45 @@ Output: `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` — being written.
 - `zensim/zensim-bench/examples/score_konjnd_full.rs` (new binary)
 - `/tmp/zensim_loop/score_konjnd_full.log` (in-progress)
 - `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` (in-progress, will be complete by next tick)
+
+### Tick 78 — 2026-05-11T05:30Z — KonJND 4-group retrain FAILS catastrophically: val_min trap
+
+Pipeline completed: scoring → conversion → training × 2 seeds.
+
+1. **Scoring**: 76,104 KonJND pairs scored with fast-ssim2 + butter + dssim in ~27 min wall (~46 pairs/sec). Output: `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` (76,105 lines incl. header).
+
+2. **Conversion**: `convert_features_bin.py` on `KonJND-1k.features.20260501_095545.bin` + new CSV → `/tmp/zensim_loop/konjnd_full_features.csv` (260 MB, 76,104 trainer-shape rows).
+
+3. **Training × 2** (seeds 1, 42): Rust h=64 + safesyn@1.0 + KADID@0.3 + TID@0.3 + **KonJND@0.5/1.0** (V0_5 mix), ~6-7 min each.
+
+**RESULT: CATASTROPHIC FAILURE**
+
+| Bake | CID22 | non-mono |
+|---|---|---|
+| **V0_5 shipped (target)** | **0.8893** | **4.57%** |
+| 4-group seed=1 | 0.6886 | 21.73% |
+| 4-group seed=42 | 0.5891 | 21.89% |
+
+The model didn't learn — CID22 0.59/0.69 (far below V0_2's linear baseline of 0.87), non-mono 22% (4x worse than V0_5).
+
+**Root cause analysis**:
+- KonJND ssim2 scores include negative values (e.g. -27.6 for very-low-quality BPG) and >100 (clipped).
+- The converter `convert_features_bin.py` line 105 clips `[0, 100]` then divides by 100. Negative ssim2 → 0 (mass quantization).
+- The trainer's val SROCC on konjnd val rows stays ~0.01 (random) because targets are mostly clipped to 0.
+- `val-policy=Min` selects the model with the highest worst-group SROCC. With konjnd always ~0.01, it picks based on tiny random variations of basically broken signal — and saves a bad model.
+
+**The val_min trap**: KonJND val should NOT be in val-min selection. Either disable val_w for konjnd (val-only off), use val_policy=mean, or fix the ssim2 clipping in the converter.
+
+**Hypothesis from Tick 76 is NOT validated** — but also NOT clearly falsified. The recipe broke for an orthogonal reason (val_min trap), not because KonJND inclusion hurts.
+
+**Saved**:
+- `benchmarks/rust_v05recipe_4groups_h64_seed{1,42}_2026-05-11.{bin,train.log}` (failed bakes preserved for record)
+- `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` (clean 76k scoring output — re-usable)
+- `/tmp/zensim_loop/konjnd_full_features.csv` (trainer-shape, but with the clipping issue)
+
+**Next tick (to validate hypothesis cleanly)**:
+1. **Option A**: Retrain with konjnd `val_w=0` (don't use konjnd for validation gating). Should let the model train on konjnd content without val_min trap.
+2. **Option B**: Modify `convert_features_bin.py` to skip the `clip(0, 100)` for konjnd (it's only there for safesyn's clean range).
+3. **Option C**: Add `val_policy=mean` to Rust trainer args (we have the `--val-policy` flag — should work).
+
+Option A is the smallest change (just `--group konjnd:...:0.5:0.0`).
