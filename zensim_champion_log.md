@@ -701,6 +701,45 @@ write the data-generation Python script + a minimal Plotly.js
 index.html that reads JSON for per-band SROCC bars. This is
 independent of the sweep result.
 
+### Tick 278 — 2026-05-11T23:18Z — Goal 6 site scaffold landed; sweep at epoch 20
+
+V0_7 seed sweep progress: all 4 seeds at epoch 20 (~2 min in,
+parallel). Best val_mean so far:
+- seed=0: 0.9115
+- seed=1: 0.9226
+- seed=2: 0.9092
+- seed=7: 0.9288
+(V0_6/seed=42 epoch-20 was 0.9268)
+
+Built Goal 6 GitHub Pages scaffold (zensim `0218a00b`):
+
+- `scripts/v_next/build_site_data.py` — parses
+  `dataset_metric_baseline` eval logs, emits per-bake JSON.
+  Handles aggregate + per-band rows + CI extraction. Manifest-
+  driven multi-bake mode.
+- `site/data/{index,bakes/*}.json` — initial data for V0_5
+  (leaked) and V0_6 (clean) bakes.
+- `site/index.html` — Plotly.js page: dataset dropdown,
+  aggregate-SROCC bars, per-band-SROCC bars with 95% CI whiskers,
+  paper Table 3 parity table.
+- `site/js/app.js` — data loading + rendering. ssim2/butter
+  shown as comparison series; paper Table 3 deltas color-coded.
+
+Pending for Goal 6 completion:
+- GH Actions workflow to publish to gh-pages branch
+- Per-codec breakdowns (independent)
+- Per-content-class (waits for Goal 4)
+- Full Table 3 reproduction (Goal 3)
+- Scatter plots per metric × band
+
+Site is local-only for now. To preview:
+`python3 -m http.server 3142 --directory site/` then visit
+`http://localhost:3142/`.
+
+Next concrete tick: monitor sweep; if seeds 0/1/2/7 finish before
+sweep ends, evaluate best-val on CID22; otherwise continue Goal 6
+work (per-codec breakdown).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
