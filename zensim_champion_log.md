@@ -298,6 +298,41 @@ regeneration script. Touching `coefficient` repo per CLAUDE.md
 requires explicit-or-implicit authorization; user already authorized
 "expand blocklist" which is a coefficient-repo edit, so I'll proceed.
 
+### Tick 267 — 2026-05-11T19:27Z — Remediation executed: cleaned CSV + generator patched
+
+User authorized full remediation (option 1) + stricter threshold
+(stage-1 d≤16 ∪ stage-2 d≤12 / w≥128).
+
+**Filtered training CSV** (zero compute cost — just a row filter):
+
+- Source: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv`
+  (218,090 rows / 3,579 distinct sources / 22 leaked CID22 refs)
+- Output: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_perceptual_clean.csv`
+  (156,421 rows after filter)
+- Removed: **1,015 distinct sources, 61,669 pairs (28.28 % of 218k)**
+  at the user-chosen strict threshold (stage-1 d≤16 ∪ stage-2 d≤12 / w≥128)
+- The stricter threshold removes more pairs than the recommended one
+  (~12% vs 28%) — chosen for widest safety margin, per user.
+
+**Coefficient generator patched** (commit `d4cb501`, pushed to
+`imazen/coefficient` main):
+
+- `CID22_VALIDATION_41` → `CID22_VALIDATION_49`. Added 8 missing
+  non-numeric-ID refs.
+- Doc comment annotated with the audit findings and pointer to
+  `zensim/benchmarks/holdout_overlap_audit_2026-05-11.md`.
+- Note: cargo build of the example fails due to unrelated missing
+  sibling dep `butteraugli-cuda`; pre-commit `cargo fmt --check` did
+  enforce style. Push went through clean.
+- **Perceptual-hash gate still pending** (filename match alone is
+  insufficient — flagged in CID22_VALIDATION_49 doc comment as the
+  next-tier fix). Queued for next tick.
+
+Next concrete tick: retrain on cleaned CSV with the same hyperparameters
+as V0_5 (TV=10, h=128, KonJND mixin). Then measure honest CID22 SROCC
+delta vs V0_5's 0.8900. Then move to Goal 3 (reproduce paper SSIM2
+numbers on the 49-ref held-out).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
