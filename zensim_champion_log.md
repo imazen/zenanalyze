@@ -820,6 +820,34 @@ Next concrete tick: wait for sweep to finish, then run the eval
 script; report CID22 SROCC for each seed; identify if any exceeds
 V0_6's 0.8839 (and ideally fast-ssim2's 0.8895).
 
+### Tick 282 — 2026-05-11T23:29Z — seed=0 val_mean=0.9443 (+0.0025 over V0_6); seeds 2/7 in eval
+
+Sweep status:
+- seed=0: still running, **best=0.9443** at epoch 140 — biggest
+  jump yet, well above V0_6's 0.9418
+- seed=1: still running, best=0.9414
+- seed=2: **DONE**, best=0.9407, bake landed
+- seed=7: **DONE**, best=0.9415, bake landed
+
+Launched eval for the 2 finished bakes against KADID + TID + CID22
++ KonJND (PIDs 2695956, 2695957). Output:
+- `/tmp/zensim_loop/v0_7_seed2_eval.log`
+- `/tmp/zensim_loop/v0_7_seed7_eval.log`
+
+ETA: ~5 min per eval; running in parallel.
+
+seed=0 needs another ~50 epochs of patience before early-stop
+since best moved 10 epochs ago. ETA ~5 min more for training.
+
+Seed=0's val_mean=0.9443 is the FIRST clean-data result that
+clearly exceeds V0_6's all-time best. If this translates to a
+better CID22 SROCC (vs V0_6's 0.8839), seed=0 becomes the V0_7
+ship candidate.
+
+Next concrete tick: seed=2 + seed=7 eval results available;
+seed=0 still in training. Likely have first cross-seed CID22
+SROCC comparison in ~3 min.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
