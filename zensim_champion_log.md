@@ -2553,3 +2553,21 @@ V0_5 is the **only verified bake meeting non-mono < 4.86%** in the KonJND-mix fa
 - h128+TV=5 (PID 2342030): 13:06, epoch 100, best val 0.9414 at epoch 90, ETA ~4 min
 
 **Next tick**: harvest both h=128 bakes; non-mono eval (1 min each); if non-mono lands < 5.0% (the h128+TV=30 lower bound), the h=128 capacity might be helping smoothness — worth then running full CID22 eval. Otherwise log results and conclude that the h=64 h=128 difference in this recipe is < seed variance.
+
+### Tick 94 — 2026-05-11T01:55Z — Pareto summary doc committed; h=128 trainings still running
+
+**New concrete artifact**: `~/work/zen/zensim/benchmarks/pareto_2026-05-11.md` — finalized cycle summary with:
+1. Goal + target reminder (CID22 > 0.8934, non-mono < 4.86%)
+2. TL;DR: V0_5 is the only verified bake meeting smoothness; CID22 0.8934 never measured (Tick 88 finding)
+3. Verified measurements table (6 bakes, all full 4292-pair CID22 + non-mono on JPEG unified parquet)
+4. ASCII Pareto sketch
+5. What worked / what didn't
+6. Recommendations: accept V0_5, re-anchor target, future paths through feature-space extension or model-class change (not recipe tuning)
+
+**zensim main pushed** (commit `ac21f478`): all 6 bake binaries + their eval.log + train.log + pareto_2026-05-11.md. Followed prior 85-bake precedent in benchmarks/.
+
+**Both h=128 trainings still going** (~ 1-3 min more):
+- TV=10 h128 (PID 2341484): epoch 130, best 0.9416 at epoch 90, ETA epoch 140 stop
+- TV=5 h128 (PID 2342030): epoch 110, best 0.9414 at epoch 90, ETA epoch 140 stop
+
+**Next tick**: harvest both bakes, non-mono eval, if either lands < 5.0% non-mono run CID22 eval; otherwise the h128 lane on the Pareto map is closed and the cycle's data is comprehensive.
