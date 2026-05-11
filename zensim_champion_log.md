@@ -333,6 +333,36 @@ as V0_5 (TV=10, h=128, KonJND mixin). Then measure honest CID22 SROCC
 delta vs V0_5's 0.8900. Then move to Goal 3 (reproduce paper SSIM2
 numbers on the 49-ref held-out).
 
+### Tick 268 — 2026-05-11T19:30Z — V0_6 retrain launched on cleaned corpus
+
+Filtered the features CSV (matching the CSV cleaning):
+- `/tmp/zensim_loop/safe_synth_218k_features.csv` (218,090 rows)
+  → `/tmp/zensim_loop/safe_synth_clean_features.csv` (156,421 rows).
+- 1,015 distinct `ref_basename`s removed.
+
+Wrote new `scripts/v_next/regen_tv_pairs.py` helper that builds
+adjacent-quality TV pairs from a training CSV (zensim `9faadca8`).
+Generated:
+- Cleaned safesyn TV pairs (141,055) at offset 0.
+- KonJND TV pairs (75,096) shifted from old indices ≥231214 to new
+  ≥169545 (subtract 61,669).
+- Combined: `/tmp/zensim_loop/combined_clean_tv_pairs.tsv` with
+  216,151 TV pairs total (vs V0_5's 271,767).
+
+Launched V0_6 retrain with V0_5's exact hyperparameters:
+- 4 groups: safesyn_clean (1.0/0.0), kadid (0.3/1.0), tid (0.3/1.0),
+  konjnd (0.5/1.0). Same group weights as V0_5.
+- h=128, epochs=300, pairs_per_epoch=50k, lr=0.001, l2=1e-5,
+  leaky=0.01, val_policy=Min, seed=42, max_features=228.
+- TV: weight=10, apply_every=50, batch=32.
+- PID 2638506, stdout `/tmp/zensim_loop/v0_6_clean_h128_tv10_seed42_train.stdout`.
+- Output bake will be `/tmp/zensim_loop/v0_6_clean_h128_tv10_seed42.bin`.
+- Estimated wall: ~6 h (V0_5 timing was ~73 s/epoch × 300 epochs).
+
+Next concrete tick: monitor V0_6 progress; when bake lands, run
+`dataset_metric_baseline` against CID22 49-ref + KonJND + KADID + TID
+to measure honest SROCC delta vs V0_5. Affine-calibrate the result.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
