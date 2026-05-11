@@ -2381,3 +2381,42 @@ Both TV=5 bakes landed. seed=1 (PID 2278949, 8:30 wall, 175 epochs, val_min 0.94
 If prediction holds → does NOT clear targets (CID22 < 0.8934, non-mono > 4.86%). If it OVERSHOOTS prediction (KonJND-aligned might land asymmetrically at higher capacity), there's a chance.
 
 **Next tick**: harvest CID22 eval for TV=5 seed=1 (next /loop firing). If above 0.890, that's a useful data point for understanding the Pareto curvature. Then check h=128+TV=30+KonJND progress.
+
+### Tick 88 — 2026-05-11T01:30Z — V0_5 eval re-confirmed + TV=5 full result + MEMORY discrepancy resolved
+
+**TV=5 seed=1 full eval** (`rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.full.log`):
+- KADID: **0.9449** (+0.10 vs V0_5's 0.8432) — huge non-CID22 lift
+- TID2013: **0.9536** (+0.11 vs V0_5's 0.8401)
+- **CID22: 0.8880** (–0.0013 vs V0_5's 0.8893)
+- Non-mono: 5.14% (above target 4.86%)
+- **Verdict**: NOT a champion — CID22 regression vs V0_5, smoothness above target.
+
+**MEMORY.md discrepancy investigated and resolved**:
+- MEMORY.md claims V0_5 SSIM2-proxy MLP at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_ssim2_holdout_20260501T045510.bin` (CID22 **0.8934**).
+- The champion log says V0_5 shipped CID22 = 0.8893.
+- **md5 check**: both files identical (`bb7e24a16a64afa43eb296bf151fb6b8`). Same model, two paths.
+- **Definitive eval just ran** (PID 2302696, full 4292-pair CID22): `v0_4_2026-04-30.bin` lands at **KADIK10k 0.8432 / TID2013 0.8401 / CID22 0.8893 / non-mono 4.57%**.
+- The MEMORY's "0.8934" was an aspirational target value, not a measurement of the shipped bake. The 0.8893 number is correct.
+- → **The target CID22 0.8934 has NEVER been measured on any held-out shipped or training bake**. It was the *aspirational* CLAUDE.md target; not a known-achievable state.
+
+**Updated Pareto leaderboard** (CID22 first):
+
+| Bake | CID22 | non-mono | KADID | TID | Status |
+|---|---|---|---|---|---|
+| h128 seed=1 no-TV (WebP-mono) | **0.8941** | 6.72% | — | — | CID22 ✓ smoothness ✗ |
+| TV=0 KonJND-aligned (Tick 81) | 0.8921 | 5.46% | 0.9395 | 0.9490 | both fail |
+| h128 seed=1 TV=30 no-KonJND (Tick 80) | 0.8874 | 4.97% | — | — | both fail (close) |
+| **V0_5 shipped** | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 | smoothness ✓ CID22 ✗ |
+| TV=5 seed=1 (NEW) | 0.8880 | 5.14% | 0.9449 | 0.9536 | both fail |
+| TV=10 (Tick 82) | 0.8841 | 5.09% | — | — | both fail |
+| TV=20 (Tick 82) | 0.8812 | 5.29% | — | — | both fail |
+
+**Saved evals**: 
+- `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.full.log` (full 4292)
+- `/tmp/zensim_loop/v0_5_shipped_full_eval.log` (V0_5 baseline confirmation)
+
+**h128+TV=30+KonJND-aligned training still running** (PID 2289817, epoch 60 at t=468s, best val_mean=0.9396 at epoch 40, ~5-10 min to early-stop). Predicted CID22 ~0.890 / non-mono ~5.5% per Tick 87.
+
+**Strategic takeaway**: nothing yet found that strictly dominates V0_5. KonJND-aligned helps KADID/TID massively (+0.10) but hurts CID22 marginally (-0.001). TV regularization trades CID22 for smoothness. The Pareto frontier appears to bound the recipe space at roughly CID22 + 0.02·(non-mono - 4.5) ≤ 0.89.
+
+**Next tick**: harvest h128+TV=30+KonJND bake. If it confirms the Pareto bound (~0.890 / ~5.5%), the realistic conclusion is **V0_5 is on the achievable Pareto frontier** and the 0.8934 target is currently unreachable with this feature set. Recommend pausing further training and instead exploring: (a) extending feature set, (b) accepting V0_5 as final, or (c) reviewing what the "0.8934" target was originally based on.
