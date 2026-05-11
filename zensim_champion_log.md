@@ -147,6 +147,33 @@ Next concrete tick: port `TvRegularizer` (struct + methods),
 with a smoke test that runs end-to-end on synthetic data and produces
 a tiny ZNPR v2 bake.
 
+### Tick 263 — 2026-05-11T19:14Z — TvRegularizer ported (15/15 tests)
+
+zensim commit `dce062bf`. `zensim-train-core::TvRegularizer` now
+public alongside the existing `MlpHyperparams` / `TrainingGroup`.
+
+- **Fields**: `pairs: Vec<(usize, usize)>`, `features: Vec<Vec<f64>>`,
+  `weight: f64`, `apply_every: usize`, `batch: usize` — bit-exact
+  shape from `zensim-validate`.
+- **API change**: `n_features_check` (originally private helper) is
+  promoted to `pub fn n_features()` so the trainer module port can
+  call it from outside the type. No behavioral diff.
+- **Two new tests**: empty-features → 0; 4 rows of 228 → 228 +
+  pair count.
+- **All 15 tests passing**: 5 baseline + 7 mlp primitives + 1 bake
+  + 2 TV.
+
+`spearman_correlation` is already covered by `stats::spearman` —
+verified the validate version uses `(n-1)/2` as the mean of ranks
+0..n-1 with ties averaged, which is bit-identical to my
+`pearson(&ranks(x), &ranks(y))` because that mean computes to the
+same value (within 1e-15 fp error).
+
+Next concrete tick: port `train_mlp_with_tv` body and `train_mlp`
+wrapper. End Phase 1 with a smoke test that uses synthetic features
+to produce a tiny ZNPR v2 bake and verifies the predictor can read
+it back.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
