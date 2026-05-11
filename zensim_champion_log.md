@@ -2901,3 +2901,24 @@ The caveat helps future sessions avoid being misled by stale aspirational target
 **No new measurements this tick**. Just doc consolidation. Cycle remains empirically closed.
 
 **Outstanding for user**: the `~/.claude/CLAUDE.md` global instructions still claim "V0_5 CID22 0.8934" — this is user-owned content; not editing without explicit request. Suggest user update the imazen crate index entry for zensim if they want consistency across the system.
+
+### Tick 108 — 2026-05-11T02:58Z — Added CID22 metric-vs-MCOS scatter (paper-canonical plot)
+
+Generated **6th CID22-paper-style plot** at `/mnt/v/output/zensim/cycle_2026-05-11/cid22_scatter.png` (389 KB).
+
+**3-panel raw-metric-vs-MCOS scatter** (n=4292 CID22 pairs):
+1. V0_5 distance vs MCOS — signed distance ranging -55 to +14; negative correlation (cloud slopes down-right)
+2. TV=10 h128 distance vs MCOS — signed distance ranging -18 to 0; same negative correlation pattern but tighter cloud (output range 3× narrower than V0_5)
+3. fast-ssim2 score vs MCOS — positive native score 0-100; positive correlation reference (cloud slopes up-right)
+
+All three reach **|SROCC| ≈ 0.89** on CID22 (V0_5: 0.8893, TV=10 h128: 0.8900, fast-ssim2: 0.8895). The plot makes the output-scale mismatch (Tick 101 finding) visually obvious: V0_5's range is wider than TV=10 h128's; neither is anchored to the SSIMULACRA2 native scale.
+
+**Pipeline**:
+- Ran `dataset_metric_baseline --per-pair-output` for V0_5 + TV=10 h128 on CID22 (~3 min wall, 2 parallel processes).
+- Per-pair CSVs at `/tmp/zensim_loop/{v0_5,tv10_h128}_per_pair_cid22.csv` (220 KB each, 4292 rows × 6 cols).
+- Plot script at `benchmarks/make_cid22_scatter_2026-05-11.py` (3.8 KB), committed to zensim main (`e52c1765`).
+- pareto_2026-05-11.md updated with scatter plot entry.
+
+**Cycle artifacts now total 6 plots + 2 scripts + 12 bakes + per-band tables + Pareto summary doc**. Comprehensive cycle documentation in place.
+
+**Cycle remains empirically closed**; future ticks should be doc maintenance only unless user provides new direction.
