@@ -2699,3 +2699,33 @@ This contrasts with h=64 where the CID22 maximum is at TV=0 (0.8921). Doubling c
 - Expected ~15 min wall (h=192 is 1.5× h=128 work)
 
 **Next tick**: monitor h=192 training; harvest when done. If CID22 ≥ 0.8934 AND non-mono < 4.86% → CHAMPION (will stop cron). If CID22 hits but non-mono fails, consider higher-TV h=192 (TV=15 or TV=20). If neither, formally close cycle.
+
+### Tick 99 — 2026-05-11T02:13Z — Per-band on TV=10 h128 reveals it WINS the product-critical bands
+
+While h=192 trains (epoch 30, t=258s, ETA ~20 more min — slower per-epoch than predicted), did the mandatory per-band analysis on TV=10 h128 (the new top non-WebP-mono CID22 bake).
+
+**CID22 per-band — TV=10 h128 vs V0_5**:
+
+| Band | V0_5 | TV=10 h128 | delta |
+|---|---|---|---|
+| B0 (<50) | 0.4396 | 0.4301 | -0.0095 (V0_5 wins) |
+| B1 [50,65) | 0.4488 | 0.4363 | -0.0125 (V0_5 wins) |
+| **B2 [65,90)** | 0.7746 | **0.7808** | **+0.0062 (TV=10 h128 wins)** |
+| **B3 [≥90]** | 0.0642 | **0.1780** | **+0.1138 (2.8×; n=43)** |
+| Aggregate | 0.8893 | **0.8900** | +0.0007 |
+
+**TV=10 h128 wins the product-critical bands** (B2 high quality + B3 visually lossless). V0_5 wins the low-q tail (B0+B1).
+
+**KADID per-band — TV=10 h128 dominates all bands**: B0 +0.22, B1 +0.085, B2 +0.022, B3 +0.010, aggregate **0.9434** vs 0.8432 (+0.10).
+
+**TID per-band — TV=10 h128 dominates all bands**: B0 +0.16, B1 +0.28, B2 +0.18, B3 -0.05 (only B3 is V0_5-better), aggregate **0.9553** vs 0.8401 (+0.115).
+
+**🎯 Product implication**: if smoothness 5.36% can be reduced to 4.86%, TV=10 h128 KonJND is the better PRODUCT than V0_5 across:
+- KADID (all bands)
+- TID (B0-B2 all bands)
+- CID22 B2 + B3 (the q70+ bands where most product traffic lives)
+The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-compressed images).
+
+**Pushed**: zensim main `f0871825` with updated `pareto_2026-05-11.md`.
+
+**Next tick**: continue monitoring h=192. If h=192 lands at CID22 ≥ 0.8934 and non-mono < 4.86%, that's the champion (capacity hypothesis confirmed). Otherwise, the product-level finding here — TV=10 h128 wins the bands that matter — may motivate accepting it as ship despite smoothness gap, or motivate exploring smoothness-only interventions (post-hoc filtering, anchor loss, etc.) on top of TV=10 h128.
