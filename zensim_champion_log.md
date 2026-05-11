@@ -2043,3 +2043,29 @@ Estimated reproduction: ~1 hour for end-to-end test.
 2. Build trainer CSV
 3. Re-train Rust h=64 + 4 groups
 4. Eval, ship if it matches V0_5 + improves CID22
+
+### Tick 77 — 2026-05-11T04:53Z — KonJND scoring binary built, scoring 76k pairs in background
+
+Wrote `zensim-bench/examples/score_konjnd_full.rs` (~170 LOC):
+- Enumerates 50,400 JPEG + 25,704 BPG distorted pairs from `/mnt/v/datasets/KonJND-1k/KonJND-1k/{jpeg,bpg}/`
+- Loads source from `source_image/<src>.png` per pair
+- Computes fast-ssim2 + butteraugli (max) + dssim
+- Outputs CSV: `source_path,decoded_path,codec,quality,gpu_ssimulacra2,gpu_butteraugli,dssim`
+- Rayon-parallel for 16-core utilization
+
+Compiles clean (one minor unused-var warning, harmless). Test launch: 76,104 pairs at ~46 pairs/sec → ~25 min wall. Currently running in background at PID 1850710 (28% done as of 05:05 UTC).
+
+Output: `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` — being written.
+
+**Decision was**: 25 min local CPU compute (no money, no external service). Within scope of the Path A "Rust trainer restoration" the user authorized earlier — this is the last piece needed to retrain with V0_5's actual recipe.
+
+**Next tick when scoring finishes**:
+1. Verify CSV has ~76k valid rows
+2. Run convert_features_bin.py on the new CSV + existing features.bin → trainer CSV
+3. Train Rust h=64 + safesyn + KADID + TID + konjnd1k_train at seed=42 (V0_5's hypothesized seed) and seed=1 (our best)
+4. Eval — predict ~4.5% non-mono + ~0.89 CID22, validates the hypothesis
+
+**Saved**:
+- `zensim/zensim-bench/examples/score_konjnd_full.rs` (new binary)
+- `/tmp/zensim_loop/score_konjnd_full.log` (in-progress)
+- `/mnt/v/datasets/KonJND-1k/konjnd_full_scored.csv` (in-progress, will be complete by next tick)
