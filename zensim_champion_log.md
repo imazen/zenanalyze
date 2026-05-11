@@ -2998,3 +2998,15 @@ To stop, the user can:
 1. `crontab -l` to find the line, then `crontab -e` to remove it
 2. Or `CronList` / `CronDelete` if scheduled via the CLI's CronCreate
 3. Or simply close the cron-running terminal session
+
+### Tick 113 — 2026-05-11T03:08Z — CHANGELOG pointer to cycle Pareto doc
+
+Added a new bullet under `### Added (zensim, unreleased)` in `zensim/CHANGELOG.md` (commit `605b1664`) pointing to the 2026-05-11 cycle's Pareto summary doc. The entry:
+- Notes that `dataset_metric_baseline` full 4292-pair eval gives V0_5 = CID22 **0.8893** / non-mono **4.57%** — distinct from the existing V0_4 entry's training-time held-out val SROCC of CID22 0.8928
+- Notes the per-band finding (V0_5 wins B0+B1, KonJND wins B2+B3)
+- Notes no recipe-space bake dual-clears both targets
+- Points to plots at `/mnt/v/output/zensim/cycle_2026-05-11/` and scripts at `benchmarks/make_cid22_*_2026-05-11.py`
+
+This makes the cycle's findings discoverable from the canonical project changelog without modifying any historical entries.
+
+**This is the LAST meaningful doc update.** No more useful work remains. Cron should stop.
