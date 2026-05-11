@@ -97,6 +97,62 @@ its source is recovered at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.
 - `zensim/benchmarks/h192x128_ep300_safesyn218k_kt_2026-05-10.bin` (Python aggregate-best, V0_5-dominated)
 - 50+ supporting bakes from seed/TV/corpus sweeps, all V0_5-dominated
 
+## 0b. Cycle close (2026-05-11) — 35 ticks extended, all per-band measured
+
+**Read this AFTER §0a.** The 2026-05-10 cycle paused at Tick 75 with "V0_5 stays ship". The cron-driven loop resumed Ticks 76-110 on 2026-05-11 with a final set of experiments and analyses.
+
+### What changed in Ticks 76-110
+
+1. **Alignment bug found (Tick 81)** — the KonJND-mix scoring binary (Tick 77) had source CSV rows misaligned with `features.bin`. Three prior KonJND attempts (Ticks 78-80) trained on RANDOM (features, target) pairings. Fix: sort source CSV by (src_id, codec, quality). New aligned features at `/tmp/zensim_loop/konjnd_aligned_features.csv`.
+
+2. **KonJND-aligned mix WORKS** (Tick 81+): TV=0 h64 → CID22 **0.8921** (+0.0028 over V0_5), smoothness 5.46% (fails).
+
+3. **Capacity exploration (Ticks 95-105)**: h=128 + TV=10 + KonJND → CID22 **0.8900** (slightly beats V0_5 0.8893). h=192 + TV=10 + KonJND → CID22 **0.8859** (REGRESSES from h=128). **Capacity peaks at h=128**, not monotonic.
+
+4. **MEMORY.md / CLAUDE.md correction (Tick 88)**: the claimed "V0_5 CID22 0.8934" in `~/.claude/CLAUDE.md` was aspirational — never measured. md5 hash confirmed shipped V0_5 (`bb7e24a1`) is identical to the file MEMORY.md attributed 0.8934 to. **Measurement-of-record: V0_5 CID22 = 0.8893.**
+
+5. **Per-band analysis (Ticks 95, 99, 109)**: V0_5 wins CID22 B0/B1 narrowly; KonJND-mix wins B2 (q65-90) slightly and B3 (visually-lossless) by 2.8×. KonJND-mix is also +0.10/+0.115 on KADID/TID aggregate.
+
+### Final Pareto state (CID22 sorted, all full 4292-pair measured)
+
+| Bake | CID22 | non-mono | smoothness ✓ | CID22 ✓ |
+|---|---|---|---|---|
+| h128 WebP-mono no-TV | 0.8941 | 6.72% | ✗ | ✓ |
+| TV=0 h64 KonJND | 0.8921 | 5.46% | ✗ | ✗ |
+| TV=10 h128 KonJND | 0.8900 | 5.36% | ✗ | ✗ |
+| **V0_5 shipped (md5 `bb7e24a1`)** | **0.8893** | **4.57%** ★ | ✓ | ✗ (-0.0041) |
+| TV=5 h64 KonJND | 0.8880 | 5.14% | ✗ | ✗ |
+| TV=5 h128 KonJND | 0.8871 | 5.44% | ✗ | ✗ |
+| TV=10 h192 KonJND | 0.8859 | 5.80% | ✗ | ✗ |
+| TV=10 h64 KonJND | 0.8841 | 5.09% | ✗ | ✗ |
+| TV=20 h64 KonJND | 0.8812 | 5.29% | ✗ | ✗ |
+| TV=30 h128 KonJND | 0.8803 | 5.39% | ✗ | ✗ |
+
+**No bake in the trainer-recipe space dual-clears both targets.**
+
+### Why no recipe-only path will work
+
+- **Capacity saturates at h=128**: h=192 regresses on CID22. The 228-input-feature space is the bottleneck, not the hidden width.
+- **TV regularization** trades CID22 for smoothness on a strict line at h=64; non-monotonic at higher h.
+- **KonJND-mix** boosts CID22 by ~+0.003 max but costs +0.5pp non-mono. The product-band gains are real (B2/B3) but the smoothness cost is binding.
+
+### Realistic paths to CID22 > 0.8934
+
+NOT recipe tuning. Realistically requires:
+1. **Feature-space extension** — add new image features outside the current 228 (queued in zentrain/INVERSION.md tier 2-4)
+2. **Different model class** — multi-head, FiLM, MoE (zentrain phase 4 work)
+3. **Re-anchored target** — `CLAUDE.md` claims 0.8934 but never measured; if the target is "match V0_5", it's already met (0.8893)
+
+### Artifacts produced in Ticks 76-110
+
+- `zensim/benchmarks/pareto_2026-05-11.md` — full Pareto summary doc
+- `zensim/benchmarks/rust_v05recipe_konjnd_*_2026-05-11.{bin,eval.log,train.log}` — 8 new bakes
+- `zensim/benchmarks/make_cid22_style_plots_2026-05-11.py` — 5-plot generator
+- `zensim/benchmarks/make_cid22_scatter_2026-05-11.py` — paper-canonical scatter
+- `zensim/benchmarks/make_per_band_tv_plot_2026-05-11.py` — per-band TV trends
+- `/mnt/v/output/zensim/cycle_2026-05-11/` — 7 PNG plots + README.md
+- `~/work/zen/zenanalyze/zensim_champion_log.md` Ticks 76-110
+
 ### Phase 4 trainer infrastructure (zensim main, after 2026-05-10)
 
 `scripts/v_next/train_v_next_mlp.py` now has 7 flags ported from
