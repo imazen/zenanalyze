@@ -514,6 +514,49 @@ Next concrete tick: paper pages 16-20 — Table 3 (per-metric SROCC)
 is the Goal 3 reproduction target. After that, V0_6 should be
 nearly done.
 
+### Tick 273 — 2026-05-11T19:38Z — Goal 2 pages 16-20 done; Tables 3/4/5 extracted as Goal 3 targets
+
+V0_6 epoch 110 done at 675s; best val_mean=0.9418 at epoch 90.
+~10 min remaining estimated.
+
+Paper pages 16-20 walked through (zensim `2797bbb4`). **Most
+valuable artifact**: extracted Tables 3, 4, 5 verbatim as Goal 3
+reproduction targets.
+
+**Table 3 — full 250-ref correlations** (caveat 201 in training):
+```
+Metric          KRCC    SRCC    PCC
+SSIMULACRA 2  0.6934  0.882   0.8601
+Butter 2-norm 0.6575  0.8455  0.8089
+Butter 3-norm 0.6547  0.8387  0.7903
+DSSIM         0.6428  0.8399  0.7813
+VMAF          0.6176  0.8163  0.7799
+FSIM          0.6089  0.8005  0.7676
+PSNR-HVS      0.6076  0.8100  0.7559
+... (15 total)
+```
+
+**Held-out 49-ref ssim2 (paper text)**: KRCC 0.7033 / SRCC 0.88541 /
+PCC 0.87448 / MAE 4.97 — **this is the hard target for Goal 3**.
+
+**Table 4 — KonJND PJND** (Goal 3 calibration anchor):
+- BPG: ssim2 65.38 ± 5.10
+- JPEG: ssim2 63.10 ± 4.65
+
+Matches our V0_5 affine target ≈ 63.
+
+**Table 5 — quality-scale alignment**: SSIMULACRA 2 maps 1:1 to
+CID22 MCOS. Band boundaries 50/65/90. Matches `CLAUDE.md` exactly
+— our zensim is already on the paper-canonical scale.
+
+Two new follow-ups:
+- Goal 3: caveat fast-ssim2 vs libjxl 0.8 ssim2 version delta
+- Goal 6: extend `dataset_metric_baseline` with per-encoder-setting
+  σ for the encoder-consistency framework
+
+Next concrete tick: paper pages 21-25 (SSIMULACRA 2 architecture +
+Table 6 pairwise SROCC). After that V0_6 will have completed.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
