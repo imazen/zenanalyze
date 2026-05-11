@@ -2,6 +2,37 @@
 
 **Goal**: produce a zensim version with **smooth scoring AND strong CID22 SROCC**, trained without any CID22 training data (49 validation references must stay held-out). Synthesize CID22-like training distortions from non-CID22 sources on `/mnt/v`. Learn from all prior work. **No crates.io publishing.**
 
+## Tick log (post-strip)
+
+### Tick 256-257 — 2026-05-11T12:50Z — V0_5 SHIPPED + CLAUDE.md updated + SKIP strip + WASM plan drafted
+
+User-driven cascade of changes after a long pending-authorization window:
+
+1. **User authorized weight swap** + CLAUDE.md edit + smoothness gate raise
+2. **V0_5 SHIPPED** (zensim commit `f3b18cbd`):
+   - Affine-calibrated TV=10 h128 KonJND-aligned (α=33.27, β=-3.791) replaces V0_4
+   - md5 `0133d165` (new) replaces `bb7e24a1` (old)
+   - Old V0_4 archived at `zensim/weights/archive/v0_4_2026-04-30.bin`
+   - Verified: KADID 0.9434 / TID 0.9553 / CID22 0.8900 (rank-invariant preserved)
+   - Non-mono 5.36% < new 5.5% gate
+   - Function/slot names preserved (`mlp_bake_preview_v0_4`) for source-compat
+3. **CLAUDE.md revised** (zensim commits `185574bf`, `587071da`):
+   - Goal #1 = match-or-exceed fast-ssim2 across all bands (was "optimize CID22 alone")
+   - Smoothness gate raised to 5.5% (was 4.86%)
+   - New shipping policy: weight swaps explicitly permitted
+   - Long-term goals added: WASM+CubeCL trainer, CID22 paper repro
+4. **Log stripped** of 138 SKIP-only ticks (zenanalyze commit `eece1b0d`). Total 258 → 120 substantive ticks.
+5. **WASM trainer plan** drafted (`zensim/docs/WASM_CUBECL_TRAINER_PLAN.md`, zensim commit `264f5190`):
+   - 6 phases, 8-12 day estimate
+   - CubeCL on WebGPU via wgpu backend
+   - Yew/Leptos UI with live plots
+   - Interleaved CID22 paper methodology repro
+6. **CID22 paper re-read** pages 1-15:
+   - Confirmed existing `docs/CID22_PAPER_NOTES_2026-05-07.md` synthesis is comprehensive
+   - Key methodology points re-extracted: reference MCOS = 88.3 mean (not 100); monotonicity-constraint impact (KRCC drops 0.937→0.556 if removed); 15 image categories; 14.7% session-discard rate.
+
+**Next tick**: start Phase 1 of WASM trainer — port `zensim-validate/src/mlp_train.rs` to a new `zensim-train-core` library crate that's WASM-compatible.
+
 ## Targets
 
 | Property | Target | Reference |
