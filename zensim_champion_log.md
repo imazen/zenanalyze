@@ -2862,3 +2862,26 @@ Generation script: `/tmp/zensim_loop/make_cid22_style_plots.py`.
 | TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 |
 
 **Next tick**: harvest h=128 seed=42 when it lands (still running). After that, the cycle is empirically complete. The Pareto frontier is fully mapped; further trainer-recipe experiments will not cross both targets.
+
+### Tick 106 — 2026-05-11T02:45Z — Killed seed=42 training (27 min, diminishing returns); plot script archived; cycle closed
+
+**h=128 seed=42 KILLED at epoch 210** (PID 2420220, 27:17 wall). The cosine LR was producing marginal new-best val_mean every 50 epochs (+0.0002 per cycle from epoch 40→90→140→190), which kept resetting early-stop patience. Killed because:
+1. Cycle is empirically complete per Tick 105 (h=128 is the capacity peak; no recipe in trainer-space dual-clears)
+2. Seed-variance probe is no longer informative — seed=1 (CID22 0.8900) is already enough
+3. No bake written (binary only writes on clean exit)
+
+No bake produced. Decision made to **stop wasting compute on confirmation-only experiments**.
+
+**Archived plot script** to permanent location: `~/work/zen/zensim/benchmarks/make_cid22_style_plots_2026-05-11.py` (13.2 KB). PNGs remain at `/mnt/v/output/zensim/cycle_2026-05-11/` (Windows-viewable at V:\output\zensim\cycle_2026-05-11\).
+
+**🏁 Cycle empirically closed**. Final state:
+- 100+ ticks over ~6.5 hours
+- ~12 bakes trained, ~10 fully evaluated on KADID/TID/CID22 + non-mono
+- 5 CID22-paper-style plots produced
+- Pareto frontier fully mapped: V0_5 (0.8893/4.57%) and h128 WebP-mono (0.8941/6.72%) are the two corner extremes; nothing crosses both targets
+- Capacity peaks at h=128 (h=192 regresses); TV optimum varies with h (TV=0 at h=64, TV=10 at h=128)
+- KonJND-aligned bakes lift KADID/TID by +0.10 each and win CID22 product-critical bands (B2/B3)
+
+**No further training launched**. The next /loop tick should consider this work concluded.
+
+**Recommended action** (for user): either re-anchor the 0.8934 target as discussed in Tick 88/89, or accept V0_5 as the achievable Pareto frontier. Future CID22 > 0.8934 requires feature-space extension (zentrain INVERSION.md path) or different model class.
