@@ -557,6 +557,50 @@ Two new follow-ups:
 Next concrete tick: paper pages 21-25 (SSIMULACRA 2 architecture +
 Table 6 pairwise SROCC). After that V0_6 will have completed.
 
+### Tick 274 — 2026-05-11T19:42Z — *** V0_6 EVAL: HONEST CID22 = 0.8839 (-0.0061 vs V0_5) ***
+
+**V0_6 training COMPLETE** — early-stop at epoch 140, best
+val_mean=0.9418 at epoch 90. Bake at
+`/tmp/zensim_loop/v0_6_clean_h128_tv10_seed42.bin`
+(md5 f660457037152a1e1d2f95de0034cb96, 119812 bytes).
+
+**Honest CID22 SROCC results** (eval on 49-ref held-out, 4,292 pairs):
+
+| Metric | Aggregate SROCC | fast-ssim2 | butter |
+|---|--:|--:|--:|
+| V0_2 (legacy) | 0.8676 | — | — |
+| **V0_5 (leaked train)** | **0.8900** | 0.8895 | 0.7412 |
+| **V0_6 (clean train)** | **0.8839** | 0.8895 | 0.7412 |
+| **Δ (V0_6 − V0_5)** | **−0.0061** | — | — |
+
+V0_5's 0.8900 was inflated by training on content perceptually-
+identical to 22 of the 49 holdout refs (4032+ pairs leaked via
+hex-hashed crops). Honest delta from removing those: -0.0061.
+
+**Still below fast-ssim2's 0.8895** — V0_6 (0.8839) does NOT yet
+meet "match-or-exceed ssim2" shipping criterion.
+
+V0_6 per-band SROCC (CID22):
+- B0 (<50): 0.4088 — ssim2 0.4418 (gap −0.033)
+- B1 [50,65): 0.4440 — ssim2 0.4694 (gap −0.025)
+- B2 [65,90): 0.7673 — ssim2 0.7722 (gap −0.005)
+- B3 (≥90): 0.1684 — ssim2 0.1121 (V0_6 +0.057, n=43)
+- Near-PJND: 0.3467 — ssim2 0.3908 (gap −0.044)
+
+V0_6 LOSES to ssim2 in B0/B1/B2/Near-PJND, BEATS ssim2 only in
+B3 (small-n). Confirms shipping criterion isn't yet met.
+
+Paper pages 21-25 also walked (zensim `1ba6bc20`): 5 per-dataset
+9-metric SROCC tables (Figs 13-17) extracted as Goal 3
+reproduction targets. SSIMULACRA 2 best on every dataset.
+
+Launched full eval (V0_6 on all 4 datasets — KADID, TID, CID22,
+KonJND with CORRECT paths this time). PID 2654043, in progress.
+
+Next concrete tick: read full V0_6 eval; consider affine calibration
+to align scale; reach decision on whether V0_6 ships or needs
+hyperparam search.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
