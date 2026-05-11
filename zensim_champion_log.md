@@ -66,6 +66,30 @@ body so we can run a smoke test from `zensim-train-core` and verify
 bit-identical output to `zensim-validate`'s trainer on a fixed seed.
 That seals Phase 1.
 
+### Tick 259 — 2026-05-11T18:56Z — SKIPPED: collision with concurrent claude-zensim-champ-loop
+
+Marker collision per global CLAUDE.md protocol:
+
+- `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
+  claude-zensim-champ-loop tick-82-tv20w` — same agent-id as mine but
+  unfamiliar activity description ("tick-82-tv20w" is from session
+  history ~170 ticks ago).
+- 5 concurrent `claude` processes running (PIDs 9043, 13917, 39754,
+  141069, 220427); at least one is racing on the zensim-champ-loop
+  cron and just rewrote the markers 2 seconds before my read.
+- Per global rule "If present and the timestamp is within the last 5
+  minutes: another agent is active. STOP. Either pick a different
+  repo or wait. Do NOT override." — backing off this tick.
+- No worktree damage: zenanalyze `@` is clean at main `4c486de1`,
+  zensim `@` is clean at main `4abb8267` (carrying the harmless empty
+  no-op commit from Tick 258's process slip).
+
+**Next concrete tick** (unchanged): port `TrainingGroup<'a>` +
+`train_mlp` body to `zensim-train-core`, with a bit-identical seed
+test vs `zensim-validate`'s trainer. The other session may have
+already started this — first action on next firing is to compare
+state before duplicating work.
+
 ## Targets
 
 | Property | Target | Reference |
