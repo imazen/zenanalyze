@@ -2747,3 +2747,28 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 **Both trainings expected to land within next 2-3 cron firings**.
 
 **Next tick**: harvest seed=42 first (lands sooner). If non-mono < V0_5's 4.57% (highly unlikely) → run CID22 eval immediately. If non-mono in 5.0-5.6% range → run CID22 to complete the seed pair. Then check h=192 progress.
+
+### Tick 101 — 2026-05-11T02:21Z — KonJND calibration audit: V0_5 and TV=10 h128 output unscaled distance (not 63-anchored)
+
+**Ran KonJND-1k calibration on TV=10 h128 KonJND-aligned bake**:
+- JPEG subset (n=504) mean V0_4 raw distance: **-6.0799** ± 1.4921
+- BPG subset (n=504) mean V0_4 raw distance: **-6.7868** ± 1.6546
+- Reference fast-ssim2: JPEG 62.55 (paper 63.10), BPG 65.38 (paper 65.38) — well-calibrated against Cloudinary CID22 paper Table 4.
+
+**For comparison, V0_5 shipped from prior `champion_konjnd_eval_2026-05-10.log`**:
+- JPEG mean V0_4 raw distance: 37.4154 ± 5.1940
+- BPG mean V0_4 raw distance: 34.5180 ± 5.5772
+
+**Observation**: both V0_5 and TV=10 h128 output **raw distance values that aren't anchored to the SSIMULACRA2 ~63 scale**. V0_5 sits at ~37, TV=10 h128 at ~-6. These are signed unscaled distance-like outputs.
+
+**Per CLAUDE.md training goal #3**: "A trained model must score at-PJND pairs ≈ 63 ± 5; if it saturates to 100 there, 'visually lossless' calibration is broken." Neither V0_5 nor TV=10 h128 are calibrated to this anchor — they're outputting distance-like predictions on an arbitrary scale. The SROCC ranking (which is what CID22 eval reports) is unaffected by output scale.
+
+**Action item**: this is a separate concern from the Pareto target — the SROCC-based comparison stands, but if the produced model is to be a user-facing dial, the output range needs explicit calibration via `affine_calibrate_bake.py` (already in `scripts/v_next/`). Not addressed in this cycle; flagged for downstream.
+
+**Training status**:
+- h=192 (PID 2414374): 12:58 elapsed, epoch 80, best 0.9412 at epoch 40 → patience 50 hit, **early-stop expected at epoch 90 (~85s more)**
+- h=128 seed=42 (PID 2420220): 5:00 elapsed, epoch 30, best 0.9369 → ~6 min more
+
+**Saved**: `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.konjnd.log`.
+
+**Next tick**: harvest h=192 first (lands first). Non-mono + CID22 eval.
