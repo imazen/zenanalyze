@@ -2456,3 +2456,21 @@ The prediction from Tick 87 (CID22 ~0.890) was off — actual landing CID22 0.88
 **Cycle ran**: 27+ ticks over ~6 hours mapping the Pareto frontier. 4 major corrections, 5+ retracted "champions". The Pareto bound is now well-established empirically.
 
 **Next tick**: if the user accepts the above conclusion, stop the cron. Otherwise, the open follow-ups are (a) h=128+TV=10+KonJND-aligned (untested mid-TV at h=128), (b) seed sweep at h=128+TV=10 (n=10 seeds for variance probe), (c) feature-space extension. All Phase 4/5 work in the original plan.
+
+### Tick 90 — 2026-05-11T01:38Z — h=128+TV=10+KonJND launched (last untested cell) + zombie cleanup
+
+**Zombie cleanup**: found 2 stale polling shells from Ticks 70-71 (PIDs 2021859, 2037347) holding pgrep race conditions and refreshing `.workongoing` markers with old tick descriptions. Killed both via `kill`. Only the new h=128+TV=10 training (PID 2341484) remains. The MEMORY.md note about Tick 70 zombie shells confirms this is a recurring failure mode of `until ! pgrep -f X` patterns — to avoid in future, prefer explicit `wait $PID` against a known PID list.
+
+**Launched h=128 + TV=10 + KonJND-aligned, seed=1** — the only untested point in the h × TV map:
+- Tick 80 had: h=128 + TV=30 + no-KonJND → 0.8874 / 4.97%
+- Tick 89 had: h=128 + TV=30 + KonJND-aligned → 0.8803 / 5.39% (over-regularized)
+- Tick 82 had: h=64 + TV=10 + KonJND-aligned → 0.8841 / 5.09%
+- **NEW**: h=128 + TV=10 + KonJND-aligned → ? / ?
+
+Args: `--hidden 128 --tv-weight 10 --seed 1 --groups safesyn(1.0:0.0)+kadid(0.3:1.0)+tid(0.3:1.0)+konjnd(0.5:1.0)`. Output: `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin`. Expected ~10-12 min.
+
+**Hypothesis**: h=128 might land at TV=10 with cleaner CID22 than TV=30's over-regularized 0.8803. If it lands at CID22 ≥ 0.890 with non-mono < 5.4%, that's a slight Pareto upgrade over h=64+TV=10's 0.8841/5.09%, though still nowhere near dual-clearing.
+
+**Prediction**: CID22 ~0.887 / non-mono ~5.2%. Will inform decision: does h=128 ever earn its training cost over h=64 in the KonJND-aligned recipe? If no, the conclusion in Tick 89 holds firm: **V0_5 is the achievable Pareto frontier**.
+
+**Next tick**: harvest h=128+TV=10 bake; non-mono eval (1 min); if non-mono < 4.86% (unlikely), launch CID22 SROCC eval (5 min). Otherwise update Pareto map and conclude cycle.
