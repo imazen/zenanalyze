@@ -2613,3 +2613,15 @@ While h=128 trainings still go (TV=10 at epoch 170, TV=5 at epoch 160, both earl
 **Caveat**: V0_5's smoothness is 4.57% (target met); KonJND-mix is 5.1-5.5% (target missed). The smoothness gap is real and binding.
 
 **Next tick**: harvest h=128 bakes (likely landed by then). Update the pareto_2026-05-11.md with per-band findings.
+
+### Tick 96 — 2026-05-11T02:02Z — TV=10 h128 landed (5.36% non-mono); pareto doc updated with per-band; TV=5 h128 still running
+
+**TV=10 h128 KonJND-aligned bake landed** at epoch 190 early-stop. `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin` (119812 bytes, val_min=0.9434 at epoch 140). Non-mono = **5.36%** on JPEG unified parquet — same band as h=64 results (5.09%-5.46%). h=128 didn't help smoothness.
+
+**Launched CID22 SROCC eval** for TV=10 h128 (PID 2382209, ~5 min). Output: `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.eval.log`.
+
+**Updated zensim/benchmarks/pareto_2026-05-11.md** with per-band CID22/KADID/TID tables + new "Product implication" section. Key finding made explicit: aggregate hides band-specific behavior, and KonJND-mix is substantially better at LOW-q discrimination across all 3 datasets (KADID B0 +0.22, TID B0/B1/B2 +0.15/+0.28/+0.18). The smoothness gap is what keeps V0_5 shipping.
+
+**TV=5 h128 still going**: PID 2342030, epoch 180, best 0.9434 at epoch 140, will early-stop at epoch 190 (~1 min).
+
+**Next tick**: harvest TV=5 h128 bake + non-mono; harvest TV=10 h128 CID22 result; if no champion emerges, formally close cycle.
