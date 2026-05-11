@@ -740,6 +740,34 @@ Next concrete tick: monitor sweep; if seeds 0/1/2/7 finish before
 sweep ends, evaluate best-val on CID22; otherwise continue Goal 6
 work (per-codec breakdown).
 
+### Tick 279 — 2026-05-11T23:19Z — Goal 6 GH Pages workflow + README; sweep epoch 40
+
+V0_7 seed sweep at epoch 40 (~3 min in):
+- seed=0: val_mean=0.9418 best=0.9377 ← matches V0_6's all-time best
+- seed=1: val_mean=0.9408 best=0.9356
+- seed=2: val_mean=0.9376 best=0.9243
+- seed=7: val_mean=0.9409 best=0.9372
+
+V0_6/seed=42 best was 0.9418 at epoch 90. All seeds tracking
+similar trajectory. Will see in next few ticks whether any exceeds.
+
+Goal 6 site infrastructure (zensim `aaf4cf0b`):
+- `.github/workflows/pages.yml` — deploys `site/` to GH Pages on
+  push to main when site/ or build_site_data.py changes. Uses
+  configure-pages@v5 + upload-pages-artifact@v3 + deploy-pages@v4.
+- `site/README.md` — architecture, regeneration, local preview,
+  pending follow-ups.
+
+To activate: enable GitHub Pages in repo settings (source =
+GitHub Actions). URL will be `imazen.github.io/zensim/`. **Pending
+user authorization** to enable Pages (touches repo settings).
+
+Next concrete tick: monitor sweep (~10 min remaining if all seeds
+converge by epoch 140-160 like V0_6 did); meanwhile add per-codec
+breakdown extraction to `build_site_data.py` (currently aggregates
+across codecs — paper's Tables 3/6 don't break out by codec but
+our internal pipeline can).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
