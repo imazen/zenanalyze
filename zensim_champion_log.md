@@ -1068,6 +1068,39 @@ this a minor bump, and V0_7 is a meaningful new champion).
 Alternatively, dive into per-band B0/B1/Near-PJND closing —
 that's the next CID22 SROCC improvement direction.
 
+### Tick 289 — 2026-05-11T23:57Z — ⚠ V0_7 shipped non-mono 5.67% EXCEEDS target 5.5%; seed=1 alternative
+
+Measured `score_unified_with_bake.py` non-mono q-step rate on the
+JPEG unified parquet (1.69M adjacent-q pairs across 93,984 curves):
+
+| Bake | Non-mono | vs 5.5% target |
+|---|--:|--:|
+| V0_2 legacy | 4.86% | (original floor) |
+| V0_5 leaked archived | 5.36% | within |
+| V0_6 clean seed=42 | 5.94% | exceeds +0.44 |
+| **V0_7 seed=0 SHIPPED** | **5.67%** | **exceeds +0.17** ✗ |
+| V0_7 seed=1 | **5.46%** | **within** ✓ |
+| V0_7 seed=7 | 5.78% | exceeds +0.28 |
+
+**V0_7 shipped (seed=0) fails the 5.5% smoothness target by
++0.17%.** Marginal, but the CLAUDE.md shipping policy on this is:
+"If a bake achieves goal #1 and band coverage but exceeds 5.5%
+bumpiness, surface to user for case-by-case decision."
+
+seed=1 has BETTER smoothness (5.46% within target). Its CID22 SROCC
+is unknown — eval launched (PID 2762514). seed=1's val_mean was
+0.9437 vs seed=0's 0.9443 (essentially tied).
+
+If seed=1 CID22 ≥ ssim2's 0.8895, seed=1 is a strict upgrade:
+- ✓ Goal #1 (ssim2-beat aggregate)
+- ✓ Goal #3 (smoothness ≤ 5.5%)
+
+Pending user decision to swap V0_7 from seed=0 to seed=1 if seed=1's
+CID22 SROCC also exceeds ssim2.
+
+Next concrete tick: read seed=1 CID22 SROCC; if ≥ 0.8895, propose
+re-shipping V0_7 = seed=1.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
