@@ -1471,3 +1471,61 @@ Trained Rust seed=3 in 165s, early-stop at epoch 75. val_min=0.9417.
 1. Re-train **all 11 seeds** with WebP-mono-only corpus → find combined best
 2. Test WebP-mono-only with multi-target loss (DSSIM)
 3. Ship `rust_webp_mono_h64_seed3_2026-05-10.bin` as the new champion (post-tick 56 leader)
+
+### Tick 61 — 2026-05-11T00:01Z — 11-seed × WebP-mono comparison — seed=1 hits CID22 0.8894 (matches V0_5)
+
+Trained 10 more seeds (0,1,2,4,5,6,7,8,9,42) with WebP-mono-only corpus (seed=3 already from Tick 60). All 10 concurrent on 16-core CPU; took ~12 min wall.
+
+**Per-seed CID22 (WebP-mono) comparison to original**:
+
+| Seed | Original | WebP-mono | Δ | Notes |
+|---|---|---|---|---|
+| 0 | **0.8905** | 0.8755 | -0.0150 | Loss |
+| **1** | 0.8806 | **0.8894** | **+0.0088** | **Best WebP-mono CID22**; ~V0_5's 0.8893 |
+| 2 | 0.8794 | 0.8768 | -0.0026 | Flat |
+| 3 | 0.8823 | 0.8851 | +0.0028 | Modest gain (Tick 60) |
+| 4 | 0.8872 | 0.8744 | -0.0128 | Loss |
+| 5 | 0.8784 | 0.8879 | +0.0095 | Gain |
+| 6 | 0.8724 | 0.8861 | +0.0137 | Big gain |
+| 7 | 0.8898 | 0.8846 | -0.0052 | Loss |
+| 8 | 0.8736 | 0.8862 | +0.0126 | Gain |
+| 9 | 0.8880 | 0.8856 | -0.0024 | Flat |
+| 42 | 0.8814 | 0.8672 | -0.0142 | Loss |
+
+**Sweep summary**:
+- 4 seeds gained CID22 (1, 5, 6, 8), 3 flat (2, 3, 9), 4 lost (0, 4, 7, 42)
+- Median Δ: -0.0024
+- Best WebP-mono CID22: **seed=1 at 0.8894** (matches V0_5's 0.8893)
+- Best original CID22: seed=0 at 0.8905 still wins **aggregate**
+- WebP-mono doesn't produce a NEW aggregate-CID22 champion across seed-variance, but it's STABLE enough that the seed-1 jump (+0.0088) shows the intervention has signal for some seeds.
+
+**Why is the result seed-dependent?** Most likely: WebP-mono shifts the loss surface in a way some seeds' random init lands better, others worse. With h=64 single layer + ~219k pairs, basin attraction is sensitive.
+
+**Per-band detail for top 2 WebP-mono candidates**:
+
+| Seed | CID22 agg | B0 | B1 | B2 | B3 |
+|---|---|---|---|---|---|
+| 1 | **0.8894** | 0.4347 | 0.4330 | 0.7754 | 0.0927 |
+| 6 | 0.8861 | TBD | TBD | TBD | TBD |
+| 3 | 0.8851 | 0.4085 | 0.4269 | 0.7769 | 0.2217 |
+
+Interesting: seed=1 has the BEST aggregate but B3 = 0.09 (low). seed=3 has aggregate-worse but B3 = 0.22 (much higher). The dial-safe pick still favors seed=3 even within WebP-mono.
+
+**Saved**: `benchmarks/11seeds_webpmono_2026-05-10.log` + 10 new bakes/train.logs.
+
+**Updated all-time leaderboard** (CID22 aggregate):
+1. seed=0 original: **0.8905**
+2. seed=7 original: 0.8898
+3. seed=1 WebP-mono: **0.8894** (NEW)
+4. seed=4 original: 0.8872 + seed=8 WebP-mono: 0.8862 + seed=6 WebP-mono: 0.8861
+
+**Updated all-time leaderboard** (CID22 B3, dial-safe, n=43 noisy):
+1. seed=3 original: **0.2599**
+2. seed=3 WebP-mono: 0.2217
+3. seed=4 original: 0.2042
+4. seed=9 original: 0.2004
+
+**Next tick**: pick something fundamentally new. The seed sweep doesn't break the ~0.89 plateau. Options:
+1. **Multi-target DSSIM loss** in Rust trainer (~80 LOC) — finally test the supervisor-multi-task hypothesis
+2. **bigger MLP** — try h=128 single-layer or h=192,128 multi-layer
+3. **Aggregate top-2 seeds** by averaging predictions (ensemble)
