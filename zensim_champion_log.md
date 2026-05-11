@@ -870,6 +870,38 @@ follow-up commit.
 Next concrete tick: read seeds 2/7 CID22 SROCC + finalize seed=0
 training. Identify ship candidate.
 
+### Tick 284 — 2026-05-11T23:37Z — seed=0 final best=0.9443 (early-stop ep 190); evals converging
+
+seed=0 training **COMPLETE**:
+- Best val_mean = 0.9443 at epoch 140
+- Early-stop at epoch 190 (no improvement for 50)
+- Bake: `/tmp/zensim_loop/v0_7_clean_h128_tv10_seed0.bin`
+- This is the **+0.0025 over V0_6's 0.9418** result, confirmed final
+
+seed=1: still training at epoch 190, val_mean=0.9421 (just hit
+new best). ~5 min more.
+
+Eval status:
+- seed=2 KADID 0.9407 / TID 0.9502; CID22 at 3003/4292 (~70 % done)
+- seed=7 KADID 0.9416 / TID 0.9518; CID22 at 3432/4292 (~80 % done)
+- seed=0 eval just launched (PID 2730556)
+
+Eval timing: KADID + TID + CID22 + KonJND together ~6 min, so
+seed=0 eval finishes ~5 min from now.
+
+Once all evals land, the comparison table will be:
+- V0_5 (leaked, h=128 TV=10 seed=42): CID22 = 0.8900
+- V0_6 (clean, h=128 TV=10 seed=42): CID22 = 0.8839
+- V0_7 (clean, h=128 TV=10 seed={0,1,2,7}): CID22 = ???
+- fast-ssim2 baseline: CID22 = 0.8895
+
+Hypothesis: if val_mean rank predicts CID22 rank, then seed=0
+(0.9443) should give the best CID22 SROCC.
+
+Next concrete tick: read all 4 CID22 SROCC values; identify
+winner; if any exceeds V0_6's 0.8839 by > 0.005, that's V0_7. If
+any exceeds fast-ssim2's 0.8895, that meets the shipping bar.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
