@@ -3644,6 +3644,30 @@ Computed least-squares affine fit `calibrated = α + β · raw_distance` against
 
 **Still pending user "yes ship"**.
 
+### Tick 253 — 2026-05-11T12:38Z — Dry-run calibration verified on real binary eval; V0_6-V0_16 inventory
+
+**Full dry-run validation** of calibrated TV=10 h128 KonJND (α=33.27, β=-3.791) via `dataset_metric_baseline`:
+
+| Dataset | Calibrated SROCC | Uncalibrated SROCC | Match? |
+|---|---|---|---|
+| KADIK10k | 0.9434 | 0.9434 | ✓ identical |
+| TID2013 | 0.9553 | 0.9553 | ✓ identical |
+| CID22 | **0.8900** | 0.8900 | ✓ identical |
+
+**Rank-invariance proven on real binary eval across all 3 gold standards**. Calibration script `affine_calibrate_znpr_v2.py` is production-ready.
+
+**User asked about V0_6-V0_16 version chain. Found**:
+- V0_4 = shipped (`v0_4_2026-04-30.bin`)
+- V0_5 = "recovery candidate" — md5-identical to V0_4 per Tick 88, never actually distinct
+- V0_6 = parked, 4 variants (FiLM rebalanced / dct_hf / mixed-supervision / MoE arch) in `everything.md §0a`, none shipped
+- V0_7 = failed (e1 fill abandoned; canonical+xcodec CID22 0.7670 well below target)
+- V0_8/V0_9 = documented plans in `docs/NEXT_TIER_DATA_PLAN.md` but never trained
+- V0_10-V0_16 = don't exist anywhere
+
+**Recommended new name for shipping**: V0_5 (clean reset; the existing "V0_5" was a label alias for V0_4 and never actually a distinct ship). Alternative: V0_8 to match documented progression. User to choose.
+
+**Pending user "yes ship" AND naming choice (V0_5 vs V0_8)**.
+
 ### Tick 252 — 2026-05-11T12:34Z — Wrote `affine_calibrate_znpr_v2.py` + verified rank-invariance
 
 Wrote new script `zensim/scripts/v_next/affine_calibrate_znpr_v2.py` (~140 lines, zensim commit `54b3438f`). Applies `y' = α + β·y` directly to a ZNPR v2 binary by mutating the final Linear layer's weights and bias in place (`W' = β·W`, `b' = β·b + α`). Zero runtime cost, no PyTorch dependency, complements the existing `affine_calibrate_bake.py` (which operates on PyTorch model.pt run-dirs).
