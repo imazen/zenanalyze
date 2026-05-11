@@ -2942,3 +2942,19 @@ This is the cleanest visualization of *where* KonJND-mix wins: the high-quality 
 **Total cycle artifacts now**: 7 plots + 3 scripts + 13 bake binaries + per-band tables + Pareto summary doc + tick log (1-109).
 
 **Cycle remains empirically closed**. Doc maintenance only unless user redirects.
+
+### Tick 110 — 2026-05-11T03:02Z — Plot directory README; final navigation aid
+
+Wrote `/mnt/v/output/zensim/cycle_2026-05-11/README.md` (4.3 KB) — navigation aid for the 7 plots + their interpretations. Includes:
+
+1. **Cycle outcome summary** — "no bake crosses both targets; V0_5 stays ship; CID22 0.8934 was aspirational"
+2. **Per-plot descriptions** ordered by usefulness (pareto_scatter first, scatter last)
+3. **Full Pareto leaderboard** (all 10 bakes, CID22-sorted)
+4. **"What's not in this cycle"** — pointers to abandoned/queued paths (h=192x128 Python, ensembles, feature-space extension)
+5. **Source pointers** to repo files (cycle log, pareto doc, plot scripts, bake binaries, eval logs)
+
+Anyone navigating to the plot directory from Windows will now have context for each PNG without having to read the 109-tick log.
+
+**Total cycle directory** at `/mnt/v/output/zensim/cycle_2026-05-11/`: 7 plots (~1.1 MB) + README. Single-source navigation point for the cycle's deliverables.
+
+**Cycle remains empirically closed**. README is the final navigation artifact; this should be the LAST useful tick unless user redirects.
