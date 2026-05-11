@@ -3552,3 +3552,38 @@ Markers refreshed. No artifacts. Cycle closed since Tick 105.
 ### Tick 248 — 2026-05-11T12:08Z — SKIP
 
 Markers refreshed. No artifacts. Cycle closed since Tick 105.
+
+### Tick 249 — 2026-05-11T12:18Z — USER DIRECTIVES + 3 pathology plots; ship-recommendation FLIPS to TV=10 h128 KonJND
+
+After 144 consecutive skips, **user provided three explicit directives**:
+
+1. **"why did the better variant not ship?"** — i.e., TV=10 h128 KonJND-aligned (CID22 0.8900) was blocked by the 5.36% non-mono failing 4.86% target.
+2. **"we should relax the smoothness gate to achieve good usability across all quality bands"** — explicit relaxation of the 4.86% target. Overrides the prior anti-pattern.
+3. **"that is a harder need than smoothness — we want to match or exceed ssim2"** — new criterion: match/exceed fast-ssim2 per-band, not just dial smoothness.
+4. Generate 5-step bin SROCC + scatters + on synth as well as CID22 to "understand pathological areas".
+
+**Generated 3 new pathology plots** at `/mnt/v/output/zensim/cycle_2026-05-11/`:
+- `pathology_per_bin_srocc.png` (200 KB) — 5-step bin SROCC, 2×2 (bake × dataset)
+- `pathology_scatter.png` (~250 KB) — full scatters with bin-median overlay
+- `pathology_residuals.png` (~150 KB) — percentile-rank residual per bin
+
+**Pathology finding (this is new)**: both V0_5 shipped AND TV=10 h128 KonJND-aligned systematically **under-predict in q15-q75 by 20-40 percentile points** (synth and CID22, identically). The pathology is **shared between bakes** — it's intrinsic to the 228-feature RankNet recipe, not bake-specific. Extremes (q0-5, q90-100) are well-calibrated. This bounds what recipe-tuning alone can achieve; the q15-q75 under-prediction is a feature-space issue.
+
+**Ship recommendation FLIPS under user's new criterion**:
+
+| Metric | V0_5 (current ship) | TV=10 h128 KonJND | fast-ssim2 (ref) | Winner |
+|---|---|---|---|---|
+| CID22 aggregate | 0.8893 | **0.8900** | 0.8895 | TV=10 h128 (matches ssim2) |
+| KADID aggregate | 0.8432 | **0.9434** | 0.8133 | TV=10 h128 (+0.13 over ssim2) |
+| TID aggregate | 0.8401 | **0.9553** | 0.8460 | TV=10 h128 (+0.11 over ssim2) |
+| CID22 B2 (q65-90) | 0.7746 | **0.7808** | 0.7722 | TV=10 h128 (beats ssim2) |
+| CID22 B3 (≥90) | 0.0642 | **0.1780** | 0.1121 | TV=10 h128 (1.6× ssim2) |
+| Non-mono | 4.57% | 5.36% | — | V0_5 (no longer binding) |
+
+**TV=10 h128 KonJND-aligned now strictly wins** by the relaxed criterion: matches ssim2 on CID22 aggregate, dramatically exceeds ssim2 on KADID/TID, beats V0_5 on every CID22 band except low-q (B0/B1) where data is starved anyway.
+
+**Pending user authorization**: swap `zensim/weights/v0_4_2026-04-30.bin` → `benchmarks/rust_v05recipe_konjnd_tv10_h128_seed1_2026-05-11.bin` as the shipped V0_4 weight. Per CLAUDE.md "show what you plan to do, WAIT for explicit approval". I've documented the swap proposal; waiting for "yes ship" before modifying the shipped weight file.
+
+**Archived script**: `zensim/benchmarks/make_pathology_plots_2026-05-11.py` (11.6 KB).
+
+**Next tick** (or next user input): if user says "yes ship", execute the swap, update CHANGELOG, push to zensim main. Otherwise continue analysis (per-codec breakdown, why-q15-q75 deep dive).
