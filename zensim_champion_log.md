@@ -475,6 +475,45 @@ Priority list now:
 Next concrete tick: continue paper pages 11-15 (Tables 2-3 covering
 the SROCC numbers we'll reproduce for Goal 3 and display in Goal 6).
 
+### Tick 272 — 2026-05-11T19:37Z — Goal 2 pages 11-15 done; V0_6 epoch 70 val 0.9275
+
+V0_6 epoch 70 done at 429s. Best val_mean=0.9403 at epoch 40
+(plateaued from there, same shape as V0_5). Wall ETA ~12 min remaining.
+
+Paper pages 11-15 walked through (zensim `3d513707`):
+
+**Page 11**: MCOS distribution by encoder (Fig 3); skipping
+disagreement-mitigation has minor effect (SRCC 0.8868).
+
+**Page 12**: fidelity-vs-appeal disagreement (Fig 4) — JPEG XL
+q60 vs AVIF aurora cq37 at ~0.5 bpp where TSBPC says AVIF is
+better but DSBQS says JPEG XL. AVIF wins by smoothing (appeal);
+JPEG XL wins by faithfulness (fidelity). **Important caveat for
+Goal 3 reproduction**: when our zensim SROCC disagrees with paper,
+check whether the pair has small ΔTSBPC = ambiguous truth (not
+necessarily our bug).
+
+**Page 13**: VVC denoise example (Fig 5) — denoising "improves"
+score but degrades fidelity. zensim is fidelity-aligned (correct).
+
+**Page 14**: Table 2 — TSBPC↔MCOS agreement %, by mitigation
+strategy and ΔTSBPC. Key relation: **avg ΔMCOS ≈ 2 × ΔTSBPC**.
+MCOS gap ≥ 20 → unanimous TSBPC. Mitigations REDUCE raw within-
+image agreement on tiny gaps but improve cross-image calibration —
+analogous to our TV regularizer trade-off.
+
+**Page 15**: viewing-conditions limitations (sRGB only); 80 DSBQS /
+5 TSBPC sample-size guidance.
+
+Two new follow-ups:
+- Goal 3: flag disagreement pairs by ΔTSBPC magnitude when comparing
+  our SROCC to paper's
+- Goal 4: caveat zensim is sRGB-only matching the paper
+
+Next concrete tick: paper pages 16-20 — Table 3 (per-metric SROCC)
+is the Goal 3 reproduction target. After that, V0_6 should be
+nearly done.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
