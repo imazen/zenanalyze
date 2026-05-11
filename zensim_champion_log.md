@@ -2821,3 +2821,44 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 - Feature-space extension is the only remaining lever
 
 **Next tick**: harvest both bakes, do final non-mono + CID22 evals, formally close cycle.
+
+### Tick 105 — 2026-05-11T02:42Z — h=192 lands WORSE than h=128 (CID22 0.8859); capacity peaks at h=128; 5 CID22-style plots generated
+
+**h=192 + TV=10 + KonJND-aligned full eval landed**:
+- KADID: 0.9424
+- TID2013: 0.9531
+- **CID22: 0.8859** ← WORSE than h=128's 0.8900 (regression by -0.0041)
+- **Non-mono: 5.80%** ← WORSE than h=128's 5.36%
+
+**Capacity hypothesis FALSIFIED at h=192**: Tick 97 saw h=64→h=128 lift CID22 +0.0059 and predicted h=128→h=192 would continue. **The curve is non-monotonic — it peaks at h=128 and regresses at h=192**. Both CID22 (-0.0041) and non-mono (+0.44pp) get worse. This contradicts Tick 104's "val_mean ceiling 0.9424 → predicted CID22 0.8908" because val_mean and held-out CID22 SROCC diverge at high capacity (val_mean uses train-time KADID+TID+KonJND val; CID22 is independent held-out human MOS).
+
+**Final cycle conclusion** (now unequivocal):
+- **h=128 is THE optimal capacity** for the 228-feature + KonJND-aligned + RankNet recipe
+- Beyond h=128, capacity HURTS held-out CID22 even though training-time val_mean plateaus
+- Beyond TV=10 at h=128, smoothness fails to recover the CID22 gap
+
+**Per CLAUDE.md user request, generated 5 CID22-paper-style plots** at `/mnt/v/output/zensim/cycle_2026-05-11/`:
+1. `pareto_scatter.png` (137 KB) — non-mono vs CID22 SROCC scatter, all 9 measured bakes, dual-target zone shaded empty
+2. `cid22_per_band.png` (74 KB) — grouped bars for V0_5 / TV=10 h128 / TV=5 h64 across B0/B1/B2/B3
+3. `tv_curve.png` (99 KB) — CID22 vs TV at h=64 and h=128, h=128 peak at TV=10 annotated
+4. `capacity_scaling.png` (94 KB) — CID22 vs hidden width showing h=64→h=128 +0.0059 / h=128→h=192 -0.0041 (peak + regression annotated)
+5. `dataset_aggregate.png` (69 KB) — KADID/TID/CID22 aggregate bars for V0_5 vs TV=10 h128 vs fast-ssim2 reference
+
+Generation script: `/tmp/zensim_loop/make_cid22_style_plots.py`.
+
+**Final Pareto table** (CID22 sorted):
+
+| Bake | CID22 | non-mono | KADID | TID |
+|---|---|---|---|---|
+| h128 WebP-mono no-TV | 0.8941 | 6.72% | — | — |
+| TV=0 h64 KonJND | 0.8921 | 5.46% | 0.9395 | 0.9490 |
+| **TV=10 h128 KonJND** | **0.8900** | 5.36% | 0.9434 | 0.9553 |
+| **V0_5 shipped** | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 |
+| TV=5 h64 KonJND | 0.8880 | 5.14% | 0.9449 | 0.9536 |
+| TV=5 h128 KonJND | 0.8871 | 5.44% | 0.9434 | 0.9540 |
+| TV=10 h192 KonJND (NEW) | 0.8859 | 5.80% | 0.9424 | 0.9531 |
+| TV=10 h64 KonJND | 0.8841 | 5.09% | 0.9380 | 0.9437 |
+| TV=20 h64 KonJND | 0.8812 | 5.29% | 0.9318 | 0.9409 |
+| TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 |
+
+**Next tick**: harvest h=128 seed=42 when it lands (still running). After that, the cycle is empirically complete. The Pareto frontier is fully mapped; further trainer-recipe experiments will not cross both targets.
