@@ -2420,3 +2420,39 @@ If prediction holds → does NOT clear targets (CID22 < 0.8934, non-mono > 4.86%
 **Strategic takeaway**: nothing yet found that strictly dominates V0_5. KonJND-aligned helps KADID/TID massively (+0.10) but hurts CID22 marginally (-0.001). TV regularization trades CID22 for smoothness. The Pareto frontier appears to bound the recipe space at roughly CID22 + 0.02·(non-mono - 4.5) ≤ 0.89.
 
 **Next tick**: harvest h128+TV=30+KonJND bake. If it confirms the Pareto bound (~0.890 / ~5.5%), the realistic conclusion is **V0_5 is on the achievable Pareto frontier** and the 0.8934 target is currently unreachable with this feature set. Recommend pausing further training and instead exploring: (a) extending feature set, (b) accepting V0_5 as final, or (c) reviewing what the "0.8934" target was originally based on.
+
+### Tick 89 — 2026-05-11T01:38Z — h128+TV=30+KonJND lands WORSE (0.8803/5.39%) — Pareto bound confirmed
+
+**h128+TV=30+KonJND-aligned bake** (`rust_v05recipe_konjnd_tv30_h128_seed1_2026-05-11.bin`, 119812 bytes, val_min 0.9396 at epoch 40, early-stop epoch 90):
+- KADID: 0.9397
+- TID2013: 0.9482
+- **CID22: 0.8803** (WORSE than predicted 0.890)
+- Non-mono: 5.39%
+
+The prediction from Tick 87 (CID22 ~0.890) was off — actual landing CID22 0.8803, **the worst CID22 of all recent attempts**. h=128 + TV=30 = OVER-regularized. The TV penalty acting at h=128 on KonJND-aligned data is too aggressive.
+
+**Comprehensive Pareto leaderboard (CID22 sorted)**:
+
+| Bake | CID22 | non-mono | KADID | TID | smoothness | CID22 |
+|---|---|---|---|---|---|---|
+| h128 WebP-mono no-TV seed=1 | **0.8941** | 6.72% | — | — | ✗ | ✓ |
+| TV=0 h64 KonJND-aligned | 0.8921 | 5.46% | 0.9395 | 0.9490 | ✗ | ✗ |
+| **V0_5 shipped** | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 | ✓ | ✗ |
+| TV=5 seed=1 h64 KonJND | 0.8880 | 5.14% | 0.9449 | 0.9536 | ✗ | ✗ |
+| TV=10 h64 KonJND | 0.8841 | 5.09% | (not run) | (not run) | ✗ | ✗ |
+| TV=20 h64 KonJND | 0.8812 | 5.29% | (not run) | (not run) | ✗ | ✗ |
+| **TV=30 h128 KonJND (NEW)** | **0.8803** | 5.39% | 0.9397 | 0.9482 | ✗ | ✗ |
+
+**🎯 Cycle conclusion — Pareto frontier confirmed**:
+1. **V0_5 is on the achievable Pareto frontier** for the (CID22, non-mono) joint. No bake found in 27+ ticks crosses BOTH targets simultaneously.
+2. The "CID22 > 0.8934" target was **aspirational, never measured** (Tick 88 finding). The 0.0041 gap from V0_5 (0.8893) to the target appears not bridgeable in this recipe space (h=64..128, single-layer, RankNet, current 228-feature set).
+3. KonJND-aligned does help KADID/TID massively (+0.10/+0.11 — useful for those datasets!) but only nudges CID22 by +0.003 at best, at cost of +0.6pp non-mono.
+
+**Recommended user actions**:
+1. **Re-anchor the CID22 target** to a measurement-backed value. Suggest 0.8943 (V0_5 + 0.005, smallest meaningful lift) or formalize that 0.8934 should be the *measured* V0_5 (i.e., target is "V0_5 reproduction").
+2. **Accept V0_5 as the shipped Pareto-optimal model** for the current 228-feature set. The KonJND-aligned bakes are useful as KADID/TID specialists but not as primary zensim ship.
+3. **Future work for CID22 > 0.8934 will require**: (a) feature-space extension (new image features outside the current 228), (b) different model class (multi-head, FiLM, MoE — already queued in zentrain), or (c) actually-leaked CID22 training data (rejected by policy).
+
+**Cycle ran**: 27+ ticks over ~6 hours mapping the Pareto frontier. 4 major corrections, 5+ retracted "champions". The Pareto bound is now well-established empirically.
+
+**Next tick**: if the user accepts the above conclusion, stop the cron. Otherwise, the open follow-ups are (a) h=128+TV=10+KonJND-aligned (untested mid-TV at h=128), (b) seed sweep at h=128+TV=10 (n=10 seeds for variance probe), (c) feature-space extension. All Phase 4/5 work in the original plan.
