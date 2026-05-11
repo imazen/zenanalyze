@@ -2786,3 +2786,17 @@ The only V0_5 advantage is CID22 B0/B1 (low-q, where users get aggressively-comp
 **Both trainings will land within next 1-2 cron firings**. Pareto-bound conclusion remains likely: the recipe space is tightly bound; nothing dual-clears.
 
 **Next tick**: harvest h=128 seed=42 first (lands sooner), then h=192. Run non-mono + CID22 eval. Update Pareto table.
+
+### Tick 103 — 2026-05-11T02:31Z — Both trainings extended again at epoch 90/140; minor val_mean improvements
+
+**h=192** (PID 2414374): 22:03 elapsed, epoch 150. **Hit ANOTHER new best at epoch 140**: val_mean=0.9424 (up from 0.9423 at epoch 90 — tiny +0.0001). Patience resets — early-stop expected at epoch 190 (~5-8 more min wall).
+
+**h=128 seed=42** (PID 2420220): 14:05 elapsed, epoch 90. **Hit new best val_mean=0.9424** (up from 0.9406 at epoch 40; +0.0018 lift). Patience resets — will continue until epoch 140 if no further improvement.
+
+**Significant finding**: h=128 seed=42's val_mean (0.9424) is **higher than seed=1's (0.9416)**, by +0.0008. This is the seed variance for h=128+TV=10+KonJND-aligned at val_mean. CID22 will land in [0.886, 0.892] band based on the variance pattern.
+
+**Cycle observation**: each new training is hitting "epoch 140 / epoch 90" basins via the cyclic cosine LR. The 50-epoch period of the cosine cycle creates predictable improvement peaks. h=192's first peak (epoch 40) hit 0.9412; second peak (epoch 90) hit 0.9423; third peak (epoch 140) hit 0.9424. Diminishing returns — the basins are tight.
+
+**Disk**: `/tmp/zensim_loop` at 3.7 GB (mostly the feature CSVs); `/mnt/v` at 89% (watching, not critical yet).
+
+**Next tick**: harvest both bakes when they early-stop. Run non-mono + CID22 evals in sequence. If h=192 lands at CID22 0.892+, ensemble with V0_5 might cross targets via averaging — worth one more experiment. Otherwise close cycle.
