@@ -363,6 +363,42 @@ Next concrete tick: monitor V0_6 progress; when bake lands, run
 `dataset_metric_baseline` against CID22 49-ref + KonJND + KADID + TID
 to measure honest SROCC delta vs V0_5. Affine-calibrate the result.
 
+### Tick 269 — 2026-05-11T19:32Z — Goal 2 started: CID22 paper page-by-page (1-5/30)
+
+V0_6 retrain progress: epoch 10 done in 68s, val_mean=0.9034 (vs
+V0_5 epoch-10 0.8931). Cleaner data gives a marginally healthier
+training trajectory. Wall-time estimate revised: ~35 min (not 6h),
+because the cleaned corpus has -28 % rows.
+
+Used the wait-time for Goal 2 — drafted
+`zensim/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md` (zensim
+`24cbebec`) with the first 5 of 30 paper pages:
+
+- Page 1: 22153 distorted / 250 refs / 1.4 M opinions /
+  ssim2 introduced. Confirmed AIC-3 scope = our shipping bar.
+- Page 2: KADID-10k is 95 % non-compression; KonJND-1k is
+  JPEG+BPG single-q. Both already framed correctly in our pipeline.
+- Page 3: pairwise RMOS vs absolute MOS — our RankNet within-source
+  matches the paper's approach.
+- Page 4: TSBPC + DSBQS protocols (full layout details). DSBQS-5 ≡
+  DSIS-4 ≡ our B1 (50–65). ✓ band cutoffs verified.
+- Page 5: refs are 512×512, **15 content categories** (we cluster
+  to 7 today — Goal 4 expansion follow-up). Codec versions paper
+  used are OLDER (mozjpeg 4.1.0, libwebp 1.0.3, etc.) — Goal 3
+  reproduction must caveat this delta. **Trivial-pair filter**
+  described — we don't currently filter trivial pairs; follow-up
+  note added.
+
+Three concrete follow-ups surfaced:
+- Goal 4: expand cluster count 7 → 15 to match paper.
+- Goal 3: caveat codec-version delta in reproduction.
+- New: trivial-pair filter (drop pairs where butter and ssim2
+  disagree by < 1 unit) in trainer — could improve SROCC by
+  pruning low-info supervision.
+
+Next concrete tick: continue paper pages 6–10 (scoring + bias
+correction → key for MCOS reproduction).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
