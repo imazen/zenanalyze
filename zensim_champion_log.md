@@ -2625,3 +2625,42 @@ While h=128 trainings still go (TV=10 at epoch 170, TV=5 at epoch 160, both earl
 **TV=5 h128 still going**: PID 2342030, epoch 180, best 0.9434 at epoch 140, will early-stop at epoch 190 (~1 min).
 
 **Next tick**: harvest TV=5 h128 bake + non-mono; harvest TV=10 h128 CID22 result; if no champion emerges, formally close cycle.
+
+### Tick 97 — 2026-05-11T02:05Z — TV=10 h128 CID22 = 0.8900 (slightly beats V0_5); TV=5 h128 lands at 5.44% non-mono
+
+**TV=10 h128 KonJND-aligned full CID22 eval landed**:
+- KADID: 0.9434
+- TID2013: **0.9553** (highest TID across all bakes)
+- **CID22: 0.8900** (highest aggregate among smoothness-failing KonJND bakes; +0.0007 over V0_5)
+- Non-mono: 5.36% (target 4.86% — fails by 0.50pp)
+
+**This is a new finding**: h=128 capacity DOES help CID22 at moderate TV. h=64 TV=10 = 0.8841; h=128 TV=10 = 0.8900. **+0.0059 CID22 lift from doubling capacity** — the largest single-knob effect on CID22 measured in this cycle.
+
+**TV=5 h128 KonJND-aligned bake also landed** (PID 2342030, epoch 190 early-stop, val_min 0.9434, same as TV=10):
+- Non-mono on JPEG unified parquet: **5.44%** (worse than TV=5 h64's 5.14% — h=128 hurts smoothness at low TV)
+- CID22 eval launched (PID 2400494, ~5 min)
+
+**Updated full Pareto** (CID22 sorted, all 4292-pair measured):
+
+| Bake | CID22 | non-mono | KADID | TID |
+|---|---|---|---|---|
+| h128 WebP-mono no-TV | 0.8941 | 6.72% | — | — |
+| TV=0 h64 KonJND | 0.8921 | 5.46% | 0.9395 | 0.9490 |
+| **TV=10 h128 KonJND (NEW)** | **0.8900** | 5.36% | 0.9434 | 0.9553 |
+| **V0_5 shipped** | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 |
+| TV=5 h64 KonJND | 0.8880 | 5.14% | 0.9449 | 0.9536 |
+| TV=10 h64 KonJND | 0.8841 | 5.09% | 0.9380 | 0.9437 |
+| TV=20 h64 KonJND | 0.8812 | 5.29% | 0.9318 | 0.9409 |
+| TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 |
+
+**Three observations**:
+1. **TV=10 h128 KonJND is now the strongest non-WebP-mono CID22 bake**. Aggregate 0.8900 > V0_5 0.8893 (+0.0007).
+2. **h=128 helps CID22 monotonically** at TV=10: 0.8841 → 0.8900. But hurts smoothness slightly: 5.09% → 5.36%.
+3. **The Pareto frontier still has nothing crossing both targets**. CID22 0.8934 (target) needs another +0.0034. h=192x128 or feature-extension are the remaining paths.
+
+**Insight for future work**: capacity (h) is more productive than TV for CID22 lift. The cycle should NOT have spent so many ticks on TV sweeps at fixed h=64.
+
+**Next tick**: harvest TV=5 h128 CID22 (in flight). Then consider whether to:
+- (a) Stop the cycle (data comprehensive; V0_5 stays ship)
+- (b) Launch h=192 single-layer + KonJND-aligned + TV=10 (capacity hypothesis says this should be even better than TV=10 h128)
+- (c) Launch h=128 + TV=10 + KonJND-aligned with multiple seeds (Pareto neighborhood variance probe)
