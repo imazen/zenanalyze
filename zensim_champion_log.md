@@ -1980,3 +1980,25 @@ Computed non-mono for all 11 h=128 WebP-mono no-TV bakes (those that already exi
 
 **Path forward (user authorization needed)**:
 4. Multi-codec corpus expansion (CLIC + JXL/WebP/AVIF/GIF + ssim2/butter/dssim GPU)
+
+### Tick 75 — 2026-05-11T04:30Z — everything.md updated with V0_5-stays-ship verdict
+
+Replaced the stale "🎯 NEW CHAMPION" section in `everything.md` §0a with the actual Tick 73-74 conclusion: V0_5 currently shipped is the best dual-target model. The recovery cycle produced 0 strict-Pareto improvements over V0_5.
+
+**Updated §0a sections**:
+- "Loop session conclusion (Tick 75)" replaces "Loop session champion candidates"
+- Documents the final verdict table (V0_5 vs h128 no-TV vs h128 TV=30 etc.)
+- Notes the Tick 73 plot twist (stale V0_5 baseline assumption)
+- Lists remaining ways to close the residual CID22 -0.004 gap (multi-target loss, multi-codec corpus, larger arch)
+- Preserves 50+ bake artifacts on disk for future comparative work
+
+**File state**: `~/work/zen/zenanalyze/everything.md` ~40-line replacement around the champion table.
+
+**Loop status**: this is the cycle's natural stopping point. V0_5 stays ship. Further CID22 gains require interventions not in the current cycle's scope.
+
+**Saved**: updated `everything.md`.
+
+**Pending user decisions**:
+1. Stop the cron / declare cycle complete
+2. Authorize multi-codec corpus expansion for next cycle
+3. Pivot to Phase 4 deferred items (multi-target DSSIM, default plotting)

@@ -61,42 +61,41 @@ The Rust trainer was deleted in PR #29 (commit `e613224`, 2026-05-07);
 its source is recovered at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs`
 (885 LOC).
 
-### Loop session champion candidates (NOT YET SWAPPED — pending user approval)
+### Loop session conclusion (Tick 75, 2026-05-11) — V0_5 STAYS SHIP
 
-After 63 ticks of automated training (2026-05-10/11, ~14 hr wall,
-130+ trainings, 50+ end-to-end evals), the **post-recovery** champion
-is the Rust trainer's h=128 + WebP-mono + seed=1 bake:
+**FINAL VERDICT** after 75 ticks of automated training (2026-05-10/11, ~18 hr wall, 130+ trainings, 70+ end-to-end evals):
 
-| File | KADID | TID | **CID22** | CSIQ | When to ship |
-|---|---|---|---|---|---|
-| 🎯 **NEW CHAMPION** `rust_webp_mono_h128_seed1_2026-05-10.bin` | (TBD) | (TBD) | **0.8941** ★ | 0.9635 | **EXCEEDS target 0.8934, beats V0_5 (0.8893) by +0.0048** |
-| h128 WebP-mono seed=4 (runner-up) | — | — | 0.8862 | 0.9611 | Backup if seed=1 has issue |
-| h64 WebP-mono seed=3 (dial-safe) | 0.9418 | 0.9501 | 0.8851 | 0.9630 | Best worst-band SROCC (TID B3 0.1390) |
-| Prior CHAMPION `h192x128_ep300_safesyn218k_kt_2026-05-10.bin` (Python) | 0.9309 | 0.8861 | 0.8803 | — | Superseded by Rust champion above |
-| Smoothness-Winner `h192x128_ep200_tv30_humw03_safesyn218k_2026-05-10.bin` | 0.9136 | 0.8571 | 0.8769 | — | Encoder rate-control loops, non-mono 4.49% |
+**Keep the currently-shipped V0_5 SSIM2-proxy MLP** (`zensim/weights/v0_4_2026-04-30.bin`, md5 `bb7e24a1`). It is the **best dual-target model** the recovery cycle could produce or evaluate.
 
-**Tick 62 BREAKTHROUGH**: After 60 ticks chasing the ~0.89 plateau via Python trainer + corpus tweaks, the Rust trainer at `--hidden 128` with WebP-mono corpus + seed=1 hit **CID22 = 0.8941** — first model in the cycle to exceed the 0.8934 target.
+| Bake | CID22 | non-mono | Both targets |
+|---|---|---|---|
+| **V0_5 shipped (current)** | **0.8893** | **4.57%** | smoothness ✓, CID22 -0.004 |
+| h128 no-TV seed=1 | 0.8941 | 6.72% | CID22 ✓ only |
+| h128 TV=30 seed=1 | 0.8874 | 4.97% | strictly dominated by V0_5 |
+| Smoothness-Winner Python | 0.8769 | 4.49% | strictly dominated by V0_5 |
+| Prior CHAMPION (Python h192x128) | 0.8803 | (high) | strictly dominated by V0_5 |
 
-**Caveat (Tick 63)**: only 1/11 h=128 seeds exceeds V0_5 (the others cluster at 0.872-0.886, median 0.8814). The recipe has high seed-variance; seed=1 is the basin lottery. But the bake IS empirically the best on CID22 across all 33+ models trained.
+**No model trained in 75 ticks Pareto-dominates V0_5 on both axes.**
 
-**Decision pending user approval to ship.** Ship is now defensible since CID22 exceeds V0_5. To ship:
-1. Copy `benchmarks/rust_webp_mono_h128_seed1_2026-05-10.bin` → `zensim/weights/v0_4_2026-04-30.bin` (replaces current V0_5 SSIM2-proxy)
-2. Update docstring at `zensim/src/profile.rs:160-181` with new lineage
-3. Run `cargo test --features __experimental_versions` to verify
-4. Commit + push to zensim main
+**Why V0_5 wins**:
+- CID22 0.8893: just -0.004 below the 0.8934 target. Closest model that also meets smoothness.
+- Non-mono 4.57%: below the V0_2-floor target 4.86%. None of the new bakes meets this.
+- The h128 no-TV seed=1 bake exceeds CID22 (+0.0048) but costs +2.15pp smoothness — bad trade for the dial property (per goal #2 "smoothness is first-class").
 
-**The winning recipe** (for reproducibility):
-```
-target/release/zensim_mlp_train \
-  --group "safesyn:/tmp/zensim_loop/safe_synth_218k_webp_mono.csv:1.0:0.0" \
-  --group "kadid:/mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv:0.3:1.0" \
-  --group "tid:/mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv:0.3:1.0" \
-  --hidden 128 --epochs 300 --pairs-per-epoch 50000 \
-  --lr 1e-3 --l2 1e-5 --val-policy min --early-stop-patience 50 \
-  --seed 1 --max-features 228
-```
+**Major plot twist (Tick 73)**: the working assumption that V0_5 had ~8.26% non-mono came from a stale doc about a DIFFERENT bake (the 2026-04-30 mixed-supervision predecessor). When measured directly via `score_unified_with_bake.py`, the actual shipped V0_5 has 4.57% non-mono — already meeting the target. The entire TV-recovery chase (Ticks 65-72) was operating on a misread.
 
-WebP-mono corpus produced via: `convert_features_bin.py` on `training_safe_synthetic_webp_mono.csv` (cum-max projection on zenwebp-default-m4 rows only, 6,528 pairs modified).
+**Closing the residual CID22 gap (-0.004)** would require interventions NOT tried in this cycle:
+1. **Multi-target loss** (DSSIM/butter as additional supervisors, Phase 4 deferred work)
+2. **Multi-codec corpus expansion** (CLIC + JXL/WebP/AVIF/GIF GPU re-scoring, pending user authorization)
+3. **Larger architecture with smoothness regularization tuned to match V0_5's 4.57%**
+
+**For now**: do not swap. V0_5 ships. The detailed per-recovery-tick log is at `~/work/zen/zenanalyze/zensim_champion_log.md`.
+
+**Loop-session best bakes preserved on disk** (for any future comparative work):
+- `zensim/benchmarks/rust_webp_mono_h128_seed1_2026-05-10.bin` (CID22-best, smoothness-fail)
+- `zensim/benchmarks/rust_webp_mono_h128_tv30_seed1_2026-05-10.bin` (best dual at Rust h=128, V0_5-dominated)
+- `zensim/benchmarks/h192x128_ep300_safesyn218k_kt_2026-05-10.bin` (Python aggregate-best, V0_5-dominated)
+- 50+ supporting bakes from seed/TV/corpus sweeps, all V0_5-dominated
 
 ### Phase 4 trainer infrastructure (zensim main, after 2026-05-10)
 
