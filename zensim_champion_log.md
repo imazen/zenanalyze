@@ -2496,3 +2496,31 @@ All 3 will complete within next /loop firing or two. The combined data will clos
 **Why this audit matters**: if Tick 82's CID22 numbers were unmeasured estimates, the Pareto-bound conclusion in Tick 89 is still valid (since TV=0 = 0.8921 and TV=30 h128 = 0.8803 are confirmed) but the gradient through the (h, TV) space is less reliable than reported. The new measurements either tighten the bound or reveal a sweet spot.
 
 **Next tick**: harvest TV=10 h64 CID22 (~3 min from now). Then check h=128+TV=10 and h=128+TV=5 trainings. Build complete (h × TV) Pareto map.
+
+### Tick 92 — 2026-05-11T01:46Z — TV=10 h64 audit clears (0.8841 confirmed); 2 more zombies killed; TV=20 eval launched
+
+**TV=10 h64 CID22 re-eval completed** — Tick 82's 0.8841 was correct after all:
+- KADID 0.9380 / TID 0.9437 / **CID22 0.8841** / non-mono 5.09%
+- Audit cleared. The Tick 82 entry was missing the eval.log artifact but the reported CID22 SROCC value matches a fresh full-dataset measurement.
+
+**Zombie shells killed** (2 more): PIDs 929227 and 940668 — old polling loops from prior sessions waiting on tasks long-since complete (`/tmp/zensim_loop/results/eval_h32_ep300_seed42_v5exact.log` from an h=32 sweep). Plus killed my own self-referential `until ! pgrep -f "examples/dataset_metric_baseline"` (PID 2356445) which matched its own command line via pgrep -f. **Lesson**: do not `pgrep -f "examples/dataset_metric_baseline"` — the until-loop command itself shows up. Use `pgrep -x dataset_metric_baseline` instead.
+
+**Launched TV=20 h64 CID22 eval** (PID 2360442, ~5 min). Output: `benchmarks/rust_v05recipe_konjnd_tv20_h64_seed1_2026-05-11.eval.log`.
+
+**Both h=128 trainings still going** (need ~3-5 more min):
+- h128+TV=10 (PID 2341484): 7:41 elapsed
+- h128+TV=5 (PID 2342030): 6:28 elapsed
+
+**Updated Pareto (CID22 sorted, confirmed measurements)**:
+
+| Bake | CID22 | non-mono | KADID | TID | Source |
+|---|---|---|---|---|---|
+| h128 WebP-mono no-TV seed=1 | 0.8941 | 6.72% | — | — | Tick 62 |
+| TV=0 h64 KonJND-aligned | 0.8921 | 5.46% | 0.9395 | 0.9490 | Tick 81 |
+| **V0_5 shipped** | **0.8893** | **4.57%** ★ | 0.8432 | 0.8401 | Tick 88 (just confirmed) |
+| TV=5 seed=1 h64 KonJND | 0.8880 | 5.14% | 0.9449 | 0.9536 | Tick 88 |
+| **TV=10 h64 KonJND (confirmed)** | **0.8841** | 5.09% | 0.9380 | 0.9437 | Tick 92 (this tick) |
+| TV=20 h64 KonJND (in flight) | ? | 5.29% | ? | ? | this tick |
+| TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 | Tick 89 |
+
+**Next tick**: harvest TV=20 h64 eval (~3 min) and check 2 h=128 trainings (likely landed). Run non-mono + CID22 on h=128 bakes.
