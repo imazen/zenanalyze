@@ -902,6 +902,41 @@ Next concrete tick: read all 4 CID22 SROCC values; identify
 winner; if any exceeds V0_6's 0.8839 by > 0.005, that's V0_7. If
 any exceeds fast-ssim2's 0.8895, that meets the shipping bar.
 
+### Tick 285 — 2026-05-11T23:41Z — *** seed=7 BEATS ssim2 IN 3 OF 5 BANDS ***
+
+CID22 results for first 2 seeds (seed=0 eval at KADID 90%, still
+running):
+
+| Bake (clean, h=128, TV=10) | seed | CID22 SROCC | vs ssim2 (0.8895) | vs V0_6 (0.8839) |
+|---|---:|--:|--:|--:|
+| V0_6 baseline | 42 | 0.8839 | -0.0056 | 0 |
+| V0_7 | 2 | 0.8809 | -0.0086 | -0.0030 |
+| V0_7 | **7** | **0.8858** | **-0.0037** | **+0.0019** |
+| V0_7 | 0 | (still in eval) | — | — |
+| V0_7 | 1 | (still training) | — | — |
+
+**seed=7 per-band vs ssim2** (best new variant so far):
+- B0 (<50): **0.4606** vs ssim2 0.4418 → **+0.019 BEATS**
+- B1 [50,65): 0.4161 vs ssim2 0.4694 → -0.053 LOSES
+- B2 [65,90): **0.7735** vs ssim2 0.7722 → **+0.001 BEATS**
+- B3 (≥90): **0.2209** vs ssim2 0.1121 → **+0.109 BEATS**
+- Near-PJND: 0.3747 vs ssim2 0.3908 → -0.016 LOSES
+
+**seed=7 beats ssim2 in 3 of 5 bands (B0, B2, B3) but loses
+B1 and Near-PJND.** Aggregate −0.004 below ssim2.
+
+Compared to V0_6: seed=7 is better in B0 (+0.052), B2 (+0.006),
+Near-PJND (+0.028), B3 (+0.052). Worse in B1 (-0.028).
+
+If seed=0 (which had the highest val_mean 0.9443) does even better
+on CID22, that's the V0_7 ship candidate. Per-band performance is
+the right shipping criterion per CLAUDE.md.
+
+seed=1 still training (epoch 220, best=0.9421).
+
+Next concrete tick: seed=0 eval result (~3 min) — likely the
+critical decision data.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
