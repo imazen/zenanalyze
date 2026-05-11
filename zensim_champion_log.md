@@ -104,6 +104,29 @@ Then resumed Phase 1 work:
 add a seed-stable smoke test that produces a tiny ZNPK v2 bake and
 verifies bit-identical output to `zensim-validate`'s trainer.
 
+### Tick 261 — 2026-05-11T19:07Z — MLP primitives ported (scaler, forward, backprop, predict)
+
+zensim commit `ca7159e4`. New module `zensim-train-core::mlp`.
+
+- **compute_scaler_from_groups**: per-feature (mean, std) over
+  train_indices groups only; std floor 1e-8; validation-only groups
+  excluded. Tests cover uniform-features (std=1e-8 floor) and
+  two-group mean=3 std=√5 arithmetic.
+- **forward**: `n_features → n_hidden LeakyReLU(α) → 1`. Skip-zero
+  optimization on first matmul preserved bit-for-bit. Returns
+  `(y, h_pre, h)`. Tests cover zero-weights→bias, linear identity
+  passthrough, leaky negative branch.
+- **backprop_step**: dl_dy accumulates into gw1/gb1/gw2/gb2; Adam
+  consumes. Test verifies zero-x produces no gw1 contribution.
+- **predict_group**: batched forward for SROCC eval. Test asserts
+  identity vs singleton forward calls.
+- **Total: 12/12 tests passing** (5 baseline + 7 new mlp tests).
+
+Next concrete tick: port `bake_two_layer_znpr_v2` (formatter) and
+`spearman_correlation` helper, then port `TvRegularizer` and
+`train_mlp_with_tv` body. That seals Phase 1 with a ZNPK v2 bake
+that the existing `zenpredict` can read back.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
