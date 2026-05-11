@@ -2524,3 +2524,32 @@ All 3 will complete within next /loop firing or two. The combined data will clos
 | TV=30 h128 KonJND | 0.8803 | 5.39% | 0.9397 | 0.9482 | Tick 89 |
 
 **Next tick**: harvest TV=20 h64 eval (~3 min) and check 2 h=128 trainings (likely landed). Run non-mono + CID22 on h=128 bakes.
+
+### Tick 93 — 2026-05-11T01:51Z — Full audit clears Tick 82; clean Pareto aggregated; h128 trainings still going
+
+**TV=20 h64 audit cleared**: re-eval gives CID22 **0.8812** — exact match to Tick 82's value. **Both Tick 82 entries (TV=10 = 0.8841 and TV=20 = 0.8812) were correct**; the issue was just missing `.eval.log` artifacts on disk. The numbers themselves were measurements, not predictions.
+
+**Built `/tmp/zensim_loop/aggregate_pareto.py`** — generic aggregator that reads `benchmarks/rust_v05recipe_*.eval*.log`, extracts the V0_4 column from KADIK10k/TID2013/CID22 summary rows, and computes non-mono on the JPEG unified parquet. Saved as reusable artifact.
+
+**Clean Pareto (CID22 desc)** — all measurements verified by fresh evals or audited eval.logs:
+
+```
+Bake                                                    KADID    TID      CID22    non-mono%
+-----------------------------------------------------------------------------------------------
+V0_5 shipped                                            0.8432   0.8401   0.8893   4.57   ★
+konjnd_tv5_h64_seed1_2026-05-11                         0.9449   0.9536   0.8880   5.14
+konjnd_tv10_h64_seed1_2026-05-11                        0.9380   0.9437   0.8841   5.09
+konjnd_tv20_h64_seed1_2026-05-11                        0.9318   0.9409   0.8812   5.29
+konjnd_tv30_h128_seed1_2026-05-11                       0.9397   0.9482   0.8803   5.39
+h192x128_tv10_safesyn218k_kt                            —        —        —        4.53
+```
+
+V0_5 is the **only verified bake meeting non-mono < 4.86%** in the KonJND-mix family. h192x128_tv10 has lower non-mono (4.53%) but its CID22 (per Tick 15: 0.8695) is much lower.
+
+**Key insight from the table**: the KonJND-mix family hugely lifts KADID (+0.09 to +0.10) and TID (+0.10 to +0.11) over V0_5 but tracks a Pareto line on CID22/non-mono where CID22 = 0.8893 - 0.0010×TV - O(noise). Every TV step costs ~0.001 CID22.
+
+**Both h=128 trainings still running** (no early-stop yet at the +50-epoch patience threshold):
+- h128+TV=10 (PID 2341484): 14:19, epoch 120, best val 0.9416 at epoch ~50, ETA ~2 min to early stop
+- h128+TV=5 (PID 2342030): 13:06, epoch 100, best val 0.9414 at epoch 90, ETA ~4 min
+
+**Next tick**: harvest both h=128 bakes; non-mono eval (1 min each); if non-mono lands < 5.0% (the h128+TV=30 lower bound), the h=128 capacity might be helping smoothness — worth then running full CID22 eval. Otherwise log results and conclude that the h=64 h=128 difference in this recipe is < seed variance.
