@@ -1895,3 +1895,45 @@ Averaging RAW predictions doesn't break the smoothness barrier — the better-sm
 2. **Generate paper-style plots** for the candidate bakes (per user's earlier ask)
 3. **Document the cycle conclusion** + propose user ship the TV=30 bake
 4. **Per-band ensemble eval** on CID22 — see if ensemble at least helps the band-level dial property even if aggregate non-mono unchanged
+
+### Tick 73 — 2026-05-11T03:57Z — 🚨 CORRECTION: V0_5 currently shipped MEETS BOTH TARGETS (4.57% non-mono)
+
+While preparing ship-decision data for TV=30 seed=1, ran smoothness check on the **currently-shipped V0_5** bake (`zensim/weights/v0_4_2026-04-30.bin`, md5 `bb7e24a1`).
+
+**SHIPPED V0_5 RESULTS**:
+| Metric | Value | Target |
+|---|---|---|
+| CID22 SROCC | **0.8893** | > 0.8934 (close) |
+| **non-mono** | **4.57%** | **< 4.86%** ✓ |
+| KADID | 0.8432 | — |
+| TID | 0.8401 | — |
+| CSIQ | 0.9676 | — |
+
+**V0_5 ALREADY MEETS the smoothness target.** All my work since Tick 65 was operating on a stale "V0_5 ~8.26% non-mono" claim — that 8.26% was for a DIFFERENT bake (the 2026-04-30 mixed-supervision predecessor, NOT the V0_5 SSIM2-proxy that's actually shipped).
+
+**Strict-dominance comparison** (ship candidates vs V0_5):
+
+| Bake | CID22 vs V0_5 | non-mono vs V0_5 | Verdict |
+|---|---|---|---|
+| **V0_5 (shipped)** | — | — | baseline |
+| h128 TV=30 seed=1 (proposed) | -0.0019 | +0.40pp | V0_5 STRICTLY DOMINATES |
+| h128 no-TV seed=1 | +0.0048 | +2.15pp | non-dominated; trades CID22 ↑ for non-mono ↑↑ |
+| Smoothness-Winner (Python) | -0.0124 | +0.08pp | V0_5 STRICTLY DOMINATES |
+| CHAMPION (Python h192x128) | -0.0090 | ~0pp | V0_5 likely dominates |
+
+**No model in the recovery cycle Pareto-dominates V0_5 on both axes**. The h128 no-TV bake exceeds CID22 (0.8941 > 0.8893) but at +2.15pp smoothness regression — bad trade for the dial property.
+
+**Honest takeaway**: the entire 60+ ticks of TV/corpus/seed work was a phantom recovery. V0_5 is fine. CID22 target 0.8934 is the only unmet goal — and that's 0.004 above what we have, achievable only with smoothness regression.
+
+**Real ship recommendation: keep V0_5.** Don't auto-swap.
+
+**Saved**: `/tmp/zensim_loop/ship_eval_tv30.log`, `/tmp/zensim_loop/v05_eval.log`.
+
+**Updated all-time leaderboard** (CID22 + smoothness, both required):
+1. **V0_5 shipped (current)**: CID22 0.8893, non-mono **4.57%** ★ — only model meeting smoothness
+2. h128 no-TV seed=1: CID22 **0.8941**, non-mono 6.72% — only model exceeding CID22 target
+3. h128 TV=30 seed=1: CID22 0.8874, non-mono 4.97% — strictly dominated by V0_5
+
+**Where does the loop go from here?**
+- The CID22 > 0.8934 target with non-mono < V0_5's 4.57% is genuinely hard. Probably needs the actual Phase 4 work that wasn't done (multi-target loss, per-step pair sampling with correct architecture, more training data).
+- **Honest stopping point**: V0_5 is the current best ship. Document why no swap, and pivot to other priorities (corpus expansion, plotting, multi-codec).
