@@ -399,6 +399,45 @@ Three concrete follow-ups surfaced:
 Next concrete tick: continue paper pages 6–10 (scoring + bias
 correction → key for MCOS reproduction).
 
+### Tick 270 — 2026-05-11T19:34Z — Goal 2 pages 6-10 done; TV regularizer validated
+
+V0_6 status: epoch 30 done at t=188s. val_mean=0.9368 (V0_5 at the
+same point was 0.9369 — essentially tied). Cleaning didn't degrade
+training trajectory.
+
+Paper pages 6-10 walked through (zensim commit `23f3d4c4`):
+
+**Page 6**: Canonical 15 content categories listed by name:
+`animals, art-abstract-decoration, building-monument, diagram-chart,
+food-drinks, illustration-logo-text, indoors-rooms, landscape-nature,
+materials-clothes, night-nightlife, people-fashion, portrait,
+sky-clouds, sports, urban-industrial-cars`. Counts skewed (8-26
+refs). Replaces our 7-cluster placeholder.
+
+**Page 8**: **Forced monotonicity** in paper's RMOS computation —
+200 dummy "higher bitrate is better" opinions per same-codec
+adjacent-bitrate pair. **Directly aligns with our `--tv-weight`
+regularizer**; the mechanism is different (loss term vs. ranking
+opinion) but the constraint is the same.
+
+**Page 10 — load-bearing finding**: Removing the monotonicity
+constraint causes KRCC to drop from 0.937 → 0.556 (40 % drop) and
+SRCC from 0.997 → 0.742 (26 % drop). **This is paper-authoritative
+validation that our TV regularizer choice was correct.** It also
+informs the V0_5/V0_6 retrain — without TV=10 we'd lose accuracy at
+similar magnitudes.
+
+Reference MCOS distribution: range 82.5–92.6, **mean 88.3**.
+Matches the V0_5 affine-calibration target (already in
+`affine_calibrate_znpr_v2.py`).
+
+Two follow-ups surfaced:
+- Replace 7-cluster scheme with paper's 15 named categories (Goal 4)
+- Add `--bootstrap N` to `dataset_metric_baseline` for 90 % CI emission
+
+Next concrete tick: paper pages 11-15 (IQA metric overview + Table 2
++ Table 3 ssim2 numbers we need to reproduce for Goal 3).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
