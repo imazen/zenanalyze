@@ -2275,3 +2275,21 @@ After Tick 82's finding that TV=10 (5.09%) was better than TV=20 (5.29%) on smoo
 - Expected runtime: ~8 min (parallel to TV=10's 471s)
 
 **Next tick**: when bake lands (next /loop firing or two), run the unified scorer + non-mono auditor on CID22 features and compare to TV={0,10,20} on the (CID22, non-mono) Pareto. If TV=5 lands in the interior (e.g. CID22 0.888, non-mono 5.2%), the conclusion is the recipe is intrinsically Pareto-frontier-bound; pivot to h=128 + KonJND-mix instead.
+
+### Tick 84 — 2026-05-11T01:11Z — TV=5 seed=42 parallel launch — seed variance probe
+
+While TV=5 seed=1 (PID 2278949) is running (at epoch 60, t=163.8s), launched a parallel TV=5 seed=42 (PID 2279630). Same hyperparams except `--seed 42`. The 7950X has plenty of headroom — both jobs at ~98% CPU on independent threads.
+
+Rationale: the Ticks 68-71 + Tick 82 evidence shows TV-sweep results have ~0.5-1pp non-mono variance just from seed alone. A 2-seed sample at the same TV point separates training noise from the actual Pareto effect — otherwise a single Tick 83 TV=5 datapoint can't be cleanly compared to TV={0,10,20} from Ticks 81-82.
+
+**Eval pipeline pre-flight** (verified, runs next tick after both bakes land):
+- CID22 SROCC: `cargo run --release -p zensim-bench --example dataset_metric_baseline -- --kadid /mnt/v/dataset/kadid10k --tid /mnt/v/dataset/tid2013 --cid22 /mnt/v/dataset/cid22/CID22_validation_set --v04-bake <bake.bin>`. Output table format with KADIK10k/TID2013/CID22 rows; reads `V0_4 (bake)` column. ~5 min per bake.
+- Non-mono q-step: `python scripts/v_next/score_unified_with_bake.py --bake <bake.bin> --parquet /mnt/v/zen/zensim-training/2026-05-07/unified/unified_v15r_zenjpeg.parquet`. Pure-numpy ZNPR v2 forward + adjacent-q reversal counter.
+
+Total eval cycle for both seeds: ~12-15 min. Likely completes inside next /loop window or the one after.
+
+**Outputs queued**:
+- `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.bin` (PID 2278949)
+- `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed42_2026-05-11.bin` (PID 2279630)
+
+**Next tick**: harvest both bakes, run eval, compare to Pareto. Decision criterion: if both seeds land below CID22 0.8893 AND non-mono > 4.86%, h64+KonJND is exhausted — pivot to h=128 + KonJND-mix next.
