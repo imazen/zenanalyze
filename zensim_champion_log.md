@@ -2352,3 +2352,32 @@ Both TV=5 bakes landed. seed=1 (PID 2278949, 8:30 wall, 175 epochs, val_min 0.94
 - **Pivot**: launch h=192x128 + KonJND-aligned + TV=10 (combining the smoothness backbone of `h192x128_tv10_safesyn218k_kt` with the CID22 lift of KonJND-aligned).
 
 **Next tick**: collect seed=1 CID22 from `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.log` (V0_4 column on CID22 row), update Pareto, then launch h=192x128+KonJND-aligned+TV=10.
+
+### Tick 87 — 2026-05-11T01:22Z — Pivot: h=128+KonJND-aligned+TV=30 launched (untested combo)
+
+**Tick 86 CID22 eval was on 500-pair subset** (default `--max-pairs 500`). Re-ran with `--max-pairs 99999` (full 4292 pairs) — PID 2284338, ETA ~5 min. Output: `benchmarks/rust_v05recipe_konjnd_tv5_h64_seed1_2026-05-11.eval.full.log`.
+
+**Pivot strategy chosen — h=192x128 path blocked, h=128 path open**:
+- Reading Ticks 15-16: prior h=192x128 candidate used the **Python trainer** (`train_v_next_mlp.py`) which produces -0.02 to -0.04 CID22 vs the Rust trainer (Tick 15 explicit diagnosis).
+- The Rust trainer (`zensim_mlp_train`) supports **single hidden layer only** — no 192x128 path.
+- Reading Tick 80: `h128 seed=1 + TV=30` (Rust trainer, no KonJND) hit **CID22 0.8874 / non-mono 4.97%** — close to dual-target but no KonJND boost.
+- **Untested combo**: Rust trainer + h=128 + TV=30 + KonJND-aligned + KADID + TID. Combines:
+  1. Rust trainer's CID22 retention (better than Python by ~0.03)
+  2. h=128 capacity (Tick 80 confirmed this is the sweet spot for h-vs-CID22)
+  3. TV=30 smoothness (Tick 80's best dual-target h=128)
+  4. KonJND-aligned mix (Tick 81's +0.0028 CID22 lift)
+
+**Launched** (PID 2289817, parallel to running CID22 eval, no contention — eval is 23-core, training is 1-core):
+- Args: `--hidden 128 --tv-weight 30 --seed 1 --groups safesyn(1.0:0.0)+kadid(0.3:1.0)+tid(0.3:1.0)+konjnd(0.5:1.0) --tv-pairs-file safesyn_konjnd_tv_pairs.tsv`
+- Output: `benchmarks/rust_v05recipe_konjnd_tv30_h128_seed1_2026-05-11.{bin,train.log}`
+- Stdout: `/tmp/zensim_loop/tv30_h128_seed1_train.stdout`
+- Expected runtime: ~10-15 min (h=128 is 2× h=64 work; KonJND mix is +30% data)
+
+**Predicted Pareto landing** (interpolating from Tick 80 + Tick 81 effects):
+- Tick 80 h128+TV=30 (no KonJND): 0.8874 / 4.97%
+- KonJND-aligned effect: +0.0028 CID22 / +0.5pp non-mono (extrapolated from Tick 81 vs V0_2 floor)
+- Predicted: CID22 ~0.890 / non-mono ~5.5%
+
+If prediction holds → does NOT clear targets (CID22 < 0.8934, non-mono > 4.86%). If it OVERSHOOTS prediction (KonJND-aligned might land asymmetrically at higher capacity), there's a chance.
+
+**Next tick**: harvest CID22 eval for TV=5 seed=1 (next /loop firing). If above 0.890, that's a useful data point for understanding the Pareto curvature. Then check h=128+TV=30+KonJND progress.
