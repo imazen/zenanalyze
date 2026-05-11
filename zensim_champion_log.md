@@ -640,6 +640,44 @@ V0_6 full eval (4 datasets) at epoch 110/300 of TID; finishing in
 Next concrete tick: read V0_6 full eval results, surface complete
 4-dataset comparison vs V0_5 + ssim2; reach a ship-or-search decision.
 
+### Tick 276 — 2026-05-11T19:49Z — V0_6 full eval complete; *** GOAL 3 KonJND validated ***
+
+Full multi-dataset eval finished. Wrote
+`zensim/benchmarks/v0_6_eval_2026-05-11.md` (zensim `0f8ceb8d`).
+
+**Aggregate SROCC (V0_6 vs ssim2)**:
+- KADID10k (in train): V0_6 0.9418 vs ssim2 0.8133 → +0.13
+- TID2013 (in train): V0_6 0.9538 vs ssim2 0.8460 → +0.11
+- **CID22 (holdout)**: V0_6 0.8839 vs ssim2 0.8895 → **−0.0056**
+
+CID22 is the only true held-out test. V0_6 is still slightly below
+ssim2 on CID22 (-0.006). Per-band: loses in B0 (-0.033), B1 (-0.025),
+B2 (-0.005), Near-PJND (-0.044); only wins B3 (small n=43).
+
+**GOAL 3 VALIDATION DELIVERABLE — fast-ssim2 matches paper Table 4**:
+
+KonJND-1k PJND threshold:
+- BPG: ours 65.38±5.42 vs paper 65.38±5.10 → **EXACT match to
+  4 sig figs**
+- JPEG: ours 62.55±5.03 vs paper 63.10±4.65 → within 0.55 units
+- Butteraugli BPG: 1.5283±0.1912 vs paper 1.528±0.192 → 3-sig-fig match
+- Butteraugli JPEG: 1.6993±0.2274 vs paper 1.699±0.229 → 3-sig-fig match
+
+**Our fast-ssim2 + butter reproduce paper Table 4 to within paper's
+own reported stdev. Pipeline VALIDATED for Goal 3.**
+
+THREE PATHS FORWARD (documented in eval doc):
+A. Ship V0_6 honest (regress −0.006 vs V0_5 claim)
+B. Hyperparam search (5-seed sweep ~2.5 h; full grid ~6 h)
+C. Architecture change (6 scales, asymmetric — multi-week)
+
+**Recommendation**: Option B starting with seed sweep on cleaned
+data. Pending user authorization to launch.
+
+Next concrete tick: either get user authorization for the seed
+sweep, OR move to Goal 6 (start building the GH Pages site
+scaffold while we wait).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
