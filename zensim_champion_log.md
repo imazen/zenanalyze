@@ -1803,3 +1803,30 @@ Trained 10 more h=128 + WebP-mono + TV=30 seeds (0, 2, 3, 4, 5, 6, 7, 8, 9, 42).
 **Saved**: 10 new bakes + `benchmarks/tv30_seed_sweep_h128_2026-05-10.log`.
 
 **Next tick**: sweep TV={33, 35, 40} at seed=1 to find exact target-crossing point.
+
+### Tick 70 — 2026-05-11T03:34Z — TV micro-sweep: TV is NOT monotonic vs non-mono at this granularity
+
+Trained TV ∈ {33, 35, 40} at h=128 seed=1 WebP-mono. Required pkill cleanup of stale polling shells from prior ticks before launching cleanly via run_in_background.
+
+| TV | CID22 | non-mono |
+|---|---|---|
+| **30** (prev tick) | **0.8874** | **4.97%** ★ |
+| 33 | 0.8784 | 5.63% |
+| 35 | 0.8782 | 5.85% |
+| 40 | 0.8846 | 5.41% |
+
+**TV→non-mono is NOT monotone at this granularity.** Training noise dominates the TV signal between adjacent weights. TV=30 4.97% was a favorable basin; we can't easily reproduce it just by tweaking TV.
+
+Variance across adjacent TV values: ~0.5-1.0pp non-mono. The averaging effect of `pairs_per_epoch=50000` doesn't fully suppress this.
+
+**TV=30 seed=1 remains the best dual candidate** (CID22 0.8874 / non-mono 4.97%) across all training attempts.
+
+**Saved**: 3 bakes + `benchmarks/tv_micro_sweep_h128_seed1_2026-05-10.log`.
+
+**Cleanup**: pkill -f zensim_mlp_train cleared 8 zombie polling shells from Ticks 47-69. Future trainings will use `run_in_background: true` Bash tool to avoid this.
+
+**Next tick options**:
+1. **Ensemble** TV=30 seed=1 with TV=10/20 seed=1 (average predictions per pair) — may give better non-mono + CID22 simultaneously
+2. **Multi-target loss** (DSSIM/butter) — deferred Phase 4 work
+3. **TV apply_every=1** with smaller weight — may stabilize the noise
+4. **Accept the 4.97% as close enough** — 0.11pp gap is within training noise; ship the TV=30 bake
