@@ -2885,3 +2885,19 @@ No bake produced. Decision made to **stop wasting compute on confirmation-only e
 **No further training launched**. The next /loop tick should consider this work concluded.
 
 **Recommended action** (for user): either re-anchor the 0.8934 target as discussed in Tick 88/89, or accept V0_5 as the achievable Pareto frontier. Future CID22 > 0.8934 requires feature-space extension (zentrain INVERSION.md path) or different model class.
+
+### Tick 107 — 2026-05-11T02:48Z — Pareto doc adds Plots section + CID22 reference caveat
+
+Updated `zensim/benchmarks/pareto_2026-05-11.md` (commit `ea8e8edb` on zensim main):
+
+1. **Plots section** lists all 5 generated CID22-style plots at `/mnt/v/output/zensim/cycle_2026-05-11/` with one-line description per plot.
+2. **Caveat on CID22 reference numbers** documents that three different CID22 values exist in different repo references:
+   - `MEMORY.md` (in `~/.claude/CLAUDE.md`): "V0_5 ... CID22 0.8934" — aspirational, never measured (md5 verified identical to shipped V0_4)
+   - `zensim/CHANGELOG.md` (Unreleased): "CID22 (0.8928)" — possibly older eval method
+   - **This cycle (measurement-backed): CID22 0.8893** — full 4292-pair `dataset_metric_baseline`
+
+The caveat helps future sessions avoid being misled by stale aspirational targets. The 0.8893 number is now the measurement-of-record for V0_5 shipped.
+
+**No new measurements this tick**. Just doc consolidation. Cycle remains empirically closed.
+
+**Outstanding for user**: the `~/.claude/CLAUDE.md` global instructions still claim "V0_5 CID22 0.8934" — this is user-owned content; not editing without explicit request. Suggest user update the imazen crate index entry for zensim if they want consistency across the system.
