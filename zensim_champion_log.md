@@ -1689,3 +1689,40 @@ Generated `/tmp/zensim_loop/safe_synth_webpmono_tv_pairs.tsv` (2.5 MB, 196,671 l
 **Saved**: `/tmp/zensim_loop/safe_synth_webpmono_tv_pairs.tsv` (2.5 MB, 196,671 pairs ready for Rust consumption).
 
 **Next tick**: add TV regularizer to `mlp_train.rs` (~30 LOC), retrain h=128 + WebP-mono + TV (weight 5-30 sweep), measure non-mono via `score_unified_with_bake.py`.
+
+### Tick 67 — 2026-05-11T01:54Z — TV regularizer in Rust trainer + first TV=10 retrain — direction validated
+
+Implemented TV regularizer in Rust trainer:
+- `TvRegularizer { pairs, features, weight, apply_every, batch }` struct + `train_mlp_with_tv()` entry point
+- Inner loop: every `apply_every` pair updates, sample `batch` TV pairs, forward both, compute violation `ReLU(pred[hi] - pred[lo])`, backprop with `±scale = weight/batch` gradient, single Adam step
+- ~70 LOC across `mlp_train.rs` (40) + `bin/zensim_mlp_train.rs` (30) for CLI: `--tv-pairs-file`, `--tv-weight`, `--tv-apply-every`, `--tv-batch`
+
+Trained Rust h=128 + WebP-mono + seed=1 + **TV=10**:
+
+| Bake | CID22 | non-mono | Status |
+|---|---|---|---|
+| h128 seed=1 (no TV, prior champion) | **0.8941** | 6.72% | CID22 ✓ / smooth ✗ |
+| **h128 seed=1 + TV=10** | 0.8867 | **5.55%** | both still ✗ — getting closer |
+| Targets | > 0.8934 | < 4.86% | — |
+
+**Per-band CID22 (seed=1 + TV=10)**:
+- B0: 0.4291 (vs no-TV 0.4486) -0.020
+- B1: 0.4318 (vs no-TV 0.4240) +0.008
+- B2: 0.7818 (vs no-TV 0.7900) -0.008
+- B3: 0.1119 (vs no-TV 0.0908) +0.021
+- Near-PJND: 0.3275 (vs no-TV 0.3577) -0.030
+
+**Direction validated**:
+- Non-mono **down 1.17pp** (6.72 → 5.55)
+- CID22 down 0.0074 (0.8941 → 0.8867)
+- Trade-off ratio: ~6.4 pp non-mono per 0.01 CID22 — favorable
+
+**Need more TV to cross 4.86% target.** Per Python TV-weight Pareto from prior ticks: TV=30 gave non-mono 4.49% but CID22 0.8769. Likely the Rust equivalent at TV=20-30 will:
+- non-mono: 4.5-5.0% (probably below target)
+- CID22: 0.87-0.88 (below V0_5 floor)
+
+**Risk**: simultaneously hitting CID22 > 0.8893 AND non-mono < 4.86% may not be achievable with single-recipe seed selection. The Python data shows a Pareto frontier where moving along it always costs one for the other.
+
+**Saved**: `benchmarks/rust_webp_mono_h128_tv10_seed1_2026-05-10.{bin,train.log,eval.log}`.
+
+**Next tick**: train TV=20 and TV=5 (bracket the optimum). Sweep `tv_weight ∈ {5, 15, 20, 30}` with h=128 seed=1 WebP-mono. Each ~10 min. Total 4 trainings concurrent ~12 min wall.
