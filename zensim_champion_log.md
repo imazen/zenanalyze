@@ -127,6 +127,26 @@ Next concrete tick: port `bake_two_layer_znpr_v2` (formatter) and
 `train_mlp_with_tv` body. That seals Phase 1 with a ZNPK v2 bake
 that the existing `zenpredict` can read back.
 
+### Tick 262 — 2026-05-11T19:09Z — bake_two_layer_znpr_v2 ported (13/13 tests)
+
+zensim commit `6db42725`. ZNPR v2 formatter now lives in
+`zensim-train-core::mlp::bake_two_layer_znpr_v2`.
+
+- **API**: same signature as `zensim-validate`'s function — `(scaler_mean,
+  scaler_scale, w1, b1, w2, b2, n_inputs, n_hidden, n_outputs)` → `Vec<u8>`.
+- **Deps**: `zenpredict::bake::{BakeLayer, BakeRequest, bake_v2}` and
+  `zenpredict::{Activation, WeightDtype}` — uses the published v0.1.0
+  v2 API (no v3-only fields).
+- **Test**: parses ZNPR magic / v2 version field / n_inputs / n_outputs /
+  n_layers from a tiny 2→3→1 bake; trusts `zenpredict::bake_v2`'s own
+  test suite for byte-exact layout.
+- **All 13 tests passing** (5 baseline + 7 mlp primitives + 1 bake).
+
+Next concrete tick: port `TvRegularizer` (struct + methods),
+`spearman_correlation`, then `train_mlp_with_tv` body. Seal Phase 1
+with a smoke test that runs end-to-end on synthetic data and produces
+a tiny ZNPR v2 bake.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
