@@ -1043,6 +1043,31 @@ update CHANGELOG with the V0_7 ship; consider CHANGELOG release
 prep (the V0_7 ship is significant enough to warrant a 0.3.x version
 bump on next `zensim` release).
 
+### Tick 288 — 2026-05-11T23:56Z — V0_7 site data + CHANGELOG entry committed
+
+seed=1 training finished: best val_mean=0.9437 (close to seed=0's
+0.9443 but not above). Bake at
+`/tmp/zensim_loop/v0_7_clean_h128_tv10_seed1.bin`; not evaluated
+or used since V0_7 = seed=0 already shipped.
+
+Regenerated `site/data/`:
+- `bakes/V0_5_leaked.json` — pointed at archived path
+- `bakes/V0_6_clean_baseline.json` — renamed from V0_6_clean
+- `bakes/V0_7_shipped.json` — NEW from seed=0 eval log
+- `index.json` updated to 3 bakes
+
+CHANGELOG entry for V0_7 ship added under `[Unreleased]/Added`
+(zensim `54d650d9`).
+
+Site now has the V_X progression visible (V0_5 → V0_6 → V0_7) when
+served. GH Pages activation still pending user authorization.
+
+Next concrete tick: consider whether to release zensim 0.3.0 (the
+queued breaking changes from the existing [Unreleased] section make
+this a minor bump, and V0_7 is a meaningful new champion).
+Alternatively, dive into per-band B0/B1/Near-PJND closing —
+that's the next CID22 SROCC improvement direction.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
