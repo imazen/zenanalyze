@@ -678,6 +678,29 @@ Next concrete tick: either get user authorization for the seed
 sweep, OR move to Goal 6 (start building the GH Pages site
 scaffold while we wait).
 
+### Tick 277 — 2026-05-11T19:50Z — 4-seed V0_7 sweep launched (seeds 0/1/2/7)
+
+User authorized seed sweep on cleaned corpus.
+
+Launched 4 parallel zensim_mlp_train processes on cleaned features
+(156k pairs after perceptual remediation), same V0_5 recipe as V0_6
+(h=128, TV=10, 300 epochs, val_policy=Min, KonJND+KADID+TID groups).
+Seeds {0, 1, 2, 7}; V0_6 already covers seed=42.
+
+PIDs: 2689208 (seed=0), 2689209 (seed=1), 2689210 (seed=2),
+2689211 (seed=7).
+
+Output paths: `/tmp/zensim_loop/v0_7_clean_h128_tv10_seed{0,1,2,7}.bin`.
+stdout logs: `*_seed{0,1,2,7}_train.stdout`.
+
+Each ~14 min wall. Running in parallel on 16 cores (~3.5 cores per
+training); CPU contention may extend wall to ~20 min each.
+
+Next concrete tick: while sweep runs, start Goal 6 site scaffold —
+write the data-generation Python script + a minimal Plotly.js
+index.html that reads JSON for per-band SROCC bars. This is
+independent of the sweep result.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
