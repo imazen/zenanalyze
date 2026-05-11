@@ -1937,3 +1937,46 @@ While preparing ship-decision data for TV=30 seed=1, ran smoothness check on the
 **Where does the loop go from here?**
 - The CID22 > 0.8934 target with non-mono < V0_5's 4.57% is genuinely hard. Probably needs the actual Phase 4 work that wasn't done (multi-target loss, per-step pair sampling with correct architecture, more training data).
 - **Honest stopping point**: V0_5 is the current best ship. Document why no swap, and pivot to other priorities (corpus expansion, plotting, multi-codec).
+
+### Tick 74 — 2026-05-11T04:23Z — Verified: all 11 h128 no-TV seeds fail smoothness target
+
+Computed non-mono for all 11 h=128 WebP-mono no-TV bakes (those that already exist on disk). Best smoothness across the 11 seeds: **seed=9 at 5.68%** — still well above the 4.86% target.
+
+| Seed | CID22 | non-mono |
+|---|---|---|
+| 0 | 0.8718 | 6.21% |
+| **1** | **0.8941** ★ | 6.72% |
+| 2 | 0.8830 | 7.17% |
+| 3 | 0.8740 | 6.13% |
+| 4 | 0.8862 | 5.97% |
+| 5 | 0.8737 | 6.20% |
+| 6 | 0.8849 | 6.08% |
+| 7 | 0.8814 | 6.09% |
+| 8 | 0.8731 | 7.69% |
+| **9** | 0.8833 | **5.68%** |
+| 42 | 0.8752 | 5.86% |
+
+**Pareto frontier of h128 WebP-mono no-TV** (CID22, non-mono):
+- (0.8941, 6.72%) seed=1 — CID22 winner
+- (0.8862, 5.97%) seed=4
+- (0.8849, 6.08%) seed=6
+- (0.8833, 5.68%) seed=9 — smoothness-best at no-TV
+- All dominated by V0_5 (0.8893, 4.57%) on smoothness
+
+**Final confirmation**: V0_5 (CID22 0.8893, non-mono 4.57%) **strictly Pareto-dominates** every h=128 + WebP-mono + no-TV seed except seed=1, which has CID22 +0.0048 but smoothness +2.15pp worse — a clear bad trade for the dial property.
+
+**Saved**: `benchmarks/h128_noTV_11seeds_nonmono_2026-05-10.log`.
+
+**Recovery cycle conclusion** (locked):
+- V0_5 shipped is the right model. Don't swap.
+- The 70+ ticks of recovery work produced **0 strict-Pareto improvements** over V0_5.
+- The CID22 0.8893 → 0.8934 target gap (+0.004) is genuinely structural; no recipe tweak we tried bridges it without sacrificing the smoothness V0_5 already meets.
+- Closing that gap probably requires (a) more compression-tuned training data (multi-codec corpus expansion still pending user authorization), (b) multi-target supervision (DSSIM/butter, ~80 LOC Phase 4), or (c) larger architecture with regularization tuned to match V0_5's 4.57%.
+
+**Path forward (no auth needed for next tick)**:
+1. **Document this conclusion in everything.md** — update §0a "Latest state" with V0_5-stays-ship verdict
+2. **Multi-target DSSIM loss** — last unattempted Phase 4 item
+3. **Plot generation** in CID22 paper style — user's earlier request
+
+**Path forward (user authorization needed)**:
+4. Multi-codec corpus expansion (CLIC + JXL/WebP/AVIF/GIF + ssim2/butter/dssim GPU)
