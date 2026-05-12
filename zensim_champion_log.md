@@ -5220,6 +5220,28 @@ Cycle 6+ COMPLETE. No more recipe iterations remain in scope.
 
 **Next tick (441)**: idle until user direction.
 
+### Tick 441 — 2026-05-12T11:04Z — Coefficient blocklist patch staged for user
+
+Wrote `zensim/benchmarks/coefficient_blocklist_patch_2026-05-12.md`
+(zensim commit `bad47474`) — staged patch for the user to apply when
+they next work in the `coefficient` repo. The patch describes:
+1. The current state of CID22_VALIDATION_49 in
+   `generate_zensim_training.rs` (catches filename stems only)
+2. The required addition: PURGED_HEX_STEMS_2026_05_12 with 361 hex
+   stems from the purge manifest
+3. The exact Rust diff (suggested) for `is_banned()`
+4. Why this matters (durable fix vs the existing filename-only check)
+
+This unblocks "coefficient repo blocklist update" from the cycle-7
+queue without me touching the other repo directly (per CLAUDE.md
+strict cross-repo rule).
+
+**Site + zensim repo state**: as comprehensive as possible without
+external changes. Now everything that COULD be done autonomously
+is done.
+
+**Next tick (442)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
