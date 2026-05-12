@@ -5295,6 +5295,38 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 445 — 2026-05-12T20:02Z — Cleared cargo fmt drift in zensim (CI fix)
+
+zensim commit `e4282436`. CI has been failing for ~2 hours on every
+commit including the cycle-6 documentation pushes; investigated and
+found `cargo fmt --all --check` is the first-failing job. Local run
+`cargo fmt --all` modified **9 files** across three crates with no
+semantic changes:
+
+- `zensim-bench/examples/dataset_metric_baseline.rs`,
+  `score_konjnd_full.rs` (53 + 110 line diffs — long arg-parse arms,
+  wide table tuples, eprintln formatting)
+- `zensim-train-core/src/{lib,mlp,stats}.rs` (5–22 line diffs each)
+- `zensim-validate/src/bin/check_holdout_overlap*.rs`,
+  `zensim_mlp_train.rs`, `src/mlp_train.rs` (8–200 line diffs;
+  mlp_train.rs is the bulk — accumulated drift from many ticks of
+  edits that didn't run fmt)
+
+Total: 321 insertions / 154 deletions. `cargo fmt --all --check`
+now passes locally. CI should re-run on push and clear Format.
+
+**Other CI jobs still failing on prior commits** (Test, Clippy,
+MSRV, Coverage) — those need separate investigation. They may be
+related (clippy lints on the same drifted code) or independent
+(missing dep / nightly drift / etc.). Next tick should check the
+specific failures, not assume fmt fix cascades.
+
+**Per global CLAUDE.md**: "Fix CI failures immediately. After
+pushing, check CI with `gh run list`. When the first job fails,
+STOP waiting for the rest — read the failure log, diagnose, fix,
+push." Following that pattern — fmt was the first-failing job
+chronologically and the simplest to fix.
+
 ### Tick 444 — 2026-05-12T19:58Z — everything.md §0c cycle-6 close
 
 zenanalyze commit `b0e350bb` adds a new top-level section §0c
