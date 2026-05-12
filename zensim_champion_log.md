@@ -1892,6 +1892,50 @@ Hypothesis check pending:
 
 Next concrete tick: read TV=15 eval results.
 
+### Tick 319 — 2026-05-12T02:09Z — TV=15 non-mono SURPRISINGLY WORSE; V0_7 retained
+
+TV=15 non-mono q-step:
+- seed=1 TV=15: **5.87%** (vs seed=1 TV=10's 5.46% → +0.41 % WORSE!)
+- seed=13 TV=15: **5.56%** (vs seed=13 TV=10's 5.58% → −0.02 % marginal)
+
+**Counterintuitive finding**: increasing TV from 10 → 15 DESTROYED
+seed=1's smoothness lottery (5.46 → 5.87). The seed=1 "luck" was
+specifically at TV=10; changing the regularization disrupts it.
+
+Same pattern showed up across the V0_8 sweep:
+- TV=10 average non-mono across seeds: 5.83% (8 seeds)
+- TV=15 average: 5.72% (2 seeds, n too small but no clear improvement)
+- TV=20 (h128_tv20): 5.70%
+
+**TV=10 is roughly where current trainer + clean-corpus settles.**
+Increasing TV doesn't help smoothness in this regime — it may even
+slightly hurt (likely because it disrupts the lucky-seed-pull at
+TV=10).
+
+CID22 evals still running (~3 min). Result moot for shipping since
+non-mono fails for both candidates.
+
+**V0_7 seed=1 retains the ship.** TV=15 sweep also failed to
+produce a strict-upgrade V0_8.
+
+Cumulative V0_8 attempts (all eliminated):
+- h128_tv20 (TV=20, seed=1): CID22 0.8897, non-mono 5.70% ❌
+- h192_tv10 (h=192, TV=10, seed=1): CID22 0.8923, non-mono 5.66% ❌
+- 4-seed sweep (seeds 5/8/13/21 at TV=10): all non-mono ≥ 5.58% ❌
+- TV=15 at seeds 1/13: non-mono 5.87/5.56% ❌
+
+**Total V0_8 attempts: 8. None dual-pass. V0_7 seed=1 wins on
+both axes empirically reproduced 10 times.**
+
+The B1 gap is the persistent next-cycle target. Approaches that
+remain unexplored:
+1. Per-band-weighted TV (trainer feature; high-value, multi-day)
+2. Multi-criterion bake ensemble (V0_7 + seed=13 average)
+3. Densify B1 training pairs in corpus
+
+Next concrete tick: surface V0_8 cycle conclusion to user; identify
+any productive next-cycle work that doesn't need new compute.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
