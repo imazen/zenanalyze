@@ -5318,6 +5318,66 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 489 — 2026-05-12T23:17Z — V0_24 v1 trained + failed; recipe-drift root-cause; v2 plan
+
+zensim commit `41b304c0`:
+`benchmarks/v0_24_dssim_cotrain_v1_result_2026-05-12.md`.
+
+**Training**: V0_24 trained in ~5 min (300 epochs, batch 16384,
+seed=1, dssim_weight=0.3, TV pairs = 0 because human-csv-only).
+Final val_srocc=0.9976, test_srocc=0.9972. Looked great on val.
+
+**Baked**: `/tmp/zensim_loop/bakes/v0_24_dssim03_2026-05-13.bin`
+(120,683 bytes, ZNPR v2, same arch as V0_16).
+
+**Eval on CID22 full 4292 pairs**:
+
+| Metric | SROCC |
+|---|---:|
+| V0_2 (linear baseline) | 0.8676 |
+| **V0_24 (this experiment)** | **0.8315** |
+| **V0_16 (ship, reference)** | **0.8919** |
+| fast-ssim2-gpu | 0.8895 |
+| butter pnorm3 | 0.7412 |
+
+**V0_24 LOST 0.060 SROCC vs V0_16** on CID22. Per-band V0_24 loses
+to ssim2 in every band (B0/B1/B2/B3/Near-PJND).
+
+**Root cause**: V0_24's training log showed `0 adjacent-q pairs
+(0.0s)` for TV pair construction. The `--human-csv` loader hardcodes
+synthetic q=0 for those rows; without `--sweeps`, no real q values
+exist → no adjacent-q pairs → TV regularizer can't run → V0_24
+trained WITHOUT TV regularizer despite `--tv-weight 20`.
+
+V0_16's training presumably included `--sweeps v15r,v15rc` alongside
+the synth CSV to provide real q values for TV. V0_24 v1 was
+human-csv-only — a recipe drift.
+
+**Cannot attribute the regression cleanly**:
+- All recipe-drift (no TV): V_X without TV historically dropped CID22
+  by ~0.04-0.05 SROCC, so this -0.06 result is in that ballpark
+  without invoking dssim.
+- All dssim: dssim_weight=0.3 hurts CID22 directly.
+- Mixed: most likely both contribute.
+
+**V0_24 v2 plan**:
+1. Trainer patch: per-row dssim mask (NaN-aware) so sweep rows
+   (which lack dssim) skip the dssim term instead of getting
+   wrong target. ~5 lines.
+2. Launch with `--sweeps v12_zenavif,v12_zenjxl,v12_zenwebp,v13_zenjpeg,v14_zenpng`
+   (~75k codec-sweep rows) + the dssim-augmented synth CSV
+   (144k rows). Yields ~219k rows, real q values for TV pairs,
+   dssim only on safesyn rows. Direct A/B vs V0_16.
+3. Estimated 10 min implementation + 15 min training + 5 min
+   eval = ~30 min total.
+
+V0_24 v1 archived; V0_16 remains the ship. Cycle-7 dssim
+co-training is incomplete (one failed run, one data-prep issue
+surfaced + the no-TV regression confound).
+
+**Next concrete tick (490)**: implement per-row dssim mask +
+launch V0_24 v2 with --sweeps.
+
 ### Tick 488 — 2026-05-12T23:15Z — V0_24 dssim co-training LAUNCHED
 
 zensim commits this tick:
