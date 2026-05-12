@@ -2652,6 +2652,46 @@ specific loss term.
 **Next tick (345)**: launch V0_11 with `[15, 20, 15, 15]` (closer to
 V0_8) and/or konjnd weight 1.0. Cleanup stale polling shells (kpkill done).
 
+### Tick 345 — 2026-05-12T04:26Z — Root cause of B1 gap: training data imbalance + V0_11 flat TV=20 launched
+
+**Critical finding**: training data band distribution from
+`safe_synth_clean_features.csv` (156k rows, ssim2 binning):
+
+| Band | Train % | CID22 % |
+|---|--:|--:|
+| B0 (<50) | 27.6% | 7.5% |
+| **B1 [50,65)** | **16.2%** | **23.5%** |
+| B2 [65,90) | 43.6% | 67.9% |
+| B3 (≥90) | 12.6% | 1.0% |
+
+**B1 is undersampled in training (16.2%) relative to its CID22
+representation (23.5%)**. The B1 gap we've been chasing with TV
+regularization is rooted in data sparsity — TV can't manufacture
+ranking signal that the data doesn't provide.
+
+This explains why V0_10's heavy B1 TV `[15,25,15,15]` made B1 WORSE
+not better: over-regularization on sparse data flattens the predictions
+across adjacent-q pairs.
+
+**V0_11 launched** (PID 3082124): flat TV=20 (no per-band).
+Continuation of V0_7(10) → V0_8(15) progression. Tests whether
+uniform stronger TV continues to help aggregate or starts the
+V0_10-style overcorrection.
+
+Out: `/tmp/zensim_loop/v0_11_flat_tv20_seed1.bin`. ETA ~12 min.
+
+**Future B1-closure ideas** (queued, not this cycle):
+1. **B1 oversample**: duplicate B1 rows in safesyn_clean → ~50k B1
+   pairs → match B2 ratio. Requires regenerating TV pairs file too.
+2. **KonJND train weight 0.5 → 1.0**: KonJND PJND ≈ 63 sits in B1
+   centre; upweighting may anchor B1 directly.
+3. **B1-specific training data**: generate more zenjpeg/zenavif/zenwebp
+   pairs targeting the q range that produces ssim2 ∈ [50, 65). The
+   current synth generator may saturate quickly out of that range.
+
+**Next tick (346)**: monitor V0_11 progress; if first epochs look
+promising, prep B1-oversample CSV script for cycle 2.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
