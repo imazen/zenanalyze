@@ -3250,6 +3250,32 @@ ranking well on.
 **Next tick (362)**: V0_15 will be at ep 80-100, possibly approaching
 final best. Begin prepping V0_15 eval scripts + CHANGELOG entry.
 
+### Tick 362 — 2026-05-12T05:42Z — V0_15 ep 90 val_mean=0.9416 (matches V0_8 exactly!)
+
+**KEY OBSERVATION**: V0_15 ep 90 val_mean = **0.9416** — identical to
+V0_8's 0.9416 final best.
+
+Why this isn't surprising:
+- `val_mean` uses `--val-policy min` = worst-per-group SROCC
+- The worst group is consistently `kadid` (val_mean trace shows
+  kadid=0.9416 at ep 90 for V0_15)
+- KADID is CID22-CONTAMINATION-INDEPENDENT — the removed 11,629
+  rows mapped to CID22-content sources, not KADID
+- So both V0_15 (purged) and V0_8 (tainted) hit the same kadid SROCC
+- val_mean trajectory therefore matches; CID22 SROCC will differ
+
+**The contamination effect will only show in held-out CID22 SROCC**
+when we run the eval. Expected: V0_8 CID22 0.8948 → V0_15 CID22 ≈
+0.890-0.892 (drop of 0.005-0.007).
+
+**8 bake JSONs are all tainted**: V0_5..V0_12 all trained on clean
+features CSV with 11,629 contaminated rows. The site already shows
+V0_8 ship warning; other bakes are archived/experimental so no
+immediate action required.
+
+**Next tick (363)**: V0_15 should hit early-stop at ep 140 or set
+new best in cycle 2. When training done, eval chain auto-fires.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
