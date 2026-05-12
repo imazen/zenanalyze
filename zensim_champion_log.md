@@ -1415,6 +1415,37 @@ underperform.
 Next concrete tick: read h128_tv20 CID22 result (~2 min); check
 h192_tv10 epoch 140 (~5 min).
 
+### Tick 300 — 2026-05-12T00:53Z — h128_tv20 CID22 = 0.8897 (below V0_7's 0.8933)
+
+h128_tv20 CID22 final: **0.8897** — just barely above ssim2 (0.8895,
++0.0002) but **BELOW V0_7 seed=1's 0.8933 by 0.0036**.
+
+Per-band CID22 (h128_tv20):
+- B0: 0.4021 vs ssim2 0.4418 → -0.040 (WORSE than V0_7's -0.005)
+- B1: 0.4527 vs ssim2 0.4694 → **-0.017 (BETTER than V0_7's -0.027!)**
+- B2: 0.7811 vs ssim2 0.7722 → +0.009 BEATS
+- B3: 0.1868 vs ssim2 0.1121 → +0.075 BEATS
+- Near-PJND: 0.3563 vs ssim2 0.3908 → -0.034 (WORSE than V0_7's -0.017)
+
+**Interesting**: higher TV (20 vs 10) IMPROVED B1 by +0.010 and B2 by
+-0.008 (closer to V0_7 in B2, better in B1) but DEGRADED B0 and
+Near-PJND. Net wash on per-band, lower aggregate.
+
+**h128_tv20 ELIMINATED**: lower aggregate CID22 AND higher non-mono
+(5.70% vs V0_7's 5.46%). Two-axis loss.
+
+h192_tv10 still running: epoch 130, best=0.9419. Cyclic LR drops to
+1e-4 at epoch 140 — peak imminent.
+
+Insight for V0_8 next attempt:
+- TV=20 helps B1 (high-quality consensus) but hurts B0/Near-PJND
+- A MIXED-TV approach (low TV for low-q pairs, high TV for high-q
+  pairs) could potentially capture both wins
+- This is a per-band-weighted TV — not currently in the trainer
+  (would need a new feature)
+
+Next concrete tick: h192_tv10 final result + decide V0_8 ship-or-stand.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
