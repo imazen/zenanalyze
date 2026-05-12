@@ -3170,6 +3170,41 @@ bakes deleted.
 **Next tick (359)**: regenerate TV pairs against purged layout + launch
 V0_15 retrain.
 
+### Tick 359 — 2026-05-12T05:30Z — V0_15 LAUNCHED on properly-purged 144,791-row CSV
+
+**TV pairs regenerated** for purged layout:
+- safesyn TV pairs (newly generated from purged perceptual_clean.csv):
+  130,558 pairs / 14,233 (source, codec) groups
+- konjnd TV pairs (shifted from old combined by -11,629):
+  75,096 pairs unchanged
+- Total: 205,654 pairs (max idx 234,019, expected 245,648 - 11,629 ✓)
+- Out: `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv`
+
+**Band distribution** (safesyn portion):
+- B0 (<50): 21.6%
+- B1 [50,65): 16.6%
+- B2 [65,90): 47.9%
+- B3 (≥90): 14.0%
+
+**V0_15 launched** (PID 3187570):
+- Recipe: V0_8 (h=128, flat TV=15, seed=1)
+- Training data: properly-purged `/tmp/zensim_loop/safe_synth_clean_features.csv`
+  (144,791 rows, all CID22-d≤16 contamination removed)
+- TV pairs: `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv`
+- Out: `/tmp/zensim_loop/v0_15_purged_tv15_seed1.bin`
+
+**Hypothesis**: V0_15 will show HONEST CID22 SROCC (likely 0.890-0.892
+instead of V0_8's inflated 0.8948). The training-set leakage was
+contributing ~0.005 SROCC inflation per the audit (1.84% of training
+came from leaked refs at d≤10; at d≤16 the contamination footprint
+was 11,629 / 156,420 = 7.43% of clean training).
+
+If V0_15 CID22 ≥ fast-ssim2's 0.8895, it remains a viable ship candidate.
+If V0_15 CID22 < 0.8895, **we have no bake that beats ssim2 on clean
+data** — that's a major finding requiring a different recipe.
+
+**Next tick (360)**: monitor V0_15 to ~ep 40-50; assess trajectory.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
