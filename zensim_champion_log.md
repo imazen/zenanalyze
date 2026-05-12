@@ -4089,6 +4089,25 @@ recipe RANGE [0.8847, 0.8919] only includes ssim2's 0.8895 inside its
 **Next tick (393)**: update methodology page with seed-variance caveat.
 Surface 4-seed sweep numbers to user.
 
+### Tick 393 — 2026-05-12T07:48Z — Methodology Section 6 "Seed variance" shipped
+
+**Site methodology page** (zensim commit `65c00f3a`):
+- New **Section 6: Seed variance**
+- Full 4-seed sweep table with mean (0.8872) + stdev (0.0034)
+- Honest framing: V0_16 SHIP = 0.8919 is what runtime delivers, but
+  recipe mean ≈ 0.8872 — V0_16 is +1.4σ outlier
+- Future direction note: ensemble or arch change needed to
+  genuinely clear ssim2 by margin > seed σ
+
+**Sections 7-9 renumbered** (previously 6-8).
+
+**Known gaps** updated with seed-variance pointer.
+
+**Next tick (394)**: ensemble experiment — combine V0_16/V0_18/V0_19/V0_20
+per-pair predictions (need to re-run V0_19/V0_20 with --per-pair-output
+since the chains didn't emit per-pair CSVs). 4-seed-mean ensemble SROCC
+should be > any single seed (variance reduction).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
