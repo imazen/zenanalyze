@@ -3788,6 +3788,30 @@ Expected V0_17 outcomes:
 
 **Next tick (381)**: V0_17 should be at ep 60-80. Continue monitoring.
 
+### Tick 381 — 2026-05-12T07:00Z — V0_17 DONE: val=0.9387 (worse than V0_16 0.9403); scatter selector shipped
+
+**V0_17 (TV=25) final**: best val_mean = **0.9387** at ep 40, early-stop ep 90.
+
+TV optimum trajectory:
+- V0_15 (TV=15): val 0.9427 (best raw), CID22 0.8914
+- V0_16 (TV=20): val 0.9403 (declining), CID22 0.8919, B1=0.4559
+- V0_17 (TV=25): val 0.9387 (further decline) — CID22 + per-band eval pending
+
+If V0_17 also regresses on CID22/B0/B1, V0_16 (TV=20) is confirmed as
+the recipe optimum.
+
+V0_17 eval chain running (CID22 ~10% done at 429/4292).
+
+**Site additions** (zensim commit `1afa1851`):
+- Scatter selector dropdown letting user swap V0_16 / V0_15 / V0_8_tainted
+- All 3 bakes' scatter JSONs committed (V0_15, V0_8 added this tick;
+  V0_16 was already there)
+- User can now visually inspect "what does the contamination look like?"
+  by comparing V0_8_tainted scatter to V0_16
+
+**Next tick (382)**: collect V0_17 CID22+AIC-3 results; decide if V0_17
+ships (probably not, but check B0/B1).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
