@@ -2465,6 +2465,36 @@ AIC-3 at 1.2 GB / 1.5 GB.
 
 Next: read V0_9 eval results.
 
+### Tick 339 — 2026-05-12T04:05Z — V0_9 results: best non-mono + B0 but B1 didn't close
+
+V0_9 (per-band TV [10,20,10,10] seed=1):
+- **CID22 aggregate = 0.8924** (V0_8: 0.8948 → -0.0024)
+- **Non-mono = 5.46%** (V0_8: 5.87% → -0.41% BETTER, ties V0_7)
+- Per-band CID22 vs ssim2:
+  - **B0: -0.003 (NEAR PARITY)** — best of any bake
+  - B1: -0.023 (V0_8: -0.014 → V0_9 WORSE)
+  - B2: +0.013 (V0_8: +0.015)
+  - B3: +0.029 (V0_8: +0.051)
+  - Near-PJND: -0.022 (V0_8: -0.024)
+
+**Counterintuitive finding**: boosting TV=20 ONLY in B1 did NOT
+close B1 better than V0_8's flat TV=15. B1 closure depends on
+cross-band rank consistency — flat higher TV helps B1 indirectly
+via B2/B3 monotonicity. Per-band B1 boost alone isn't enough.
+
+**Tradeoff vs V0_8**: V0_9 wins B0 + Near-PJND + non-mono; V0_8
+wins aggregate + B1 + B2 + B3. Different ship optima.
+
+V0_9 satisfies the OLD strict 5.5% gate (5.46%); V0_8 only the new
+6.0% gate. If preserving smoothness is paramount, V0_9 is better.
+If aggregate-ssim2-beat is paramount, V0_8 is better.
+
+Bake: `/tmp/zensim_loop/v0_9_perband_tv_seed1.bin` (md5 TBD).
+
+Next: surface to user — V0_9 ships, V0_8 ships, or hold both as
+selectable profiles. Or: try other band-weight configs (e.g.,
+[10, 25, 15, 10] — push B1 harder AND raise B2/B3 closer to V0_8).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
