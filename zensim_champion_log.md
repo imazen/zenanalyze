@@ -5295,6 +5295,47 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 453 — 2026-05-12T20:38Z — AIC-3 export script + dssim-gpu backfill launched
+
+User directive: "dssim is important, you can have another run
+dssim gpu backfill in the bg". Acted on it:
+
+**dssim-gpu backfill (running in background)**:
+- 600-pair AIC-3 TSV at `/tmp/aic3_dssim/pairs.tsv` (10 refs × 6
+  codecs {AVIF, HM, JPEG-1, JPEG-2000, JPEGXL, VVC} × 10 quality
+  levels = 600).
+- Launched
+  `/home/lilith/work/zen/zenmetrics/target/release/zen-metrics
+  batch --metric dssim-gpu --pairs … --output
+  /tmp/aic3_dssim/scored_dssim.tsv` as bash background (PID
+  3519745); log at `/tmp/aic3_dssim/dssim_run.log`.
+- Progress as of tick close: 219 / 600 rows scored (~1/3, fast
+  GPU pass).
+- Output column: `dssim_gpu` (per zen-metrics batch convention).
+
+**AIC-3 → parquet export script** (zensim `33d576ed`):
+- `scripts/v_next/export_aic3_to_parquet.py` reads
+  `/mnt/v/dataset/aic3_ctc_epfl/decoded/info_with_bitrates.csv`
+  and merges in zen-metrics batch output TSVs by
+  `(codec, image_name, quality)` join key.
+- Schema: `corpus / ref_path / dist_path / image_name / codec /
+  q / quality_index / bpp / human_jnd` + optional `score_dssim
+  / score_ssim2 / score_butter_max / score_butter_p3 /
+  score_zensim` once the metric passes complete.
+- Base export (no metrics yet) at
+  `/tmp/aic3_dssim/aic3_ctc_epfl.parquet` (600 rows × 9 cols,
+  10 KB).
+
+**Next tick (454)**:
+1. Wait for dssim-gpu to finish (~1–2 min from now).
+2. Sequentially run ssim2-gpu, butteraugli-gpu, zensim (CPU)
+   batches against the same pairs.tsv. Single GPU → sequential,
+   not concurrent.
+3. Re-run export script with `--metrics-tsv` flags for each
+   metric output; final AIC-3 parquet has all 5 metrics +
+   human-JND + bpp.
+4. Once done, upload to R2 once public-read URL is enabled.
+
 ### Tick 452 — 2026-05-12T20:36Z — User corrections: stage-7 paper year, AIC-3/AIC-4 datasets, feat_* are zensim-not-zenanalyze
 
 User flagged three things during the cron tick:
