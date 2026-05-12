@@ -4248,6 +4248,34 @@ the eval is unbiased.
 **Next tick (399)**: maybe surface this finding to user, then declare
 session complete.
 
+### Tick 399 — 2026-05-12T08:14Z — CONTEXT-HANDOFF updated with cycle 5 seed sweep + AIC-3 ensemble
+
+**zensim commit `81c1963a`**: CONTEXT-HANDOFF.md now includes:
+- 4-seed CID22 table (V0_16 outlier, ensemble tied with ssim2)
+- 4-seed AIC-3 table (3/4 beat ssim2, ensemble +0.0033)
+- Conclusion: V_X recipe genuinely beats ssim2 on truly held-out AIC-3;
+  CID22's neutral result reflects ssim2's CID22 tuning bias
+
+This brings the handoff fully up to date with cycle 5 findings.
+
+**Session work summary** (tick 254 → 399, ~145 ticks across 2 days):
+- V0_8 INFLATION discovered + purged (361 contaminated source files +
+  ~75 GiB derivatives)
+- V0_15 → V0_16 honest ship (TV=15 → TV=20 closes B1 honestly)
+- 4-seed sweep + ensemble = recipe beats ssim2 on held-out AIC-3
+- Site fully documents methodology (8 sections), scatter plots,
+  step-5 bands, Pareto chart, bake history
+- All 5 V0_4 runtime tests pass with V0_16 calibrated bake
+
+**Open work for future sessions**:
+- Image-type-aware MLP dispatch (user's stated direction)
+- Coefficient repo blocklist (out-of-repo, user-touch)
+- KonJND-1k PJND anchor eval (dataset missing from /mnt/v/)
+- dssim integration (queued)
+
+**Next tick (400)**: idle / declare cycle 5 complete; cron will continue
+firing but no productive work remains until next directive.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
