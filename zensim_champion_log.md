@@ -3036,6 +3036,40 @@ V0_8, commit butter-concordance audit + plan a V0_14 with the Liberal
 filter applied to the clean CSV (after re-deriving features). This is
 larger than 10-min work — flag to user for authorization.
 
+### Tick 356 — 2026-05-12T05:13Z — Butter filter applied; V0_14 prep staged
+
+**V0_13 at ep 60, best=0.9387** (set at ep 40). Cycle 2 isn't lifting
+the peak. V0_13 will likely early-stop at ep 90.
+
+**Butter-filter prep done** (zensim commit pending):
+- Wrote `scripts/v_next/apply_butter_filter.py`
+- Output: `/tmp/zensim_loop/training_safe_synthetic_butter_filtered.csv`
+  - Input: 218,089 rows
+  - Dropped: 13,039 rows (5.98%) as butter-discordant LOW-q sides
+  - Output: 205,050 rows
+
+**V0_14 prep status** (cannot train this cycle):
+1. ✓ Butter-filtered original CSV ready
+2. ✗ Feature re-extraction TODO (zenanalyze 300 feats × 205k rows ≈ slow)
+3. ✗ Perceptual-overlap cleanup TODO (binary at
+   `zensim-validate/src/bin/check_holdout_overlap.rs`)
+4. ✗ Re-derive TV pairs against new row counts
+
+Estimated work: ~30 min compute (feature extraction) + 5 min cleanup
++ 1 min pair regen. Then ~12 min V0_14 training. Total ~50 min — too
+big for one tick.
+
+**Cycle 3 plan** (staged for after V0_13 finishes):
+- Tick 357-358: re-extract features for butter-filtered CSV
+- Tick 359: perceptual-overlap clean
+- Tick 360: regenerate TV pairs file
+- Tick 361: launch V0_14 (h=128, flat TV=15, seed=1, butter-clean data)
+- Tick 363-365: eval V0_14 against V0_8
+
+**Next tick (357)**: V0_13 may still be running. Begin feature
+extraction in background. Surface V0_14 plan to user (no specific
+authorization needed — synth-only data, no CID22 leak, just compute).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
