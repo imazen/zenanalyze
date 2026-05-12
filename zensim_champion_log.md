@@ -4004,6 +4004,27 @@ Auto-eval chains armed (PIDs 3323702, 3323706) using trainer PIDs
 likely converge near 0.94. Then collect CID22 for both → 4-seed mean
 + stdev.
 
+### Tick 390 — 2026-05-12T07:36Z — V0_19/V0_20 cycle 2; all 4 seeds val_mean within 0.0023
+
+V0_19 (seed=7) ep 80, cycle 1 best=0.9393 at ep 40
+V0_20 (seed=123) ep 80, cycle 1 best=0.9397 at ep 40
+
+Seed-by-seed val_mean comparison at ep 40 (first cycle peak):
+- seed=1 (V0_16): **0.9401** (highest)
+- seed=7 (V0_19): 0.9393
+- seed=42 (V0_18): 0.9378 (lowest)
+- seed=123 (V0_20): 0.9397
+
+Range = 0.0023, mean ≈ 0.9392, stdev ≈ 0.0010 on val_mean.
+
+If CID22 SROCC variance follows the same magnitude, V0_16's CID22 lead
+over ssim2 (+0.0024) is meaningful. If CID22 variance is much larger
+(per V0_16 vs V0_18 0.0072 spread), V0_16's "above ssim2" claim is
+within noise.
+
+**Next tick (391)**: V0_19/V0_20 likely at ep 130-140 (early-stop
+soon). Chains will fire, collect CID22 + non-mono for both.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
