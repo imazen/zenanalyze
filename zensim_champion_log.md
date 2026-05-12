@@ -5295,6 +5295,63 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 459 — 2026-05-12T20:59Z — Combined AIC per-codec analysis (three patterns)
+
+Tick 458 said next step was scoring dssim on unified parquets, but
+inspection showed unified parquets don't carry encoded files (just
+score columns + features), so re-scoring there needs a full re-encode
+sweep (multi-hour). Pivoted to the smaller-but-equally-actionable step:
+combined per-codec analysis across both AIC corpora.
+
+zensim commit `472ef50a`: `benchmarks/aic_combined_per_codec_2026-05-12.md`.
+
+**Pattern 1: dssim is the strongest baseline overall.** Of 12 (corpus,
+codec) cells, dssim is the top non-paper metric on 6 (AIC-3 JPEG-1;
+AIC-4 JPEG-1/JPEG-2000/JPEG-AI/JPEG-XL/VVC). fast-ssim2 tops 4
+(AIC-3 AVIF/HM/JPEG-2000/VVC; AIC-4 AVIF). V0_16 tops 1 (AIC-3 JPEGXL).
+
+**Pattern 2: JPEG-AI breaks point-wise metrics.** On AIC-4 JPEG-AI:
+- V0_16: 0.8265
+- fast-ssim2: 0.8459
+- dssim: **0.9147** (+0.088 over V0_16, +0.069 over ssim2)
+
+Transformer-codec artifacts aren't well-modeled by point-wise structural
+metrics; dssim's multi-scale SSIM-derived structure handles them
+substantially better. Cycle-7 implication: V0_X recipes need explicit
+transformer-codec training examples OR a multi-scale aggregation
+architecture change.
+
+**Pattern 3: V0_16 wins JPEG-derived codecs, loses HEVC/AV1-derived.**
+Pooled across both corpora:
+- V0_16 ahead: JPEG-1 (+0.005), JPEG-XL (+0.009)
+- V0_16 behind: AVIF (-0.009), HM (-0.004), VVC (mixed)
+- Tied: JPEG-2000
+
+Cycle-7 corpus rebalance: densify AVIF + HM + VVC encodes in synth;
+add transformer-codec examples (JPEG-AI or similar) to address pattern 2.
+
+**Aggregate cross-corpus summary** (V0_16 vs reference):
+- AIC-3 n=600: V0_16 0.7962 vs fast-ssim2 0.7970 (-0.0008)
+- AIC-4 n=300: V0_16 0.9107 vs fast-ssim2 0.9127 (-0.0020)
+- Cross-corpus pattern: dssim is the surprise winner on AIC-4 (0.9256
+  vs ssim2 0.9127). CVVDP at 0.9609 is the upper ceiling.
+
+**Cycle-7 actionable list (consolidated)**:
+1. Densify AVIF/HM/VVC distortion sampling in synth corpus
+2. Add transformer-codec examples (JPEG-AI artifacts)
+3. Consider dssim as a co-training signal — outperforms ssim2 on AIC-4
+4. Pursue multi-scale aggregation (path toward IW-SSIM/MS-SSIM-class
+   performance: +0.04 SROCC headroom)
+5. Long-horizon: CVVDP-style viewing-condition contrast sensitivity
+   (+0.05 SROCC ceiling)
+
+**Next concrete tick (460)**: with AIC parquets ready, the smallest
+useful step is to upload them to R2 so the comparison-site can pull
+them. But that needs the public-read URL the user hasn't enabled yet.
+Alternative independent step: scaffold the JS MLP forward-pass
+(228→128→1 LeakyReLU) in `site/js/mlp.js` — independent of network
+data, builds toward the comparison-site step 10.
+
 ### Tick 458 — 2026-05-12T20:53Z — Background chain DONE; full AIC-3/AIC-4 metric tables
 
 Chain finished at 20:51:42. All 5 metric passes (dssim/ssim2/butter ×
