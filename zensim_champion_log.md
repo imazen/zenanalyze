@@ -2260,6 +2260,33 @@ attribute). Login succeeds and listing returns
 Next concrete tick: monitor downloads; plan per-band-weighted TV
 trainer feature.
 
+### Tick 330 — 2026-05-12T03:30Z — AIC sidecars cloned; per-band TV design committed
+
+AIC-3 FTP at 64 MB / ~1.5 GB; AIC-4 ZIP extracted in progress
+(1.08 GB unzip).
+
+GitHub sidecars cloned to `~/work/`:
+- `JPEG-AIC-4-datasets`: 300 rows × 8 cols subjective scores (CSV
+  matches AIC-4 ZIP's PTC_##### images)
+- `dataset-btc-ptc-24`: subjective-data/ + test-images/
+
+**Per-band TV design** (zensim commit `e9a6877c`):
+- Replaces constant `--tv-weight` with per-band weight table
+  `{B0:10, B1:20, B2:15, B3:10}` based on V0_7-vs-V0_8 trade pattern
+- TV pairs file gains `band_id` column (backward-compat: absent =
+  all B2)
+- `TvRegularizer` struct gains `band_id: Option<Vec<u8>>` and
+  `band_weights: Option<[f64; 4]>`
+- New CLI flag `--tv-band-weights B0,B1,B2,B3`
+- Hypothesis: closes B1 like V0_8 but preserves V0_7's B0/non-mono
+
+Doc: `docs/PER_BAND_TV_DESIGN_2026-05-12.md`. ~3-5 hours
+implementation work; deferred to user-authorized next session.
+
+Next concrete tick: finish AIC-3 download; begin per-band TV
+implementation OR pivot to ingesting AIC-4 + AIC-3 datasets into
+our eval pipeline.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
