@@ -3226,6 +3226,30 @@ training set isn't hurting convergence at this stage.
 **Next tick (361)**: monitor V0_15 to ep 40-50; cycle peak around there.
 If V0_15 best val_mean > V0_8's 0.9416, it's a strong ship candidate.
 
+### Tick 361 — 2026-05-12T05:38Z — V0_15 ep 60 best=0.9391 (vs V0_8's INFLATED 0.9402); site banner added
+
+**V0_15 progress** (PID 3187590, 5:35 elapsed):
+- ep 40: val_mean 0.9391 (set as best — first cycle peak)
+- ep 50: 0.9081 (cycle 2 reset)
+- ep 60: 0.9220
+
+V0_15 ep 40 = 0.9391 vs V0_8 ep 40 = 0.9402: V0_15 is **0.0011 BEHIND**
+V0_8 at comparable epoch. Expected — V0_8's val_mean was also inflated
+by the 11,629 contaminated rows.
+
+The val_mean gap suggests V0_15 will land ~0.9407-0.9415 at convergence
+(vs V0_8's 0.9416). **CID22 SROCC gap** will be larger because the
+removed rows include CID22-content samples that V0_8 was specifically
+ranking well on.
+
+**Site warning banner shipped** (zensim commit `9111a8fa`):
+- Added prominent amber-bordered warning above the green V0_8 banner
+- Documents the contamination, links to purge manifest
+- Explains V0_8's 0.8948 is upper-bound until V0_15 lands
+
+**Next tick (362)**: V0_15 will be at ep 80-100, possibly approaching
+final best. Begin prepping V0_15 eval scripts + CHANGELOG entry.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
