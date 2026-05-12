@@ -2748,6 +2748,31 @@ RankNet signal in B1.
 **Next tick (348)**: monitor both; eval whichever finishes first. V0_12
 is the higher-confidence experiment (addresses root cause of B1 gap).
 
+### Tick 348 — 2026-05-12T04:38Z — V0_12 tracking ahead of V0_8 + V0_11; site JSON for V0_10
+
+**V0_12 first signs are strong**:
+- ep 0: 0.9034 (vs V0_8 0.8937, V0_11 0.8883)
+- ep 20: 0.9242 (vs V0_8 0.9277, V0_11 0.9298 — V0_12 slightly behind)
+- ep 30: 0.9354 (vs V0_8 0.9352 — even)
+- **ep 40: 0.9417** (vs V0_8 0.9402, V0_11 0.9398 — V0_12 LEADS by 0.0015)
+
+V0_12 is tracking ahead of V0_8 at the comparable cosine-cycle point.
+Final best should land near or above V0_8's 0.9416 — and if val SROCC
+correlates with CID22 (it has, weakly), V0_12 may beat V0_8 on the
+gold standard.
+
+**V0_11 progress** (ep 90, val=0.9408 — just improved from best 0.9398):
+- Still slowly improving in the 5th cosine cycle.
+- Early-stop will fire ~ep 140 if no further improvement.
+
+**Site update** (Goal #6):
+- Added `site/data/bakes/V0_10_perband_tv15_25_15_15.json` (full per-band table)
+- Updated `site/data/index.json` to include V0_10 + V0_8 AIC-3 note
+
+**Next tick (349)**: V0_11 should finish soon. Launch V0_11 eval first
+(serial — V0_12 still has 10 epochs to go). Then V0_12 eval. Update site
+with V0_11 + V0_12 numbers.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
