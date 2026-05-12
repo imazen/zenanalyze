@@ -5295,6 +5295,71 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 462 — 2026-05-12T21:11Z — Wired mlp.js into compare-worker.js + shipped 4 V_X bakes
+
+zensim commit `df3d1a55`. Build-order step 10 complete.
+
+**Shipped binaries** under `site/weights/`:
+- `v0_4.bin` — 60.9 KB (228→64→1, predecessor of V0_16, 2026-04-30)
+- `v0_16.bin` — 119.8 KB (228→128→1, current ship, 2026-05-12)
+- `v0_20.bin` — 119.8 KB (seed 123 from cycle-6 ensemble; 2-bake-optimum partner)
+- `v0_22.bin` — 119.8 KB (konjnd_w=1 specialty: best smoothness, best Near-PJND)
+
+Total: ~420 KB — well within gh-pages caps.
+
+**Worker wiring** (`site/js/compare-worker.js`):
+- Imports `parseZnpr` + `predict` from `./mlp.js`.
+- `bakeCache: Map<bakeId, Model>` for parsed bakes.
+- `loadBake(id)`: lazy fetch + parse; cached per worker session.
+- `bakeIdForMetric(metric)`: regex extracts `v0_NN` from `score_zensim_v0_NN`.
+- `runQuery` pre-loads bakes for X+Y axes; demo path applies V_X MLP to
+  synthetic 228-vec inputs to prove the pipeline is wired.
+
+**Compare.js metrics list** updated to reflect shipped bakes only
+(V0_4 / V0_16 / V0_20 / V0_22) and add human-JND CI columns visible
+when AIC-4 corpus is selected.
+
+**End-to-end node test** at `/tmp/worker_test.mjs`:
+
+| Bake | Architecture | predict(synth-vec) → |
+|---|---|---:|
+| V0_4  | 228→64→1   | 2170.99 |
+| V0_16 | 228→128→1  | 827.92 |
+| V0_20 | 228→128→1  | -63.20 |
+| V0_22 | 228→128→1  | -331.24 |
+
+All 4 produce distinct outputs from the same input (no cache crosstalk).
+Re-predicting on cached model yields identical answer (idempotent).
+The parser handles BOTH 228→64 (V0_4) and 228→128 (V0_16/20/22)
+architectures.
+
+**State of build-order**:
+1. ✅ Spec captured (CLAUDE.md)
+2. ✅ Plan doc (COMPARE_PLAN_2026-05-12.md)
+3. ✅ Skeleton compare.html + compare.js + compare-worker.js
+4. ⬜ Wire one parquet end-to-end (blocked on R2 public-read)
+5. ⬜ Upload parquets to R2 (blocked on user action)
+6. ⬜ Corpus checkboxes wired to actual data
+7. ⬜ Scatter + step-5 + per-band SROCC table real data
+8. ⬜ Codec/version filters
+9. ⬜ Y→codec lookup
+10. ✅ V_X bake binaries shipped + JS MLP forward-pass wired
+11. ⬜ Human-rated parquets (AIC-3/AIC-4 done at /tmp; need R2 upload)
+12. ⬜ MOS/DMOS axis dropdown wiring
+13. ⬜ Candlestick + CI by band
+14. ⬜ dssim scoring on unified parquets (needs full re-encode pass)
+15. ⬜ 2023 paper figure reproduction
+
+**Blocking**: R2 public-read URL form (r2.dev preview vs custom
+domain). Once user enables, steps 4/5/6/7/11/12 unblock.
+
+**Next concrete tick (463)**: write a small `tests/test_compare.html`
+or local-only DuckDB-WASM smoke that loads one local parquet (e.g.
+copy `unified_v12_zenwebp.parquet` to `site/data/parquet/`, ~14 MB,
+shipping as in-repo dev artifact). Tests the DuckDB-WASM path
+end-to-end. Once R2 is enabled this gets swapped for the remote
+parquet, but the JS path is exercised either way.
+
 ### Tick 461 — 2026-05-12T21:08Z — JS↔Rust bit-equivalence confirmed
 
 zensim commit `a108a82e`: `zensim-validate/examples/mlp_cross_check.rs`.
