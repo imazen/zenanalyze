@@ -5295,6 +5295,65 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 470 — 2026-05-12T21:46Z — CID22 full-set V0_16 measurement + corpus inventory doc
+
+zensim commits this tick:
+- `24e54a22` — `site/CORPORA_INVENTORY_2026-05-12.md`: single
+  reference card for all 5 in-repo corpora (AIC-3 + AIC-4 +
+  CID22 + KADID + TID), 18,366 total human-rated rows in
+  ~251 KB.
+- `9101dd00` — re-export of `site/data/parquet/cid22.parquet`
+  with **zensim CPU (V0_16) + dssim-gpu** columns merged
+  (chain2 zensim done at 4292/4292, dssim done at 4292/4292).
+  4341 rows × 13 cols, 161 KB.
+
+**First measurement on full CID22 paired-comparison set
+(n=4292, MCOS)**:
+
+| Metric | SROCC vs MCOS |
+|---|---:|
+| dssim (sign-flipped) | **+0.8722** |
+| zensim V0_16         | +0.8674 (-0.0048 below dssim) |
+
+dssim beats V0_16 by +0.0048 SROCC. This **continues the
+AIC-4 pattern** (dssim was strongest there too, +0.013 over
+fast-ssim2). The cross-corpus consistency strengthens the
+cycle-7 hypothesis: dssim is a stronger reference signal than
+ssim2 in many regimes, and adding it as a co-training target
+or replacing ssim2 with it in V_X training would be a
+structural win.
+
+**Note** on the 0.8919 vs 0.8674 discrepancy: ship docs cite
+V0_16 CID22 SROCC = 0.8919, but that's on the 49-ref
+validation subset (one row per ref, with a different scoring
+path than `zen-metrics batch`'s raw MLP output). The 4292-row
+paired-comparison set is a different statistic — both are
+valid CID22 numbers measuring different things.
+
+**Cross-AIC + CID22 consistency snapshot**:
+
+| Corpus | n | V0_16 | dssim | gap |
+|---|---:|---:|---:|---:|
+| AIC-3 CTC EPFL | 600 | 0.7962 | 0.7884 | V0_16 +0.0078 |
+| AIC-4 sample   | 300 | 0.9107 | 0.9256 | dssim +0.0149 |
+| CID22 (full)   | 4292 | 0.8674 | 0.8722 | dssim +0.0048 |
+
+V0_16 holds the lead on AIC-3 (sub-PJND range) but trails dssim
+on the structured AIC-4 (perceptibility range) and the full
+CID22. Avg gap across corpora: dssim ahead by ~+0.004 SROCC.
+
+**Background chain status**:
+- zensim CPU: ✅ DONE (4292/4292)
+- dssim-gpu: ✅ DONE (4292/4292)
+- ssim2-gpu: in flight (~30 min wall)
+- butter-gpu: queued after ssim2
+
+**Next concrete tick (471)**: poll for ssim2-gpu completion;
+when done, re-export cid22.parquet with ssim2 merged and compute
+V0_16 vs fast-ssim2 on full CID22. Goal #1 from CLAUDE.md
+(match-or-exceed fast-ssim2) is empirically checked on n=4292
+for the first time.
+
 ### Tick 469 — 2026-05-12T21:42Z — CID22 metrics chain launched (workaround for 16-bit PNGs)
 
 Launched the CID22 metric backfill but immediately hit `zen-metrics`
