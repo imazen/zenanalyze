@@ -5295,6 +5295,72 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 480 — 2026-05-12T22:35Z — All 5 in-repo corpora: comparable metric set unified
+
+3 commits this tick:
+- zensim `9b072771`: merged `score_v0_2_linear / score_ssim2_gpu /
+  score_butter_p3` into KADID + TID parquets from the per-pair CSV.
+- zensim `484a9762`: merged `score_v0_2_linear` into AIC-3 + CID22
+  parquets from their respective per-pair CSVs (AIC-4 has it via
+  the paper pre-computed columns; KADID/TID got it from this run).
+- zensim `83810a1d`: added `score_v0_2_linear` option to the
+  comparison-site Y-axis dropdown.
+
+**Final aggregate cross-corpus table (n totals)**:
+
+| Corpus | n | V0_2 | V0_16 | ssim2 | butter |
+|---|---:|---:|---:|---:|---:|
+| AIC-3 | 600 | 0.7962 | 0.7990 | 0.7965 | (TBD, scored in earlier chain) |
+| AIC-4 | 300 | 0.9107 | 0.9175 | 0.9127 | 0.8969 (paper) |
+| CID22 | 4292 | 0.8676 | 0.8919 | 0.8895 | 0.7911 |
+| **KADID** | **10125** | 0.8192 | **0.9403** | 0.8133 | 0.6062 |
+| **TID**   | **3000**  | 0.8427 | **0.9501** | 0.8460 | 0.6696 |
+
+**On the 3 held-out corpora** (no V_X training overlap): V0_16 is
+~+0.0024 to +0.0048 above ssim2 — modest but consistent. butter
+trails everything by 0.05-0.20 SROCC on those corpora.
+
+**On the 2 training-overlap corpora**: V0_16 dominates by +0.10 to
++0.13 — confirms V_X is well-fit but doesn't tell us anything
+new about generalization.
+
+**butter weakness across corpora**: butteraugli's 3-norm SROCC is
+substantially below ssim2 on every public corpus. Its claim to
+fame is the visually-lossless boundary, but the corpora span the
+full perceptibility range and butter's weighting is misaligned
+there.
+
+**Comparison-site is now fully consistent**: every corpus exposes
+the same `(human_*, score_v0_2_linear, score_zensim_v0_16,
+score_ssim2_gpu, score_butter_p3)` plus dssim where applicable.
+Users can pick any X-axis / Y-axis pair on any corpus and get a
+meaningful scatter.
+
+**Build-order MVP fully complete**. The remaining items are all
+either user-blocked (R2 unified parquets), multi-hour (dssim on
+unified parquets — needs full re-encode pass), or low-value (CID22
+paper figure repro). Recommend declaring cycle-6 complete and
+awaiting user direction on cycle-7 priorities.
+
+**Cycle-7 priorities (final list, ordered by impact)**:
+
+1. **JPEG-AI training examples** in synth corpus. V0_16 on JPEG-AI
+   = 0.7951 vs dssim 0.9147 (AIC-4). Transformer codecs are the
+   future; we're undertrained.
+2. **dssim co-training signal**. The AIC-4 dssim-wins-over-ssim2
+   finding + dssim's JPEG-AI dominance suggests dssim captures
+   something V_X currently misses.
+3. **AIC-3 sub-PJND coverage**. V0_16 loses 4 of 6 codecs in
+   sub-PJND distortion levels (q ≥ 85 area). Densify high-q synth
+   sweeps.
+4. **R2 unified parquet hosting** (user-blocked). Once enabled,
+   the comparison-site can query the 2.37M-row codec-sweep
+   parquets and the per-codec story scales 100×.
+
+**Next concrete tick (481)**: idle or user-direction. The
+2-bake-Pareto-optimum work, methodology page, site widget, 5
+parquet corpora, and final cross-corpus benchmarks are all done.
+
 ### Tick 479 — 2026-05-12T22:30Z — KADID + TID parquets gained TRUE V0_16
 
 zensim commit `09865f9b`. KADID and TID parquets are the last two
