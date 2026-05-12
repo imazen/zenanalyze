@@ -5295,6 +5295,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 461 — 2026-05-12T21:08Z — JS↔Rust bit-equivalence confirmed
+
+zensim commit `a108a82e`: `zensim-validate/examples/mlp_cross_check.rs`.
+
+Wrote a Rust example using `zenpredict::Model::from_bytes` +
+`Predictor::predict` (workspace `zenpredict = "0.1.0"`, which is the
+v2-supporting version on crates.io). Loaded V0_16 bake, ran predict on
+three input vectors. Compared against `site/js/mlp.js` outputs from
+tick 460's smoke test:
+
+| Input | Rust (zenpredict 0.1.0) | JS (site/js/mlp.js) | Δ |
+|---|---:|---:|---:|
+| `[0.5; 228]`         | **815.8024**  | **815.8024** | **0.0 (exact)** |
+| `[0.0; 228]`         | **115.45036** | **115.4504** | rounding-only (4-decimal JS print) |
+| `i/228 for i=0..228` | **1229.1823** | **1229.1825** | **0.0002** (f32 SAXPY accumulation order) |
+
+The 0.0002 delta on the sequence input comes from Rust's 8-wide chunked
+SAXPY vs JS's scalar accumulation loop — f32 associativity isn't
+guaranteed across reorderings. Both are correct; the difference is well
+within usable precision for ranking-based scoring.
+
+**JS forward-pass is now validated against the canonical Rust path**.
+Confidence is high enough to wire `mlp.js` into `compare-worker.js`
+(the previously "safer next step" option from tick 460).
+
+**Compile + run cost**: 4.26 s release build (one-time); inference time
+not measured but expected ≪ 1 ms per pair on the 228→128→1 net in both
+Rust and JS.
+
+**Path forward**:
+1. Wire `mlp.js` into `compare-worker.js` so Y-axis menu items like
+   "zensim V0_16 (JS-MLP)" and "zensim V0_18 seed 42 (JS-MLP)" produce
+   real scores from the parquet's `feat_*` columns.
+2. Ship V_X bake `.bin` files under `site/weights/` (small — V0_16 is
+   119 KB; V0_2 legacy will be similar). Five bakes ≈ 600 KB total,
+   well within gh-pages 100 MB per-file cap.
+3. Once R2 public-read URL is enabled by user, upload codec-sweep
+   parquets and human-rated parquets (AIC-3/AIC-4 ready, ready to go).
+
+**Next concrete tick (462)**: wire `mlp.js` into `compare-worker.js`
+(option A from tick 460 — now safe given the cross-check). Workers
+fetch `weights/v0_16.bin`, parse, apply to selected parquet rows,
+emit the result as a new metric column for scatter/SROCC.
+
 ### Tick 460 — 2026-05-12T21:04Z — JS MLP forward-pass scaffolded (site step 10)
 
 zensim commit `742e9222`: `site/js/mlp.js` (~160 LOC). MVP build-order
