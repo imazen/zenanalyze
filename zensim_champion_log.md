@@ -3635,6 +3635,43 @@ request (paper Table 5 is CID22-specific anyway).
 **Next tick (375)**: V0_16 should be at ep 190 (early-stop imminent).
 Chain will fire and emit V0_16 step-5 JSON.
 
+### Tick 375 — 2026-05-12T06:36Z — V0_16 BEATS V0_15 on CID22 AND per-band coverage!
+
+V0_16 DONE (early-stop ep 190, best val=0.9403). Bake md5 `b3f5fc59`,
+size 119,812 bytes.
+
+**V0_16 CID22 = 0.8919** (V0_15 was 0.8914 → **V0_16 +0.0005 better**).
+
+**V0_16 per-band CID22 BEATS V0_15** on B0, B1, Near-PJND (the bands
+V0_15 was weakest on):
+
+| Band | V0_15 | V0_16 | Δ(V0_16-V0_15) | V0_16 vs ssim2 |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 0.3933 | **0.4214** | **+0.028** | -0.020 |
+| B1 [50,65) | 0.4307 | **0.4559** | **+0.025** | -0.014 |
+| B2 [65,90) | 0.7849 | 0.7802 | -0.005 | +0.008 |
+| B3 (≥90) | 0.1886 | 0.1723 | -0.016 | +0.060 |
+| Near-PJND | 0.3453 | **0.3547** | **+0.009** | -0.036 |
+
+**V0_16 vs V0_15 summary**: V0_16 wins B0, B1, Near-PJND, CID22
+aggregate. V0_15 wins B2, B3.
+
+**Critical observation**: V0_16's B1 SROCC -0.014 vs ssim2 is the
+SAME as V0_8's -0.014 (TAINTED). So V0_16 closes the B1 gap HONESTLY,
+which V0_15 didn't. Higher TV (20 vs 15) on clean data RECOVERS the
+B1 closure that V0_8 had via contamination.
+
+This is a meaningful champion improvement. AIC-3 + non-mono pending.
+
+If V0_16:
+- AIC-3 ≥ V0_15's 0.8019 (cross-dataset hold)
+- Non-mono ≤ V0_15's 2.51% (smoothness preserved or improved)
+
+→ V0_16 SHOULD REPLACE V0_15 as ship.
+
+**Next tick (376)**: collect AIC-3 + non-mono; surface to user for
+ship swap authorization.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
