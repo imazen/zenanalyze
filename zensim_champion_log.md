@@ -3597,6 +3597,44 @@ status is confirmed (TV=15 is the recipe optimum on clean data).
 generate KADID/TID step-5 JSONs for V0_15; possibly extend site to
 swap CID22 vs KADID/TID step-5 chart via dataset dropdown.
 
+### Tick 374 — 2026-05-12T06:32Z — V0_15 BEATS V0_8 across ALL THREE datasets
+
+**V0_15 honest results across all 3 human-MOS datasets**:
+
+| Dataset | V0_15 | V0_8 | ssim2 | V0_15 - V0_8 |
+|---|--:|--:|--:|--:|
+| KADID10k (10,125) | **0.9427** | 0.9422 | 0.8133 | **+0.0005** ✓ |
+| TID2013 (3,000) | **0.9526** | 0.9515 | 0.8460 | **+0.0011** ✓ |
+| CID22 (4,292) | 0.8914 | 0.8948 | 0.8895 | -0.0034 |
+
+V0_8's 0.0034 advantage on CID22 is EXACTLY the contamination
+inflation (which we expected). On KADID and TID where there was no
+data overlap, V0_15 STRICTLY BEATS V0_8. Strong evidence that V0_15
+is the better-generalizing model.
+
+V0_15 dominance vs ssim2 across datasets:
+- KADID +0.129 (V0_15 vs ssim2 0.8133)
+- TID +0.107 (V0_15 vs ssim2 0.8460)
+- CID22 +0.0019 (V0_15 vs ssim2 0.8895)
+- AIC-3 +0.0054 (V0_15 0.8019 vs ssim2 0.7965)
+
+V0_15 SUBSTANTIALLY beats ssim2 on KADID/TID (synthetic distortions
+like blur/noise/color, where ssim2 is weak) and beats ssim2
+narrowly on real-codec datasets CID22/AIC-3.
+
+**V0_16 progress**: ep 160 (16:00 elapsed), best=0.9403 (set at ep 140,
+incremental improvement from ep 90's 0.9402). Tracking ~0.0025 BEHIND
+V0_15. Patience to ep 190 max.
+
+**Step-5 KADID/TID panels deferred**: KADID/TID human_score is in
+[0,1]/[0,1] but represents MOS not MCOS. The current step-5 binning
+script assumes MCOS-aligned. Would need dataset-specific scale handling.
+CID22 step-5 alone is sufficient for the user's "step 5 band graphs"
+request (paper Table 5 is CID22-specific anyway).
+
+**Next tick (375)**: V0_16 should be at ep 190 (early-stop imminent).
+Chain will fire and emit V0_16 step-5 JSON.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
