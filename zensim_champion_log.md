@@ -5295,6 +5295,35 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 444 — 2026-05-12T19:58Z — everything.md §0c cycle-6 close
+
+zenanalyze commit `b0e350bb` adds a new top-level section §0c
+`Cycle close (2026-05-12)` to `everything.md`, sitting between §0b
+(2026-05-11 V0_5 close) and the existing `## 0. Quick-reference map`.
+
+Content:
+- 2026-05-12 contamination purge summary (361 sources, 75 GiB derivs)
+- V0_15 honest ship → V0_16 honest ship (same-day supersede)
+- Cycle-6 ensemble characterization (4-seed sweep, V0_21/22/23 recipe
+  diversity, exhaustive 7-bake subset search → **{V0_16, V0_20}
+  2-bake Pareto optimum** at CID22 +0.0015, AIC-3 +0.0085)
+- Site + methodology + script artifacts published
+- Recipe-knob space EXHAUSTED, cycle 7 needs structural change
+
+This makes the cycle-6 findings discoverable from the central
+tracking doc without anyone having to read 443 tick entries. Parity
+with §0a (2026-05-10 close) and §0b (2026-05-11 close).
+
+**Outstanding tracking doc** still pointing at stale state:
+- `~/.claude/CLAUDE.md` global imazen crate index still shows V0_5
+  CID22 0.8934 + V0_8 lineage. User-owned content; not modifying
+  without explicit request (per Tick 111 precedent).
+- `~/work/zen/RECOVERY_HANDOFF_2026-05-08.md` predates cycle 6.
+
+**Next tick (445)**: idle unless user redirects. Cycle remains
+closed across the four authoritative trackers: zensim CHANGELOG +
+zensim CLAUDE.md + zenanalyze everything.md + zensim_champion_log.md.
+
 ### Tick 443 — 2026-05-12T19:55Z — CHANGELOG cycle-6 ensemble section
 
 zensim commit `c0773d34` adds a top-of-`[Unreleased]` section
