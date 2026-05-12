@@ -4915,6 +4915,20 @@ ETA ~7 more min. Chain will fire on completion.
 
 **Next tick (426)**: V0_22 at ep 80-90 (likely early-stop).
 
+### Tick 426 — 2026-05-12T10:04Z — V0_22 ep 80; near early-stop
+
+V0_22 (konjnd_w=1.0) at ep 80 (8:05 elapsed), best val=0.9380 set at
+ep 40, no improvement since. Patience timer to ep 90 → early-stop
+imminent. Chain will fire.
+
+V0_22 val 0.0023 below V0_16 (which had 0.9403) — TID is now the
+bottleneck. Suggests konjnd weight bump shifted training focus away
+from TID.
+
+Real ship signal will come from CID22 + AIC-3 eval.
+
+**Next tick (427)**: V0_22 eval results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
