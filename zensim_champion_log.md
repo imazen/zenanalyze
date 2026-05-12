@@ -5295,6 +5295,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 465 — 2026-05-12T21:23Z — Candlestick + box-plot mode (build-order step 13)
+
+zensim commit `2ef3f9ab`. The candlestick view from the user spec
+("offer both scatter and candlestick and ci interval tables by band")
+is now wired end-to-end.
+
+**Implementation**:
+- `compare-worker.js`: `computeBoxes(points, binWidth=5)` bins points
+  by 5-unit X steps and reports `{ x_lo, x_hi, x_mid, n, p5, p25,
+  p50, p75, p95 }` per bin. Sorting + quantile helper.
+- `result` message now carries `boxes` alongside `rows`, `step5`,
+  `bands`.
+- `compare.js`: renderResult adds a Plotly `box` trace per bin with
+  `lowerfence`/`q1`/`median`/`q3`/`upperfence` set to p5/p25/p50/p75/p95.
+  Renders into `#candlestick` div.
+- `compare.html`: descriptive lede above the candlestick (what the
+  box edges and whiskers mean).
+- compare.js `Number.isFinite` guards added on per-band SROCC/KROCC/
+  PLCC/RMSE table rendering so NaN cells show "—" instead of crashing
+  the toFixed call.
+
+**Verification**:
+- `node --check` passes on both compare.js and compare-worker.js
+- Live curl with cache-bust confirms gh-pages has the new code
+  (earlier curl hit GitHub edge cache; the deploy at 21:21 had
+  already shipped the candlestick logic)
+- Deploy site workflow: ✅ completed in 40s, 21:21 UTC
+
+**Build-order state**:
+1–4, 6–7 ✅ (spec, plan, skeleton, parquet round-trip, corpus UI,
+scatter+step-5+SROCC)
+10 ✅ (V_X bake binaries + JS MLP forward-pass)
+**13 ✅ (candlestick + p5..p95 by X-bin)**
+Remaining: 5 (R2 parquet upload), 8 (codec/version filter wiring),
+9 (Y→codec param lookup), 11 (CID22/KADID/TID human-rated parquets),
+12 (MOS/DMOS axis wiring), 14 (dssim on unified parquets), 15 (paper
+figure repro).
+
+**Live URL** (with cache-bust if needed):
+https://imazen.github.io/zensim/compare.html
+
+**Next concrete tick (466)**: codec / version filter wiring (step 8).
+The dropdowns exist in compare.html but aren't populated. compare.js
+needs to:
+1. On corpus selection, run a quick worker query to enumerate distinct
+   codec values + distinct knob_tuple_json values.
+2. Populate the dropdowns.
+3. When user picks a filter, pass it to runQuery so the worker SQL
+   adds a WHERE clause.
+
+Independent of R2.
+
 ### Tick 464 — 2026-05-12T21:18Z — Comparison-site live + verified end-to-end
 
 zensim commit `e12df03b`: nav link from index.html + "Try first"
