@@ -4614,6 +4614,35 @@ becomes the path forward for users wanting recipe-best performance.
 Rust (real cycle-6 implementation work), or surface to user for
 authorization.
 
+### Tick 413 — 2026-05-12T09:12Z — V0_21 + 5-bake ensemble row added to site bake history
+
+zensim commit `9e09a7c7`:
+- New `site/data/bakes/V0_21_butter_clean.json` with full per-band data
+- index.json includes V0_21 entry
+- NONMONO_PCT_BY_LABEL includes V0_21 (2.91%)
+- bake history table now shows:
+  - 4-seed ensemble (CID22 tied, AIC-3 wins)
+  - V0_21 single bake (CID22 below, AIC-3 wins)
+  - **5-bake ensemble** highlighted as CYCLE-6 DELIVERABLE
+    (BEATS ssim2 on BOTH datasets)
+
+The site now visually communicates the cycle-6 finding alongside the
+existing cycle-5 documentation.
+
+**Cycle 6 deliverable is fully shipped to site**: anyone visiting
+imazen.github.io/zensim can see the 5-bake ensemble result + methodology
+Sections 6.1/6.2/6.3 explaining the seed variance + AIC-3 ensemble +
+5-bake combination.
+
+**Next-tick paths**:
+1. Build Rust runtime support for multi-bake ensemble (zenpredict
+   extension; substantial code change ~3-4 hours)
+2. Try 6-bake ensemble (add another butter-clean seed variation)
+3. Image-type-aware dispatch (largest remaining direction)
+4. Idle / await user direction
+
+**Next tick (414)**: open-ended.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
