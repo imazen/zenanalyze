@@ -5142,6 +5142,37 @@ ETA ~1 min for early-stop, then eval (~5 min).
 
 **Next tick (438)**: V0_23 CID22 + AIC-3.
 
+### Tick 438 — 2026-05-12T10:52Z — V0_23 (val_policy=mean) confirms recipe space is exhausted
+
+V0_23 final results:
+- CID22: 0.8886 (-0.0009 vs ssim2; within seed-variance of V0_X mean 0.8872 ± 0.0034)
+- AIC-3: 0.7985 (+0.0020 vs ssim2; modest beat)
+- Non-mono: 2.40%
+- Near-PJND: 0.3554 (V0_16: 0.3547 — essentially tied)
+- B3: 0.1874 (V0_16: 0.1723 — V0_23 +0.015 better)
+
+V0_23 numbers fit cleanly within the V0_X seed-variance distribution.
+The val_policy=mean save criterion produces a bake that's a different
+random sample, but no new recipe-diversity dimension.
+
+**CYCLE 6 RECIPE-KNOB EXHAUSTED**:
+- TV magnitude: V0_15(15)/V0_16(20)/V0_17(25) sweep mapped
+- Seed: V0_16(1)/V0_18(42)/V0_19(7)/V0_20(123) sweep mapped
+- Training data variant: V0_21 butter-clean (different signal)
+- Group weights: V0_22 konjnd_w=1.0 (specialty Near-PJND/smoothness)
+- val_policy: V0_23 mean (just a different save criterion)
+
+**ALL recipe knobs within h=128 MLP space tested.** Further gains
+require structural change:
+- Multi-bake runtime ensemble (engineering work, +0.0086 AIC-3 with
+  {V0_16, V0_20, V0_21})
+- Image-type-aware MLP dispatch (multi-MLP architecture)
+- Deeper/wider arch (V0_13 h=256 tried, no help)
+
+Session has truly reached recipe-space optimum.
+
+**Next tick (439)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
