@@ -3578,6 +3578,25 @@ when the trainer is started inside an eval'd shell.
 **Next tick (373)**: V0_16 likely still in cycle 3 (ep 100-150).
 Continue monitoring; chain will fire when trainer exits.
 
+### Tick 373 — 2026-05-12T06:28Z — V0_16 ep 130 (best 0.9402); V0_15 KADID+TID per-pair eval launched
+
+**V0_16 status**: ep 130, best=0.9402 (set at ep 90, no improvement
+since). Will early-stop at ep 140. **0.0025 BEHIND V0_15** on val_mean.
+
+If V0_16 CID22 also lands lower than V0_15's 0.8914, then V0_15 ship
+status is confirmed (TV=15 is the recipe optimum on clean data).
+
+**V0_15 KADID+TID per-pair eval launched** (PID 3224409):
+- Will write CSV with rows from KADIK10k (10,125 pairs) + TID2013
+  (3,000 pairs)
+- Feeds per_band_step5.py for KADID/TID step-5 panels (currently
+  CID22-only on site)
+- ETA ~3-4 min (kadid 10k pairs at ~30/s)
+
+**Next tick (374)**: collect V0_16 results from auto-eval chain;
+generate KADID/TID step-5 JSONs for V0_15; possibly extend site to
+swap CID22 vs KADID/TID step-5 chart via dataset dropdown.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
