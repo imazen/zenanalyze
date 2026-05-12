@@ -5318,6 +5318,67 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 494 — 2026-05-12T23:44Z — V0_26 KonJND-aligned: closes JPEG-AI by +0.044 BUT loses CID22 by -0.028
+
+zensim commit `093b30b2`: V0_26 result doc.
+
+V0_26 = V0_25 recipe + `--human-csv konjnd:...:1.0:0.0`.
+Cross-corpus eval:
+
+| Metric | V0_26 | V0_16 | Δ |
+|---|---:|---:|---:|
+| AIC-3        | **0.8027** | 0.7990 | +0.004 |
+| AIC-4 agg    | 0.9097 | 0.9175 | -0.008 |
+| **CID22**    | 0.8639 | **0.8919** | **-0.028** |
+| **AIC-4 JPEG-AI** | **0.8387** | 0.7951 | **+0.044** ⚡ |
+
+**🎯 KonJND alone IS the cycle-7 lever for JPEG-AI** (NOT dssim).
+V0_26 closes the JPEG-AI gap by +0.044 SROCC without any dssim
+auxiliary head. This was the original cycle-7 motivation.
+
+**BUT V0_26 doesn't strictly dominate V0_16**:
+- CID22 regression -0.028 (the canonical gate)
+- JPEG-1 -0.026, JPEG-2000 -0.013, VVC -0.015 (smaller AIC-4 codec
+  regressions)
+- AVIF -0.005, JPEG-XL +0.001 (tiny)
+
+V0_16 stays ship. V0_26 is preserved as a useful tradeoff variant.
+
+**Cycle-7 cumulative cross-corpus table**:
+
+| Variant | CID22 | AIC-3 | AIC-4 agg | AIC-4 JPEG-AI |
+|---|---:|---:|---:|---:|
+| V0_16 (ship)              | **0.8919** | 0.7990 | **0.9175** | 0.7951 |
+| V0_24 v1 (no TV, dssim=0.3) | 0.8315 | — | — | — |
+| V0_24 v2 (TV, dssim=0.3)    | 0.8254 | — | — | — |
+| V0_25 (TV, dssim=0)         | 0.8505 | — | — | — |
+| V0_26 (TV+KonJND, dssim=0)  | 0.8639 | **0.8027** | 0.9097 | **0.8387** ⚡ |
+
+V0_16's 0.028 CID22 gap above V0_26 is from supervision channels
+we still haven't reproduced (likely KADID + TID mixed-supervision
+per V0_4 inheritance + maybe concordance filter).
+
+**Cycle-7 verdict — final**:
+- KonJND alignment is the real cycle-7 lever for JPEG-AI (+0.044
+  SROCC over V0_16), not dssim co-training.
+- dssim_weight=0.3 was a distractor (cost 0.025 CID22 with no
+  benefit; V0_26 achieves the same goal without dssim).
+- V0_16 ↔ V0_26 is a tradeoff, not a dominance. Possible future
+  cycle-8 paths:
+  1. Ensemble V0_16 + V0_26 (different per-codec strengths).
+  2. Add KADID + TID mixed-supervision (likely closes the
+     remaining 0.028 CID22 gap; would also dilute KonJND signal).
+  3. Architectural extension (multi-head per-codec-family
+     routing).
+
+**Cycle-7 is at a natural stopping point**. V0_16 stays ship.
+V0_26 + KonJND CSV provenance documented for future cycle-8.
+
+**Next concrete tick (495)**: genuinely idle unless user redirects.
+All 3 user-authorized tasks complete (R2 upload, dssim co-train,
+JPEG-AI — though the JPEG-AI fix came via KonJND not corpus
+acquisition).
+
 ### Tick 493 — 2026-05-12T23:37Z — Found KonJND CSV; V0_26 launched with mixed-supervision
 
 **Found the missing-supervision ingredient**: per tick 492 analysis,
