@@ -4552,6 +4552,37 @@ V0_21 patience timer reset to ep 140 if no new best after ep 90.
 **Next tick (411)**: V0_21 likely early-stops ep 90 or sets new best.
 Chain will fire eval.
 
+### Tick 411 — 2026-05-12T09:02Z — V0_21 (butter-clean) CID22=0.8874 — BELOW V0_16 (hypothesis disproved)
+
+V0_21 (butter-concordant training, 128k rows, otherwise V0_16 recipe):
+- val_mean best = 0.9390 (V0_16: 0.9403)
+- CID22 = **0.8874** (V0_16: 0.8919; -0.0045 lower)
+- Per-band: B0 0.4185, B1 0.4346, B2 0.7810, B3 0.1429
+  - All BELOW V0_16's B0/B1/B3 values
+  - Only B2 essentially tied
+
+**Hypothesis disproved**: butter-concordance filtering does NOT improve
+SROCC. The 11.27% of pairs where ssim2 and butter disagree on within-curve
+ranking contained REAL SIGNAL on CID22. Removing them hurts the model.
+
+Plausible reason: ssim2/butter rank disagreement happens at the boundaries
+of each metric's accuracy regime. CID22 humans don't follow ssim2 OR
+butter exactly — they're somewhere in between. The discordant pairs
+might be where the human label is most informative (because the metrics
+disagree).
+
+**Cycle 6 candidate #4 (butter-concordant training) RULED OUT.**
+
+V0_21 result is within seed variance of the V0_X distribution (mean
+0.8872 ± 0.0034). So the experiment doesn't even rule out "butter filter
+makes no difference" — just that it doesn't IMPROVE.
+
+AIC-3 + non-mono pending; will not change ship decision (V0_16 stays).
+
+**Next tick (412)**: collect AIC-3 + non-mono; document V0_21 as
+rule-out; turn attention to cycle 6 candidate #1 (image-type dispatch)
+or candidate #3 (deeper architecture).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
