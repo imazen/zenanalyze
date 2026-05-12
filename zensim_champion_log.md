@@ -1607,6 +1607,22 @@ matching seed=1's epoch-50 trajectory. No clear winner yet.
 
 Next concrete tick: monitor at epoch ~100 (cyclic LR cycle 3).
 
+### Tick 307 — 2026-05-12T01:21Z — seed=5/8 DONE (both 0.9419); seed=13/21 ep 120
+
+Seeds 5 and 8 both finished — best val_mean = **0.9419** (identical
+early-stop at epoch 90). Both below V0_7 seed=1's 0.9437 by 0.0018.
+
+Launched evals for both: CID22 SROCC + non-mono in parallel
+(PIDs 2855208-2855211).
+
+seed=13 and seed=21 still running at epoch 120:
+- seed=13: best=0.9428 (closest to V0_7's 0.9437)
+- seed=21: best=0.9418
+
+If seed=13 surges to 0.943+ in the final cycle, it has a shot.
+
+Next concrete tick: read seed=5/8 CID22 + non-mono; monitor 13/21.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
