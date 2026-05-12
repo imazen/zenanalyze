@@ -2941,6 +2941,38 @@ prioritizes those properties; the B0 weakness is real though.
 Build Plotly.js chart of Pareto (CID22 vs non-mono) showing all bakes.
 Document the V0_11/V0_12 results in CLAUDE.md shipping history.
 
+### Tick 353 — 2026-05-12T05:00Z — Site Pareto chart shipped + V0_13 (h=256) launched
+
+**Site update — Goal #6 progress** (zensim commit `1eadcf79`):
+- New Pareto scatter: CID22 SROCC (Y) vs non-mono q-step % (X reversed)
+- All 8 bakes (V0_5/V0_6/V0_7-seed0/V0_7-seed1/V0_8/V0_10/V0_11/V0_12)
+  + fast-ssim2 reference diamond
+- Color coding: V0_8 ship green, archived gray, smoothness specialists blue
+- New bake history rows with AIC-3 column
+- V0_8 SHIP banner still prominent
+
+The chart visualizes the **Pareto frontier dilemma**: V0_8 dominates
+CID22 aggregate but has worst non-mono of the modern bakes; V0_12
+dominates smoothness but ties ssim2 aggregate; V0_11 sits between.
+
+**V0_13 launched** (PID 3109383, h=256):
+- Same V0_8 recipe (flat TV=15, seed=1) but DOUBLED hidden layer
+- 4x parameter count (228×256 + 256×1 vs 228×128 + 128×1)
+- Hypothesis: B1 ranking failures are capacity-limited; more
+  parameters can absorb B1 patterns without sacrificing other bands
+- Per-epoch time: ~12.2s (vs h=128's 6.2s) → ETA ~30 min with
+  early-stop
+- **ep 0 val_mean = 0.9167** (highest of any bake at ep 0)
+- Out: `/tmp/zensim_loop/v0_13_h256_tv15_seed1.bin`
+
+**If V0_13 succeeds** (CID22 > 0.8948 AND B1 closer to ssim2),
+that proves the V0_8 plateau is capacity-limited and h=256 becomes
+the next ship candidate. **If V0_13 fails to clear V0_8**, V0_8 is
+genuinely the recipe optimum and we accept the floor.
+
+**Next tick (354)**: monitor V0_13 progress; site QA (open in browser
+if possible); commit V0_8 AIC-3 result to CLAUDE.md history.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
