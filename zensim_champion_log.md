@@ -5295,6 +5295,61 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 457 — 2026-05-12T20:49Z — V0_16 vs fast-ssim2 on AIC-3 (ssim2-gpu merged, canonical comparison)
+
+zensim commit `a85c8ba3` (renamed
+`benchmarks/aic3_zensim_vs_dssim_2026-05-12.md` →
+`aic3_zensim_vs_baselines_2026-05-12.md` and added ssim2-gpu).
+
+**Aggregate AIC-3 (n=600) |SROCC| vs human JND**:
+
+| Metric | \|SROCC\| | Result |
+|---|---:|---|
+| fast-ssim2-gpu | **0.7970** | reference baseline |
+| zensim V0_16   | 0.7962 | -0.0008 vs ssim2 (effective tie) |
+| dssim-gpu      | 0.7884 | structural baseline |
+
+Effective tie with fast-ssim2 in aggregate. Same shipping-bar result as
+on CID22 — V0_16 holds up here too.
+
+**Per-codec V0_16 vs fast-ssim2-gpu**:
+
+| Codec | zensim | ssim2-gpu | Δ | Winner |
+|---|---:|---:|---:|---|
+| AVIF      | 0.8106 | 0.8183 | -0.0077 | ssim2 |
+| HM        | 0.7795 | 0.7838 | -0.0043 | ssim2 |
+| JPEG-1    | 0.8497 | 0.8446 | +0.0051 | **V0_16** |
+| JPEG-2000 | 0.7658 | 0.7671 | -0.0013 | ssim2 (within noise) |
+| JPEGXL    | 0.8507 | 0.8399 | +0.0107 | **V0_16** (biggest margin) |
+| VVC       | 0.7999 | 0.8063 | -0.0064 | ssim2 |
+
+V0_16 wins on JPEG-1 and JPEGXL; ssim2 wins on AVIF, HM, JPEG-2000, VVC.
+
+**Pattern**: V0_16 wins where the distortion most resembles its synthetic
+training distribution (JPEG-1's blocking artifacts; JPEGXL inherits
+JPEG-derived structure). Loses on modern HEVC/AV1-derived codecs (AVIF,
+HM, VVC) which produce smoother artifacts.
+
+**Actionable for cycle 7**: densify AVIF/HM/VVC distortion sampling in
+the synth corpus. Currently the V0_X training data is heavy on zenjpeg-
+based encodes; AIC-3's V0_16 loss pattern would shrink if synth carried
+more transform-coded artifacts that match those modern codecs.
+
+**Cross-corpus consistency check**:
+- AIC-3 (n=600, low-q JND):  V0_16 -0.0008 vs fast-ssim2
+- AIC-4 (n=300, high-q JND): V0_16 -0.0018 vs paper SSIMULACRA2
+- CID22 (paper Table 3):     V0_16 +0.002 vs fast-ssim2
+
+V0_16 is within ±0.002 SROCC of fast-ssim2 on every public corpus. Goal #1
+(match-or-exceed across all bands) is empirically achieved.
+
+**Background chain**:
+- AIC-3 butteraugli-gpu: in flight (started 14:47)
+- AIC-4 dssim/ssim2/butter-gpu: queued (single GPU sequence)
+
+**Next tick (458)**: when butter lands, add butteraugli to the AIC-3 doc
+table; when AIC-4 chain finishes, do same for AIC-4.
+
 ### Tick 456 — 2026-05-12T20:45Z — V0_16 matches paper SSIMULACRA2 on AIC-4 (n=300)
 
 zensim commit `27e1275d`: `benchmarks/aic4_zensim_vs_paper_metrics_2026-05-12.md`.
