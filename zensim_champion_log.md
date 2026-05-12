@@ -5101,6 +5101,25 @@ Real signal will come from CID22/AIC-3 eval.
 
 **Next tick (435)**: V0_23 at ep 70-90.
 
+### Tick 435 — 2026-05-12T10:40Z — V0_23 ep 60, per-group SROCCs still mirror V0_16
+
+V0_23 per-group at ep 40 (cycle 1 peak):
+- kadid: 0.9401 (V0_16 had 0.9401)
+- tid: 0.9496 (V0_16: 0.9491)
+- konjnd: 0.9967 (V0_16: 0.9970)
+
+Essentially identical per-group SROCCs. The val_policy=mean vs min
+difference affects WHICH bake gets saved as best (mean might pick a
+different epoch's snapshot), but the trained model is fundamentally
+the same.
+
+Expected: V0_23 CID22 will land near V0_16's 0.8919 ± seed variance
+(~0.003). Not a meaningfully different bake.
+
+ETA ~5 more min. Will collect results next tick.
+
+**Next tick (436)**: V0_23 eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
