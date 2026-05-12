@@ -4954,6 +4954,30 @@ Will eval next tick once early-stop fires.
 
 **Next tick (429)**: V0_22 eval.
 
+### Tick 429 — 2026-05-12T10:16Z — V0_22 (konjnd_w=1.0) trades B2/B3 for Near-PJND
+
+V0_22 final results:
+- val_mean = 0.9395 (V0_16: 0.9403; -0.0008)
+- CID22 = **0.8870** (V0_16: 0.8919; -0.0049 below; below ssim2 -0.0025)
+- Per-band CID22:
+  - B0: 0.4204 (similar to V0_16's 0.4214)
+  - B1: 0.4437 (V0_16: 0.4559; slightly worse)
+  - B2: 0.7728 (V0_16: 0.7802; worse)
+  - B3: 0.1409 (V0_16: 0.1723; worse)
+  - **Near-PJND: 0.3710** (V0_16: 0.3547; **+0.0163 BETTER** — V0_22 wins this band!)
+
+**Key finding**: konjnd_w=1.0 IMPROVES Near-PJND by +0.0163 over V0_16
+at the cost of B2/B3. This is recipe-diversity in a different direction
+than V0_21 (butter-clean).
+
+V0_22 is a candidate for the ensemble specifically when Near-PJND
+matters. Should run subset search to test if {V0_16, V0_20, V0_21, V0_22}
+4-bake ensemble lifts the Near-PJND result.
+
+AIC-3 still running (480/600). Will collect + log next tick.
+
+**Next tick (430)**: V0_22 full results + extended subset search.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
