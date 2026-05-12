@@ -2995,6 +2995,47 @@ without the JND scores. Skipping AIC-4 ingestion for now.
 If V0_13 best val_mean clears V0_8's 0.9416 by a meaningful margin
 (say 0.005+), capacity-limit hypothesis is supported.
 
+### Tick 355 — 2026-05-12T05:09Z — V0_13 NOT helping; butter-concordance audit done
+
+**V0_13 capacity hypothesis weakening**:
+- ep 30 val=0.9309 (V0_8 was 0.9352, V0_11 was 0.9322)
+- ep 40 val=0.9387 (V0_8 was 0.9402, V0_11 was 0.9398)
+
+V0_13 is BEHIND V0_8 at comparable epochs. h=256 (4x params) does NOT
+help under the current recipe. Possibilities:
+- L2 needs scaling with hidden size (currently 1e-5, may need 4e-5)
+- Wider net needs more pairs_per_epoch (currently 50k)
+- The MLP architecture itself is the limit; need more layers/different
+- OR V0_8 is genuinely the recipe optimum
+
+Conservatively: **V0_8 confirmed as recipe optimum at h=128**.
+
+**Butter-concordance audit** (zensim commit pending):
+- Wrote `scripts/v_next/butter_concordance_audit.py`
+- Audit on `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv` (218,089 rows / 21,315 curves):
+  - **42.3% of curves have ≥1 ssim2/butter ranking disagreement**
+  - **6.63% of adjacent-q pairs are discordant** (13,039 / 196,671)
+  - SROCC distribution:
+    - [-1.0, -0.9]: 88.6% (clean — strong negative correlation; ssim2 + butter agree)
+    - (-0.9, -0.5]: 6.4% (moderate)
+    - (-0.5, 0.5]: 4.6% (weak — flagged for filtering)
+    - (0.5, 1.0]: 0.4% (catastrophic — definitely drop)
+- Output: `/tmp/zensim_loop/butter_concordance_audit.tsv` (1.9 MB per-curve)
+
+**Filter strategy options for cycle 3**:
+1. **Liberal (pair-level)**: drop only 13k discordant adjacent-q pairs → 6.6% pair drop, 93.4% retention
+2. **Moderate (curve SROCC > -0.5)**: drop ~1k catastrophic + weak curves → 95.2% retention
+3. **Aggressive (any discordance)**: drop 9k curves → 57.7% retention
+
+Recommend Liberal (option 1) — minimal data loss, removes only the
+clear-noise pairs. Could provide a cleaner training signal that may
+allow shipping a V0_14 with better B1 ranking (the unanswered problem).
+
+**Next tick (356)**: monitor V0_13 to completion. If it doesn't clear
+V0_8, commit butter-concordance audit + plan a V0_14 with the Liberal
+filter applied to the clean CSV (after re-deriving features). This is
+larger than 10-min work — flag to user for authorization.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
