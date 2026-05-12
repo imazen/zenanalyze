@@ -1305,6 +1305,23 @@ a follow-up.
 Next concrete tick: monitor V0_8 sweep progress; iterate on site
 (maybe add per-codec breakdown extraction).
 
+### Tick 295 — 2026-05-12T00:32Z — V0_8 sweep slow (CPU contention); bake-history table on site
+
+V0_8 sweep progress (slow due to concurrent-training CPU contention):
+- h192_tv10 seed=1: epoch 0 just done (t=9.7s; larger MLP = slower)
+- h128_tv20 seed=1: epoch 10 done (t=61.8s; ~6s/epoch)
+
+Expected wall: ~20-25 min remaining (was ~15 min estimate, slowed
+by concurrent training).
+
+Added a "Bake history" table to `site/index.html` (zensim `012a5ce4`)
+showing the V0_5 → V0_6 → V0_7(seed=0) → V0_7(seed=1) progression
+with CID22 SROCC, delta-vs-ssim2, non-mono q-step rate, and ship
+status. Current V0_7 seed=1 row bolded with all green deltas.
+
+Next concrete tick: monitor V0_8 sweep epoch ~50; expect another
+~15 min before either candidate produces a bake.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
