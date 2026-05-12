@@ -2412,6 +2412,25 @@ AIC-3 at 742 MB / 1.5 GB (50%).
 
 Next: check at epoch ~140.
 
+### Tick 336 — 2026-05-12T03:53Z — V0_9 ep 130 best 0.9421; cycle 4 peak at ep 190
+
+V0_9 ep 130 best=**0.9421** (achieved at ep 90).
+
+Comparison:
+- V0_7 TV=10 best 0.9437
+- V0_8 TV=15 best 0.9422
+- **V0_9 per-band [10,20,10,10] best 0.9421** (so far)
+
+V0_9 tracks closer to V0_8 than V0_7 — consistent with weighted-
+average TV being between 10 and 15 (B2 dominates at 47.7% with
+TV=10; B1 is 16.6% with TV=20).
+
+Cycle 4 peak imminent at epoch 190 (early-stop window).
+
+AIC-3 at 896 MB / 1.5 GB (60%).
+
+Next: V0_9 final at ep ~190; launch eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
