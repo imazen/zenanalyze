@@ -4861,6 +4861,25 @@ roadmap.
 
 **Next tick (423)**: idle.
 
+### Tick 423 — 2026-05-12T09:52Z — Methodology TL;DR added at top of page
+
+zensim commit `6d013c08`: 7-bullet TL;DR at top of methodology page
+covering the cycle 5+6 findings:
+1. V0_16 SHIP CID22/AIC-3/non-mono numbers
+2. Recipe-level signal: V0_16 on +1.4σ tail of recipe distribution
+3. AIC-3 ensemble +0.0033; {V0_20,V0_21} hits +0.0114
+4. Pareto-optimal {V0_16, V0_20, V0_21} for deployment
+5. Where the lift comes from: B2 (68% pairs)
+6. Smoothness: V0_16 non-mono per codec
+7. V0_8 contamination history
+
+First-time readers can now get the full story in one screen without
+scrolling through 10 sections.
+
+Site is now genuinely production-ready as a research artifact.
+
+**Next tick (424)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
