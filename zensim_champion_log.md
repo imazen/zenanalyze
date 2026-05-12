@@ -4025,6 +4025,35 @@ within noise.
 **Next tick (391)**: V0_19/V0_20 likely at ep 130-140 (early-stop
 soon). Chains will fire, collect CID22 + non-mono for both.
 
+### Tick 391 — 2026-05-12T07:40Z — V0_20 done CID22=0.8872 BELOW ssim2; V0_19 still training
+
+**V0_20 (seed=123) DONE**: val=0.9397, **CID22 = 0.8872** (-0.0023 vs ssim2 0.8895).
+
+**4-seed CID22 results so far**:
+| Seed | Bake | val_mean | CID22 | vs ssim2 |
+|---|---|--:|--:|--:|
+| 1 | V0_16 (SHIP) | 0.9403 | **0.8919** | +0.0024 |
+| 7 | V0_19 | 0.9403+ | TBD (training) | TBD |
+| 42 | V0_18 | 0.9401 | 0.8847 | -0.0048 |
+| 123 | V0_20 | 0.9397 | 0.8872 | -0.0023 |
+
+Mean so far (3 seeds): (0.8919 + 0.8847 + 0.8872) / 3 = **0.8879**, very close
+to ssim2 0.8895 (slightly below).
+
+V0_16 (seed=1) is now clearly the **outlier** on the high side. The V_X recipe
+SROCC averaged over seeds is **at or below ssim2**, not above.
+
+**Research-honesty conclusion**:
+- V0_16 SHIP CID22 0.8919 is the bake's actual measured value
+- "V_X recipe" expected CID22 (seed-averaged) ≈ 0.888 ± 0.004
+- V0_16's "+0.0024 above ssim2" is **largely seed-1 luck**
+
+V0_19 still training; will see if seed=7 corroborates (close to V0_16) or
+falls into the V0_18/V0_20 cluster.
+
+**Next tick (392)**: V0_19 finish + log; update methodology page with
+seed-variance caveat.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
