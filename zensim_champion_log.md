@@ -2441,6 +2441,30 @@ AIC-3 at 1.1 GB / 1.5 GB (~73%).
 
 Next: V0_9 final + eval (CID22 + non-mono + per-band).
 
+### Tick 338 — 2026-05-12T04:01Z — V0_9 DONE best 0.9422; eval launched
+
+V0_9 training **DONE** at ep 190 (early-stop). Best val_mean=
+**0.9422** at ep 140 (identical to V0_8).
+
+Bake: `/tmp/zensim_loop/v0_9_perband_tv_seed1.bin` (119,812 bytes).
+
+Evals launched:
+- CID22 (PID 3039620): `v0_9_eval.log`
+- Non-mono (PID 3039621): `v0_9_nonmono.log`
+
+Critical eval questions:
+- B1 SROCC: V0_7=-0.027, V0_8=-0.014. With B1 TV=20 (per-band), does
+  V0_9 land at ≤ -0.014?
+- Aggregate CID22: ≥ V0_8's 0.8948?
+- Non-mono: ≤ 5.5% (B0/B2/B3 keep TV=10, B1 boosted; expect smoother
+  curves overall)
+
+If V0_9 dominates V0_8 on per-band + non-mono, ship as V_NEXT.
+
+AIC-3 at 1.2 GB / 1.5 GB.
+
+Next: read V0_9 eval results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
