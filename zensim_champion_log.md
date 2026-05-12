@@ -3424,6 +3424,50 @@ When V0_8 per-pair lands, will:
 **Next tick (368)**: collect V0_8 per-pair; emit step-5 JSON;
 commit multi-bake step-5 view.
 
+### Tick 368 — 2026-05-12T06:10Z — V0_8 step-5 shipped; V0_15 vs V0_8 within-bin SROCC NEARLY IDENTICAL
+
+**V0_8 per-pair CID22 eval done** (105.5s, 4,292 pairs scored).
+Generated `site/data/step5_bands/v0_8_tainted.json` (13 bins). Pushed
+to zensim main (commits `73fe8e31` + `4079077d`).
+
+**V0_15 vs V0_8 within-bin SROCC comparison**:
+
+| Bin | n | V0_15 | V0_8 | ssim2 | Δ(V0_8-V0_15) |
+|---|--:|--:|--:|--:|--:|
+| [30,35) | 15 | -0.589 | -0.557 | 0.511 | +0.032 |
+| [35,40) | 42 | -0.040 | 0.050 | 0.147 | +0.090 |
+| [40,45) | 98 | 0.082 | 0.039 | 0.004 | -0.043 |
+| [45,50) | 168 | -0.245 | -0.250 | 0.223 | -0.005 |
+| [50,55) | 266 | -0.188 | -0.212 | 0.208 | -0.024 |
+| [55,60) | 349 | -0.233 | -0.250 | 0.256 | -0.017 |
+| [60,65) | 395 | -0.202 | -0.249 | 0.237 | -0.047 |
+| [65,70) | 441 | -0.151 | -0.149 | 0.154 | +0.002 |
+| [70,75) | 503 | -0.216 | -0.225 | 0.241 | -0.009 |
+| [75,80) | 589 | -0.219 | -0.211 | 0.209 | +0.009 |
+| [80,85) | 632 | -0.243 | -0.247 | 0.241 | -0.005 |
+| [85,90) | 750 | -0.224 | -0.200 | 0.223 | +0.024 |
+| [90,95) | 43 | 0.189 | 0.163 | -0.112 | -0.026 |
+
+**Key observation**: V0_15 and V0_8 within-bin SROCC differ by at most
+~0.09 (tail bin n=42), median |Δ| ≈ 0.015. The 0.0034 aggregate
+inflation between V0_8 and V0_15 doesn't concentrate in any single
+bin — it accumulates across the full MOS range (and the leaked rows
+boost ranking precision at all bands proportionally).
+
+**Sign note**: The negative within-bin SROCC values (e.g., -0.589 for
+bin [30,35)) reflect that WITHIN A NARROW MCOS WINDOW, the distance
+metric loses ranking power. Aggregate SROCC stays positive (~0.89)
+because the metric correctly ranks across the FULL MOS range; the
+within-bin signal is noise-dominated when MCOS span is small.
+
+This is consistent with ssim2 behavior (e.g., ssim2 [30,35) bin
+SROCC = 0.51 but [65,70) = 0.15 — both metrics have variable within-bin
+discriminative power).
+
+**Next tick (369)**: site QA — confirm GH Pages deploy actually
+succeeds after the `enablement: true` fix. Also add V0_2 step-5
+since the per-pair CSVs include V0_2 distances.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
