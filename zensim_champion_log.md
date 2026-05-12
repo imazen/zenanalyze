@@ -1322,6 +1322,27 @@ status. Current V0_7 seed=1 row bolded with all green deltas.
 Next concrete tick: monitor V0_8 sweep epoch ~50; expect another
 ~15 min before either candidate produces a bake.
 
+### Tick 296 — 2026-05-12T00:37Z — V0_8 sweep progress; eval script prepped
+
+V0_8 sweep at epoch ~30-60 (parallel):
+- h192_tv10: epoch 30, best=0.9386 (V0_7 ceiling was 0.9437; below)
+- h128_tv20: epoch 60, best=0.9398 (below V0_7)
+
+Both progressing but neither has hit V0_7's val_mean ceiling yet.
+~10-15 min more before convergence/early-stop.
+
+Prepared `/tmp/zensim_loop/eval_v0_8_sweep.sh` — runs
+`dataset_metric_baseline` + `score_unified_with_bake.py` (non-mono)
+against each candidate bake when it lands. Output to per-config
+eval log + tail summary including CID22 SROCC and non-mono rate.
+
+Reminder shipping target: V0_8 must beat V0_7's CID22 (0.8933) AND
+keep non-mono ≤ 5.5%. If neither candidate does, V0_7 remains the
+champion and V0_8 path moves to different knobs (seed, training
+data densification, architecture).
+
+Next concrete tick: wait for sweep convergence; run eval script.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
