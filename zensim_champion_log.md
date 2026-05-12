@@ -5295,6 +5295,68 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 483 — 2026-05-12T22:50Z — R2 codec-sweep parquets LIVE (user enabled `zentrain-r2.imazen.org`)
+
+User answered the cycle-7-fork question with a custom-domain URL
+(`zentrain-r2.imazen.org`) rather than picking one of the 4 options.
+That's option (2) "R2 setup" actioned — DNS already configured,
+Cloudflare bucket binding live.
+
+**Verified end-to-end**:
+- `curl -I https://zentrain-r2.imazen.org/<test>` returns Cloudflare
+  served + bucket data ✅
+- `aws s3 cp ... s3://zentrain/zensim-compare-site/_test.json` then
+  `curl ...` reproduces the content ✅
+- `accept-ranges: bytes` header set → DuckDB-WASM HTTP-range fetch
+  will work ✅
+
+**Uploaded 5 codec-sweep parquets** (99 MB total) in parallel:
+- `unified_v12_zenavif.parquet` (4k rows, 15 MB)
+- `unified_v12_zenjxl.parquet` (32k rows, 20 MB)
+- `unified_v12_zenwebp.parquet` (1k rows, 14 MB)
+- `unified_v13_zenjpeg.parquet` (36k rows, 36 MB)
+- `unified_v14_zenpng.parquet` (2.4k rows, 14 MB)
+
+All 5 schema-include `feat_0..feat_299` (zensim per-pair features),
+which unlocks the JS-MLP path on the comparison-site for ANY V_X
+bake against codec-sweep data.
+
+**NOT uploaded** (saved 1.2 GB egress):
+- `unified_v15r_zenjpeg.parquet` (1.79M rows, 496 MB)
+- `unified_v15rc_zenjpeg.parquet` (514k rows, 695 MB)
+
+Pending explicit user authorization given size + R2 egress cost.
+
+**Site wiring**:
+- `compare.js`: `R2_BASE = "https://zentrain-r2.imazen.org/zensim-compare-site"`;
+  5 R2 corpora added to `STUB_MANIFEST.corpora` (replacing the
+  `[R2 pending]` placeholders).
+- `compare-worker.js`: `CORPUS_URLS` map carries both in-repo
+  (relative paths) and R2 corpora (absolute URLs). DuckDB-WASM
+  accepts both as the `FROM '...'` source.
+- `_manifest.json` uploaded to bucket root describing what's
+  available + schema notes + the not-yet-uploaded v15 sweeps.
+
+**Build-order step 5 ✅** — R2 hosting enabled. Comparison-site
+now offers 10 corpora total (5 in-repo human-rated + 5 R2-hosted
+codec-sweep).
+
+zensim commit `606def3c`.
+
+**Live URL**: https://imazen.github.io/zensim/compare.html
+(after gh-pages deploy completes — about 1 min from this push).
+
+**Next concrete tick (484)**: now that codec-sweep parquets are
+live with feat_* cols, real cycle-7 work can start. The JS-MLP
+path can score any V_X bake on the millions of (image, codec, q)
+combos. A useful next thing would be to add a JS-MLP-scoring
+demo: "Pick zenjpeg sweep + Y = zensim V0_16 (JS-MLP), watch the
+worker score 36k rows against the v0_16.bin and produce
+per-codec SROCC vs MCOS … wait that's vs ssim2 since this is
+a codec sweep without human ratings". Actually the value is more
+about per-codec rate-distortion curves (X=bpp, Y=zensim_v0_16)
+than vs-human SROCC. Worth documenting the use cases.
+
 ### Tick 482 — 2026-05-12T22:42Z — Superseded banners on 3 V0_2-mislabeled AIC docs
 
 zensim commit `23b07439`. First Edit attempt errored (harness lost
