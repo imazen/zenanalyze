@@ -2543,6 +2543,30 @@ pairs CSV. score.jnd domain is [-3, 0]; use `human_score = score_jnd`
 (higher=better; identical=0, worst=-3). SROCC vs ssim2/zensim will be
 positive if both metrics rank consistently with human JND.
 
+### Tick 342 — 2026-05-12T04:17Z — AIC-3 loader added to dataset_metric_baseline.rs
+
+Extended `zensim-bench/examples/dataset_metric_baseline.rs` with:
+- New CLI arg `--aic3 <path-to-pairs-csv>`
+- New `load_aic3()` function (modeled on `load_csiq`)
+- Maps `score_jnd ∈ [-3, 0]` → `human_score = (score_jnd + 3) / 3 ∈ [0, 1]`
+  to match the higher=better convention used by all other loaders
+
+Build: `cargo build --release -p zensim-bench --example dataset_metric_baseline`
+clean (12s, no errors, no warnings).
+
+**V0_10 progress** (PID 3062154, 5.7 min in, at ~ep 60):
+- ep 0: val_mean 0.9053 (vs V0_9 0.8937 — V0_10 starts higher)
+- ep 40: val_mean 0.9402 (vs V0_9 0.9411 — slightly behind)
+- ep 60: val_mean 0.9235 (cycle reset at ep 50 → recovering)
+
+The higher cross-band TV (15 vs 10) is **expected** to reduce raw
+RankNet objective slightly. V0_8 ended at val 0.9416 vs V0_7's 0.9422.
+
+**Next tick (343)**: monitor V0_10 + launch AIC-3 baseline eval
+(V0_8 vs ssim2 vs butter) once V0_10 finishes, OR run AIC-3 baseline
+in parallel if CPU headroom allows (it's a different binary, may share
+core busy-wait but image decode is the bottleneck).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
