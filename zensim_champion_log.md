@@ -5318,6 +5318,51 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 488 — 2026-05-12T23:15Z — V0_24 dssim co-training LAUNCHED
+
+zensim commits this tick:
+- `34eb2d21` — 3 trainer unblockers: (1) join script that
+  positionally merges dssim from synth CSV into the existing
+  144,791-row features.csv V0_16 was trained on (verified 0 row
+  mismatches via human_score=max(0,ssim2/100) sanity check); (2)
+  `load_human_csv` patch preserves dssim column when present;
+  (3) `--sweeps NONE` allows CSV-only training mode (V0_16's
+  recipe routed through `--human-csv`).
+- `6d28c948` — graceful 0-TV-pairs handling: human-csv-only rows
+  have synthetic q=0 so TV-pair construction yields 0 pairs; was
+  crashing with `RuntimeError: random_ expects 'from' < 'to'`;
+  now prints info message + disables TV instead.
+
+**V0_24 training run LIVE** (PID 3645301):
+- Command: `python3 train_v_next_mlp.py --sweeps NONE
+  --human-csv safesyn:/tmp/zensim_loop/safe_synth_clean_features_with_dssim.csv:1.0:0.0
+  --target ssim2 --loss mse_rank --hidden 128 --epochs 300
+  --batch-size 16384 --lr 3e-3 --weight-decay 1e-5 --rank-weight 0.5
+  --tv-weight 20 --dssim-weight 0.3 --seed 1 --tag v0_24_dssim03_seed1_2026-05-13`
+- Recipe MATCHES V0_16 except `--dssim-weight 0.3` is new.
+- Loaded 144,791 rows / 2,376 unique refs / split train/val/test.
+- Config confirmed: `dssim_weight=0.3` in TrainConfig.
+- Trainer reports: `dssim co-training: weight=0.3, target rows=115,702`.
+- TV pairs: 0 (synthetic q=0 for human-csv rows) — TV regularizer
+  disabled this run. V0_16 had TV pairs from sweep parquets;
+  cleanest direct comparison would also include parquets. This
+  baseline V0_24 is a "dssim-only delta vs V0_16-no-TV" — useful
+  for isolating the dssim signal but not the cleanest A/B.
+- Log: `/tmp/zensim_loop/v0_24_dssim03_train.log`.
+- ETA: ~10 min wall.
+
+**Recipe-comparison caveat documented**: V0_24's no-TV-pairs side
+effect means we can't directly attribute any delta to dssim alone.
+For a proper A/B, next tick will launch V0_24-with-TV by also
+including sweep parquets in the run (handles NaN dssim correctly
+per the patch — sweep rows get dssim=0 → quality target=100, which
+is wrong; need a fix).
+
+**Next concrete tick (489)**: poll V0_24 training, bake when done,
+run dataset_metric_baseline on AIC-3/AIC-4/CID22 to get the
+per-corpus + per-codec breakdown — especially the JPEG-AI deficit
+which was the cycle-7 thesis.
+
 ### Tick 487 — 2026-05-12T23:08Z — Cycle-7 dssim trainer patch landed + data-prep gap documented
 
 Implemented `--dssim-weight` patch on `train_v_next_mlp.py`
