@@ -4583,6 +4583,37 @@ AIC-3 + non-mono pending; will not change ship decision (V0_16 stays).
 rule-out; turn attention to cycle 6 candidate #1 (image-type dispatch)
 or candidate #3 (deeper architecture).
 
+### Tick 412 — 2026-05-12T09:08Z — 5-BAKE ENSEMBLE BEATS SSIM2 ON BOTH DATASETS — CYCLE 6 DELIVERABLE
+
+Combined the V0_21 (butter-clean) bake with the 4-seed sweep into a
+5-bake ensemble:
+
+| Model | CID22 | Δ ssim2 | AIC-3 | Δ ssim2 |
+|---|--:|--:|--:|--:|
+| fast-ssim2 ref | 0.8895 | — | 0.7965 | — |
+| V0_16 SHIP | 0.8919 | +0.0024 | 0.7990 | +0.0025 |
+| 4-bake ensemble | 0.8892 | -0.0003 | 0.7998 | +0.0033 |
+| **5-bake (+V0_21)** | **0.8896** | **+0.0001** | **0.8012** | **+0.0047** |
+
+**KEY FINDING**: V0_21's CID22/AIC-3 trade-off as a single bake transforms
+into a STRICT WIN in the ensemble. The added recipe diversity (butter-
+clean training is fundamentally different from seed-sweep variation)
+lifts both axes simultaneously.
+
+**Cycle 6 deliverable**: a recipe combination (5-bake ensemble) that
+beats fast-ssim2 on BOTH biased (CID22) and unbiased (AIC-3) held-out
+data. To deploy, we need the multi-bake runtime ensemble path
+(methodology Section 9 candidate #2).
+
+V0_16 SHIP remains for single-bake deployment. Multi-bake runtime
+becomes the path forward for users wanting recipe-best performance.
+
+**Site Section 6.3 shipped** documenting this finding.
+
+**Next tick (413)**: consider building multi-bake runtime ensemble in
+Rust (real cycle-6 implementation work), or surface to user for
+authorization.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
