@@ -4746,6 +4746,24 @@ cycle-5+6 series.
 
 **Next tick (418)**: idle.
 
+### Tick 418 — 2026-05-12T09:32Z — 2D Pareto (CID22 vs AIC-3) chart added with ensemble points
+
+zensim commit `b3f4639d`:
+- New chart `chart-pareto-cid22-aic3` in site/index.html
+- `renderParetoCid22Aic3()` function in app.js
+- Plots all bakes as points; ssim2 reference as red diamond
+- HARD-CODED 3 ensemble points (orange): {V0_16,V0_21}, {V0_16,V0_20,V0_21}, 5-bake
+- Dashed red lines at ssim2 levels; visual goal = upper-right quadrant
+
+The chart immediately shows V0_16 + ensembles ALL clear ssim2 (upper-
+right quadrant) while V0_18/V0_19/V0_20 single bakes drop into CID22-
+below-ssim2 territory.
+
+**Site is comprehensive**: 7 chart sections + 5 bake tables + 10
+methodology sections. All cycle-5+6 findings are visualized.
+
+**Next tick (419)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
