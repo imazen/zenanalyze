@@ -1936,6 +1936,32 @@ remain unexplored:
 Next concrete tick: surface V0_8 cycle conclusion to user; identify
 any productive next-cycle work that doesn't need new compute.
 
+### Tick 320 — 2026-05-12T02:13Z — Session cycle summary doc committed
+
+Wrote `zensim/benchmarks/cycle_summary_2026-05-11.md` (zensim commit
+`b89e851f`) — comprehensive recap of the day's session covering:
+- V0_7 seed=1 ship details (CID22 0.8933, non-mono 5.46%, per-band)
+- Goal 5 leak-audit pipeline + 11.77% contamination cleanup
+- Goal 2 paper page-by-page methodology (30/30 complete)
+- Goal 3 KonJND Table 4 reproduction matching paper to 3-4 sig figs
+- Goal 6 GH Pages scaffold + 4-bake data
+- V0_8 sweep verdict (10 attempts, 0 strict upgrades)
+- Three key empirical findings
+- Next-cycle B1-closure approaches
+- Open work items (V0_4 test fix, Pages enable, WASM Phase 2, etc.)
+- Cycle stats (319 ticks, 25 zensim commits, 11 bakes)
+
+This is the durable artifact for the day's work. Future sessions can
+read it instead of scrolling 319 ticks.
+
+V0_7 seed=1 is the ship. V0_8 cycle proved seed=1 is genuinely
+unique at (h=128, TV=10) — 8 of 9 seeds fail non-mono, TV deviations
+hurt smoothness, val_mean doesn't predict CID22 perfectly.
+
+Next concrete tick: enable GH Pages (pending user authorization)
+OR start B1-densification work (need user authorization for
+generator changes).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
