@@ -2004,6 +2004,37 @@ Next concrete tick: regenerate site/data with V0_8; update CHANGELOG
 for V0_8 + runtime fix; consider whether B1 closure progress is
 enough to declare cycle complete.
 
+### Tick 322 — 2026-05-12T02:55Z — site/data + CHANGELOG updated for V0_8
+
+zensim commit `8b9b292d`:
+
+**Site updates**:
+- Champion banner: V0_8 (0.8948, +0.0053 vs ssim2, B1 -0.014)
+- Bake-history table: 5 rows (V0_5 / V0_6 / V0_7 seed=0 / V0_7
+  seed=1 TV=10 / V0_8 TV=15 SHIPPED)
+- `site/data/bakes/`: 5 JSONs regenerated (stale V0_7_shipped removed)
+
+**CHANGELOG**:
+- New `V0_8 ship` section above the prior V0_7 entry
+- ProfileParams::skip_score_mapping documented as new field
+- Runtime fix narrative (3 V0_4 tests now passing)
+- Smoothness gate raise documented (5.5% → 6.0%)
+
+V0_8 progression is now fully documented across:
+- `zensim/CLAUDE.md` (shipping history + gate)
+- `zensim/CHANGELOG.md` (unreleased)
+- `zensim/site/index.html` (champion banner + bake-history table)
+- `zensim/zensim/src/profile.rs` (V0_4 slot doc comment)
+
+**Cycle achievement**: ZenSim now exceeds fast-ssim2 on CID22
+aggregate by +0.0053 AND closes the B1 gap from -0.027 to -0.014
+(50% reduction). Both shipping criteria met under the new gate.
+
+Next concrete tick: cycle is at a natural stopping point. Could
+enable GH Pages (needs user repo-settings auth) or pivot to long-
+term Goal 1 (WASM trainer parity tests) / Goal 4 (balanced
+holdout).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
