@@ -5013,6 +5013,29 @@ queue that for next tick.
 
 **Next tick (431)**: V0_22 site row + scatter/step-5 + non-mono entry.
 
+### Tick 431 — 2026-05-12T10:24Z — V0_22 site additions; Pareto-optimal 3-bake highlighted
+
+zensim commit `96826d79`:
+- V0_22 bake JSON, scatter, step-5 generated
+- Added to index.json + NONMONO_PCT_BY_LABEL + scatter/step-5 selectors
+- Bake history now shows:
+  - 5-bake ensemble (downgraded note: "diluted")
+  - **{V0_16, V0_20, V0_21} 3-bake** highlighted as PARETO-OPTIMAL
+  - V0_22 specialty entry
+
+Site bake history now reflects the cycle-6 conclusions accurately:
+single-bake V0_16 ships; ensemble {V0_16, V0_20, V0_21} is the
+recommendation for users with multi-bake runtime; V0_22 is specialty.
+
+**Site state**:
+- 9 bake JSONs (V0_5 through V0_22)
+- 9 scatter JSONs
+- 9 step-5 JSONs
+- 10 methodology sections + TL;DR
+- 8 chart sections + KonJND/parity tables + bake history (15+ rows)
+
+**Next tick (432)**: idle / await user direction on cycle-7 work.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
