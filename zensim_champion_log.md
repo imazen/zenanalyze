@@ -5295,6 +5295,44 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 454 — 2026-05-12T20:42Z — AIC-3 dssim DONE, chain launched, AIC-4 export script
+
+zensim commits this tick:
+- `2a262cbf` — `scripts/v_next/export_aic4_to_parquet.py` (300
+  rows × 18 base cols including paper pre-computed PSNR-Y, SSIM,
+  MS-SSIM, IW-SSIM, VMAF-neg, SSIMULACRA2, HDR-VDP-2/3, CVVDP +
+  reconstructed JND with CI bounds; merges zen-metrics outputs
+  by `(codec, image_name, dlevel)`).
+- `240fec26` — fixed both export scripts: added `RENAME_ZEN_METRICS`
+  map so `dssim_gpu`→`score_dssim`, `butteraugli_max_gpu`→
+  `score_butter_max`, etc.; also made `write_parquet` handle
+  heterogeneous rows uniformly (per-column union of keys).
+
+**AIC-3 dssim COMPLETE**: 600/600 scored. Parquet now has
+`score_dssim` populated; values range 4e-5 (near-identical) to
+0.0176 (worst distortion), median 0.00275 — sensible DSSIM range.
+Live at `/tmp/aic3_dssim/aic3_ctc_epfl.parquet` (10 cols, 13 KB).
+
+**AIC-4 base export**: 300 rows × 18 cols at
+`/tmp/aic4_metrics/aic4_sample.parquet`. Pre-computed paper
+metrics already in (PSNR-Y, SSIM, MS-SSIM, IW-SSIM, VMAF-neg,
+SSIMULACRA2 paper, HDR-VDP-2/3, CVVDP) plus human JND + CI.
+
+**Background chain launched** (`/tmp/aic3_dssim/run_remaining_
+metrics.sh`, PID 3521421):
+- zensim CPU on AIC-3 + AIC-4 in parallel (separate cores)
+- AIC-3 GPU sequence: ssim2-gpu → butter-gpu
+- AIC-4 GPU sequence: dssim-gpu → ssim2-gpu → butter-gpu
+- Status at tick close: AIC-4 zensim DONE (63 KB);
+  AIC-3 zensim still running (~95%); AIC-3 ssim2-gpu running.
+- Total est. ETA: ~30 min for the full chain.
+
+**Next tick (455)** once chain finishes: re-run both exports
+with all metric TSVs merged, producing aic3_ctc_epfl.parquet
+(~13 cols including all 4 zen-metrics) and aic4_sample.parquet
+(~22 cols, paper + zen-metrics + JND-CI). Then upload to R2
+(blocked on user enabling public-read URL).
+
 ### Tick 453 — 2026-05-12T20:38Z — AIC-3 export script + dssim-gpu backfill launched
 
 User directive: "dssim is important, you can have another run
