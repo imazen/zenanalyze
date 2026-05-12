@@ -4785,6 +4785,29 @@ Idle status continues. Cron will fire every 4 min.
 
 **Next tick (420)**: idle.
 
+### Tick 420 — 2026-05-12T09:40Z — AIC-4 download URL 404; cycle 7+ remains blocked
+
+Tested `curl -sLI https://aicdb.jpeg.org/aic-4/JPEG-AIC-4-example-dataset.zip`
+→ HTTP 404. URL from AIC-4 README is stale or moved.
+
+AIC-4 evaluation requires either:
+- The user to provide a new URL or local copy of the dataset
+- Manual scraping of the JPEG AIC site for the active link
+
+Not actionable autonomously.
+
+**Recap of blocked work** (cycle 7+):
+1. zenpredict multi-bake ensemble runtime → needs Rust code change auth
+2. Image-type-aware MLP dispatch → multi-hour project, needs direction
+3. KonJND-1k restoration → dataset missing
+4. AIC-4 full dataset → URL 404
+5. dssim integration → Rust code change
+6. Coefficient repo blocklist → out-of-repo
+
+**Cron tick 420 idle**. Will continue.
+
+**Next tick (421)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
