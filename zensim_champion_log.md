@@ -1725,6 +1725,28 @@ Next concrete tick: seed=13 final + seed=21 CID22; close sweep
 documentation; pivot to Goal 4 (balanced holdout) or Goal 1 (parity
 tests) if time allows.
 
+### Tick 311 — 2026-05-12T01:37Z — seed=13 DONE best=0.9433; seed=21 CID22=0.8821 (eliminated)
+
+**seed=13 training DONE**: best val_mean = **0.9433** at epoch 140
+(early-stop epoch 190). Just 0.0004 below V0_7's 0.9437.
+
+**seed=21 CID22 = 0.8821** — well below V0_7's 0.8933 (-0.011).
+Eliminated.
+
+Launched seed=13 eval (PIDs 2915101, 2915102):
+- CID22 + KADID + TID + KonJND
+- Non-mono q-step rate
+
+seed=13 is the last sweep candidate. Outcome possibilities:
+- Both criteria pass → V0_8 = seed=13 (would ship if CID22 > 0.8933)
+- Non-mono fail → V0_7 stays; sweep concludes 0-for-8 also-rans
+- CID22 below V0_7 → V0_7 stays
+
+ETA ~5 min for seed=13 eval.
+
+Next concrete tick: read seed=13 CID22 + non-mono; finalize sweep
+verdict.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
