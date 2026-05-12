@@ -1170,6 +1170,44 @@ Next concrete tick: regenerate site/data with the swapped V0_7;
 update CHANGELOG entry; flag B1 SROCC gap as a focused next-cycle
 target.
 
+### Tick 292 — 2026-05-12T00:09Z — CHANGELOG + site/data updated for V0_7 seed=1 ship
+
+zensim commit `db66055b`:
+
+- CHANGELOG `[Unreleased]/Added` entry rewritten to reflect seed=1
+  as the final ship. Includes the methodology note about
+  val_mean→CID22 non-monotonicity.
+- `site/data/` regenerated with 4 bakes:
+  - `V0_5_leaked.json` (archived)
+  - `V0_6_clean_baseline.json` (honest seed=42)
+  - `V0_7_seed0_initial.json` (archived initial ship)
+  - `V0_7_shipped.json` (CURRENT, seed=1)
+
+`site/index.json` now lists 4 bakes. The Plotly.js bars on the
+site will show the V_X progression from V0_5 (leaked) through V0_6
+(honest baseline) through V0_7 seed=0 (initial ship) to V0_7 seed=1
+(final ship).
+
+**State of the cycle**:
+- Goal 1 (parity): scaffold only (zensim-train-core landed; no parity
+  tests yet — Phase 1 incomplete)
+- Goal 2 (paper methodology): COMPLETE (30/30 pages)
+- Goal 3 (paper SSIM2 repro): KonJND Table 4 numbers MATCH to 3-4 sig
+  figs; full Table 3 reproduction script not yet written
+- Goal 4 (balanced holdout): not started
+- Goal 5 (overlap audit): COMPLETE (stage-1+stage-2 shipped, V0_7
+  trained on clean corpus)
+- Goal 6 (GH Pages site): scaffold + 4-bake data + workflow committed
+  (Pages activation in repo settings pending)
+
+V0_7 (seed=1) is the new champion: ssim2-beat +0.0038, smoothness
+within target. **First time both shipping criteria are met
+simultaneously in this cycle.**
+
+Next concrete tick: investigate the B1 gap (V0_7 −0.027 vs ssim2)
+since that's the only meaningful per-band loss. Or: enable GH Pages
+(pending user authorization) so the site is publicly visible.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
