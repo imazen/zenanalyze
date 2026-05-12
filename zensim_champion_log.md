@@ -4941,6 +4941,19 @@ ETA ~3-4 more min. Will collect results next tick.
 
 **Next tick (428)**: V0_22 eval should be in.
 
+### Tick 428 — 2026-05-12T10:12Z — V0_22 still training (ep 170 cycle 4)
+
+V0_22 set new best 0.9395 at ep 140 (up from 0.9387). Patience timer
+reset; ep 190 max. Still running.
+
+V0_22 (konjnd_w=1.0) is converging more slowly than V0_16 (which
+finished at ep 90 with 0.9403). Possibly the heavier konjnd weight
+makes the gradient signal more complex; takes more epochs to settle.
+
+Will eval next tick once early-stop fires.
+
+**Next tick (429)**: V0_22 eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
