@@ -5120,6 +5120,19 @@ ETA ~5 more min. Will collect results next tick.
 
 **Next tick (436)**: V0_23 eval.
 
+### Tick 436 — 2026-05-12T10:44Z — V0_23 ep 100, still training (cycle 3)
+
+V0_23 set new best val_mean=0.9631 at ep 90 (mean across kadid/tid/konjnd).
+Patience reset; ep 140 max. Per-group at ep 90:
+- kadid: 0.9402 (V0_16: 0.9403)
+- tid: 0.9521 (V0_16: 0.9534)
+- konjnd: 0.9970 (V0_16: 0.9972)
+
+Indistinguishable from V0_16 trajectory. val_policy=mean isn't producing
+a different MODEL — only a different SAVE-TIME criterion.
+
+**Next tick (437)**: V0_23 eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
