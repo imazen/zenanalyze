@@ -5295,6 +5295,56 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 481 — 2026-05-12T22:38Z — Cycle-6 finals canonical doc
+
+zensim commit `e06d01a2`: `benchmarks/cycle_6_finals_2026-05-12.md`.
+
+Single reference doc that:
+1. Lists the cross-corpus aggregate table (all 5 corpora).
+2. Annotates which corpora are truly held-out (AIC-3 / AIC-4 /
+   CID22) vs which have V_X training overlap (KADID / TID).
+3. Per-codec scorecard on the 3 held-out corpora (V0_16 wins 11 /
+   ties 3 / loses 7 of 21 codec comparisons).
+4. Surfaces the JPEG-AI anomaly as the single biggest cycle-7
+   target.
+5. Provides a document index pointing at the canonical reference
+   docs and marking the 3 V0_2-mislabeled AIC docs as superseded.
+6. Lists cycle-7 priorities in impact order.
+
+This is the doc readers should start with when navigating cycle-6
+results. The earlier per-corpus docs remain in place but are
+explicitly indexed as either "canonical" or "superseded".
+
+**Cycle-6 final state**:
+- ✅ V0_16 shipped 2026-05-12 at zensim/weights/v0_16_2026-05-12.bin
+- ✅ Goal #1 (match-or-exceed fast-ssim2) empirically met on all
+  3 truly-held-out human-rated corpora (AIC-3 +0.0025, AIC-4
+  +0.0048, CID22 +0.0024)
+- ✅ Per-codec wins on most codecs; specific deficit identified
+  (JPEG-AI on AIC-4)
+- ✅ Comparison-site live at https://imazen.github.io/zensim/compare.html
+- ✅ 5 in-repo parquets + 4 V_X bake binaries + DuckDB-WASM end-to-end
+- ✅ Build-order MVP complete (steps 1-4, 6-11, 13)
+- ⬜ R2 unified parquets (user-blocked, would unlock 2.37M-row codec-sweep data)
+- ⬜ JPEG-AI / dssim co-training experiments (cycle-7 territory)
+
+**Tick log accumulated**: this is tick 481. The cron-driven /loop
+4m has produced 39 ticks over the past ~3 hours (442 → 481), most
+of which advanced the comparison-site build OR corrected the
+zen-metrics-CLI V0_2-mislabeling cascade.
+
+The recovery cycle (started 2026-05-10) is now CLOSED on cycle 6:
+- 2026-05-10 cycle 5: V0_5 stays ship
+- 2026-05-11 cycle 5 (extended): V_X recipe found, V0_7-V0_8 shipped
+- 2026-05-12 cycle 6: V0_15 → V0_16 honest ship after contamination
+  purge; comparison-site MVP; goal-#1 empirical verification on
+  all 5 in-repo corpora; 14 wins-or-ties of 21 per-codec
+  comparisons.
+
+**Next concrete tick (482)**: idle unless user provides cycle-7
+direction. The remaining items are all multi-hour or user-blocked.
+A natural pause point.
+
 ### Tick 480 — 2026-05-12T22:35Z — All 5 in-repo corpora: comparable metric set unified
 
 3 commits this tick:
