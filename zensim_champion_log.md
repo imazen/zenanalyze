@@ -4520,6 +4520,16 @@ distortions), V0_21 may regress due to smaller training set.
 **Next tick (409)**: V0_21 will be at ep 30-40. Monitor + arm auto-eval
 chain.
 
+### Tick 409 — 2026-05-12T08:54Z — V0_21 ep 20 val=0.9251 (tracks V0_16); auto-eval armed
+
+V0_21 (butter-clean recipe) at ep 20, val_mean=0.9251 — basically
+identical to V0_16's ep 20 val=0.9259. Smaller training set isn't
+hurting convergence at this stage.
+
+**Chain armed** with correct trainer PID 3393399 (kill -0 check).
+
+**Next tick (410)**: V0_21 at ep 60-80; chain will fire on completion.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
