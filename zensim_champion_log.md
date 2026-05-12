@@ -1499,6 +1499,46 @@ ships. Otherwise V0_7 stays.
 Next concrete tick: read h192_tv10 CID22 + non-mono → V0_8
 ship-or-stand decision.
 
+### Tick 303 — 2026-05-12T01:05Z — h192_tv10 non-mono 5.66% (also over target); CID22 80% done
+
+h192_tv10 non-mono result: **5.66%** — ALSO above 5.5% target,
+worse than V0_7 seed=1's 5.46% by +0.20%.
+
+**Both V0_8 candidates ELIMINATED on smoothness**:
+- h128_tv20: non-mono 5.70% ❌
+- h192_tv10: non-mono 5.66% ❌
+- V0_7 seed=1 (ship): non-mono 5.46% ✓
+
+**Pattern noticed**: every clean-data bake we've trained has
+non-mono > 5.5% EXCEPT V0_7 seed=1 (5.46%):
+- V0_6 (seed=42): 5.94%
+- V0_7 seed=0: 5.67%
+- V0_7 seed=1 (SHIP): 5.46%
+- V0_7 seed=2: 5.78%
+- V0_7 seed=7: 5.78%
+- V0_8 h128_tv20: 5.70%
+- V0_8 h192_tv10: 5.66%
+
+seed=1 with (h=128, TV=10) is an outlier — possibly a "lucky"
+non-mono. Most clean-data bakes hover at 5.6-5.9%. The 5.5% target
+may be too tight for the cleaned 156k-pair corpus.
+
+h192_tv10 CID22 still running (80% done). Result is moot for
+shipping (non-mono fails) but informative for next-cycle planning.
+
+**V0_8 verdict**: V0_7 seed=1 stays as the ship. The TV/h
+hyperparam-grid does NOT produce a strict improvement. Next-cycle
+directions:
+1. Larger seed sweep at (h=128, TV=10) to find more low-non-mono
+   seeds (seed=1 may be 1-in-5 luck)
+2. Per-band-weighted TV regularizer (closes B1 gap without hurting
+   B0 — needs trainer feature)
+3. Densify training around B0/B1 quality bands
+4. Architecture: more scales (paper uses 6 vs zensim's 4)
+
+Next concrete tick: read h192_tv10 CID22 + per-band; document
+V0_8 cycle conclusion.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
