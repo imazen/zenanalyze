@@ -3107,6 +3107,69 @@ remapped TV pairs becomes worth the time.
 (no-TV version) on butter-clean data in parallel. Eval V0_13 once
 it finishes via auto-chain.
 
+### Tick 358 — 2026-05-12T05:25Z — USER-DIRECTED PURGE: contaminated source files + ALL tainted derivatives
+
+**User directive**: "purge every copy of contaminated source files
+where validation set variants slipped in. permanently, in every form,
+lest someone else accidentally use them"
+
+**Scope confirmed via AskUserQuestion**:
+- Sources: d≤16 relaxed (361 files / 282 MiB) — captures stage 1 + stage 2
+  matches at "possibly the same image" threshold
+- Derivatives: encoded variants + training CSVs + tower mirror + feature
+  .bin caches (all four)
+
+**Purge executed**:
+
+| Target | Count | Size | Location |
+|---|--:|--:|---|
+| Source PNGs | 361 | 282 MiB | `/mnt/v/input/zensim/sources/` |
+| Encoded variant dirs | 361 | 30,625 MiB | `/mnt/v/input/zensim/images/<stem>/` |
+| Feature .bin caches | 27 | 9,076 MiB | `/mnt/v/output/zensim/synthetic-v2/` |
+| .pre-purge-bak intermediates | 15 | 861 MiB | `/mnt/v/output/zensim/synthetic-v2/` |
+| Tower source mirror | 361 | similar | `/mnt/tower/input/zensim/sources/` |
+| Tower image mirror | 361 | similar | `/mnt/tower/input/zensim/images/` |
+| Tower feature .bin caches | 5 | 3,236 MiB | `/mnt/tower/output/zensim/synthetic-v2/` |
+| Tainted bakes | 6 | ~700 KiB | `/tmp/zensim_loop/v0_9..v0_14*.bin` |
+| Tainted intermediate CSVs | 3 | ~1.2 GiB | `/tmp/zensim_loop/` |
+
+**Total freed**: ~75 GiB.
+
+**Training CSV row strip** (15 CSVs cleaned in `/mnt/v/output/zensim/synthetic-v2/`):
+- training_safe_synthetic.csv: 218,089 → 196,086 rows (22,003 dropped, 10.09%)
+- training_safe_synthetic_perceptual_clean.csv: 156,420 → 144,791 (11,629 dropped, 7.43%)
+- training_safe_synthetic_extended.csv: 340,206 → 305,110 (35,096 dropped, 10.32%)
+- ... 12 others, similar drop rates
+
+**Manifest preserved**: `zensim/benchmarks/contaminated_sources_purged_2026-05-12.txt`
+(361 absolute paths, for audit trail).
+
+**CRITICAL REALIZATION**: V0_8 SHIP (and V0_9..V0_14) were ALL trained
+on `safe_synth_clean_features.csv` which contained these 11,629
+contaminated rows. The clean CSV had been overlap-cleaned at a LOOSER
+threshold than d≤16. V0_8's reported **CID22 SROCC 0.8948 is INFLATED**
+by training-set leakage of content from 22 of 49 held-out refs.
+
+The clean features CSV has been re-purged in place: `/tmp/zensim_loop/safe_synth_clean_features.csv`
+now has 144,791 rows (was 156,420). Stale tainted intermediates and
+bakes deleted.
+
+**V0_15 cycle plan** (next session, urgent):
+1. Re-train V0_8 recipe (h=128, flat TV=15, seed=1) on properly-purged
+   clean features (144,791 rows)
+2. Regenerate TV pairs file against new layout (safesyn 0..144,790,
+   kadid 144,791.., etc.)
+3. Eval V0_15 against fast-ssim2 on CID22 — expect HONEST aggregate
+   below 0.8948 (perhaps 0.8910-0.8920 given prior leakage rate)
+4. Replace V0_8 ship bake at `zensim/zensim/weights/v0_8_2026-05-11.bin`
+   with V0_15 + archive V0_8 to `weights/archive/v0_8_tainted_2026-05-11.bin`
+5. Update CLAUDE.md shipping history, site bake JSON, CHANGELOG
+6. Add 361 hex-stem entries to generator blocklist in coefficient repo
+   (out-of-repo — surface to user separately)
+
+**Next tick (359)**: regenerate TV pairs against purged layout + launch
+V0_15 retrain.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
