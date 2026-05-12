@@ -2,6 +2,29 @@
 
 **Goal**: produce a zensim version with **smooth scoring AND strong CID22 SROCC**, trained without any CID22 training data (49 validation references must stay held-out). Synthesize CID22-like training distortions from non-CID22 sources on `/mnt/v`. Learn from all prior work. **No crates.io publishing.**
 
+## Current state (last updated 2026-05-12T22:58Z, tick 486)
+
+**Cycle-6 status: COMPLETE.** Ship + comparison-site + verification all live.
+
+**Ship**: `zensim/weights/v0_16_2026-05-12.bin` (md5 `baf3fdcb`, 228→128→1 MLP, affine-calibrated α=28.0366 β=-5.0738). Wins fast-ssim2 across all 3 truly-held-out human-rated corpora:
+
+| Corpus | n | V0_16 | fast-ssim2 | gap |
+|---|---:|---:|---:|---:|
+| AIC-3 | 600 | 0.7990 | 0.7965 | +0.0025 |
+| AIC-4 | 300 | 0.9175 | 0.9127 | +0.0048 |
+| CID22 | 4292 | 0.8919 | 0.8895 | +0.0024 |
+
+**Per-codec**: 11 wins, 3 ties, 7 losses of 21 codec comparisons across 3 corpora. Biggest single deficit: JPEG-AI on AIC-4 (V0_16 -0.051 vs ssim2; dssim 0.91 is intact).
+
+**Comparison-site live**: <https://imazen.github.io/zensim/compare.html>. 10 corpora (5 in-repo + 5 R2-hosted at `zentrain-r2.imazen.org`), 4 V_X bake binaries, DuckDB-WASM + JS-MLP forward-pass + scatter + step-5 + per-band SROCC + candlestick + Y→codec lookup. All paths mathematically verified end-to-end.
+
+**Canonical doc to start with**: `zensim/benchmarks/cycle_6_finals_2026-05-12.md`.
+
+**Outstanding (need user direction)**:
+1. Upload v15 zenjpeg sweeps (1.2 GB egress; otherwise R2 has 99 MB / 5 small sweeps only).
+2. Cycle-7 dssim co-training experiment (3-4 hours Python; addresses JPEG-AI deficit).
+3. JPEG-AI training corpus acquisition (needs encoder access).
+
 ## Tick log (post-strip)
 
 ### Tick 256-257 — 2026-05-11T12:50Z — V0_5 SHIPPED + CLAUDE.md updated + SKIP strip + WASM plan drafted
