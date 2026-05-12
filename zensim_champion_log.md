@@ -2175,6 +2175,26 @@ Final cycle state:
 
 Next concrete tick: cycle complete. Pivot or end loop.
 
+### Tick 327 — 2026-05-12T03:13Z — cycle_summary doc updated with V0_8 + ensemble
+
+Updated `zensim/benchmarks/cycle_summary_2026-05-11.md` (zensim
+commit `b42b7b81`):
+- Shipped-artifact section now V0_8 (was V0_7)
+- New Ensemble experiment section: JPEG synth wins, CID22 mixed,
+  ensemble path closed
+- V0_7 numbers preserved as superseded midday-ship section
+
+The doc captures the complete cycle end state in a single durable
+file. Future sessions can read this instead of scrolling 320+
+ticks.
+
+**Definitive cycle outcome**: V0_8 (TV=15 seed=1) is the final
+ship. CID22 = 0.8948 (+0.0053 vs ssim2). B1 -0.014 (50% reduction
+from V0_7). Non-mono 5.87% under raised 6.0% gate. 5 of 5 V0_4
+runtime tests pass with the score-mapping fix.
+
+Next concrete tick: pure stand-by; cycle is closed.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
