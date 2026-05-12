@@ -4730,6 +4730,22 @@ No new experiments fired. Cycle 6 has reached natural endpoint:
 **Cron continues firing every 4 min**. Will log minimal idle status
 until directive or new data arrives.
 
+### Tick 417 — 2026-05-12T09:28Z — Filled missing scatter + step-5 for V0_18/V0_19/V0_20/V0_21
+
+Caught a data gap: V0_18/V0_19/V0_20/V0_21 had bake JSONs but no
+scatter or step-5 data files. Site selectors couldn't show them.
+
+zensim commit `fc8670d0`:
+- Generated 4 scatter JSONs (4292 points each, color-by-band)
+- Generated 4 step-5 JSONs (13 CID22 bins each)
+- Updated `app.js` scatter selector + step-5 labels to include all 8
+  bakes: v0_16, v0_15, v0_17, v0_18, v0_19, v0_20, v0_21, v0_8_tainted
+
+Site users can now compare per-band and scatter for any bake in the
+cycle-5+6 series.
+
+**Next tick (418)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
