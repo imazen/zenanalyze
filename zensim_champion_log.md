@@ -5295,6 +5295,42 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 447 — 2026-05-12T20:10Z — Cleared all remaining clippy `-D warnings` errors
+
+zensim commit `dc74ca8f`. After ticks 445 (fmt) and 446 (E0603),
+ran `cargo clippy --workspace --all-targets --all-features
+--exclude zensim-wasm-tests -- -D warnings` locally. Hit 8 clippy
+errors across 5 files. Fixed all:
+
+- `zensim-validate/src/bin/check_holdout_overlap.rs`: collapsed
+  nested `if let` + `is_multiple_of` (clippy::collapsible_if,
+  clippy::manual_is_multiple_of)
+- `zensim-validate/src/bin/check_holdout_overlap_stage2.rs`: same
+  two lints + introduced `type WindowMatch = (String,u32,…)` and
+  `type SourceScan = (String, Option<WindowMatch>)` aliases to
+  address clippy::type_complexity at line 103
+- `zensim-validate/src/main.rs:2095`: replaced
+  `if let Some(_) = ref_basenames` with `if ref_basenames.is_some()`
+  (clippy::redundant_pattern_matching)
+- `zensim-bench/examples/score_konjnd_full.rs`: drop unused
+  `Path` import; `_src_stem` on unused tuple binding
+- `zensim-bench/examples/dataset_metric_baseline.rs:551`: replace
+  `features.iter().copied().collect()` with `features.to_vec()`
+  (clippy::iter_cloned_collect)
+
+Local `cargo clippy --workspace --all-targets --all-features
+--exclude zensim-wasm-tests -- -D warnings`: **clean** in 0.25 s.
+
+Combined CI hit-list cleared:
+- fmt (tick 445)
+- E0603 affecting Test×8 + Clippy + Coverage + MSRV (tick 446)
+- clippy lints in 5 files affecting Clippy (tick 447)
+
+Next push of CI should reach the previously-unseen jobs (Coverage
+final upload, Feature permutations, Corpus ICC tests, WASM SIMD128,
+zensim-regress API leakage). If any of those have their own issues
+they'll surface now.
+
 ### Tick 446 — 2026-05-12T20:05Z — Fixed E0603 in zensim_mlp_train test (Clippy + Test + MSRV + Coverage)
 
 zensim commit `5da0097e`. Investigated the second CI-failure pattern
