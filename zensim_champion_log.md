@@ -4381,6 +4381,40 @@ The page now offers a clear roadmap for future sessions.
 material. The /loop cron continues firing but there's no productive
 recipe-iteration work left in scope.
 
+### Tick 404 — 2026-05-12T08:34Z — Cycle-6 prep: k-means on zenanalyze features reveals natural content clusters
+
+Wrote `zensim/scripts/v_next/content_class_explore.py` (~50 lines).
+Ran k-means on 10k safesyn feature vectors (228-dim zenanalyze features,
+z-score normalized) for k ∈ {3, 4, 6, 8}.
+
+**Results**:
+- k=3: cluster sizes [4.9%, 65.0%, 30.1%]
+- k=4: [4.6%, 41.7%, 24.6%, 29.1%]
+- k=6: [4.0%, 30.3%, 10.3%, 5.4%, 24.6%, 25.4%]
+- k=8: [3.7%, 27.4%, 11.6%, 9.9%, 23.9%, 5.8%, 15.5%, 2.3%]
+
+**Key observation**: a ~4-5% small cluster PERSISTS across all k values.
+Likely a distinct content class (screen content, line-art, or similar).
+At k=4, the data splits into ~3 mid-size clusters (~25-40%) + 1 small
+outlier.
+
+**Implication for cycle 6**: image-type-aware MLP dispatch is plausible.
+The data has natural content-class structure that a classifier could
+learn to detect. 3-way dispatch (photo / mid-density / sparse content)
+might be sufficient — k=3 captures the biggest signal.
+
+**Cycle 6 path**:
+1. Train a 4-way k-means classifier on zenanalyze features (saved as
+   centroid table)
+2. Build 4 specialized MLPs, each trained on rows from its cluster only
+3. Runtime: classify image → dispatch to right MLP → score
+4. Eval ensemble across CID22 + AIC-3
+
+This is ~hours of work, not a single tick. Stage it for the next
+session.
+
+**zensim commit**: `<TBD>` (this tick's commit).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
