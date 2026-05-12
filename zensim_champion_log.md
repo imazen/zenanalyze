@@ -2495,6 +2495,32 @@ Next: surface to user — V0_9 ships, V0_8 ships, or hold both as
 selectable profiles. Or: try other band-weight configs (e.g.,
 [10, 25, 15, 10] — push B1 harder AND raise B2/B3 closer to V0_8).
 
+### Tick 340 — 2026-05-12T04:14Z — V0_10 [15,25,15,15] launched + AIC-3 ingestion plan
+
+V0_10 launched (PID 3062154): per-band TV `[15, 25, 15, 15]`, seed=1.
+Hypothesis: V0_8's flat TV=15 closed B1 from -0.027 to -0.014 because
+the cross-band TV strength enables B1 ranking through B2/B3 monotonicity.
+V0_9 with `[10,20,10,10]` kept cross-band TV at 10 (too loose) and B1
+boost alone wasn't enough. V0_10 keeps V0_8's floor and adds B1 boost.
+Out: `/tmp/zensim_loop/v0_10_perband_tv_15_25_15_15_seed1.bin`. ETA ~16 min.
+
+**AIC datasets confirmed downloaded** (top user priority done):
+- `/mnt/v/dataset/aic3_ctc_epfl/` — 10 imgs × 6 codecs × 10 q-strata = 600
+  samples. Each has `score.jnd` (human JND measure) + `quality.selected`
+  (codec Q value). Codecs: JPEG-1, JPEG-2000, JPEGXL, HM (HEVC), AVIF, VVC.
+- `/mnt/v/dataset/aic4_sample/` — JPEG_AIC-4 sample dataset with
+  full_resolution_images/, PTC_images/, README.md.
+
+Plan for AIC-3 ingestion (next tick or two):
+1. Write a Rust binary in zensim-validate that walks info.csv and
+   emits a paired CSV with (ref_path, dist_path, codec, q, score.jnd).
+2. Score with all 3 metrics: zensim (V0_8), ssim2, butteraugli.
+3. Compute SROCC vs score.jnd, per-codec + aggregate.
+4. Per-band reporting: use ssim2 score to assign band per CID22 Table 5.
+5. Add AIC-3 to the GH Pages site as a new section "Held-out validation".
+
+Next: monitor V0_10 training; scaffold aic3_eval.rs script.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
