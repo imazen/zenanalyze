@@ -1828,6 +1828,25 @@ stage. Cyclic LR will peak ~ep 100 / 140.
 
 Next concrete tick: monitor at ~ep 100; expect first val_mean peak.
 
+### Tick 315 — 2026-05-12T01:53Z — TV=15 sweep ep 70-80; below TV=10 baseline
+
+TV=15 sweep at epoch 70-80:
+- seed=1 TV=15: best=0.9414 (vs TV=10 seed=1's 0.9437, gap -0.0023)
+- seed=13 TV=15: best=0.9405 (vs TV=10 seed=13's 0.9433, gap -0.0028)
+
+**Both candidates tracking LOWER val_mean than TV=10 counterparts**.
+TV=15 mildly degrades val_mean at this hyperparameter point — same
+pattern as h128_tv20 (which was 0.9408).
+
+Conclusion shapeshifts: increased TV in the (0..30) range may
+broadly hurt val_mean. Net effect on CID22 + non-mono is the
+unknown. Could still produce a better B1 + smoother result if val_mean
+loss is in the in-training KADID/TID, not the held-out CID22.
+
+Both still running. ETA ~10 more min.
+
+Next concrete tick: TV=15 final results + CID22/non-mono eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
