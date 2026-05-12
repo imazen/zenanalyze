@@ -1361,6 +1361,36 @@ No bake files yet (trainers don't write until completion).
 Next concrete tick: re-check at epoch ~140; expect h128_tv20 to
 peak first.
 
+### Tick 298 — 2026-05-12T00:46Z — h128_tv20 DONE, non-mono 5.70% WORSE than V0_7
+
+**h128_tv20 training finished** — early-stop epoch 140, best
+val_mean=0.9408. md5 `eed8d048`.
+
+Non-mono measurement: **5.70%** — WORSE than V0_7 seed=1's 5.46%
+and above 5.5% target. Higher TV (20 vs V0_7's 10) actually
+INCREASED bumpiness. Possible reasons:
+- TV=20 over-regularizes the gradients, disrupting cyclic-LR
+  convergence
+- TV pairs file may be too sparse for stronger TV weight
+- The TV regularizer pairs adjacent-q only; doesn't help cross-q-step
+  smoothness
+
+**h128_tv20 is eliminated from V_NEXT contention** — fails goal #3
+smoothness target.
+
+CID22 eval still running (~50% through KADID), but result is moot
+unless we accept worse smoothness.
+
+h192_tv10 still training: epoch 90, val_mean=0.9419 (current best).
+Continuing through epochs 140+ where V0_7 peaked.
+
+**Provisional finding**: TV-weight increase from 10 to 20 does NOT
+improve smoothness in this regime. V0_7 seed=1 (TV=10) remains
+better on both axes.
+
+Next concrete tick: wait for h192_tv10 finish + eval; also let
+h128_tv20 CID22 eval complete for completeness.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
