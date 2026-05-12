@@ -3908,6 +3908,31 @@ V0_16 ship is robust to seed variance at the magnitude we tested
 **Next tick (386)**: V0_18 likely early-stops; chain fires; collect
 CID22 + non-mono numbers to confirm seed-noise floor.
 
+### Tick 386 — 2026-05-12T07:19Z — V0_18 ep 90 = 0.9401 (CAUGHT UP to V0_16's 0.9403!); chain re-armed
+
+**Same PID-watching bug** as V0_16's first chain: I used the wrapper
+bash PID (3308037) instead of the real trainer PID (3308061). The
+chain bailed with "BAKE MISSING" because V0_18 was actually still
+training.
+
+**V0_18 progress**:
+- ep 40: 0.9378 (first cycle peak)
+- ep 90: **0.9401** (matches V0_16's 0.9403 within 0.0002!)
+- ep 120: still running, 0.9328 (cycle 3 in progress)
+
+V0_18 CAUGHT UP in cycle 2. The earlier "behind V0_16" assessment was
+premature — different seeds reach the same plateau by ep 90.
+
+**Implication**: V0_16 vs V0_18 (seed=1 vs seed=42) converge to the
+SAME val_mean plateau ~0.9401-0.9403. Seed variance at the recipe
+optimum is essentially zero on val_mean. The earlier V0_15→V0_16
++0.0005 CID22 difference is more likely real signal than seed noise.
+
+**Chain re-armed** with correct PID 3308061.
+
+**Next tick (387)**: V0_18 patience timer to ep 140. Could set another
+new best.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
