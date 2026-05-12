@@ -1594,6 +1594,19 @@ All seeds tracking lower than V0_7 seed=1 at this point (which had
 Next concrete tick: check sweep at epoch ~90-100; expect best vals
 to peak around there per the V0_7 trajectory.
 
+### Tick 306 — 2026-05-12T01:17Z — seed sweep mid-epoch (best 0.9420 / seed=13)
+
+Sweep at epoch ~50-60. Bests so far:
+- seed=5: 0.9419
+- seed=8: 0.9419
+- seed=13: **0.9420** (slightly leading)
+- seed=21: 0.9403
+
+V0_7 seed=1 hit best=0.9437 at epoch 140. Current seeds are
+matching seed=1's epoch-50 trajectory. No clear winner yet.
+
+Next concrete tick: monitor at epoch ~100 (cyclic LR cycle 3).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
