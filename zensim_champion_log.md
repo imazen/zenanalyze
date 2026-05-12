@@ -5318,6 +5318,54 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 492 — 2026-05-12T23:27Z — V0_25 control → cycle-7 dssim outcomes documented
+
+zensim commit `56bcad5f`: `benchmarks/cycle_7_dssim_outcomes_2026-05-12.md`.
+
+**V0_25 control eval** (same recipe as V0_24 v2 minus dssim):
+
+| Variant | CID22 SROCC | Δ vs V0_16 |
+|---|---:|---:|
+| V0_16 (ship)            | 0.8919 | — |
+| V0_25 control (dssim=0) | **0.8505** | **-0.041** |
+| V0_24 v2 (dssim=0.3)    | 0.8254 | -0.067 |
+
+**Decomposed cause** of V0_24 v2's -0.067 regression vs V0_16:
+- **0.041 from missing supervision** (V0_25 control still falls
+  short of V0_16 — recipe drift dominates, 61% of gap)
+- **0.025 from dssim_weight=0.3** (V0_24 v2 vs V0_25 control —
+  dssim too aggressive, 39% of gap)
+
+Per zensim CLAUDE.md V0_16 ship line: "h=128, TV=20, seed=1,
+**KonJND-aligned**". V0_25 used same h/TV/seed but no KonJND
+anchor — that's the 0.041 SROCC. The trainer has
+`--konjnd-anchor-csv` flag; we didn't pass it. Would need to
+locate the canonical KonJND-anchor CSV (likely under
+`/mnt/v/dataset/konjnd-1k/` which CLAUDE.md flags as missing) and
+also may need KADID/TID mixed supervision per the V0_4 recipe
+V0_16 inherits.
+
+**Cycle-7 dssim verdict** (per the outcome doc):
+1. dssim_weight=0.3 hurts CID22 by 0.025 SROCC at this scale.
+2. Lower weights (0.05, 0.1) might be net-positive on JPEG-AI
+   without hurting CID22 too much, but only if V0_16's full
+   recipe is reproduced first.
+3. **V0_16 stays as ship** — no shipping change.
+
+**Cycle-7 forward options** (left for user decision):
+a) **Drop cycle-7** — V0_16 meets goal #1; ship as-is.
+b) **Continue cycle-7** — first reproduce V0_16's exact recipe
+   (KonJND anchor + possibly KADID/TID), then experiment with
+   small dssim weights.
+c) **JPEG-AI corpus** — bypass dssim, add JPEG-AI training pairs
+   directly.
+
+V0_24 v1, v2, V0_25 bakes archived at `/tmp/zensim_loop/bakes/`.
+
+**Next concrete tick (493)**: idle or final wrap-up. Cycle-7 work
+is at a clean stopping point pending user decision; V0_16 stays
+ship; comparison-site complete; cross-corpus benchmarks complete.
+
 ### Tick 491 — 2026-05-12T23:24Z — V0_24 v2 also regressed; V0_25 control launched
 
 zensim commit `5c203de7`: V0_24 v2 result doc.
