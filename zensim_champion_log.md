@@ -4929,6 +4929,18 @@ Real ship signal will come from CID22 + AIC-3 eval.
 
 **Next tick (427)**: V0_22 eval results.
 
+### Tick 427 — 2026-05-12T10:08Z — V0_22 still training (ep 130, cycle 3)
+
+V0_22 at ep 130, best val=0.9387 set at ep 90 (matches V0_18, behind
+V0_16 0.9403). Cycle 3 reset at ep 100, currently climbing back.
+
+Patience timer to ep 180 (50 epochs no improvement from ep 90).
+Chain still waiting.
+
+ETA ~3-4 more min. Will collect results next tick.
+
+**Next tick (428)**: V0_22 eval should be in.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
