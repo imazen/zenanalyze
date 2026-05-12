@@ -3933,6 +3933,40 @@ optimum is essentially zero on val_mean. The earlier V0_15→V0_16
 **Next tick (387)**: V0_18 patience timer to ep 140. Could set another
 new best.
 
+### Tick 387 — 2026-05-12T07:24Z — V0_18 reveals HUGE seed variance on CID22 (val_mean is misleading)
+
+**V0_18 (seed=42) final results**:
+- val_mean = 0.9401 (V0_16 seed=1: 0.9403 — TIED)
+- CID22 = **0.8847** (V0_16: 0.8919 → **V0_18 is 0.0072 LOWER!**)
+- B0: 0.3938 (V0_16: 0.4214; -0.028)
+- B1: 0.4389 (V0_16: 0.4559; -0.017)
+- B2: 0.7709 (V0_16: 0.7802; -0.009)
+- B3: 0.1542 (V0_16: 0.1723; -0.018)
+- Near-PJND: 0.3358 (V0_16: 0.3547; -0.019)
+
+**Critical finding**: val_mean (worst-per-training-group SROCC, ≈ kadid)
+is SEED-INSENSITIVE at convergence. CID22 (held-out, never seen by
+trainer) is SEED-SENSITIVE — V0_18 lost 0.007 aggregate and 0.02-0.03
+in every band.
+
+**Research-honesty implication**: V0_16's CID22 0.8919 includes ~0.005-
+0.01 of "seed=1 luck". A multi-seed-averaged V0_X recipe might land at
+CID22 ≈ 0.888 with std ~0.004. The +0.0024 V0_16 lead over ssim2 might
+shrink to 0 or even reverse under seed averaging.
+
+**V0_16 SHIP REMAINS VALID** — it's the bake we have, it scores 0.8919
+on CID22, those are the user-facing numbers. The seed-luck is in
+"what model parameters we ended up with" not "the data was wrong".
+
+**For the site/methodology**: should add a "seed variance caveat" note.
+
+V0_15 (seed=1) → V0_16 (seed=1) ΔCID22 = +0.0005 may be RECIPE noise within
+seed-1's distribution, not necessarily a TV=15 vs TV=20 difference.
+
+**Next tick (388)**: launch a few more seeds (seed=7, seed=123) to
+better calibrate seed variance. OR write up seed-variance caveat to
+methodology page and freeze ship.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
