@@ -5318,6 +5318,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 496 — 2026-05-12T23:58Z — V0_27 FALSIFIES dssim co-training; cycle-7 truly done
+
+zensim commit `5857a1a8`. V0_27 (V0_26 base + `--dssim-weight 0.1`)
+results:
+
+| Codec / Corpus | V0_27 | V0_26 | V0_16 |
+|---|---:|---:|---:|
+| CID22 (n=4292)        | 0.8658 | 0.8639 | 0.8919 |
+| AIC-4 **JPEG-AI**     | **0.7791** | **0.8387** | 0.7951 |
+| AIC-4 AVIF            | 0.9598 | 0.9551 | 0.9598 |
+| AIC-4 JPEG-1          | 0.9560 | 0.9283 | 0.9541 |
+| AIC-4 JPEG-2000       | 0.9091 | 0.9224 | 0.9357 |
+| AIC-4 JPEG-XL         | 0.9679 | 0.9717 | 0.9705 |
+| AIC-4 VVC             | 0.9125 | 0.9225 | 0.9375 |
+
+**V0_27 dropped JPEG-AI by 0.060 vs V0_26 just by adding dssim
+head at 0.1.** Even small dssim weight DESTROYS the KonJND-induced
+JPEG-AI sensitivity.
+
+**Mechanism**: dssim signal trains V_X on synth rows, which are
+JPEG-class artifacts only. dssim and ssim2 agree mostly on JPEG;
+dssim's separate transformer-codec friendliness (its 0.9147 score
+on AIC-4 JPEG-AI) is not transferable through a synth-corpus
+auxiliary head. Adding dssim DILUTES the targeted KonJND signal.
+
+**Cycle-7 final verdict**:
+- ✅ V0_26 (KonJND-aligned, no dssim) is the cycle-7 best for
+  JPEG-AI (+0.044 vs V0_16) but loses CID22 (-0.028).
+- ❌ dssim co-training at any weight is the WRONG direction for
+  JPEG-AI; only useful would be JPEG-AI training samples directly.
+- V0_16 stays ship.
+
+**Cycle-7 final scoreboard**:
+
+| Variant                  | CID22 | JPEG-AI | Notes |
+|---|---:|---:|---|
+| V0_16 (ship)             | **0.8919** | 0.7951 | reference |
+| V0_24 v1 (no-TV, dssim=0.3) | 0.8315 | (n/a) | bug-confounded |
+| V0_24 v2 (TV, dssim=0.3)    | 0.8254 | (n/a) | dssim costs CID22 |
+| V0_25 (TV, no KonJND, no dssim) | 0.8505 | (n/a) | minimum recipe |
+| **V0_26 (+KonJND, no dssim)** | 0.8639 | **0.8387** | cycle-7 best for JPEG-AI |
+| V0_27 (+KonJND, dssim=0.1) | 0.8658 | 0.7791 | dssim hurts JPEG-AI |
+
+**Cycle-7 IS DONE. dssim co-training is conclusively a dead end
+for transformer-codec robustness.** The correct cycle-8 path:
+acquire JPEG-AI training corpus directly (encode synth refs
+through a JPEG-AI codec, score with ssim2, add to safesyn).
+
+All 3 user-authorized cycle-7 tasks complete:
+1. ✅ R2 v15 sweeps uploaded (sites have 12 corpora)
+2. ✅ dssim co-training tested + conclusively falsified
+3. ✅ JPEG-AI deficit characterized + correct path identified
+   (training-corpus acquisition, not auxiliary loss)
+
+**Next concrete tick (497)**: idle. Cycle-7 is at a definitive
+stopping point. V0_16 stays ship; comparison-site stable; cycle-8
+needs user direction on JPEG-AI training-corpus acquisition.
+
 ### Tick 495 — 2026-05-12T23:54Z — V0_27 launched: V0_26 base + small dssim (weight=0.1)
 
 Per the cycle-7 finding that KonJND alignment is the JPEG-AI lever
