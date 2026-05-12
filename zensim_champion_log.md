@@ -4880,6 +4880,30 @@ Site is now genuinely production-ready as a research artifact.
 
 **Next tick (424)**: idle.
 
+### Tick 424 — 2026-05-12T09:56Z — V0_22 launched (V0_16 recipe + konjnd weight 1.0)
+
+V0_22 trainer PID 3432542. Same recipe as V0_16 but **konjnd train_w
+raised from 0.5 to 1.0** — emphasizes PJND anchors more.
+
+**Hypothesis**: stronger konjnd anchoring lifts Near-PJND SROCC (and
+maybe B1) by giving the model more gradient signal in the visual-
+threshold region (PJND ≈ 63 = B1 center).
+
+**Predictions**:
+- val_mean: similar to V0_16 (0.94 range)
+- CID22 Near-PJND: better than V0_16's 0.3547 (currently -0.024 vs ssim2)
+- B1: maybe better than V0_16's 0.4559
+- B0/B3/AIC-3: possibly slight regression (training emphasis shifted)
+
+If V0_22 has notably better Near-PJND/B1, adding it to the
+{V0_16, V0_20, V0_21} ensemble could lift cycle-7 results.
+
+Out: `/tmp/zensim_loop/v0_22_konjnd_w1_seed1.bin`. ETA ~10-12 min.
+Auto-eval chain armed with correct PID 3432542 (this time `$!` got
+the real trainer; verified via pgrep).
+
+**Next tick (425)**: V0_22 should be at ep 30-40.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
