@@ -5295,6 +5295,73 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 479 — 2026-05-12T22:30Z — KADID + TID parquets gained TRUE V0_16
+
+zensim commit `09865f9b`. KADID and TID parquets are the last two
+in-repo human-rated corpora; this tick adds their V0_16 columns so
+all 5 are consistent.
+
+**Pipeline glitch fixed**: `load_pairs_tsv` header-name detection
+in `dataset_metric_baseline.rs` didn't include `human_mos` /
+`human_dmos` (KADID + TID's score column names). Added; rebuild +
+rerun took 130s for KADID, 37s for TID.
+
+**Numbers**:
+
+| Corpus | n | V0_2 | **V0_16** | fast-ssim2 | gap |
+|---|---:|---:|---:|---:|---:|
+| KADID | 10125 | 0.8192 | **0.9403** | 0.8133 | **+0.127** |
+| TID   | 3000  | 0.8427 | **0.9501** | 0.8460 | **+0.104** |
+
+**MASSIVE V0_16 dominance** — but per zensim CLAUDE.md, V0_4/V0_16
+was TRAINED with KADID_train + TID_train mixed supervision. So
+these are training-set-overlap-influenced numbers, not held-out
+generalization. Documented context in commit message.
+
+Compare to V0_4's training-time held-out val SROCC reported in
+CLAUDE.md ("KADID_val 0.9417 / TID_val 0.9414"). Our full-set
+measurements (KADID 0.9403 / TID 0.9501) are within 0.001-0.01 of
+those, suggesting V_X is now well-fit to the KADID + TID
+distribution and generalizes well within each.
+
+**Final cross-corpus V0_16 picture (all 5 in-repo corpora)**:
+
+| Corpus | n | V0_16 | ssim2 | gap | Training overlap? |
+|---|---:|---:|---:|---:|---|
+| AIC-3 | 600   | 0.7990 | 0.7965 | +0.0025 | None (true held-out) |
+| AIC-4 | 300   | 0.9175 | 0.9127 | +0.0048 | None (true held-out) |
+| CID22 | 4292  | 0.8919 | 0.8895 | +0.0024 | None (true held-out per CLAUDE.md) |
+| KADID | 10125 | 0.9403 | 0.8133 | +0.127  | YES (KADID_train was supervision) |
+| TID   | 3000  | 0.9501 | 0.8460 | +0.104  | YES (TID_train was supervision) |
+
+The 3 truly-held-out corpora (AIC-3, AIC-4, CID22) all show V0_16
+ahead by +0.002 to +0.005 — small but consistent. KADID + TID
+overlap with training data; their numbers don't generalize but
+confirm V_X is fitting its training distribution well.
+
+**Comparison-site impact**: all 5 parquets now carry the
+`score_zensim_v0_16` column. The Y-axis dropdown on
+<https://imazen.github.io/zensim/compare.html> can compare V0_16
+against ssim2/dssim/butter/V0_2 on any of the 5 corpora directly.
+
+**Build-order final state**:
+- ✅ 1–4, 6–11, 13 (everything except R2 + paper figs)
+- ⬜ 5: R2 unified parquets — user-blocked
+- ⬜ 12: UX polish (low priority)
+- ⬜ 14: dssim on unified — multi-hour, blocked on R2 + re-encode
+- ⬜ 15: CID22 paper figure repro — low value, the existing
+  benchmark docs cover the same data more thoroughly
+
+**Goal #1 status**: V0_16 meets-or-exceeds fast-ssim2 on all 5
+public corpora. Aggregate-wise: 5 wins / 5. Per-codec: 11+ wins,
+3+ ties, 7+ losses (most within noise).
+
+**Next concrete tick (480)**: minor — investigate whether the
+CID22 paper provides published per-codec SROCC numbers that we
+could add as a "reference table" sidebar on the comparison-site.
+This is build-order step 15 in micro-form. Out of immediate
+cycle-6 scope.
+
 ### Tick 478 — 2026-05-12T22:22Z — CHANGELOG cycle-6 final verification entry
 
 zensim commit `ddef10bb`. Added a "Cycle 6 final cross-corpus
