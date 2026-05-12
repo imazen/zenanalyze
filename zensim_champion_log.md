@@ -5133,6 +5133,15 @@ a different MODEL — only a different SAVE-TIME criterion.
 
 **Next tick (437)**: V0_23 eval.
 
+### Tick 437 — 2026-05-12T10:48Z — V0_23 ep 130, early-stop imminent at ep 140
+
+V0_23 still training (cycle 3). Best=0.9631 mean at ep 90.
+Patience timer to ep 140. Chain still waiting on trainer PID 3455983.
+
+ETA ~1 min for early-stop, then eval (~5 min).
+
+**Next tick (438)**: V0_23 CID22 + AIC-3.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
