@@ -2431,6 +2431,16 @@ AIC-3 at 896 MB / 1.5 GB (60%).
 
 Next: V0_9 final at ep ~190; launch eval.
 
+### Tick 337 — 2026-05-12T03:57Z — V0_9 ep 170 best 0.9422 (= V0_8); cycle 5 imminent
+
+V0_9 best so far: **0.9422** at epoch 140 (matches V0_8 exactly).
+Still running, at epoch 170. Cycle 5 LR drops to 1e-4 at epoch 240
+but likely early-stops at ep 190.
+
+AIC-3 at 1.1 GB / 1.5 GB (~73%).
+
+Next: V0_9 final + eval (CID22 + non-mono + per-band).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
