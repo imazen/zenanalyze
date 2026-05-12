@@ -4445,6 +4445,25 @@ or bake history for completeness.
 **Next tick (406)**: optional cross-codec non-mono table on site, or
 idle.
 
+### Tick 406 — 2026-05-12T08:42Z — Cross-codec non-mono table shipped on site
+
+zensim commit `01cde869`:
+- Added cross-codec non-mono table to site/index.html
+- AVIF 0.00%, JXL 0.00%, WebP 0.50%, JPEG 2.30%
+- Above the Pareto chart
+
+Site now shows complete smoothness story: V0_16 SHIP delivers within
+or far-below the 4.86 % strict target across every codec family.
+
+**Cycle 5 + early cycle-6 status**:
+- V0_16 SHIP confirmed across CID22/AIC-3/4 codecs
+- Site fully documents methodology, scatter, step-5, Pareto,
+  cross-codec smoothness, bake history, ensemble
+- Cycle 6 foundation: content-class k-means findings committed
+- Path forward (per methodology Section 9) staged for next session
+
+**Next tick (407)**: nothing critical; will continue minimal updates.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
