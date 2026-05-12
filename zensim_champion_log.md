@@ -3749,6 +3749,26 @@ of srocc et. as well as scatter and other stats".
 4. Image-type-aware MLP dispatch (big new direction)
 5. Coefficient repo blocklist update for the 361 hex stems (user-touch)
 
+### Tick 379 — 2026-05-12T06:52Z — V0_17 TV=25 launched; KonJND eval path missing
+
+**V0_17 launched** (PID 3293329): same recipe as V0_16 but TV=25.
+Output: `/tmp/zensim_loop/v0_17_purged_tv25_seed1.bin`. ETA ~12 min.
+
+**Hypothesis**: V0_15(TV=15)→V0_16(TV=20) was a clear improvement on B0/B1.
+Does V0_17(TV=25) continue the trend, or are we at the TV optimum?
+
+**KonJND eval skipped**: `/mnt/v/dataset/konjnd-1k/` doesn't exist on disk.
+The trainer's konjnd group uses `/tmp/zensim_loop/konjnd_aligned_features.csv`
+(features only). PJND validation needs the raw dataset which is missing.
+Defer to next session or surface to user (separate from purge).
+
+**First V0_17 launch glitch**: forgot to cd to zensim cwd. The first
+wrapper exited 127 "No such file or directory". Relaunched from zensim
+cwd; PID 3293329 confirmed running.
+
+**Next tick (380)**: V0_17 progress check; if val_mean is lower than
+V0_16 (likely with TV=25), we may be past the optimum.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
