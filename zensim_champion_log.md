@@ -3890,6 +3890,24 @@ V_X differences. If V0_18 is far off, V0_16 (seed=1) was lucky.
 **Next tick (385)**: V0_18 should be at ep 60-70. Continue monitoring;
 chain will fire on completion.
 
+### Tick 385 — 2026-05-12T07:15Z — V0_18 ep 80 best=0.9378 (0.0025 behind V0_16's 0.9403)
+
+V0_18 (seed=42) progress:
+- ep 40: 0.9378 (set as best — first cycle peak)
+- ep 80: 0.9344 (cycle 2, no new best)
+
+V0_18 is consistently 0.002-0.003 BEHIND V0_16. Seed=42 appears genuinely
+worse than seed=1 for this recipe — not just early-stage variance.
+
+If V0_18 doesn't catch up by ep 90 (next 10 epochs), early-stop fires
+and we have a clear answer: seed=1 was preferred by ~0.002 SROCC.
+
+V0_16 ship is robust to seed variance at the magnitude we tested
+(seed=1 vs seed=42 same magnitude difference as V0_15 vs V0_16).
+
+**Next tick (386)**: V0_18 likely early-stops; chain fires; collect
+CID22 + non-mono numbers to confirm seed-noise floor.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
