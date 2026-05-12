@@ -3967,6 +3967,29 @@ seed-1's distribution, not necessarily a TV=15 vs TV=20 difference.
 better calibrate seed variance. OR write up seed-variance caveat to
 methodology page and freeze ship.
 
+### Tick 388 — 2026-05-12T07:28Z — V0_19 (seed=7) + V0_20 (seed=123) launched in parallel
+
+**Multi-seed sweep for V0_16 recipe** (h=128, flat TV=20, clean data):
+- V0_16 (seed=1): val=0.9403, CID22=0.8919
+- V0_18 (seed=42): val=0.9401, CID22=0.8847 (-0.0072)
+- V0_19 (seed=7): PID 3322750, ep 0 val=0.9119 (just started)
+- V0_20 (seed=123): PID 3322751, ep 0 val=0.8942 (just started)
+
+After V0_19 and V0_20 complete (~14 min), we have 4-seed sweep across
+{1, 7, 42, 123}. Compute:
+- Mean CID22 SROCC
+- Std-dev / Range
+- Per-band variance
+
+If V0_16 (seed=1) is at the high end of the distribution, that confirms
+it's somewhat lucky. If V0_16 is near the mean, then seed=1 is a
+"typical" outcome and our reporting is honest.
+
+Parallel training fine — single-thread per trainer, 32 cores available.
+
+**Next tick (389)**: V0_19/V0_20 will be at ep 30-50. Continue monitoring;
+auto-eval chains needed.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
