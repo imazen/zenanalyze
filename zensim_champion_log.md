@@ -1962,6 +1962,48 @@ Next concrete tick: enable GH Pages (pending user authorization)
 OR start B1-densification work (need user authorization for
 generator changes).
 
+### Tick 321 — 2026-05-12T02:21Z — *** V0_8 SHIPPED + runtime score-mapping fix ***
+
+User authorized V0_8 ship (trade smoothness for B1 closure +
+aggregate CID22) and runtime fix.
+
+**V0_8 SHIPPED** (zensim commit `f83aa42a`):
+- `zensim/weights/v0_8_2026-05-11.bin` (md5 `67482691`)
+- Trained: clean corpus, h=128, TV=15, seed=1
+- Affine: α=31.1041, β=-4.3882, R²=0.76
+- CID22 = **0.8948** (+0.0053 vs ssim2, vs V0_7's +0.0038)
+- **B1 SROCC = 0.4554 / -0.014 vs ssim2 (50% reduction from V0_7's -0.027)**
+- Non-mono = 5.87% (over old 5.5% target; new gate raised to 6.0%)
+- V0_7 archived: `zensim/weights/archive/v0_7_seed1_tv10_2026-05-11.bin`
+
+**Runtime score-mapping fix landed in same commit**:
+- Added `skip_score_mapping: bool` to `ProfileParams`
+- V0_4 slot sets it `true` (so V0_8 MCOS-calibrated raw output is
+  returned directly without `100 - 18*d^0.7*sign(d)` mangling)
+- V0_1 / V0_2 retain the transform (skip_score_mapping=false)
+- **All 5 V0_4 runtime tests now pass** (were broken with V0_5/V0_7
+  bakes pre-fix; surfaced by Tick 293's audit)
+
+**CLAUDE.md updated**:
+- Shipping history reflects V0_8 ship
+- Smoothness gate: 5.5% → **6.0%** (permits V0_8 trade)
+- Reasoning documented inline
+
+**Per-band CID22 vs ssim2 (V0_8)**:
+- B0: 0.4321 vs 0.4418 → -0.010 near-parity
+- B1: **0.4554** vs 0.4694 → **-0.014 BIG IMPROVEMENT**
+- B2: 0.7872 vs 0.7722 → +0.015 BEATS
+- B3: 0.1628 vs 0.1121 → +0.051 BEATS
+- Near-PJND: 0.3673 vs 0.3908 → -0.024 near-parity
+
+**Cycle progression**: V0_5 (leaked 0.8900) → V0_6 (honest 0.8839) →
+V0_7 seed=0 (0.8912) → V0_7 seed=1 (0.8933) → **V0_8 (0.8948)**.
+Each step uncovered an honest improvement.
+
+Next concrete tick: regenerate site/data with V0_8; update CHANGELOG
+for V0_8 + runtime fix; consider whether B1 closure progress is
+enough to declare cycle complete.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
