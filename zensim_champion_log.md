@@ -1653,6 +1653,34 @@ seed=21 finished at 0.9418 (eval launched).
 
 Next concrete tick: seed=13 final + all CID22 results.
 
+### Tick 309 — 2026-05-12T01:29Z — Seed sweep results consolidating; all over non-mono target
+
+CID22 evals still running (seed=5/8 just transitioned to CID22 step;
+seed=21 still in KADID).
+
+Confirmed non-mono > 5.5% target across the additional seed sweep:
+- seed=5: 5.83%
+- seed=8: 5.95%
+- seed=21: 5.98%
+(seed=13 pending — still training)
+
+V0_7 seed=1 (5.46%) remains the only sub-target bake. **The
+clean-corpus training landscape clearly has higher baseline
+non-mono than 5.5%**; we need either:
+- Lucky-seed-pull approach (try N seeds, ship the rare sub-5.5%)
+- Targeted regularization (per-band TV, smoothness-focused loss)
+- More TV pairs (current 216k vs original V0_5's 271k — 20%
+  reduction may be the cause)
+
+**Hypothesis worth testing**: regenerate TV pairs using the
+ORIGINAL safesyn ordering but apply cleaning at training time
+(group-weight=0 for leaked rows, instead of dropping them). This
+preserves the TV pair density at 271k while still excluding leaked
+content from RankNet pairs.
+
+Next concrete tick: seed=13 final + CID22 evals; document
+sweep verdict.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
