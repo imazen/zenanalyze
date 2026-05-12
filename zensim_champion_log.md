@@ -5295,6 +5295,49 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 451 — 2026-05-12T20:30Z — Scaffolded compare.html + worker skeleton (MVP step 3)
+
+zensim commit `3119c84e`. Build-order step 3 from
+`site/COMPARE_PLAN_2026-05-12.md`: skeleton files that load
+DuckDB-WASM and round-trip a synthetic scatter through the worker
+so the full UI plumbing is visible end-to-end before real data
+flows.
+
+Files added:
+- `site/compare.html` — 280px-wide left panel with corpus
+  checkboxes / X-axis / Y-axis / codec / version filter dropdowns;
+  right panel hosts scatter (#scatter), per-band table
+  (#band-table), candlestick placeholder, codec-param lookup
+  placeholder. Plotly already on the site → reused. Two-column
+  grid layout, vanilla CSS.
+- `site/js/compare.js` — main thread: fetches `_manifest.json`
+  from `R2_BASE` (placeholder URL until R2 public-read enabled),
+  falls back to `STUB_MANIFEST` when 404 so the page works
+  pre-upload. Renders checkboxes + dropdowns from manifest.
+  Bound Run button posts `{type:'query', corpora, x_metric,
+  y_metric, codec_filter, version_filter}` to worker. Receives
+  `result` and draws scatter + step-5 + band table.
+- `site/js/compare-worker.js` — Web Worker: lazy-loads
+  `@duckdb/duckdb-wasm@1.29.0` from jsDelivr on first query
+  (keeps initial page-load fast). Sketched
+  `initDuckDB()` per the duckdb-wasm jsDelivr-bundles pattern.
+  `runQuery()` currently emits synthetic demo rows so the round-
+  trip is observable; replaced once real parquet wiring lands.
+
+Static asset only — Deploy site workflow should pick up next
+push (paths watched: `site/**`). No CI implications.
+
+**Next concrete tick (452)**: upload one small parquet to R2
+(start with `unified_v12_zenwebp.parquet` at 14 MB — smallest
+codec sweep), enable public-read on `zentrain` bucket via the
+account console (user step) OR use the r2.dev preview URL,
+then replace the stub data in `runQuery()` with a real DuckDB
+SELECT against the uploaded file.
+
+**Outstanding user item**: pick a public-read URL form for R2
+(r2.dev preview vs custom domain). Once known, `R2_BASE` in
+compare.js gets updated to the real URL.
+
 ### Tick 450 — 2026-05-12T20:25Z — User directive: interactive comparison-site spec + plan
 
 User-requested feature (zensim CLAUDE.md commits `ad3bfd15` +
