@@ -5173,6 +5173,35 @@ Session has truly reached recipe-space optimum.
 
 **Next tick (439)**: idle.
 
+### Tick 439 — 2026-05-12T10:56Z — Exhaustive 7-bake search: {V0_16, V0_20} 2-bake is optimum
+
+Ran exhaustive ensemble search over all 2-/3-/4-bake subsets containing
+V0_16 from the 7 bakes (V0_16, V0_18-V0_23).
+
+**Top by combined Δ vs ssim2** (CID22+AIC-3 sum):
+
+1. **{V0_16, V0_20}**: CID22=0.8910, AIC-3=0.8050, Σ=**+0.0100** ← OPTIMUM
+2. {V0_16, V0_20, V0_21}: CID22=0.8908, AIC-3=0.8051, Σ=+0.0099
+3. {V0_16, V0_20, V0_21, V0_23}: CID22=0.8908, AIC-3=0.8035, Σ=+0.0083
+
+**REVISED RECOMMENDATION**: {V0_16, V0_20} 2-bake.
+
+**Why this matters**: 2× inference cost (not 3×). Combined performance
+virtually identical to the 3-bake. V0_21's butter-clean diversity is
+REDUNDANT with V0_20's seed-123 diversity for this purpose. The
+exhaustive search reveals adding V0_21 to {V0_16, V0_20} adds nothing
+to the AIC-3 score (0.8050 vs 0.8051 — noise) and slightly hurts
+CID22 (0.8910 vs 0.8908).
+
+Site methodology updated with new recommendation.
+
+**Cycle 6+ final optimum**:
+- Single-bake: V0_16 (0.8919 CID22, 0.7990 AIC-3)
+- 2-bake ensemble: **{V0_16, V0_20}** (0.8910 CID22, 0.8050 AIC-3)
+- Per the exhaustive search, adding more bakes brings diminishing returns
+
+**Next tick (440)**: idle (cycle endpoint truly reached).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
