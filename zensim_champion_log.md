@@ -5063,6 +5063,24 @@ new direction.
 
 **Next tick (433)**: idle.
 
+### Tick 433 — 2026-05-12T10:32Z — V0_23 launched (V0_16 recipe + val_policy=mean)
+
+V0_23 launched PID 3455983: V0_16 recipe but **val_policy=mean** instead
+of "min". Mean policy optimizes AVERAGE SROCC across kadid/tid/konjnd
+rather than worst-per-group.
+
+**Hypothesis**: with mean policy, training doesn't get bottlenecked
+by whichever group is hardest. Could produce a bake more uniformly
+optimized — different B0/B1/B2/B3 balance than V0_16.
+
+If V0_23 has different per-band signature, it could add to the ensemble
+in a way V0_22 didn't (V0_22 specifically lifted Near-PJND but hurt
+AIC-3).
+
+Chain armed PID 3456120 with correct trainer PID. ETA ~10-12 min.
+
+**Next tick (434)**: V0_23 at ep 30-50.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
