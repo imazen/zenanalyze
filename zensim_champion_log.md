@@ -5295,6 +5295,59 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 464 — 2026-05-12T21:18Z — Comparison-site live + verified end-to-end
+
+zensim commit `e12df03b`: nav link from index.html + "Try first"
+onboarding hint on compare.html.
+
+**Local smoke test** (Python http.server on port 3742):
+- compare.html: 200 OK (4774 bytes)
+- compare.js: 200 OK (8158 bytes)
+- compare-worker.js: 200 OK (11017 bytes)
+- mlp.js: 200 OK (7576 bytes)
+- v0_16.bin: 200 OK (119812 bytes)
+- aic3 parquet: 200 OK (25918 bytes)
+- All JS files passed `node --check` syntax validation
+- HTML tag stack balanced at EOF (zero unmatched tags)
+
+**Live deploy** (gh-pages, last deploy 21:14 UTC = 4 min ago):
+- https://imazen.github.io/zensim/compare.html — 200 OK, title
+  "zensim — interactive corpus comparison" rendered
+- https://imazen.github.io/zensim/js/mlp.js — 200 OK
+- https://imazen.github.io/zensim/weights/v0_16.bin — 200 OK
+- https://imazen.github.io/zensim/data/parquet/aic3_ctc_epfl.parquet — 200 OK
+- Worker source confirmed to contain parseZnpr / loadBake / CORPUS_URLS
+  / DuckDB references — the DuckDB integration shipped intact.
+
+**Discoverability** improved:
+- index.html now has a top-nav link "→ Interactive corpus comparison"
+- compare.html now has a "Try first" lede explaining the default pick
+  (AIC-3, X=q, Y=score_ssim2) and what to switch to next (Y=score_dssim
+  or Y=human_jnd).
+
+**Build-order state** after this tick:
+1. ✅ Spec + plan + skeleton
+4. ✅ Parquet round-trip via DuckDB-WASM (in-repo AIC parquets)
+6. ✅ Corpus checkboxes wired to real data
+7. ✅ Scatter + step-5 + per-band SROCC (live for AIC corpora)
+8. ⬜ Codec/version filter implementation in compare.js (UI exists,
+   wiring TODO — knob_tuple_json parsing for version)
+9. ⬜ Y → codec param lookup table
+10. ✅ V_X bake binaries + JS MLP forward-pass
+13. ⬜ Candlestick + CI by band (CI cols ready in AIC-4 parquet:
+    `human_jnd_ci_lo`/`hi`)
+
+**Genuinely blocking on user** for further unlocks:
+- R2 public-read URL form (unlocks codec-sweep parquet hosting, step 5)
+- AIC-3/AIC-4 are 600+300 = 900 human-rated rows, but for the codec-
+  facing site we want the unified parquets (~2.37M rows).
+
+**Next concrete tick (465)**: step 13 — candlestick + CI mode. AIC-4
+already has `human_jnd_ci_lo`/`hi` columns so this is implementable
+right now without any external dependency. Build a second chart type
+toggled by a button: instead of scatter + step-5, render per-band
+candlestick (p5/p25/p50/p75/p95) with errorbars from the CI bounds.
+
 ### Tick 463 — 2026-05-12T21:14Z — AIC parquets in repo + DuckDB end-to-end in worker
 
 zensim commit `2265b9cc`. Build-order steps 4 + 6 + 7 + a bit of 11 + 13
