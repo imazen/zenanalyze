@@ -1861,6 +1861,18 @@ Cyclic LR will hit 1e-4 at ep 140 — peak imminent.
 
 Next concrete tick: read final at ep ~180-190.
 
+### Tick 317 — 2026-05-12T02:01Z — TV=15 ep 160; seed=13 narrowing to 0.9425 (gap -0.0008)
+
+TV=15 at epoch 160:
+- seed=1: best=0.9422 (vs TV=10's 0.9437 → -0.0015)
+- seed=13: best=0.9425 (vs TV=10's 0.9433 → -0.0008)
+
+Both still below TV=10 counterparts but seed=13 nearly closed the gap.
+
+Early-stop at ~ep 190. ~5 more min.
+
+Next concrete tick: TV=15 finals + eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
