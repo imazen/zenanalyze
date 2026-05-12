@@ -3721,6 +3721,34 @@ linked into site's loadStep5Bakes() — current list is `[v0_15, v0_8_tainted]`.
 **Next tick (378)**: update site to add V0_16 to step-5 chart label list
 (add to `labels = [...]` in app.js); push.
 
+### Tick 378 — 2026-05-12T06:48Z — V0_16 fully wired into site
+
+**Site updates** (zensim commit `fad527e5`):
+1. Created `site/data/bakes/V0_16_shipped.json` (full aggregate + per-band)
+2. Updated `site/data/index.json` to include V0_16_shipped entry
+3. Updated `app.js loadStep5Bakes()` labels: `[v0_16, v0_15, v0_8_tainted]`
+4. Updated `NONMONO_PCT_BY_LABEL` map with `V0_16_shipped: 2.30`
+
+V0_16 now visible in:
+- Aggregate SROCC bar chart (CID22/AIC-3)
+- Per-band SROCC chart
+- Pareto chart (best non-mono + above-ssim2 aggregate corner)
+- Step-5 chart as primary series (green, V0_16 highlighted)
+- Bake history table (already updated in prior commit)
+
+**GH Pages will auto-deploy** the site changes within ~30s.
+
+**Goal #6 status**: Largely complete. The site has all the required
+chart types per user directive: "interactive with step 5 band graphs
+of srocc et. as well as scatter and other stats".
+
+**Next tick (379)**: phase plan options:
+1. Try V0_17 (TV=25) to see if even higher TV helps
+2. KonJND-1k PJND anchor eval for V0_16
+3. Run V0_16 on KADID/TID per-pair for full step-5 panels
+4. Image-type-aware MLP dispatch (big new direction)
+5. Coefficient repo blocklist update for the 361 hex stems (user-touch)
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
