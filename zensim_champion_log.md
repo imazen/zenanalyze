@@ -3839,6 +3839,36 @@ fails goal #1 on CID22 aggregate).
 bake (not a ship); phase plan: image-type-aware dispatch or freeze
 ship at V0_16 and focus on coefficient blocklist (out-of-repo).
 
+### Tick 383 — 2026-05-12T07:08Z — V0_17 full results + V0_18 seed-variance probe launched
+
+**V0_17 (TV=25) full results**:
+- CID22 = 0.8849 (FAIL goal #1: < ssim2 0.8895)
+- AIC-3 = 0.7995 (+0.0030 vs ssim2; +0.0005 vs V0_16 — marginal AIC-3 win)
+- Non-mono = 2.44% (between V0_16's 2.30% and V0_15's 2.51%)
+
+V0_17 marginally beats V0_16 on AIC-3 but loses CID22 + B2/B3. NOT a
+ship candidate. Added to site bake history as Pareto data point.
+
+**V0_18 launched** (PID 3308037): V0_16 recipe (h=128, flat TV=20)
+but **seed=42** instead of seed=1. Probes whether V0_16's results are
+seed-stable or seed-lucky.
+
+If V0_18 (seed=42) lands very close to V0_16 (seed=1) → ship is robust.
+If V0_18 substantially differs → V0_16 result is seed-dependent and
+we should sweep seeds before declaring V0_16 the optimum.
+
+**Auto-eval chain armed** (PID 3308037 watched correctly this time).
+
+**Site update** (zensim commit `0fa86d7e`):
+- V0_17 added to bake history row
+- V0_17 step-5 + scatter JSONs committed
+- V0_17 added to scatter selector dropdown
+- TV optimum visually demonstrable: V0_15 (TV=15) → V0_16 (TV=20) →
+  V0_17 (TV=25) sweep clearly shows V0_16 as peak
+
+**Next tick (384)**: monitor V0_18 progress; if seed=42 differs from
+seed=1, consider full seed sweep before locking V0_16 ship.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
