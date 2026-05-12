@@ -2195,6 +2195,52 @@ runtime tests pass with the score-mapping fix.
 
 Next concrete tick: pure stand-by; cycle is closed.
 
+### Tick 328 — 2026-05-12T03:15Z — AIC datasets LOCATED per user top-priority directive
+
+User directive (just before this tick): "top priority - locate the
+AIC datasets mentioned in the first paragraph of the CID22 paper"
+plus next-cycle priorities (balanced holdout, per-band work,
+image-type-dispatch MLPs).
+
+**AIC datasets located** (via general-purpose agent + web search;
+documented at `zensim/docs/AIC_DATASETS_2026-05-12.md`, zensim
+commit `ec2c9b84`):
+
+| Dataset | Source | Status |
+|---|---|---|
+| **AIC-3 CTC (EPFL)** | `ftp://tremplin.epfl.ch:21` (user `jpeg-aic3@epfl.ch`, pw `.L:p*O`) | ~1.5 GB; CC0; **THE dataset in CID22 Fig 17** |
+| AIC-4 Sample | https://aicdb.jpeg.org/JPEG_AIC-4_Sample_Dataset.zip | Includes JPEG AI codec |
+| BTC-PTC-24 | github.com/jpeg-aic/dataset-btc-ptc-24 | Raw AMT triplet responses |
+| AIC-HDR2025 | github.com/jpeg-aic/AIC-HDR2025 | HDR variant (low priority) |
+| AIC-1/AIC-2 | ISO/IEC standards (paid) | No public images — methodology only |
+
+**Top recommendation**: download **AIC-3 CTC (EPFL)** to
+`/mnt/v/dataset/aic3_ctc_epfl/`. 500 distorted images × 5 codecs
+with per-pair JND scores. Becomes a **second independent held-out**
+alongside CID22 49-ref. Combined with KADID + TID + KonJND, that's
+**6-7 independent SROCC checks per bake**.
+
+Pending user authorization for the ~1.5 GB FTP download +
+smaller archives.
+
+**Next-cycle plan** (user-directed):
+1. Download AIC-3 CTC (top priority) — gives proper second held-out
+2. Build balanced synth holdout corpus (Goal 4) — stratified by
+   band × codec × content class
+3. Better validation set with ssim2 AND butter (prerequisite for
+   per-band work and image-type-aware MLP dispatch)
+4. Per-band SROCC work — closing B1 gap, B0 gap
+5. **Image-type-aware MLP dispatch** — gradient-descent choice between
+   N specialized MLPs based on detected image type (NEW idea)
+
+The last item is novel — it generalizes the ensemble experiment
+(two static bakes averaged) to a learned router (one of N bakes
+chosen per image based on content features). zenpredict already has
+the runtime infra for this (multi-class classifier head).
+
+Next concrete tick: await user authorization for AIC-3 CTC
+download + further next-cycle direction.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
