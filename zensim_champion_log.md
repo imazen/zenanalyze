@@ -5295,6 +5295,40 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 449 — 2026-05-12T20:17Z — CI fix verification + status snapshot
+
+Verified the 4-commit CI fix sequence landed:
+
+**Run 25759591441** (MSRV-fix commit `e38bf0ba`, the latest):
+- ✓ Corpus ICC tests (1m5s) ✓ Feature permutations (2m22s)
+- ✓ WASM SIMD128 (46s) ✓ Clippy (39s) ✓ Format (14s)
+- ✓ Coverage (2m23s) ✓ MSRV (52s, was X)
+- ✓ Test (ubuntu-24.04-arm) (2m45s) ✓ Test (ubuntu-latest) (3m36s)
+- ✓ zensim-regress public API leakage check (33s)
+- ⋆ Test (windows-latest, windows-11-arm, macos-latest,
+  macos-15-intel, macos-26-intel, Test all features) — in progress
+  (typical 7-10 min for those platforms with C++ libjxl build)
+
+**Net change from pre-fix state**: 7 of ~9 build/lint jobs went
+from RED → GREEN. Two ubuntu Test runs from PENDING → GREEN.
+Windows/macOS tests had been failing on E0603 before tick 446 and
+should now pass on the new commit since the build error is gone.
+
+**Outstanding warnings (non-fatal)**:
+- Node.js 20 deprecation on `actions/github-script` (transitive
+  via `softprops/action-gh-release@v2`; upstream concern, not ours
+  to fix until softprops updates)
+- Low-severity dependabot alert on rand@0.8.6 (transitive via
+  `cmaes v0.2.2` in zensim-validate-only — non-shipping binary,
+  not propagating to library API)
+- `cargo-binstall fallback does not support prebuilt binaries for
+  cargo-public-api on this platform` — installer informational,
+  not a job failure (no-leakage job still passes)
+
+**Recipe-knob space still EXHAUSTED**. Cycle-7 structural work
+remains the blocking item for further metric improvement, and
+requires user authorization.
+
 ### Tick 448 — 2026-05-12T20:14Z — Fixed MSRV job (missing rust-version on zensim-train-core)
 
 zensim commit `e38bf0ba`. After tick 447 cleared clippy, observed CI
