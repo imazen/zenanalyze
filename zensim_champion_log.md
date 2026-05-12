@@ -5295,6 +5295,57 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 466 — 2026-05-12T21:27Z — Codec + version filter wiring (build-order step 8)
+
+zensim commit `4bfbba09`. Filter dropdowns are now live.
+
+**Worker** gained `list_codecs` message handler:
+- `listCorpusCodecs(corpora)`: opens DuckDB connection, runs
+  `SELECT DISTINCT codec FROM '<url>' WHERE codec IS NOT NULL` per
+  selected corpus parquet, plus
+  `SELECT DISTINCT knob_tuple_json FROM '<url>' WHERE knob_tuple_json
+  IS NOT NULL` (try/catch so AIC parquets that lack the column don't
+  fail). Returns a `{codecs, versions}` payload.
+- `runQuery` now applies both `codec_filter` AND `version_filter`
+  as JS-side `.filter()` after DuckDB returns rows (we could push
+  to SQL `WHERE` but that's an optimization — the filter applies
+  to <10k rows, JS-side is instant).
+
+**Main thread** gained:
+- `populateFilters({codecs, versions})`: rebuilds the two select
+  elements, preserving the previously-selected value if still
+  present in the new list.
+- `shortVersion(json)`: friendly label for knob_tuple_json
+  entries — `{}` → "(default)", `{"effort":7}` → "effort=7".
+- A `change` listener on `#corpus-list` re-runs the codec-enum
+  query when the user toggles corpora.
+
+**For AIC parquets** (current shipped data):
+- AIC-3 codecs: AVIF, HM, JPEG-1, JPEG-2000, JPEGXL, VVC
+- AIC-4 codecs: AVIF, JPEG-1, JPEG-2000, JPEG-XL, VVC, JPEG-AI
+- No knob_tuple_json column → version dropdown stays at "(all
+  versions)" — correct behavior
+
+When R2 unlocks the codec-sweep parquets, those carry `codec` =
+`zenjpeg`/`zenavif`/... and `knob_tuple_json` carries the per-knob
+detail (e.g. `{"effort":7}` for JXL). The dropdowns will reflect
+that automatically.
+
+**Build-order state after this tick**:
+1–4, 6–7, 10, 13 ✅
+**8 ✅ (codec + version filter)**
+Remaining: 5 (R2 parquet upload), 9 (Y→codec param lookup),
+11 (CID22/KADID/TID parquets), 12 (MOS/DMOS dropdown UX),
+14 (dssim on unified), 15 (paper figure repro).
+
+**Next concrete tick (467)**: build-order step 9 — Y→codec param
+lookup table. When a user picks a Y target value (input field),
+the worker SQL `SELECT codec, q, knob_tuple_json FROM '<url>'
+WHERE ABS(<y_metric> - target) < tolerance ORDER BY encoded_bytes`
+and a small table renders. This is the user-facing "I want zensim
+= 70, what should the codec do?" path that motivates the whole
+site.
+
 ### Tick 465 — 2026-05-12T21:23Z — Candlestick + box-plot mode (build-order step 13)
 
 zensim commit `2ef3f9ab`. The candlestick view from the user spec
