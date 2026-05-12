@@ -5242,6 +5242,37 @@ is done.
 
 **Next tick (442)**: idle.
 
+### Tick 442 — 2026-05-12T11:08Z — Blocklist patch made drop-in
+
+zensim commit `79fef00b`:
+- Generated `zensim/benchmarks/purged_hex_stems_const_2026-05-12.rs` —
+  pre-formatted Rust constant array with all 361 hex stems
+- Updated `coefficient_blocklist_patch_2026-05-12.md` with drop-in
+  instructions
+
+The user can now `cp` the const file into the coefficient repo,
+add the `mod` + `use` statements, apply the `is_banned()` diff,
+and the blocklist is in place. ~5 minutes of mechanical work
+instead of manual stem-list extraction.
+
+This effectively closes the "coefficient blocklist update" item from
+the cycle-7 queue (everything except the cross-repo apply, which is
+required by the strict cross-repo rule).
+
+**Final state of staged work for the user**:
+1. zenpredict multi-bake runtime — full implementation plan in
+   methodology Section 9 candidate #2 (~3-4 hours Rust)
+2. **Coefficient blocklist** — drop-in patch staged with pre-formatted
+   const array (~10 minutes apply)
+3. Image-type-aware MLP dispatch — k-means foundation explored;
+   full implementation needs direction (multi-hours)
+4. KonJND-1k dataset — restore from external source
+5. AIC-4 dataset — full release URL needed
+6. dssim — Rust binary extension needed
+
+**Next tick (443)**: idle. The session has produced everything
+autonomously possible.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
