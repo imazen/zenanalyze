@@ -2692,6 +2692,35 @@ Out: `/tmp/zensim_loop/v0_11_flat_tv20_seed1.bin`. ETA ~12 min.
 **Next tick (346)**: monitor V0_11 progress; if first epochs look
 promising, prep B1-oversample CSV script for cycle 2.
 
+### Tick 346 — 2026-05-12T04:30Z — B1-oversample CSV ready for cycle 2
+
+Wrote `zensim/scripts/v_next/band_balance_safesyn.py` (~80 lines). Built
+`/tmp/zensim_loop/safe_synth_b1_oversample.csv`:
+
+- Input: 156,420 rows (B1=16.2%)
+- Output: 171,592 rows (B1=23.6%, **matches CID22's 23.5%**)
+- Multiplier=0.6 (each of 25,286 B1 rows duplicated 60% of the time → +15,172 extra)
+- Duplicates appended at end; original row indices preserved so existing
+  TV pairs file remains valid without regeneration
+
+**Why it works without TV-pair regen**: TV pairs reference original row
+indices 0..156,419. Duplicates live at 156,420..171,591 and don't have
+TV pairs — they only contribute extra RankNet gradient signal in B1.
+
+**Queued for cycle 2** (after V0_11 finishes):
+V0_12 = retrain V0_8 recipe (h=128, flat TV=15) on B1-oversample CSV.
+Hypothesis: balanced B1 representation closes B1 gap without smoothness
+penalty.
+
+**V0_11 progress** (PID 3082124, 1:52 in):
+- ep 0: val_mean 0.8883
+- ep 10: val_mean 0.9177
+- Tracking V0_8/V0_9/V0_10 trajectory; ETA ~11 more min.
+
+**Next tick (347)**: when V0_11 finishes, eval CID22+AIC-3+non-mono.
+If V0_11 ≥ V0_8 aggregate, ship V0_11. Otherwise launch V0_12 (B1
+oversample).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
