@@ -3070,6 +3070,43 @@ big for one tick.
 extraction in background. Surface V0_14 plan to user (no specific
 authorization needed — synth-only data, no CID22 leak, just compute).
 
+### Tick 357 — 2026-05-12T05:18Z — V0_14 prep: clean→original join, 138.6k filtered features ready
+
+**V0_13 update**: ep 90 val_mean = 0.9414 (new best, slight improvement
+from ep 40's 0.9387). Still under V0_8's 0.9416. Patience timer restarts;
+ETA another ~10-30 min until early-stop.
+
+**V0_14 prep — feature re-extraction AVOIDED**:
+
+Insight: clean CSV rows uniquely identifiable by (ref_basename, ssim2)
+in original CSV — 98.5% of clean keys match unique original rows.
+Match-and-filter is faster than re-extraction.
+
+Built `/tmp/zensim_loop/build_clean_butter_filtered.py`:
+- Read butter-filtered original (205k surviving rows)
+- Build (basename, ssim2) survivor key set
+- Walk clean CSV (156,420 rows); keep rows whose key is in survivors
+
+Result: **`/tmp/zensim_loop/safe_synth_clean_butter_filtered_features.csv`**
+(138,625 rows, **11.4% drop from clean 156k**). The clean→original drop
+rate (11.4%) is higher than original→filtered (5.98%) because the LOW-q
+side of each discordant pair tends to be in clean.
+
+**Still pending for V0_14** (1 more script):
+1. ✓ Butter-clean features CSV (138.6k rows)
+2. ✗ TV pairs remap (need old_clean_idx → new_clean_idx map; drop pairs
+   with dropped endpoints; shift kadid/tid/konjnd offsets by 17,795)
+3. ✗ Launch V0_14 train
+
+**Simpler probe option for tick 358**: launch V0_14 with `--tv-weight 0`
+(no TV regularizer). Skips TV pair remap entirely. Tests whether the
+butter-clean data alone improves rankings. If yes, full V0_14 with
+remapped TV pairs becomes worth the time.
+
+**Next tick (358)**: monitor V0_13 to end. Launch V0_14-probe
+(no-TV version) on butter-clean data in parallel. Eval V0_13 once
+it finishes via auto-chain.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
