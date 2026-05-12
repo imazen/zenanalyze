@@ -1571,6 +1571,29 @@ Updated bake leaderboard (clean-data, h=128, TV=10):
 Next concrete tick: monitor 4-seed sweep; estimate ~15-20 min to
 first results.
 
+### Tick 305 — 2026-05-12T01:13Z — everything.md updated; new seed sweep at ep ~30
+
+Updated central tracking doc `everything.md` (zenanalyze commit
+`05c12c45`):
+- New top section: V0_7 SHIPS verdict (supersedes V0_5 midday)
+- Full comparison table: V0_5 leaked / V0_6 clean / V0_7 seed=0 /
+  V0_7 seed=1 (current ship) / V0_8 sweep / fast-ssim2
+- Methodology finding: val_mean ≠ CID22 SROCC (non-monotonic)
+- Per-band B1 gap as next-cycle target
+- Prior V0_5 verdict preserved as superseded section
+
+4-more-seed sweep progress (epoch ~30):
+- seed=5: val_mean=0.9353 best=0.9266
+- seed=8: val_mean=0.9360 best=0.9310
+- seed=13: val_mean=0.9383 best=0.9337
+- seed=21: val_mean=0.9375 best=0.9277
+
+All seeds tracking lower than V0_7 seed=1 at this point (which had
+~0.9268-0.9418 at epoch 20-40 trajectory). 15-20 min more.
+
+Next concrete tick: check sweep at epoch ~90-100; expect best vals
+to peak around there per the V0_7 trajectory.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
