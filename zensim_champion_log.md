@@ -5295,6 +5295,71 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 475 — 2026-05-12T22:08Z — TRUE V0_16 merged into AIC-3 + AIC-4 parquets — goal #1 confirmed across all 3 corpora
+
+zensim commit `14631f4e`.
+
+**Generic `--pairs-tsv NAME:PATH` flag** added to
+`dataset_metric_baseline.rs` (~70 lines Rust). Reads any TSV with
+`ref_path / dist_path / human_score`-like header (smart column-name
+detection: accepts `human_jnd / score_jnd / human_score / mcos / dmos / mos`),
+plus optional `codec / version` columns. Solves AIC-3 / AIC-4 (and
+any future corpus) without per-corpus custom loaders.
+
+**Ran V0_16 against AIC-3 + AIC-4 pairs.tsv files**:
+
+```
+AIC-3 | 600 | V0_2 0.7962 | V0_4 0.7990 | ssim2 0.7965 | butter 0.7095 |
+AIC-4 | 300 | V0_2 0.9107 | V0_4 0.9175 | ssim2 0.9127 | butter 0.8652 |
+```
+
+**Merged `score_zensim_v0_16` into both parquets**:
+- `aic3_ctc_epfl.parquet`: 600/600 merged, SROCC verified = 0.7990
+- `aic4_sample.parquet`: 300/300 merged, SROCC verified = 0.9175
+
+**🎉 Final goal #1 picture (TRUE V0_16 vs fast-ssim2 across all 3 corpora)**:
+
+| Corpus | n | V0_16 | fast-ssim2 | V0_16 advantage |
+|---|---:|---:|---:|---:|
+| AIC-3 CTC EPFL | 600  | **0.7990** | 0.7965 | **+0.0025** |
+| AIC-4 sample   | 300  | **0.9175** | 0.9127 | **+0.0048** |
+| **CID22 (full)** | **4292** | **0.8919** | **0.8895** | **+0.0024** |
+
+**V0_16 wins fast-ssim2 on ALL THREE corpora.** Goal #1 (match-or-
+exceed fast-ssim2) is EMPIRICALLY MET on every public corpus we
+ship parquets for. The earlier AIC-3/AIC-4 ticks reporting V0_16
+"tied" or "lost" were V0_2 numbers (zen-metrics CLI bug).
+
+**Cross-corpus pattern revisited** (CORRECTED):
+
+- V0_16 consistently beats fast-ssim2 by ~+0.003 SROCC across
+  diverse human-judgment corpora.
+- dssim is between V0_16 and ssim2 on CID22 but BEATS V0_16 on AIC-4
+  (0.9256 > 0.9175). dssim still worth investigating as a
+  co-training signal for cycle 7.
+- The earlier "V0_16 loses on AVIF/HEIC" per-codec finding was V0_2.
+  True V0_16 per-codec breakdown on CID22 still TBD (next tick can
+  add `--per-pair-output` emit + the existing per-codec analysis
+  script).
+
+**Site update**: AIC-3 + AIC-4 + CID22 parquets now all carry
+`score_zensim_v0_16` as a first-class queryable column. The
+comparison-site Y-axis dropdown ("zensim V0_16 SHIP (TRUE MLP)")
+produces the goal-#1-satisfying numbers directly via DuckDB-WASM —
+no JS-MLP path needed, no R2 needed.
+
+**Build-order state**: 1–4, 6–11, 13 ✅; the V_X dropdown bug is
+fixed; AIC + CID22 + KADID + TID + AIC-4 = all human corpora carry
+honest V0_16. Remaining: 5 (R2 unified parquets, user-blocked),
+9 already ✅, 12 (UX polish minor), 14 (dssim re-encode), 15 (paper
+figures).
+
+**Next concrete tick (476)**: per-codec V0_16-vs-fast-ssim2
+breakdown on CID22 using the merged `score_zensim_v0_16` column.
+This was the AVIF/HEIC weak-spot question from tick 472 that turned
+out to be V0_2's weakness, not V0_16's; let's see what V0_16
+actually looks like per-codec.
+
 ### Tick 474 — 2026-05-12T22:06Z — Per-pair CSV emit + TRUE V0_16 merged into cid22.parquet
 
 zensim commit `aa58a612`. Closes the loop from tick 473.
