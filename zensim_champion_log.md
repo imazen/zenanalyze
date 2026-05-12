@@ -4329,6 +4329,33 @@ can see the within-band variance directly.
 
 **Next tick (402)**: cycle 5 visualization complete. Will continue idle.
 
+### Tick 402 — 2026-05-12T08:26Z — Bake history full sweep + ensemble row shipped
+
+zensim commit `2079c632`:
+- Added V0_18 / V0_19 / V0_20 rows + 4-seed ensemble row to the bake
+  history table in `site/index.html`
+- Ensemble row highlighted as recipe-level honest signal
+- Bake history table now reflects ALL the experiments from this session
+
+**Bake history now contains** 12 rows covering:
+- V0_5/V0_6/V0_7 (predecessor archived bakes)
+- V0_8 (tainted, archived)
+- V0_10/V0_11/V0_12 (tainted-data experiments)
+- V0_15 (honest first ship, archived same-day)
+- V0_16 (CURRENT SHIP, bold)
+- V0_17 (TV=25, over-regularized, not shipped)
+- V0_18 / V0_19 / V0_20 (seed sweep, not shipped)
+- 4-seed ensemble (recipe-level honest signal)
+
+The progression tells the complete story from "tainted recipe with
+inflated 0.8948" → "honest V0_16 with 0.8919" → "recipe is at ssim2
+on CID22 (biased) but +0.0033 above on AIC-3 (held-out)".
+
+**Cycle 5 complete in all senses**: data, ship, site, methodology.
+
+**Next tick (403)**: nothing actionable until user provides direction.
+Will continue minimal status pings each tick.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
