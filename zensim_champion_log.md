@@ -4108,6 +4108,27 @@ per-pair predictions (need to re-run V0_19/V0_20 with --per-pair-output
 since the chains didn't emit per-pair CSVs). 4-seed-mean ensemble SROCC
 should be > any single seed (variance reduction).
 
+### Tick 394 — 2026-05-12T07:52Z — Ensemble experiment prep: V0_19/V0_20 per-pair eval running
+
+**Plan**: average v04_distance across the 4 seeds (V0_16/V0_18/V0_19/V0_20)
+per (ref, dist) pair, compute SROCC of ensemble vs MCOS. Theoretical
+prediction: ensemble SROCC ≥ best single seed (variance reduction).
+
+**Status**: V0_19/V0_20 per-pair evals running (PIDs 3343751/3343752,
+both at CID22 ~20% done, ETA ~2.5 min each).
+
+V0_16 and V0_18 per-pair CSVs already exist from prior ticks.
+
+**Wrote** `zensim/scripts/v_next/ensemble_seeds.py` (~100 lines) — takes
+N per-pair CSVs, computes mean v04 per row, emits ensemble SROCC + per-band.
+
+**Hypothesis**: if 4-seed-mean ensemble CID22 ≥ 0.8895 (ssim2), then
+"V_X recipe with ensembling beats ssim2" is honest. If still below,
+we need a different recipe direction (image-type dispatch).
+
+**Next tick (395)**: V0_19/V0_20 per-pair done, run ensemble script,
+report results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
