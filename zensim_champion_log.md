@@ -5295,6 +5295,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 468 — 2026-05-12T21:36Z — CID22/KADID/TID parquets exported (build-order step 11)
+
+zensim commit `af59da76`. Three gold-standard human-rated corpora are
+now queryable from the comparison-site without R2.
+
+**Files added**:
+- `scripts/v_next/export_human_corpora_to_parquet.py` — one script with
+  three loaders + shared `merge_metric_tsv` for later zen-metrics overlay.
+- `site/data/parquet/cid22.parquet` — 4341 rows × 11 cols, 122 KB.
+  Schema: corpus / ref_path / dist_path / image_name / codec
+  (encoder string: JPEG / JPEG_XL / AVIF_aom_s1 / AVIF_aom_s7 /
+  AVIF_aurora_fast / AVIF_aurora_slow / HEIC / JPEG_2000 / WebP /
+  Reference) / version (setting string: q30 / e7_q30 / s1_q40) /
+  bpp / human_mos (MCOS) / human_dmos (RMOS) / human_elo (Elo from
+  paired comparisons) / nb_pc_opinions.
+- `site/data/parquet/kadid.parquet` — 10125 rows × 8 cols, 52 KB.
+  KADID-10k schema: codec column = distortion type ID (01..25),
+  version = distortion level (01..05). human_dmos + human_dmos_var.
+- `site/data/parquet/tid.parquet` — 3000 rows × 7 cols, 19 KB.
+  TID2013: codec = distortion type ID (01..24), version = level (1..5).
+  human_mos only.
+
+Total addition: ~193 KB. Repository remains way under gh-pages caps.
+
+**Comparison-site wiring**:
+- `compare-worker.js`: added `cid22`, `kadid10k`, `tid2013` to
+  `CORPUS_URLS` map.
+- `compare.js`: 3 new corpus entries in `STUB_MANIFEST.corpora`,
+  marked with row counts and a useful one-line description. Old
+  `[TODO]` placeholder entries removed.
+- All 5 in-repo corpora (AIC-3, AIC-4, CID22, KADID, TID) now usable
+  end-to-end: corpus checkbox → DuckDB-WASM query → scatter +
+  step-5 + per-band SROCC + candlestick + Y→codec lookup.
+
+**What's now answerable on the live page**:
+- CID22 (MCOS scale, codec-output distortions): pick X=`bpp`,
+  Y=`human_mos` → classic rate-quality curve for each codec.
+- KADID (analytic distortions): X=`version`, Y=`human_dmos` → mean
+  DMOS by distortion level.
+- TID2013 (analytic distortions, MOS): X=`version`, Y=`human_mos`.
+- Combined: select multiple corpora; worker concats their parquets
+  and the table shows pooled per-band SROCC.
+
+**Note on per-corpus zen-metrics scoring**: The new parquets carry
+human labels + bpp only. zen-metrics columns (score_zensim,
+score_ssim2, etc.) require running `zen-metrics batch` over each
+corpus's (ref, dist) pair list — multi-hour for CID22 / KADID at
+their sizes. That's a follow-up cycle, not blocking the site.
+
+**Build-order state**: 1–4, 6–11, 13 ✅. Remaining:
+- 5 (R2 upload, user-blocked)
+- 12 (MOS/DMOS axis UX polish, low priority)
+- 14 (dssim on unified parquets — needs full re-encode sweep)
+- 15 (2023 paper figure reproduction)
+
+**Next concrete tick (469)**: run `zen-metrics batch` on CID22 (4341
+pairs, ~30 min GPU) in background. Output cols: score_dssim,
+score_ssim2_gpu, score_butter_max, score_butter_p3, score_zensim
+(via the V0_16-ship-time runtime which is the live `zensim` crate).
+Once done, re-export CID22 parquet with metric columns merged in.
+This lets the page show V0_16 vs ssim2 vs dssim on the gold-standard
+CID22 corpus.
+
 ### Tick 467 — 2026-05-12T21:32Z — Y → codec param lookup (build-order step 9)
 
 zensim commit `92492acf`. The "I want Y=70, what should the codec
