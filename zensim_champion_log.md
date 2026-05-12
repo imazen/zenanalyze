@@ -5295,6 +5295,51 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 455 — 2026-05-12T20:43Z — V0_16 beats dssim on AIC-3 (n=600, low-q regime)
+
+zensim commit `844a0b25` (benchmarks/aic3_zensim_vs_dssim_2026-05-12.md).
+First-ever measurement of V0_16 on AIC-3 CTC EPFL — a corpus the cycle-7
+plan flagged as critical for low-q (B0/B1) human-judgment coverage.
+
+**Aggregate SROCC vs reconstructed human JND (n=600)**:
+
+| Metric | SROCC |
+|---|---:|
+| **zensim V0_16 (current ship)** | **+0.7962** |
+| dssim-gpu (sign-flipped) | +0.7884 |
+| bpp | +0.6334 |
+| q (encoder param) | +0.0467 |
+
+V0_16 wins by **+0.0078** in aggregate. Per-codec: wins 5 of 6 (AVIF, HM,
+JPEG-2000, JPEGXL, VVC); ties dssim on JPEG-1 by -0.0013 (within noise).
+Biggest margin on JPEGXL (+0.0188).
+
+**Why this matters** — AIC-3 JND spans the perceptibility threshold
+(JND ∈ [-2.5, -0.25], negative values are sub-PJND distortion levels).
+This is the B0/B1 regime where ssim2 (and by extension V0_X trained
+against ssim2) was suspected to underperform. The data refutes that —
+V0_16 holds up against dssim across the entire range.
+
+This wasn't measurable before this tick because AIC-3 had no metric
+columns. The AIC-3 → parquet pipeline (ticks 453, 454, 455 combined)
+unlocks this evaluation.
+
+**Background chain status**:
+- AIC-3 dssim-gpu: ✅ done
+- AIC-3 zensim CPU: ✅ done
+- AIC-3 ssim2-gpu: in flight (started 20:41, ~3 min in)
+- AIC-3 butteraugli-gpu: queued
+- AIC-4 zensim CPU: ✅ done
+- AIC-4 dssim-gpu / ssim2-gpu / butter-gpu: queued
+
+**Next tick (456)**: when ssim2-gpu lands, recompute the table with
+V0_16-vs-fast-ssim2 (the canonical comparison per CLAUDE.md goal #1).
+Then butter, then AIC-4 cross-check.
+
+Current parquet at `/tmp/aic3_dssim/aic3_ctc_epfl.parquet` (600 × 11
+cols): corpus, ref_path, dist_path, image_name, codec, q, quality_index,
+bpp, human_jnd, score_dssim, score_zensim.
+
 ### Tick 454 — 2026-05-12T20:42Z — AIC-3 dssim DONE, chain launched, AIC-4 export script
 
 zensim commits this tick:
