@@ -5202,6 +5202,24 @@ Site methodology updated with new recommendation.
 
 **Next tick (440)**: idle (cycle endpoint truly reached).
 
+### Tick 440 — 2026-05-12T11:00Z — Site updated with {V0_16, V0_20} 2-bake OPTIMUM recommendation
+
+zensim commit `255e39a4`:
+- Bake history table: {V0_16, V0_20} 2-bake is now bold/OPTIMUM
+- 3-bake demoted to "virtually tied with 2-bake at +0.0099 combined"
+- Pareto chart adds {V0_16, V0_20} as the highlighted 2-bake point
+
+**Site state**: Fully reflects the cycle 6+ exhaustive search conclusions.
+Anyone reading the site can immediately identify:
+1. V0_16 = the single-bake ship
+2. {V0_16, V0_20} = the runtime ensemble recommendation (2× cost)
+3. {V0_20, V0_21} = the AIC-3-specialty 2-bake (max cross-codec)
+4. V0_22 = the smoothness/Near-PJND specialty
+
+Cycle 6+ COMPLETE. No more recipe iterations remain in scope.
+
+**Next tick (441)**: idle until user direction.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
