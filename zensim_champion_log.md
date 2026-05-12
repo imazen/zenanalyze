@@ -2773,6 +2773,29 @@ gold standard.
 (serial — V0_12 still has 10 epochs to go). Then V0_12 eval. Update site
 with V0_11 + V0_12 numbers.
 
+### Tick 349 — 2026-05-12T04:42Z — Chain eval script launched (V0_11 → V0_11 nonmono → V0_12 → V0_12 nonmono)
+
+V0_11 at ep 130 (best=0.9408 since ep 90); will early-stop at ep 140.
+V0_12 at ep 70 (best=0.9417 since ep 40); will continue if it finds
+improvement.
+
+**Chain script** `/tmp/zensim_loop/chain_evals.sh` launched (PID 3088778):
+1. wait for V0_11 → run CID22+AIC-3 eval → run JPEG non-mono
+2. wait for V0_12 → run CID22+AIC-3 eval → run JPEG non-mono
+
+Total chain time: ~25 min (waits + 4 evals × ~3 min each).
+
+**Predictions** (anchored on training trajectory and prior data):
+- V0_11 (flat TV=20): CID22 ~0.892-0.895, B1 ~-0.012, non-mono ~4.5%,
+  AIC-3 ~0.800. Continuation of V0_7(10)→V0_8(15) trend with slight
+  smoothness gain. Maybe edges out V0_8.
+- V0_12 (B1-oversample + V0_8 recipe): CID22 ~0.895-0.905, B1 ~-0.005
+  (CLOSURE), non-mono ~5-6%, AIC-3 ~0.805. B1 data balance addresses
+  root cause — should pay off where V0_10's per-band TV failed.
+
+**Next tick (350)**: V0_11 should be evaluated. Read results, log,
+update site.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
