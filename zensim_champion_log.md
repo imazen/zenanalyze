@@ -4491,6 +4491,35 @@ All are multi-tick projects. Awaiting user direction.
 
 **Next tick (408)**: idle.
 
+### Tick 408 — 2026-05-12T08:50Z — V0_21 launched: butter-clean + V0_16 recipe (cycle 6 candidate #4)
+
+Started cycle-6 candidate #4 from methodology Section 9: butter-concordant
+training data.
+
+**Data prep**:
+- Re-ran `apply_butter_filter.py` on post-purge `training_safe_synthetic.csv`
+  (196k rows). Dropped 11,675 discordant rows (5.95%) → 184,411 survivor rows.
+- Joined with current clean features CSV (144,791 rows) →
+  `/tmp/zensim_loop/safe_synth_clean_butter_post_purge_features.csv`
+  (**128,466 rows**, 11.27% drop from purge-clean).
+- Remapped TV pairs file → 182,770 pairs (11.13% drop).
+
+**V0_21 launched** (PID 3393399):
+- Same recipe as V0_16 (h=128, flat TV=20, seed=1)
+- Training data: butter+purge-clean (128k rows, smallest training set
+  so far)
+- Out: `/tmp/zensim_loop/v0_21_butter_purged_tv20_seed1.bin`
+- ETA ~10-12 min
+
+**Hypothesis**: butter-concordant training removes ~11% noisy labels
+(ssim2/butter rank disagreements). If the noise was confusing the
+model, V0_21 CID22 should land somewhat better than V0_16 (which
+had 0.8919). If the discordant pairs are actually valid (just rare
+distortions), V0_21 may regress due to smaller training set.
+
+**Next tick (409)**: V0_21 will be at ep 30-40. Monitor + arm auto-eval
+chain.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
