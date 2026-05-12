@@ -1873,6 +1873,25 @@ Early-stop at ~ep 190. ~5 more min.
 
 Next concrete tick: TV=15 finals + eval.
 
+### Tick 318 — 2026-05-12T02:05Z — TV=15 finals; evals launched
+
+TV=15 trainings DONE (both early-stop epoch 190):
+- seed=1 TV=15: best=0.9422 (md5 `d6c99c0c`)
+- seed=13 TV=15: best=0.9425 (md5 `6d934ad2`)
+
+Both below their TV=10 counterparts (seed=1 0.9437, seed=13 0.9433).
+
+Launched evals (CID22 + non-mono) for both. PIDs 2946358-2946361.
+~5 min wall.
+
+Hypothesis check pending:
+- If seed=13 TV=15 lands ssim2-beat CID22 (>=0.8895) AND
+  within-target non-mono (<=5.5%) AND B1 better than V0_7's -0.027,
+  it's a V0_8 ship candidate.
+- If both criteria fail like the prior sweeps, V0_7 stays.
+
+Next concrete tick: read TV=15 eval results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
