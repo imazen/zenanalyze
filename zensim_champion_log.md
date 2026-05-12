@@ -3350,6 +3350,35 @@ Surface to user for explicit go-ahead before swapping.**
 **Next tick (365)**: collect AIC-3 + non-mono numbers; surface full
 comparison to user; await ship authorization.
 
+### Tick 365 — 2026-05-12T05:58Z — V0_15 SHIPPED; site + CHANGELOG updated; GH Pages fix; step-5 prep
+
+**V0_15 SHIPPED** (user authorized) — zensim commits:
+- `48264692` — ship(V0_15) bake swap + V0_8 archived as `_tainted`
+- `c0974c8c` — site banners (V0_15 green, V0_8 archive note)
+- `885ea915` — fix Pages workflow (`enablement: true`)
+
+Runtime: `zensim/weights/v0_15_2026-05-12.bin` md5 `73d5e418`
+(affine-calibrated α=26.9332, β=-4.5520, R²=0.7447). All 5 V0_4
+runtime tests pass with calibrated bake.
+
+**CHANGELOG.md updated** with V0_15 entry + 2026-05-12 purge note.
+
+**User new directives**:
+1. "why so few bands; also use gh pages on zensim to generate all the graphs etc"
+2. GH Pages already enabled at imazen.github.io/zensim; was failing
+   on `configure-pages@v5` with "Get Pages site failed" — fixed by
+   adding `enablement: true` parameter.
+3. Step-5 bands: user wants finer granularity. Currently 4 paper-Table-5
+   bands (B0<50, B1 [50,65), B2 [65,90), B3 ≥90). Step-5 means every
+   5 ssim2 points → 16 bins from 0..100.
+
+**Step-5 prep**: re-running V0_15 eval with `--per-pair-output` so we
+have per-pair CSV → can compute step-5 SROCC offline + render as new
+chart on the site.
+
+**Next tick (366)**: collect V0_15 per-pair CSV; write Python step-5
+band aggregator; add new Plotly chart to site (step-5 SROCC per bake).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
