@@ -5295,6 +5295,78 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 458 — 2026-05-12T20:53Z — Background chain DONE; full AIC-3/AIC-4 metric tables
+
+Chain finished at 20:51:42. All 5 metric passes (dssim/ssim2/butter ×
+{AIC-3, AIC-4} + zensim CPU × 2) complete. Both parquets now have full
+column coverage.
+
+**AIC-3 parquet** at `/tmp/aic3_dssim/aic3_ctc_epfl.parquet`
+(600 rows × 14 cols).
+**AIC-4 parquet** at `/tmp/aic4_metrics/aic4_sample.parquet`
+(300 rows × 23 cols — includes paper-pre-computed metrics +
+our zen-metrics outputs + human JND with CI bounds).
+
+zensim commit `6c4fbd59` finalizes
+`benchmarks/aic4_zensim_vs_paper_metrics_2026-05-12.md`.
+
+**AIC-3 (n=600) aggregate |SROCC| vs human JND** (final, full metric set):
+
+| Metric | \|SROCC\| |
+|---|---:|
+| fast-ssim2-gpu       | 0.7970 |
+| **zensim V0_16**     | **0.7962** (-0.0008) |
+| dssim-gpu            | 0.7884 |
+| butter pnorm3        | 0.7571 |
+| butter max           | 0.7074 |
+
+**AIC-4 (n=300) aggregate |SROCC| vs human JND** (final, full metric set):
+
+| Rank | Metric | \|SROCC\| |
+|---:|---|---:|
+| 1  | CVVDP                  | 0.9609 (ceiling) |
+| 2  | IW-SSIM                | 0.9507 |
+| 3  | MS-SSIM                | 0.9409 |
+| 4  | HDR-VDP-3              | 0.9329 |
+| 5  | HDR-VDP-2              | 0.9294 |
+| 6  | **dssim-gpu**          | **0.9256** ← BEATS fast-ssim2 |
+| 7  | VMAF-neg               | 0.9209 |
+| 8  | fast-ssim2-gpu         | 0.9127 |
+| 9  | paper SSIMULACRA2      | 0.9125 (ssim2-gpu sanity-check: Δ=0.0002) |
+| 10 | **zensim V0_16**       | **0.9107** (-0.002 vs ssim2) |
+| 11 | SSIM                   | 0.9046 |
+| 12 | butter pnorm3          | 0.8969 |
+| 13 | butter max             | 0.8656 |
+| 14 | PSNR-Y                 | 0.8163 |
+
+**Three surprising findings**:
+
+1. **dssim beats fast-ssim2 on AIC-4** by +0.013 SROCC. Contradicts the
+   "ssim2 is canonical" assumption. dssim deserves a serious look as a
+   training signal in cycle 7 (worth running it on the unified V_X
+   parquets too).
+
+2. **Our ssim2-gpu reproduces paper SSIMULACRA2** within Δ=0.0002
+   (0.9127 vs 0.9125 on AIC-4). zen-metrics CLI is producing correct
+   canonical numbers.
+
+3. **Butteraugli is weak** on both AIC corpora — pnorm3 hits 0.7571 on
+   AIC-3 (vs ssim2 0.7970) and 0.8969 on AIC-4 (vs ssim2 0.9127). It
+   was designed for the visually-lossless regime, not the full
+   perceptibility range AIC spans.
+
+**Cycle-7 reachable ceiling on AIC-4**:
+- Match dssim: +0.015 SROCC (adopt MS-SSIM-style multi-scale)
+- Match IW-SSIM: +0.04 SROCC (information-weighted pooling)
+- Match CVVDP: +0.05 SROCC (viewing-condition-aware CSF — biggest lift)
+
+**Next concrete tick (459)**: dssim is now a stronger reference than
+fast-ssim2 on AIC-4. Worth scoring dssim on the existing unified V_X
+parquets (`/mnt/v/zen/zensim-training/2026-05-07/unified/*.parquet`)
+to see whether the V0_X recipes' SROCC vs dssim story differs from
+their SROCC vs fast-ssim2 story. This is the smallest useful step
+that builds on tonight's data.
+
 ### Tick 457 — 2026-05-12T20:49Z — V0_16 vs fast-ssim2 on AIC-3 (ssim2-gpu merged, canonical comparison)
 
 zensim commit `a85c8ba3` (renamed
