@@ -3205,6 +3205,27 @@ data** — that's a major finding requiring a different recipe.
 
 **Next tick (360)**: monitor V0_15 to ~ep 40-50; assess trajectory.
 
+### Tick 360 — 2026-05-12T05:34Z — V0_15 ep 20 tracking V0_8; CLAUDE.md inflation caveat added
+
+**V0_15 progress** (PID 3187590):
+- ep 0: val_mean 0.9083
+- ep 10: val_mean 0.9153
+- ep 20: val_mean 0.9259
+
+Similar trajectory to V0_8 (ep 20 was 0.9277). The 7.4% smaller
+training set isn't hurting convergence at this stage.
+
+**Auto-eval chain armed** (PID 3188487, script
+`/tmp/zensim_loop/eval_v0_15.sh` using `kill -0` not pgrep -f).
+
+**zensim/CLAUDE.md updated** (commit pending):
+- Added prominent V0_8 INFLATION CAVEAT under the shipping section
+- Documents the 11,629 contaminated rows, 361 source files purged
+- Notes V0_15 retrain in flight with expected 0.890-0.892 honest CID22
+
+**Next tick (361)**: monitor V0_15 to ep 40-50; cycle peak around there.
+If V0_15 best val_mean > V0_8's 0.9416, it's a strong ship candidate.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
