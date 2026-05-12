@@ -5295,6 +5295,56 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 467 — 2026-05-12T21:32Z — Y → codec param lookup (build-order step 9)
+
+zensim commit `92492acf`. The "I want Y=70, what should the codec
+do?" user-facing path the comparison-site spec called for is now live.
+
+**UI** (`compare.html`):
+- New form below the per-band table: target Y input + tolerance input
+  + "Find rows" button + progress span.
+- Result table columns: codec / version / n / Y median / X median /
+  bytes median.
+
+**Worker** (`compare-worker.js`):
+- New `lookup` message type with payload
+  `{corpora, x_metric, y_metric, target_y, tolerance}`.
+- SQL: `SELECT codec, TRY_CAST(<x>) AS x, TRY_CAST(<y>) AS y,
+  TRY_CAST(encoded_bytes) AS bytes, knob_tuple_json FROM '<url>'
+  WHERE y IS NOT NULL AND ABS(y - target) ≤ tolerance` per corpus.
+- JS groups rows by `(codec, knob_tuple_json)`, computes median y / x
+  / bytes per group, sorts descending by row count.
+- Reply: `lookup_result` with `{groups: [{codec, version, n, y_median,
+  x_median, bytes_median}]}`.
+
+**Main thread** (`compare.js`):
+- `renderLookup({groups})` populates `#lookup-table` tbody, using
+  `shortVersion()` to prettify the knob_tuple_json column.
+- "Find rows" button validates inputs (target required, tolerance > 0)
+  and surfaces the worker progress in `#lookup-progress`.
+
+**End-to-end on AIC-4**: pick AIC-4 corpus, Y = score_zensim,
+target = 70, tolerance = 2 → table lists which codecs/distortion
+levels land in [68, 72] zensim and their encoded-byte costs. Same
+on AIC-3 (Y = human_jnd, target = -1.0, tolerance = 0.25 → list of
+(codec, quality_level) entries at that JND band).
+
+**Build-order state**: 1–4, 6–10, 13 ✅. Remaining:
+- 5 (R2 upload, blocked on user public-read URL form)
+- 11 (CID22/KADID/TID human-rated parquets — exports needed)
+- 12 (MOS/DMOS axis dropdown UX polish)
+- 14 (dssim on unified parquets — needs full re-encode sweep)
+- 15 (2023 paper figure reproduction)
+
+The MVP from COMPARE_PLAN steps 3-9 is now complete and live.
+
+**Next concrete tick (468)**: 11 — export CID22/KADID/TID human-rated
+sets to parquet. CID22 is at `/mnt/v/dataset/cid22/CID22_validation_set.csv`,
+KADID at `/mnt/v/dataset/kadid10k/`, TID at `/mnt/v/dataset/tid2013/`.
+Write export scripts similar to AIC-3/AIC-4 (small parquets, in-repo
+under site/data/parquet/). This unlocks the comparison-site for the
+gold-standard human-rated corpora — without needing R2.
+
 ### Tick 466 — 2026-05-12T21:27Z — Codec + version filter wiring (build-order step 8)
 
 zensim commit `4bfbba09`. Filter dropdowns are now live.
