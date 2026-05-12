@@ -4129,6 +4129,47 @@ we need a different recipe direction (image-type dispatch).
 **Next tick (395)**: V0_19/V0_20 per-pair done, run ensemble script,
 report results.
 
+### Tick 395 — 2026-05-12T07:58Z — ENSEMBLE RESULT: 4-seed mean = 0.8892, tied with ssim2
+
+**Definitive cycle 5 conclusion**: 4-seed ensemble CID22 = **0.8892**,
+essentially tied with fast-ssim2 (0.8895, Δ=-0.0003).
+
+**Per-seed CID22 SROCCs**:
+- V0_16 (seed=1): 0.8919 (single-bake outlier, +0.0024 vs ssim2)
+- V0_18 (seed=42): 0.8847
+- V0_19 (seed=7): 0.8848
+- V0_20 (seed=123): 0.8872
+- **Mean: 0.8872, ensemble: 0.8892** (ensembling lifts +0.002 from mean)
+
+**Per-band ensemble vs ssim2**:
+- B0 (n=324): 0.4344 vs 0.4418, Δ = -0.0074
+- B1 (n=1010): 0.4607 vs 0.4694, Δ = -0.0088
+- B2 (n=2915): 0.7730 vs 0.7722, Δ = +0.0008 (tied)
+- B3 (n=43): noisy small sample
+
+**Honest research summary**:
+- V_X recipe's CID22 SROCC in expectation = ssim2 level (no recipe-level beat)
+- V0_16 SHIP gets +0.0024 above ssim2 from seed-1 luck (within seed distribution)
+- Ensembling reduces variance (beats 3/4 single seeds) but doesn't lift above ssim2
+- B2 (the biggest band) is where V_X recipe matches/beats ssim2; B0/B1 trail
+
+**Methodology page updated** (Section 6.1) with ensemble table.
+
+**Cycle 5 status**: TV/seed exploration EXHAUSTED. Recipe optimum
+identified (V0_16: h=128, flat TV=20, seed=1). To go beyond ssim2
+in expectation, need:
+- Image-type-aware MLP dispatch (multiple specialized MLPs + classifier)
+- Deeper architecture
+- Significantly improved training data
+- All require substantial work; not in scope for this session.
+
+**Session wrap-up**: V0_16 SHIPPED, site fully documents methodology +
+seed variance + ensemble experiment. CONTEXT-HANDOFF up to date with
+V0_16 status.
+
+**Next tick (396)**: optional — run AIC-3 ensemble (V0_19/V0_20 need
+re-eval with --aic3); OR pivot to image-type dispatch.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
