@@ -3769,6 +3769,25 @@ cwd; PID 3293329 confirmed running.
 **Next tick (380)**: V0_17 progress check; if val_mean is lower than
 V0_16 (likely with TV=25), we may be past the optimum.
 
+### Tick 380 — 2026-05-12T06:55Z — V0_17 ep 30 val=0.9331; auto-eval armed with correct PID
+
+**V0_17 progress** (PID 3293329):
+- ep 30 val=0.9331 (V0_16 was 0.9345 at ep 30, V0_15 was 0.9321)
+
+V0_17 (TV=25) is between V0_15 and V0_16 at ep 30. Will see if it
+catches up by ep 90 cycle peak.
+
+**Auto-eval chain armed** (PID 3295966) — uses correct trainer PID
+3293329, fires when V0_17 exits.
+
+Expected V0_17 outcomes:
+- If TV=25 continues the trend → better B0/B1 than V0_16, similar
+  smoothness. Ship swap candidate.
+- If TV=25 overshoots → V0_10's `[15,25,15,15]` story repeats (worse
+  B1, similar aggregate). V0_16 is the optimum.
+
+**Next tick (381)**: V0_17 should be at ep 60-80. Continue monitoring.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
