@@ -3990,6 +3990,20 @@ Parallel training fine — single-thread per trainer, 32 cores available.
 **Next tick (389)**: V0_19/V0_20 will be at ep 30-50. Continue monitoring;
 auto-eval chains needed.
 
+### Tick 389 — 2026-05-12T07:32Z — V0_19/V0_20 progressing; chains armed
+
+V0_19 (seed=7) ep 30: 0.9312
+V0_20 (seed=123) ep 40: 0.9397
+
+V0_20 tracking close to V0_16's ep 40 (0.9401). V0_19 a bit behind.
+
+Auto-eval chains armed (PIDs 3323702, 3323706) using trainer PIDs
+3322750/3322751 — verified via `pgrep`.
+
+**Next tick (390-391)**: V0_19/V0_20 should be at ep 60-90; both will
+likely converge near 0.94. Then collect CID22 for both → 4-seed mean
++ stdev.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
