@@ -3493,6 +3493,31 @@ them would clutter the chart with archived bakes.
 4. Try one more recipe variant (V0_16) on clean data — different TV
 5. Update CONTEXT-HANDOFF.md / next-session pickup
 
+### Tick 370 — 2026-05-12T06:16Z — V0_16 (clean + TV=20) launched; CONTEXT-HANDOFF shipped
+
+**V0_16 launched** (PID 3222018): same as V0_15 recipe but **flat TV=20**
+instead of 15.
+- Data: `safe_synth_clean_features.csv` (144,791 rows — properly purged)
+- TV pairs: `combined_purged_tv_pairs_bands.tsv` (205,654 pairs)
+- Out: `/tmp/zensim_loop/v0_16_purged_tv20_seed1.bin`
+- ep 0 val_mean = 0.9002 (vs V0_15 ep 0 = 0.9083; lower start)
+- ETA ~12 min
+
+**Hypothesis**: TV=20 may produce a smoothness specialist (better non-mono)
+on top of V0_15's honest data. If it also clears ssim2 aggregate, it's
+a viable swap target.
+
+**CONTEXT-HANDOFF.md shipped** (zensim commit `83d6ede6`):
+- V0_15 ship state with metric table
+- Purge audit trail (~75 GiB freed, 361 source files)
+- V0_15 recipe (training CSV, TV pairs, hyperparams, calibration)
+- Open work queue (KADID/TID step-5, KonJND PJND, blocklist, image-type
+  dispatch, butter-concordance training)
+- DO NOTs (don't re-add CID22 holdout, don't trust V0_8 number)
+
+**Next tick (371)**: V0_16 will be at ~ep 30-40. Continue monitoring;
+also start KonJND PJND eval for V0_15 (uses different harness flag).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
