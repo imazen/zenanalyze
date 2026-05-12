@@ -4764,6 +4764,27 @@ methodology sections. All cycle-5+6 findings are visualized.
 
 **Next tick (419)**: idle.
 
+### Tick 419 — 2026-05-12T09:36Z — Re-checked AIC-4; confirmed unusable without JND scores CSV
+
+Re-examined `/mnt/v/dataset/aic4_sample/`. The README references
+`JPEG_AIC_reconstructed_jnd_scores.csv` but this CSV is NOT bundled
+with the sample dataset (only images + README). Same finding as
+tick 341 — AIC-4 evaluation requires the full release from
+<https://aicdb.jpeg.org/aic-4/>.
+
+For now, AIC-3 remains the only held-out cross-dataset.
+
+**Cycle 7+ candidates** that I can't progress without user input:
+- AIC-4 full dataset download
+- KonJND-1k dataset restoration
+- dssim integration (Rust code change)
+- Multi-bake ensemble runtime (Rust code change)
+- Image-type-aware dispatch (substantial multi-MLP work)
+
+Idle status continues. Cron will fire every 4 min.
+
+**Next tick (420)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
