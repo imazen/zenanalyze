@@ -1101,6 +1101,27 @@ CID22 SROCC also exceeds ssim2.
 Next concrete tick: read seed=1 CID22 SROCC; if ≥ 0.8895, propose
 re-shipping V0_7 = seed=1.
 
+### Tick 290 — 2026-05-12T00:01Z — Audit doc outcome section + seed=1 KADID 0.9437
+
+Added an Outcome section to `benchmarks/holdout_overlap_audit_2026-05-11.md`
+(zensim `cf69cca6`) documenting the closed remediation cycle:
+1. Generator patched (`CID22_VALIDATION_49`)
+2. CSV cleaned 218k → 156k pairs
+3. V0_6 retrained, CID22 = 0.8839 (honest baseline)
+4. 5-seed sweep, seed=0 best at CID22 = 0.8912
+5. V0_7 shipped (zensim `5286623d`)
+6. Goal-3 KonJND Table 4 reproduction matches paper to 3-4 sig figs
+
+Caveats acknowledged: B0/B1/Near-PJND gaps remain; V0_7 non-mono
+5.67% > 5.5% target by +0.17%; audit not yet in CI.
+
+seed=1 eval progress: **KADID = 0.9437** (vs seed=0's 0.9443).
+TID just started; CID22 ~3 min out.
+
+Next concrete tick: seed=1 CID22 result → if ≥ ssim2's 0.8895,
+propose swap V0_7 = seed=1 (which has both ssim2-beat + smoothness-
+within-target).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
