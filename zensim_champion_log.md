@@ -2287,6 +2287,45 @@ Next concrete tick: finish AIC-3 download; begin per-band TV
 implementation OR pivot to ingesting AIC-4 + AIC-3 datasets into
 our eval pipeline.
 
+### Tick 331 — 2026-05-12T03:33Z — Per-band TV: regen_tv_pairs.py --emit-bands shipped
+
+First implementation step toward per-band TV: extended
+`regen_tv_pairs.py` with `--emit-bands` flag (zensim commit
+`ce21a716`). When set, output TSV gains `band_id` column (0..3 for
+B0..B3 per CID22 paper Table 5).
+
+**Tested on cleaned safesyn corpus**:
+- 141,055 TV pairs (15,365 source/codec groups)
+- Band distribution: B0 21.8 % / B1 16.6 % / **B2 47.7 %** / B3 13.9 %
+- Output: `/tmp/zensim_loop/safesyn_clean_tv_pairs_bands.tsv`
+
+B2 dominates (~half), B1 is the third largest. With per-band weights
+`{B0:10, B1:20, B2:15, B3:10}`, expect TV pressure to be 1.5x higher
+in B1 / 2x higher in B2 than V0_7's flat TV=10.
+
+Wait — let me reconsider. The user direction: focus per-band weight
+**on the gap band B1**. Possible weights:
+- `{B0:10, B1:20, B2:10, B3:10}` — TV=20 ONLY in B1, TV=10 elsewhere
+  (closer to V0_7-with-B1-boost)
+- `{B0:10, B1:25, B2:15, B3:10}` — even stronger B1 push
+
+The first is the simpler test. Empirical TV=15 (V0_8) helped B1 to
+-0.014; pushing only B1 to TV=20-25 may close further while
+preserving V0_7's B0/non-mono.
+
+**Remaining work for per-band TV V0_9**:
+1. ⏳ Patch `TvRegularizer` struct in `mlp_train.rs` (+band_id +band_weights)
+2. ⏳ Add `--tv-band-weights B0,B1,B2,B3` CLI flag to `zensim_mlp_train`
+3. ⏳ Use per-band weight in TV gradient computation
+4. ⏳ Train V0_9 with `[10, 20, 10, 10]` first
+5. ⏳ Eval + ship-or-stand
+
+AIC-3 download still progressing (~132 MB / 1.5 GB; ~30 min ETA).
+AIC-4 ZIP extracted (610 PNG files in `JPEG_AIC-4_Sample_Dataset/`).
+
+Next concrete tick: patch TvRegularizer struct — ~2 hours of focused
+work but can start with the data-model changes.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
