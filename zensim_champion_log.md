@@ -5318,6 +5318,66 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 486 — 2026-05-12T23:01Z — User: vacation mode + 3-task auth; CORS bug fixed (the 404), v15 sweeps uploaded, cycle-7 dssim plan ready
+
+**User direction**: "you have user authoeization for all 3 tasks,
+don't waste my time stopping constantly, i am on vacation. also
+getting 404, fix and test the site deploy". Switching to autonomous
+mode per the global CLAUDE.md "Work independently" definition.
+
+**Root-caused the 404**: R2 was missing CORS headers. Preflight
+`OPTIONS` to `zentrain-r2.imazen.org` was returning 403, so browser
+fetch from `imazen.github.io` aborted before any GET. Sym was
+"compare-html 404" but the actual failure was the cross-origin
+preflight.
+
+**Fix**: `aws s3api put-bucket-cors` on the `zentrain` bucket with
+`AllowedOrigins=["*"]`, `AllowedMethods=["GET","HEAD"]`,
+`AllowedHeaders=["*"]`, `MaxAgeSeconds=3600`. Notes:
+- `ExposeHeaders` field is REJECTED by R2's S3 API (MalformedXML);
+  omit it.
+- Configured only via the S3 API at
+  `<account>.r2.cloudflarestorage.com`; not exposed via the
+  custom domain endpoint.
+
+**Verified**:
+- Preflight: `HTTP 204` with `access-control-allow-origin: *`,
+  `access-control-allow-headers: range`, `access-control-allow-methods: GET, HEAD`.
+- GET with Origin + Range: `HTTP 206` with `access-control-allow-origin: *`.
+- DuckDB Python `INSTALL httpfs; SELECT FROM '<R2 URL>'`: returns
+  36000-row count + per-codec aggregates on v13_zenjpeg. Same path
+  DuckDB-WASM takes in the browser.
+
+**v15 sweeps uploaded** (per user auth):
+- `unified_v15r_zenjpeg.parquet` (1.79M rows, 496 MB) ✅
+- `unified_v15rc_zenjpeg.parquet` (514k rows, 695 MB) ✅
+- Both wired into `compare.js` + `compare-worker.js` as additional
+  R2 corpora. Comparison-site now has **12 corpora total** (5
+  in-repo human-rated + 7 R2 codec-sweep).
+
+**Cycle-7 dssim co-training plan written**
+(`scripts/v_next/CYCLE_7_DSSIM_COTRAIN_PLAN.md`):
+- KEY FINDING: the synth training CSV
+  `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv`
+  already has a `dssim` column. NO re-scoring needed.
+- Trainer patch (~4 changes): expose `dssim_weight` flag in
+  `TrainConfig` + add `dssim_weight * mse(pred, (1-dssim)*100)`
+  to loss when > 0.
+- Proposed V0_24 recipe: V0_16 + `--dssim-weight 0.3`. Same
+  network architecture (228→128→1), same bake binary format.
+- Expected wall: ~15 min train + bake + eval.
+- Success criteria: AIC-4 JPEG-AI SROCC > 0.85, no CID22/AIC-3/AIC-4
+  aggregate regression.
+
+zensim commits this tick:
+- `2a03eb16` — CORS fix on R2
+- `169fe41a` — v15 site wiring
+- `90167f3d` — CYCLE_7_DSSIM_COTRAIN_PLAN.md
+
+**Next concrete tick (487)**: implement the trainer patch +
+launch V0_24 training run in background. ~15 min training; results
+in tick 488-489.
+
 ### Tick 485 — 2026-05-12T22:56Z — JS-MLP-on-codec-sweep verified end-to-end
 
 zensim commit `a4815a1e`: `benchmarks/jsmlp_codec_sweep_verify_2026-05-12.md`.
