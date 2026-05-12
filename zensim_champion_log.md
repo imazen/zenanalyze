@@ -2567,6 +2567,36 @@ RankNet objective slightly. V0_8 ended at val 0.9416 vs V0_7's 0.9422.
 in parallel if CPU headroom allows (it's a different binary, may share
 core busy-wait but image decode is the bottleneck).
 
+### Tick 343 — 2026-05-12T04:18Z — V0_10 STOPPED ep 90 val=0.9402; AIC-3 baseline: V0_8 BEATS ssim2
+
+**V0_10 early-stopped** at epoch 90, best val_mean = **0.9402** (vs V0_9
+0.9422, V0_8 0.9416). Higher cross-band TV (15 → 15,25,15,15) reduces
+RankNet training fit slightly but is not blocking — val SROCC is still
+in the same ballpark. Bake at `/tmp/zensim_loop/v0_10_perband_tv_15_25_15_15_seed1.bin`
+md5 `753066a7`.
+
+**AIC-3 held-out baseline (V0_8, 600 pairs, 6 codecs):**
+
+| Metric | SROCC |
+|---|---|
+| V0_2 (legacy) | 0.7962 |
+| **V0_8 SHIPPED (V0_4 slot)** | **0.8043** ✓ |
+| fast-ssim2 | 0.7965 |
+| butteraugli | 0.7095 |
+
+V0_8 **beats fast-ssim2 by +0.0078 on AIC-3** — cross-dataset
+generalization confirmed. The +0.0053 CID22 win and the +0.0078
+AIC-3 win line up: V0_8 is meaningfully better than ssim2 on
+held-out human-rated codec output.
+
+**Launched in parallel** (estimated ~15 min total):
+- V0_10 on CID22 + AIC-3 (PID 3070920) — `dataset_metric_baseline`
+- V0_10 non-mono on JPEG v13 parquet (PID 3073322) — `score_unified_with_bake.py`
+
+**Next tick (344)**: collect V0_10 CID22+AIC-3 SROCC + non-mono;
+compare to V0_8; decide ship/hold. Also: log V0_8 AIC-3 result in
+`zensim/CLAUDE.md` shipping history.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
