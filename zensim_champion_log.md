@@ -5295,6 +5295,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 476 — 2026-05-12T22:15Z — Per-codec TRUE V0_16 vs fast-ssim2 on CID22
+
+zensim commit `53a104a5`: `benchmarks/cid22_per_codec_v0_16_2026-05-12.md`.
+
+Per-codec analysis using the TRUE V0_16 column merged in tick 474.
+**V0_16 wins 5 of 9 codecs**, ties 2, loses 2:
+
+| Codec | V0_2 | V0_16 | ssim2 | Δ(V16-S) | Result |
+|---|---:|---:|---:|---:|---|
+| AVIF_aurora_slow | 0.8384 | **0.8809** | 0.8425 | **+0.0384** | V0_16 wins big |
+| JPEG_XL          | 0.9246 | **0.9314** | 0.9219 | +0.0096 | V0_16 |
+| AVIF_aom_s1      | 0.8592 | **0.8903** | 0.8813 | +0.0090 | V0_16 |
+| WebP             | 0.8928 | 0.9085 | 0.9052 | +0.0034 | V0_16 |
+| JPEG_2000        | 0.8598 | 0.8743 | 0.8724 | +0.0019 | V0_16 (noise) |
+| AVIF_aom_s7      | 0.8886 | 0.9138 | 0.9140 | 0.0000 | tie |
+| AVIF_aurora_fast | 0.8001 | 0.8618 | 0.8627 | -0.0009 | tie |
+| HEIC             | 0.8879 | 0.8902 | 0.8920 | -0.0017 | ssim2 (noise) |
+| JPEG             | 0.9424 | 0.9402 | 0.9458 | -0.0056 | ssim2 |
+
+**Major recovery story**: V0_X training specifically un-broke V0_2's
+AVIF weakness. V0_2 was at 0.80–0.86 on the four AVIF variants
+(losing to ssim2 by 0.02–0.06 each); V0_16 is at 0.86–0.91, with
+AVIF_aurora_slow climbing from 0.84 → 0.88 (+0.038 vs ssim2 — the
+largest per-codec gain anywhere in this table). V0_2's "AVIF
+weakness" identified in tick 472 was a V0_2 problem; V0_16 fixed
+it.
+
+**Real losses to investigate** (next cycle):
+1. **JPEG -0.006** (V0_16 0.9402 vs ssim2 0.9458). Small but real
+   regression vs V0_2 too (V0_2 was 0.9424 on JPEG). V0_X may have
+   slightly over-fit to AVIF distortions at JPEG's expense.
+2. **HEIC -0.002** within noise (V0_16 0.8902 vs ssim2 0.8920).
+   Largely a tie.
+
+**dssim re-examined** on CID22: dssim wins 2/9 codecs, ssim2 wins 6,
+tie 1. **dssim does NOT beat fast-ssim2 on CID22 aggregate** —
+contradicting AIC-4 where dssim was strongest. The
+"dssim as co-training signal" idea is corpus-dependent: helpful
+on AIC-4, but on CID22 it's just one of several competing
+references with no clear edge. Worth experimenting in cycle 7 but
+not a slam-dunk.
+
+**Cross-corpus V0_16 vs fast-ssim2 (FINAL, corrected)**:
+
+| Corpus | n | V0_16 | ssim2 | gap | Per-codec |
+|---|---:|---:|---:|---:|---|
+| AIC-3 | 600 | 0.7990 | 0.7965 | +0.0025 | TBD |
+| AIC-4 | 300 | 0.9175 | 0.9127 | +0.0048 | TBD |
+| **CID22** | **4292** | **0.8919** | **0.8895** | **+0.0024** | **5 win / 2 tie / 2 lose** |
+
+V0_16 ties or wins on **7 of 9 codecs** on the canonical CID22
+corpus. Goal #1 fully met aggregate and per-codec.
+
+**Build-order state**: 1–4, 6–11, 13 ✅. Comparison-site MVP done.
+Remaining: 5 (R2 unified parquets), 12 (UX), 14 (dssim re-encode),
+15 (paper figs).
+
+**Next concrete tick (477)**: ideal next-step debate is between
+(a) per-codec V0_16 vs ssim2 on AIC-3 + AIC-4 (close the cross-
+corpus matrix), and (b) implement build-order step 15 (CID22 paper
+Tables 3/4/5/6 reproduction on the comparison-site). Default to
+(a) since the data + script are already in place.
+
 ### Tick 475 — 2026-05-12T22:08Z — TRUE V0_16 merged into AIC-3 + AIC-4 parquets — goal #1 confirmed across all 3 corpora
 
 zensim commit `14631f4e`.
