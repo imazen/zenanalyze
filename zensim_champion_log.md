@@ -4307,6 +4307,28 @@ shipping criteria.
 **Next tick (401)**: cron will fire; will likely continue idle until
 user directive (image-type dispatch, dssim, blocklist).
 
+### Tick 401 — 2026-05-12T08:22Z — Per-band CID22 data added for V0_18/V0_19/V0_20
+
+Filled per-band CID22 SROCC + CIs in V0_18/V0_19/V0_20 bake JSONs.
+
+**Surprising finding**: V0_19 (seed=7) has the BEST per-band B0 (0.4521)
+and B1 (0.4757) of ANY bake — exceeding V0_16 (seed=1)'s 0.4214/0.4559!
+But V0_19's CID22 aggregate (0.8848) is LOWER than V0_16's (0.8919).
+
+This means within-band ranking quality and cross-band ranking quality
+can diverge. V0_19 ranks pairs well within each band but its raw
+distance values may have a different absolute scale that hurts the
+combined Spearman across the whole 4292-pair set.
+
+**Per-band CIs** show all V_X bakes are within 95% CI overlap of each
+other on B0/B1/Near-PJND — the per-seed differences are within noise
+at those band sizes. Aggregate is more reliable (larger n).
+
+**Site now shows** full per-band SROCC for 4-seed sweep + ensemble. Users
+can see the within-band variance directly.
+
+**Next tick (402)**: cycle 5 visualization complete. Will continue idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
