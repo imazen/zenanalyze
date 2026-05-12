@@ -5081,6 +5081,26 @@ Chain armed PID 3456120 with correct trainer PID. ETA ~10-12 min.
 
 **Next tick (434)**: V0_23 at ep 30-50.
 
+### Tick 434 — 2026-05-12T10:36Z — V0_23 ep 30, val_mean=0.9598 (mean-policy metric, not comparable to V0_16 val=0.94 min-policy)
+
+V0_23 (val_policy=mean) tracking. val_mean now uses arithmetic mean
+across kadid/tid/konjnd val SROCCs — different metric than V0_16's
+"min" so direct comparison isn't meaningful at this stage.
+
+Per-group at ep 30:
+- kadid: 0.9345 (V0_16 was 0.9345 at ep 30 — tied)
+- tid: 0.9484 (V0_16 was 0.9469 — slightly better)
+- konjnd: 0.9965 (V0_16 was 0.9965 — tied)
+- mean of three: 0.9598
+
+V0_23 isn't favoring any group differently at this stage; per-group
+val SROCCs are essentially same as V0_16. So the mean-policy may or
+may not produce a meaningfully different bake.
+
+Real signal will come from CID22/AIC-3 eval.
+
+**Next tick (435)**: V0_23 at ep 70-90.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
