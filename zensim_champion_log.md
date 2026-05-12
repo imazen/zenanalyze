@@ -2389,6 +2389,19 @@ ETA ~15-20 min. AIC-3 download at 542 MB / 1.5 GB in parallel.
 
 Next concrete tick: monitor V0_9 progress at ep ~100.
 
+### Tick 334 — 2026-05-12T03:45Z — V0_9 ep 40 val 0.9411; tracking V0_7/V0_8 trajectory
+
+V0_9 at epoch 40, val_mean=0.9411 (current best). Tracking similarly
+to V0_7 (0.9403 at same point) and V0_8 (~0.9410).
+
+The per-band TV is active in training (`bands=true, band_weights=[10,
+20, 10, 10]`). Whether the B1 push translates to lower CID22 B1 gap
+needs the post-training eval.
+
+AIC-3 at 648 MB / 1.5 GB.
+
+Next concrete tick: V0_9 at ep ~100 (~5 min); first peak.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
