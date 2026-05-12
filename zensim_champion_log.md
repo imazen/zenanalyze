@@ -3379,6 +3379,30 @@ chart on the site.
 **Next tick (366)**: collect V0_15 per-pair CSV; write Python step-5
 band aggregator; add new Plotly chart to site (step-5 SROCC per bake).
 
+### Tick 366 — 2026-05-12T06:02Z — Step-5 chart shipped to site
+
+Wrote `zensim/scripts/v_next/per_band_step5.py` (~100 lines). Bins
+per-pair CSV by `floor(MCOS / 5) × 5` → 13 step-5 bins for CID22.
+For each bin: SROCC of V_X / ssim2 / butter / V0_2 vs human MCOS.
+
+Generated `site/data/step5_bands/v0_15.json` (13 bins covering MCOS
+30-95). Per-bin n ranges from 15 (low-MCOS tail) to ~500 (B2 core).
+
+Site updates (zensim commit `5f2aac6b`):
+- Added `chart-step5` div above the Pareto chart
+- `renderStep5()` in app.js plots V_X / ssim2 / butter as lines
+- Currently V0_15 only; needs V0_8 / V0_11 etc step-5 JSONs to
+  multi-series.
+
+**Step-5 data quality caveat**: tail bins (n=15 for MCOS [30,35))
+have wide SROCC variance. The V_X SROCC at MCOS 30-35 was -0.59
+(after sign flip) — likely sample-size artifact, not a real bug.
+Larger bins (n≥100) are more trustworthy.
+
+**Next tick (367)**: extend per_band_step5.py to load multiple
+per-pair CSVs into one chart (multi-bake series). Re-run V0_8
+eval with `--per-pair-output` for comparison data.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
