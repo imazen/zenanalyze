@@ -5295,6 +5295,70 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 473 — 2026-05-12T22:01Z — 🚑 CORRECTION: tick 472 measured V0_2 not V0_16
+
+Big retraction. After tick 472 published "V0_16 trails fast-ssim2 by
+0.022 on full CID22", I dug into the methodology gap and found the
+measurement bug:
+
+**`ZensimProfile::latest()` in `zensim/src/profile.rs:48-50` returns
+`Self::PreviewV0_2`**, NOT `PreviewV0_4`. So `zen-metrics batch
+--metric zensim` (which uses `Zensim::new(ZensimProfile::latest())`)
+runs the V0_2 LINEAR weights, not the V0_16 trained MLP.
+
+**The 0.8674 I reported as V0_16 was actually V0_2** — the linear
+predecessor. This is confirmed by:
+- `dataset_metric_baseline` reports V0_2 SROCC = 0.8676 on full CID22
+  (rounding-equal to my "V0_16" 0.8674).
+- Running `dataset_metric_baseline --v04-bake v0_16_2026-05-12.bin
+  --max-pairs 5000` yields the TRUE V0_16 number: **0.8919**.
+
+**Corrected aggregate |SROCC| on CID22 (n=4292)**:
+
+| Metric | True \|SROCC\| | Source |
+|---|---:|---|
+| **zensim V0_16 (MLP)**     | **0.8919** | dataset_metric_baseline + v0_16 bake |
+| fast-ssim2-gpu             | 0.8895 | both harnesses agree |
+| dssim-gpu                  | 0.8722 | zen-metrics |
+| V0_2 (linear, ≠ V0_16)     | 0.8676 | zen-metrics `--metric zensim` (default) |
+| butter pnorm3              | 0.7911 | zen-metrics |
+
+**V0_16 IS +0.0024 above fast-ssim2** — CLAUDE.md goal #1 (match-or-
+exceed fast-ssim2) is empirically MET on the full 4292-pair CID22 set.
+Earlier "0.022 LOSS" was wrong; the actual story is V0_16 wins by
++0.002.
+
+**Same correction applies to AIC-3 / AIC-4 numbers I posted earlier**:
+those zen-metrics-CLI-`--metric zensim` numbers were V0_2 outputs too.
+True V0_16 on those corpora needs re-measurement via
+`dataset_metric_baseline`. Filed as a follow-up.
+
+**The cycle-7 takeaway is also REVISED**:
+- V0_2's per-codec weakness on AVIF (-0.022 to -0.063) is real but
+  expected — V0_2 is a legacy linear path with no AVIF/HEIC training.
+- V0_16's per-codec breakdown is unknown until re-scored; the V0_16
+  aggregate-win over fast-ssim2 by +0.002 doesn't tell us which codec
+  drives the win.
+
+**Outstanding fixes**:
+1. `dataset_metric_baseline` doesn't emit per-pair TSV; need to add
+   that so the comparison-site can use V0_16 outputs.
+2. `zen-metrics batch --metric zensim` defaults to V0_2; either
+   add `--profile preview-v0-4` flag OR flip `latest()` to V0_4
+   (with AGPL gating). The site currently surfaces V0_2 in
+   `score_zensim` columns — misleadingly labeled.
+3. Comparison-site UI label change: rename `score_zensim` →
+   `score_zensim_v0_2_linear` in the dropdown, distinguish it from
+   the JS-MLP V0_16 path which is the actual modern bake.
+
+zensim commit `de42f2ff`: rewrote
+`benchmarks/cid22_full_v0_16_vs_ssim2_2026-05-12.md` with the
+correction + reproducibility commands.
+
+**Next concrete tick (474)**: Add a per-pair-TSV emit mode to
+`dataset_metric_baseline` so the comparison-site can pull V0_16
+outputs into the parquets. ~150 lines Rust, independent of R2.
+
 ### Tick 472 — 2026-05-12T21:51Z — 🚨 CID22 full-set V0_16 LOSES to fast-ssim2 by 0.022 SROCC
 
 zensim commit `a6e01395`: `benchmarks/cid22_full_v0_16_vs_ssim2_2026-05-12.md`.
