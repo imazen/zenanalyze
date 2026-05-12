@@ -1847,6 +1847,20 @@ Both still running. ETA ~10 more min.
 
 Next concrete tick: TV=15 final results + CID22/non-mono eval.
 
+### Tick 316 — 2026-05-12T01:57Z — TV=15 ep 120 still below TV=10 counterparts
+
+TV=15 sweep at epoch 120:
+- seed=1 TV=15 best=0.9417 (vs TV=10 0.9437 → -0.0020)
+- seed=13 TV=15 best=0.9423 (vs TV=10 0.9433 → -0.0010)
+
+Gap narrowing as cyclic LR cycles continue. seed=13 TV=15 is now
+just 0.0010 below its TV=10 counterpart. May or may not catch up
+in the final cycle (ep 140-190).
+
+Cyclic LR will hit 1e-4 at ep 140 — peak imminent.
+
+Next concrete tick: read final at ep ~180-190.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
