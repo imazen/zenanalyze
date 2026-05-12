@@ -4530,6 +4530,28 @@ hurting convergence at this stage.
 
 **Next tick (410)**: V0_21 at ep 60-80; chain will fire on completion.
 
+### Tick 410 — 2026-05-12T08:58Z — V0_21 ep 70; chain re-armed (caught PID-watch bug again)
+
+V0_21 (butter-clean recipe) at ep 70, best val=0.9390 set at ep 40
+(matches V0_16's 0.9402 within seed noise).
+
+**Same chain bug as V0_16/V0_18**: `pgrep -f "v0_21_butter"` returned
+PID 3393399 immediately after launch, but that was a TRANSIENT wrapper
+that exited. Real trainer PID is **3393419**. Chain was watching the
+wrong one and fired "BAKE MISSING" prematurely.
+
+**Lesson learned (recorded for future)**: $! after `nohup ... &` is
+unreliable when nested in an eval'd shell. The cleanest path: use
+`pgrep -af "<unique pattern>"` AFTER waiting at least 5s for the
+fork, then look for the longest-running matching PID.
+
+**Chain re-armed** with correct PID 3393419 (PID 3395216).
+
+V0_21 patience timer reset to ep 140 if no new best after ep 90.
+
+**Next tick (411)**: V0_21 likely early-stops ep 90 or sets new best.
+Chain will fire eval.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
