@@ -4186,6 +4186,25 @@ seed variance, V0_16 SHIP near the high tail, ensemble at ssim2 level.
 
 **Next tick (397)**: collect AIC-3 ensemble result + commit.
 
+### Tick 397 — 2026-05-12T08:06Z — V0_19/V0_20 AIC-3 still running (CID22 done)
+
+Per-pair full evals at 240/600 (V0_19) and 180/600 (V0_20) on AIC-3.
+ETA ~80-100s more. Will compute AIC-3 ensemble next tick.
+
+**Per-seed AIC-3 SROCC** (already known from prior eval outputs):
+- V0_16 (seed=1): 0.7990
+- V0_18 (seed=42): 0.8019 (highest so far!)
+- V0_19 (seed=7): TBD
+- V0_20 (seed=123): TBD
+
+Interesting: on AIC-3, V0_18 (seed=42) BEATS V0_16. The seed ranking
+differs across datasets. Suggests dataset-specific seed luck — what
+matters for CID22 isn't what matters for AIC-3.
+
+Ensemble across datasets should reduce dataset-specific noise.
+
+**Next tick (398)**: V0_19/V0_20 AIC-3 done; run ensemble; commit.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
