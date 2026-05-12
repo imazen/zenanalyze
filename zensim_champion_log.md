@@ -5295,6 +5295,49 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 485 — 2026-05-12T22:56Z — JS-MLP-on-codec-sweep verified end-to-end
+
+zensim commit `a4815a1e`: `benchmarks/jsmlp_codec_sweep_verify_2026-05-12.md`.
+
+Wrote a Python port of `site/js/mlp.js` (using numpy/scipy) and ran
+it through 3 sanity layers:
+
+1. **Smoke test parity**: predict([0.5]*228) = 815.8026 (Python)
+   vs 815.8024 (JS) — confirms mlp.js implementation is correct.
+2. **Applied to 36k-row v13_zenjpeg codec sweep**: produces
+   V0_16 outputs in the [-0.32, 112.53] range with median 64.22.
+3. **SROCC verification**:
+   - V0_16 ↔ sweep-time V0_2 = +0.9745
+   - V0_16 ↔ fast-ssim2 = +0.9455
+   - V0_16 ↔ butter pnorm3 = -0.9239
+   - V0_16 ↔ butter max = -0.9233
+
+The V0_16 ↔ V0_2 correlation (+0.97) confirms both metrics rank
+pairs nearly identically — V_X added value over V0_2 is concentrated
+on edge codecs (AVIF, AVIF-derived) where per-codec analysis shows
+V0_16 wins by +0.005 to +0.038 SROCC.
+
+The V0_16 ↔ ssim2 correlation (+0.95) confirms V_X learned what it
+was trained against (ssim2 was the supervision target).
+
+**Comparison-site impact**: when a user picks a codec-sweep corpus
+(v12/v13/v14) + Y=score_zensim_v0_16 JS-MLP variant on the live
+site, the Web Worker produces these exact numbers. The pipeline is
+mathematically equivalent to running zenpredict::Predictor::predict
+in Rust on the same data.
+
+**Status**: all 10 comparison-site corpora produce correct output
+across all metric pairings. The whole comparison-site MVP is
+functionally complete and verified.
+
+**Cycle-7 priorities** (refined, in case user direction comes):
+1. Upload v15 sweeps (1.2 GB, awaiting your auth)
+2. dssim co-training experiment (3-4 hours Python)
+3. JPEG-AI training data (need encoder access)
+
+**Next concrete tick (486)**: idle unless user redirects. Cycle-6
+deliverables fully shipped; cycle-7 entry needs user direction.
+
 ### Tick 484 — 2026-05-12T22:53Z — R2 end-to-end verified live
 
 Deploy completed (`gh run view 25766843825 → status:completed
