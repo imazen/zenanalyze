@@ -4680,6 +4680,29 @@ size based on inference budget.
 (multi-bake load + output averaging). Beyond cycle-loop scope unless
 user authorizes substantial work.
 
+### Tick 415 — 2026-05-12T09:20Z — Multi-bake deployment plan documented
+
+Expanded methodology Section 9 candidate #2 (multi-bake ensemble) with
+concrete Rust deployment plan:
+- `Predictor::with_ensemble(&[bake_bytes])` constructor
+- `predict()` averages N forward-pass outputs
+- `ProfileParams::extra_bakes: &[&[u8]]` opt-in field
+- New `ZensimProfile::PreviewV0_4Ensemble` variant
+- ~3-4 hours of Rust work + new tests
+
+Provides a clear engineering checklist for whoever implements the
+ensemble runtime path. Result would let users opt into +0.0086 AIC-3
+SROCC at 3× inference cost.
+
+**Cycle 6 fully documented**: the recipe-level evidence is conclusive,
+the optimal ensemble subset is identified, and the deployment plan is
+written. Session has reached natural endpoint pending user direction
+on (a) authorizing the Rust ensemble runtime work or (b) pivoting to
+image-type dispatch.
+
+**Next tick (416)**: idle status until user authorizes substantial
+work.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
