@@ -5036,6 +5036,33 @@ recommendation for users with multi-bake runtime; V0_22 is specialty.
 
 **Next tick (432)**: idle / await user direction on cycle-7 work.
 
+### Tick 432 — 2026-05-12T10:28Z — Idle: Pareto frontier complete
+
+The session has fully mapped the Pareto frontier for h=128 MLP recipes:
+
+**Single-bake performers** (CID22 / AIC-3):
+- V0_16 (TV=20, seed=1): 0.8919 / 0.7990 — best CID22 single
+- V0_20 (TV=20, seed=123): 0.8872 / 0.8097 — best AIC-3 single
+- V0_21 (TV=20, butter-clean): 0.8874 / 0.8060 — best AIC-3 with diversity
+- V0_22 (TV=20, konjnd_w=1.0): 0.8870 / 0.7906 — best smoothness/Near-PJND
+
+**Ensemble combos**:
+- {V0_16, V0_21}: 0.8911 / 0.8024 — best 2-bake CID22
+- {V0_16, V0_20, V0_21}: **0.8908 / 0.8051** — Pareto-optimal
+- {V0_20, V0_21}: 0.8889 / **0.8079** — best 2-bake AIC-3
+
+Further single-bake or seed variations within the same MLP architecture
+won't yield meaningful gains. Path forward (Section 9 candidates):
+1. Multi-bake runtime ensemble (Rust work, ~3-4 hours)
+2. Image-type-aware MLP dispatch (multi-MLP architecture)
+3. Deeper/wider arch (V0_13 tried h=256, no help)
+4. Dataset expansion (AIC-4, KonJND-1k both blocked on availability)
+
+**Cron continues firing every 4 min.** Will log minimal status tics until
+new direction.
+
+**Next tick (433)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
