@@ -5295,6 +5295,44 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 443 — 2026-05-12T19:55Z — CHANGELOG cycle-6 ensemble section
+
+zensim commit `c0773d34` adds a top-of-`[Unreleased]` section
+documenting the cycle-6 findings that landed on the methodology page
++ site charts but weren't yet in CHANGELOG. New bullets:
+
+- 4-seed sweep (V0_18 / V0_19 / V0_20) — CID22 mean 0.8872 ± 0.0034
+- V0_21 butter-clean, V0_22 konjnd_w=1.0, V0_23 val_policy=mean
+- Exhaustive 7-bake subset search → **{V0_16, V0_20} 2-bake Pareto
+  optimum**: CID22 0.8910 (+0.0015), AIC-3 0.8050 (+0.0085), 2×
+  inference cost
+- AIC-3 cross-dataset validation: V_X recipe beats fast-ssim2 on
+  truly held-out data by ≥+0.0033 in 4-bake ensemble, +0.0114 in
+  best subset {V0_20, V0_21}
+- New scripts: `apply_butter_filter.py`, `band_balance_safesyn.py`,
+  `ensemble_seeds.py` (with `--dataset` flag), `per_band_step5.py`,
+  `build_scatter_data.py`, `content_class_explore.py`
+- Methodology page (10 sections + TL;DR) at
+  <https://imazen.github.io/zensim/methodology.html>
+- Site charts (8 sections + bake history)
+
+Branch state: zensim main now at `c0773d34` (working copy `42eef902`
+is an empty wip); zenanalyze main unchanged at `4c486de1`.
+
+**Marker collision check**: 5 `claude` processes (PIDs 9043, 13917,
+39754, 141069, 220427) still running; the `.workongoing` markers I
+just wrote say `cycle6 documentation wrap-up` — same agent-id as
+prior loop, no foreign agent active.
+
+**Recipe-knob space remains exhausted** (per Tick 442). Cycle 7 still
+needs a structural change — multi-MLP runtime, deeper architecture,
+or more (non-CID22) training data. None of those fit a 5-minute slice.
+
+**Next concrete tick** (unchanged): port `TrainingGroup<'a>` +
+`train_mlp` body to `zensim-train-core`. The other session may have
+already started this — first action on next firing is to compare
+state before duplicating work.
+
 ## Targets
 
 | Property | Target | Reference |
