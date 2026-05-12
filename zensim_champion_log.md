@@ -5295,6 +5295,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 463 — 2026-05-12T21:14Z — AIC parquets in repo + DuckDB end-to-end in worker
+
+zensim commit `2265b9cc`. Build-order steps 4 + 6 + 7 + a bit of 11 + 13
+unblocked without needing R2.
+
+**Shipped parquets** under `site/data/parquet/`:
+- `aic3_ctc_epfl.parquet` — 26 KB (600 rows × 12 cols: human JND +
+  zen-metrics dssim/ssim2/butter/zensim)
+- `aic4_sample.parquet` — 32 KB (300 rows × 23 cols: human JND with CI
+  bounds + paper PSNR/SSIM/MS-SSIM/IW-SSIM/VMAF-neg/SSIMULACRA2/HDR-VDP/
+  CVVDP + our zen-metrics outputs)
+
+Total: 58 KB — trivial gh-pages footprint.
+
+**Worker (`compare-worker.js`) end-to-end DuckDB integration**:
+- `CORPUS_URLS` map: aic3_ctc_epfl → `data/parquet/aic3_ctc_epfl.parquet`,
+  similar for AIC-4.
+- `runQuery` initializes DuckDB-WASM, opens connection, runs
+  `SELECT TRY_CAST(<col> AS DOUBLE) AS <col> FROM '<url>'` per selected
+  corpus, collects rows.
+- Per-row: pulls X from `x_metric` column; if Y is a JS-MLP variant
+  (`score_zensim_v0_NN`), applies the cached bake to the row's
+  `feat_0..feat_227` (AIC corpora don't have feat cols → warns and
+  falls back to score_zensim column).
+- Filters by codec, computes step-5 binning, computes per-band
+  SROCC + PLCC + RMSE (CID22 Table 5 bands + Near-PJND).
+- Hand-written ranked Spearman with tie-handling (no scipy in
+  browser).
+
+**Compare.js manifest** updated:
+- AIC-3 and AIC-4 listed first (in-repo, immediately queryable).
+- Codec-sweep corpora marked "[R2 pending]".
+- Human-rated corpora (CID22, KADID, TID) marked "[TODO]".
+
+**What works now without R2**:
+- User selects AIC-3 or AIC-4 corpus checkbox
+- Picks X axis (e.g. `q`, `human_jnd`, `score_ssim2_gpu`, `score_dssim`)
+- Picks Y axis (same options + JS-MLP variants which fall back to
+  score_zensim on AIC since no feat_* cols)
+- Hits Run → DuckDB-WASM queries parquet via HTTP-range, worker computes
+  per-band stats, main thread renders scatter + step-5 line + band table
+
+**What still needs work**:
+1. JS-MLP path on parquets with feat_* (= codec-sweep parquets) needs
+   R2 upload. AIC corpora have no feat cols by design (different
+   schema: human-rated).
+2. Butteraugli filter (CLAUDE.md spec mention) on AIC-4 only via
+   score_butter_max / pnorm3.
+3. Y-score → codec param table (build-order step 9) — TODO.
+4. Candlestick + CI by band — TODO; AIC-4 has CI bounds in
+   `human_jnd_ci_lo`/`hi` columns which would feed this directly.
+
+**Next concrete tick (464)**: smoke-test the page locally via a tiny
+http server, confirm DuckDB-WASM loads + queries the AIC parquets +
+the worker reports per-band SROCC numbers. If anything's broken in
+the JS path, iterate. After that, the page-deploy via gh-pages should
+"just work".
+
 ### Tick 462 — 2026-05-12T21:11Z — Wired mlp.js into compare-worker.js + shipped 4 V_X bakes
 
 zensim commit `df3d1a55`. Build-order step 10 complete.
