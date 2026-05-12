@@ -3276,6 +3276,36 @@ immediate action required.
 **Next tick (363)**: V0_15 should hit early-stop at ep 140 or set
 new best in cycle 2. When training done, eval chain auto-fires.
 
+### Tick 363 — 2026-05-12T05:47Z — V0_15 ep 140 BEATS V0_8 on val_mean (0.9427 > 0.9416)
+
+**V0_15 ep 140 val_mean = 0.9427** — sets new best, **BEATS V0_8's
+0.9416 by +0.0011** on the kadid bottleneck!
+
+This is counterintuitive — V0_15 has 7.4% LESS training data than
+V0_8 but is producing HIGHER val SROCC. Hypothesis: the contaminated
+rows acted as NOISE during V0_8 training (the model had to memorize
+CID22 content patterns that don't generalize to kadid distortions).
+Removing the noise produces a better generalizing model.
+
+Cycle progression (V0_15 vs V0_8 at same epochs):
+- ep 40: V0_15 0.9391 / V0_8 0.9402 (V0_15 -0.0011)
+- ep 90: V0_15 0.9416 / V0_8 0.9416 (tie)
+- ep 140: V0_15 0.9427 / V0_8 0.9402 (V0_15 +0.0025) ← V0_15 STRONGER
+
+V0_15 is at ep 150 (cycle 3 reset). Patience timer reset to ep 190 max.
+Possibly another new best in cycle 3.
+
+**Implication**: V0_15 will likely also BEAT V0_8 on CID22 SROCC.
+That's the cleanest possible outcome — V0_15 is BOTH honestly trained
+AND a real improvement over V0_8.
+
+Eval will fire when V0_15 finishes via auto-chain (PID 3188487 still
+waiting).
+
+**Next tick (364)**: V0_15 may still be training (cycle 3 ongoing).
+Continue monitoring; expect early-stop at ep 190 if no further
+improvement.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
