@@ -4703,6 +4703,33 @@ image-type dispatch.
 **Next tick (416)**: idle status until user authorizes substantial
 work.
 
+### Tick 416 — 2026-05-12T09:24Z — Idle status; cycle 6 fully captured
+
+No new experiments fired. Cycle 6 has reached natural endpoint:
+- V_X recipe optimum mapped (TV=20 ≈ best single-bake, TV=15/25 sub-par)
+- Seed sweep mapped (CID22 mean 0.8872 ± 0.0034; V0_16 +1.4σ outlier)
+- Butter-clean V0_21 alone trades CID22 for AIC-3
+- Ensemble subsets searched: {V0_16, V0_20, V0_21} 3-bake optimal
+- Multi-bake runtime path documented for cycle-6 deployment
+
+**Site URL**: <https://imazen.github.io/zensim/>
+- Index page: aggregate + per-band + step-5 + scatter + Pareto +
+  cross-codec smoothness + bake history
+- Methodology page: 10 sections, 4 of them on seed/ensemble analysis
+  (6.1 seed variance, 6.2 AIC-3 ensemble, 6.3 5-bake ensemble,
+  6.4 subset search)
+
+**Open work** (requires user authorization or direction):
+1. zenpredict multi-bake ensemble runtime (~3-4 hours Rust, +0.0086
+   AIC-3 vs single ship)
+2. Image-type-aware MLP dispatch (multi-hour project)
+3. KonJND-1k dataset restoration (dataset missing from /mnt/v/)
+4. dssim integration (Rust binary extension)
+5. Coefficient repo blocklist update (out-of-repo, user-touch)
+
+**Cron continues firing every 4 min**. Will log minimal idle status
+until directive or new data arrives.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
