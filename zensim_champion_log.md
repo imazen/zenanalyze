@@ -4054,6 +4054,41 @@ falls into the V0_18/V0_20 cluster.
 **Next tick (392)**: V0_19 finish + log; update methodology page with
 seed-variance caveat.
 
+### Tick 392 — 2026-05-12T07:44Z — 4-seed sweep complete; V_X recipe avg BELOW ssim2
+
+**V0_19 (seed=7) CID22 = 0.8848** (essentially tied with V0_18 seed=42 0.8847).
+
+**FULL 4-SEED SWEEP** (V0_16 recipe: h=128, flat TV=20, clean data, 144,791 rows):
+
+| Seed | Bake | val_mean | CID22 | vs ssim2 |
+|---|---|--:|--:|--:|
+| **1** | **V0_16 SHIP** | **0.9403** | **0.8919** | **+0.0024** |
+| 7 | V0_19 | 0.9403 | 0.8848 | -0.0047 |
+| 42 | V0_18 | 0.9401 | 0.8847 | -0.0048 |
+| 123 | V0_20 | 0.9397 | 0.8872 | -0.0023 |
+
+**Mean = 0.8872, stdev = 0.0034** (sample stdev across 4 seeds).
+**3 of 4 seeds land BELOW ssim2 0.8895**; V0_16 (seed=1) is +1.4σ outlier.
+
+**Honest "V_X recipe expected CID22" ≈ 0.887 ± 0.003** (below ssim2's 0.8895).
+
+V0_16 SHIP CID22 0.8919 IS what the runtime bake delivers — that part isn't
+in question. But framing it as "V_X recipe BEATS ssim2" is misleading; the
+recipe RANGE [0.8847, 0.8919] only includes ssim2's 0.8895 inside its
+1σ band around the mean.
+
+**Implications**:
+1. V0_16 SHIP stays — it's an honestly-trained, properly-cleaned bake
+   that scores 0.8919 on CID22. Users get those numbers.
+2. The methodology page should note the seed variance and that the
+   shipping bake's score is a SAMPLE from a wider distribution.
+3. To genuinely "beat ssim2", we need an ensemble or substantially better
+   recipe (image-type-aware dispatch, deeper model, content-class
+   training stratification).
+
+**Next tick (393)**: update methodology page with seed-variance caveat.
+Surface 4-seed sweep numbers to user.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
