@@ -5295,6 +5295,42 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 448 — 2026-05-12T20:14Z — Fixed MSRV job (missing rust-version on zensim-train-core)
+
+zensim commit `e38bf0ba`. After tick 447 cleared clippy, observed CI
+run `25759424719` showed Clippy ✓, Format ✓, Corpus ICC ✓, WASM
+SIMD128 ✓ — but **MSRV still X**.
+
+Local repro: `cargo hack check --rust-version --workspace
+--exclude zensim-validate --exclude zensim-bench --exclude
+zensim-wasm-tests` →
+```
+error: no rust-version field in zensim-train-core's Cargo.toml is specified
+```
+
+The `zensim-train-core` crate was added recently (Phase 1 of
+`docs/WASM_CUBECL_TRAINER_PLAN.md`) with `[package]
+edition = "2024"` but no `rust-version`. Other workspace crates
+(zensim, zensim-regress) pin `rust-version = "1.93.0"`.
+
+**Fix**: added `rust-version = "1.93.0"` to
+`zensim-train-core/Cargo.toml` (1-line addition, same MSRV as
+zensim + zensim-regress).
+
+Local `cargo hack check --rust-version --workspace ...` now clean
+in 3.64 s.
+
+**Combined CI fix sequence** (tick 445 → 446 → 447 → 448):
+- 445 fmt: clears Format
+- 446 E0603: clears Test×8, Clippy, Coverage build, MSRV (initial)
+- 447 clippy lints: clears Clippy strict-mode
+- 448 rust-version: clears MSRV strict-mode
+
+Next push CI should be green except potentially for the
+Coverage runner job's upload-to-codecov step (independent of build),
+and the Test platforms whose individual test-runtime issues weren't
+visible behind the build error.
+
 ### Tick 447 — 2026-05-12T20:10Z — Cleared all remaining clippy `-D warnings` errors
 
 zensim commit `dc74ca8f`. After ticks 445 (fmt) and 446 (E0603),
