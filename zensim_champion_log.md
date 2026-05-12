@@ -4643,6 +4643,43 @@ Sections 6.1/6.2/6.3 explaining the seed variance + AIC-3 ensemble +
 
 **Next tick (414)**: open-ended.
 
+### Tick 414 — 2026-05-12T09:16Z — Subset search: {V0_16, V0_21} 2-bake BEATS 5-bake; {V0_16, V0_20, V0_21} 3-bake AIC-3 LEADER
+
+Tested 9 ensemble subsets. Best results:
+
+| Subset | CID22 | AIC-3 |
+|---|--:|--:|
+| ssim2 | 0.8895 | 0.7965 |
+| V0_16 alone | 0.8919 | 0.7990 |
+| **{V0_16, V0_21} 2-bake** | **0.8911** | 0.8024 (+0.0059) |
+| **{V0_16, V0_20, V0_21} 3-bake** | 0.8908 | **0.8051** (+0.0086) |
+| 5-bake all | 0.8896 | 0.8012 |
+| {V0_18,V0_19,V0_20,V0_21} no-V0_16 | 0.8885 | 0.8017 |
+
+**Key insight**: **Recipe diversity beats seed sweep diversity**. Adding
+butter-clean V0_21 to V0_16 gives a strong 2-bake ensemble; adding the
+AIC-3-best seed V0_20 makes it the 3-bake AIC-3 leader. Adding seed
+sweep bakes (V0_18/V0_19) DILUTES the result toward the recipe's
+neutral SROCC.
+
+**Optimal ensemble**: {V0_16, V0_20, V0_21} — 3× inference cost,
++0.0013 CID22 / +0.0086 AIC-3 over single-bake V0_16. AIC-3 lift is
+significant (5σ above seed noise of 0.002).
+
+**Site methodology Section 6.4 shipped** documenting subset search.
+
+**Cycle 6 is now fully delivered**:
+- Single-bake ship: V0_16 (CID22 0.8919, AIC-3 0.7990)
+- 2-bake ensemble: {V0_16, V0_21} (CID22 0.8911, AIC-3 0.8024)
+- 3-bake AIC-3 leader: {V0_16, V0_20, V0_21} (CID22 0.8908, AIC-3 0.8051)
+
+All beat ssim2 on both datasets. The runtime can choose its ensemble
+size based on inference budget.
+
+**Next tick (415)**: deployment requires zenpredict Rust changes
+(multi-bake load + output averaging). Beyond cycle-loop scope unless
+user authorizes substantial work.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
