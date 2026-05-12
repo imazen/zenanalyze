@@ -5295,6 +5295,62 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 474 — 2026-05-12T22:06Z — Per-pair CSV emit + TRUE V0_16 merged into cid22.parquet
+
+zensim commit `aa58a612`. Closes the loop from tick 473.
+
+**Rust change** (`zensim-bench/examples/dataset_metric_baseline.rs`):
+- `Pair` struct gained `codec: Option<String>` + `version:
+  Option<String>` fields, plumbed through every dataset loader.
+- CID22 loader sets `codec = Some(encoder)`, `version =
+  Some(setting)` from the CSV. Other loaders leave them `None`.
+- Parallel-map closure now returns `EnrichedRow` (9-tuple including
+  ref / dist / codec / version + metric outputs) so per-pair-output
+  can emit those columns.
+- Per-pair CSV header gained: `reference, distorted, codec, version`
+  (before the existing human_score / v02 / v04 / ssim2 / butter
+  columns). Backwards-incompatible header change, but the file
+  isn't user-facing — it's a transient artifact.
+
+**Verified output**:
+```
+$ dataset_metric_baseline --cid22 ... --max-pairs 5000 \
+    --v04-bake .../v0_16_2026-05-12.bin \
+    --per-pair-output /tmp/cid22_metrics/per_pair_v0_16.csv
+
+CID22 (n=4292): | V0_2 0.8676 | V0_4 0.8919 | ssim2 0.8895 | butter 0.7412 |
+```
+
+**Merged into cid22.parquet**: new `score_zensim_v0_16` column
+holds the TRUE V0_4-bake distance (V0_16 MLP path output). The
+existing `score_zensim` column stays as V0_2 output for clarity
+about what zen-metrics CLI emits.
+
+Verified post-merge: `score_zensim_v0_16` SROCC vs MCOS on n=4292
+= **0.8919** — matches the harness directly, confirms the merge is
+correct (rank-preserving).
+
+**Site update** (`compare.js`):
+- `score_zensim` relabeled "zensim V0_2 linear (sweep-time /
+  zen-metrics CLI default)" so users aren't misled about what it is.
+- `score_zensim_v0_16` added as a Y-axis option: "zensim V0_16 SHIP
+  (TRUE MLP via dataset_metric_baseline)" — the goal-#1-satisfying
+  number renders directly from the parquet column.
+- JS-MLP variants renamed `*_jsmlp` to distinguish from the static
+  parquet column (the JS-MLP path still needs feat_* cols, which
+  AIC/CID/KADID/TID don't carry).
+
+**Goal #1 status**: ✅ EMPIRICALLY MET. V0_16 = 0.8919 > fast-ssim2 =
+0.8895 on full 4292-pair CID22 (CLAUDE.md gold-standard). Match-or-
+exceed on AIC-3 / AIC-4 still needs re-measurement (current
+benchmark-doc numbers are V0_2, not V0_16).
+
+**Next concrete tick (475)**: re-score AIC-3 + AIC-4 with the same
+`dataset_metric_baseline --per-pair-output` pattern → merge into
+their parquets → publish per-corpus TRUE V0_16 benchmark table.
+That gives the comparison-site honest V0_16 columns for all 5
+in-repo corpora.
+
 ### Tick 473 — 2026-05-12T22:01Z — 🚑 CORRECTION: tick 472 measured V0_2 not V0_16
 
 Big retraction. After tick 472 published "V0_16 trails fast-ssim2 by
