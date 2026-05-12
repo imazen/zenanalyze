@@ -1446,6 +1446,36 @@ Insight for V0_8 next attempt:
 
 Next concrete tick: h192_tv10 final result + decide V0_8 ship-or-stand.
 
+### Tick 301 — 2026-05-12T00:57Z — h192_tv10 best=0.9429 at ep 140 (V0_7 ceiling 0.9437)
+
+h192_tv10 at epoch 160, last best=0.9429 at epoch 140 — STILL
+below V0_7's 0.9437 by 0.0008. Cyclic LR back at peak; cycle 4
+running now.
+
+If no improvement by epoch 190, early-stop kicks in. Total
+estimate: ~5 more min.
+
+Even if h192_tv10 hits 0.9437+, the val_mean-to-CID22-SROCC
+mapping is noisy — could still translate to lower or higher CID22
+SROCC than V0_7.
+
+**Status across the V0_8 attempts**:
+| Cand | Best val | Non-mono | CID22 |
+|---|--:|--:|--:|
+| V0_7 seed=1 SHIPPED | 0.9437 | 5.46% | 0.8933 |
+| h128_tv20 | 0.9408 | 5.70% | 0.8897 |
+| h192_tv10 | 0.9429 (so far) | TBD | TBD |
+
+If h192_tv10 doesn't surpass V0_7, the V_NEXT direction shifts
+from hyperparam-sweep to:
+- Architecture: per-band-weighted TV regularizer (handles B0 vs B1
+  tradeoff seen with h128_tv20)
+- Training data: densify around B0/B1 quality bands
+- Or: accept V0_7 as the current ship and pivot to Goal 4
+  (balanced holdout) + Goal 1 (parity tests)
+
+Next concrete tick: h192_tv10 final at epoch 190 (~3 min).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
