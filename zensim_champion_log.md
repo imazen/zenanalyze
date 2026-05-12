@@ -2366,6 +2366,29 @@ zensim_mlp_train ... \
 Next concrete tick: launch V0_9 training with `[10, 20, 10, 10]`
 weights at seed=1; eval CID22 + non-mono.
 
+### Tick 333 — 2026-05-12T03:41Z — V0_9 LAUNCHED with per-band TV [10, 20, 10, 10]
+
+V0_9 training launched (PID 3031089). Configuration confirmed in
+stdout: `bands=true, band_weights=Some([10.0, 20.0, 10.0, 10.0])`.
+
+**V0_9 hyperparameters**:
+- Cleaned safesyn (156k pairs, 4 groups)
+- h=128, TV=10 base, seed=1 (V0_7/V0_8's lucky seed)
+- TV pairs: combined_clean_tv_pairs_bands.tsv (216,151 with bands)
+- Per-band weights: [10, 20, 10, 10] (B1 boosted 2x, others flat 10)
+
+epoch 0: val_mean=0.8937 (V0_8 ep 0 was 0.8883 — slightly higher)
+
+Hypothesis to test:
+- Closes B1 gap to ssim2 (V0_8 was -0.014; aiming for ≤ -0.005)
+- Preserves V0_7's B0 (-0.005), Near-PJND (-0.017)
+- Non-mono ≤ 5.5% (within OLD strict gate)
+- Aggregate CID22 ≥ V0_8's 0.8948
+
+ETA ~15-20 min. AIC-3 download at 542 MB / 1.5 GB in parallel.
+
+Next concrete tick: monitor V0_9 progress at ep ~100.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
