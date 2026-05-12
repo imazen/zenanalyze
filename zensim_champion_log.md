@@ -5318,6 +5318,45 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 495 — 2026-05-12T23:54Z — V0_27 launched: V0_26 base + small dssim (weight=0.1)
+
+Per the cycle-7 finding that KonJND alignment is the JPEG-AI lever
+(tick 494), test whether a SMALL dssim co-training weight on top of
+the KonJND-aligned base produces further JPEG-AI improvement
+without much CID22 cost.
+
+V0_27 launched (PID 3676892):
+- Same recipe as V0_26 EXCEPT `--dssim-weight 0.1` (vs V0_26's 0.0
+  and V0_24 v2's 0.3).
+- Hypothesis: dssim cost is roughly linear in weight. At 0.3 it
+  cost 0.025 CID22 (V0_24 v2 vs V0_25). At 0.1 it should cost
+  ~0.008 CID22 if linear. If JPEG-AI gain is also linear or
+  super-linear, this could be net-positive.
+
+Log: `/tmp/zensim_loop/v0_27_train.log`. ETA ~12 min wall.
+
+**Cycle-7 experimental tree (cumulative)**:
+
+```
+V0_16 (ship, KonJND-aligned + safesyn + ?)
+ └─ unknown extra supervision; CID22 0.8919, JPEG-AI 0.7951
+
+V0_25 — minimum-recipe baseline (TV+safesyn, no KonJND, no dssim)
+ ├─ CID22 0.8505 (-0.041 vs V0_16)
+ │
+ ├─ V0_24 v2 (V0_25 + dssim=0.3)
+ │   CID22 0.8254 (dssim costs 0.025), JPEG-AI: not measured
+ │
+ └─ V0_26 (V0_25 + KonJND, no dssim)
+     ├─ CID22 0.8639 (KonJND adds 0.013), JPEG-AI 0.8387 (+0.044)
+     │
+     └─ V0_27 PENDING (V0_26 + dssim=0.1)
+         hypothesis: small JPEG-AI gain, modest CID22 cost
+```
+
+**Next concrete tick (496)**: poll V0_27 → bake → eval per-codec
+on AIC-4 (JPEG-AI especially) + CID22.
+
 ### Tick 494 — 2026-05-12T23:44Z — V0_26 KonJND-aligned: closes JPEG-AI by +0.044 BUT loses CID22 by -0.028
 
 zensim commit `093b30b2`: V0_26 result doc.
