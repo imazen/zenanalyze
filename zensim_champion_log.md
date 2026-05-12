@@ -4808,6 +4808,35 @@ Not actionable autonomously.
 
 **Next tick (421)**: idle.
 
+### Tick 421 — 2026-05-12T09:44Z — Exhaustive 26-subset search: {V0_20, V0_21} hits AIC-3 0.8079!
+
+Ran all 26 multi-bake subsets of {V0_16, V0_18, V0_19, V0_20, V0_21}.
+
+**Top 3 by CID22**:
+1. {V0_16, V0_21}: 0.8911 +0.0016
+2. {V0_16, V0_20}: 0.8910 +0.0015
+3. {V0_16, V0_20, V0_21}: 0.8908 +0.0013
+
+**Top 3 by AIC-3**:
+1. **{V0_20, V0_21}: 0.8079 +0.0114** — highest AIC-3 of any subset!
+2. {V0_16, V0_20, V0_21}: 0.8051 +0.0086 (Pareto-optimal)
+3. {V0_19, V0_20, V0_21}: 0.8051 +0.0086
+
+**V0_16 essential for CID22**: EVERY CID22-positive ensemble contains
+V0_16. EVERY subset without V0_16 has CID22 ≤ ssim2.
+
+**{V0_20, V0_21} alone dominates AIC-3** by a wide margin (+0.0114
+above ssim2). The combination of seed=123 (AIC-3 best individual) +
+butter-clean training (recipe diversity) produces the strongest cross-
+codec result.
+
+**Pareto-optimal compromise**: {V0_16, V0_20, V0_21} 3-bake — CID22
++0.0013, AIC-3 +0.0086. The configuration to deploy as runtime ensemble.
+
+Site methodology Section 6.4 updated with this finding.
+
+**Next tick (422)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
