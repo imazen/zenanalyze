@@ -4904,6 +4904,17 @@ the real trainer; verified via pgrep).
 
 **Next tick (425)**: V0_22 should be at ep 30-40.
 
+### Tick 425 — 2026-05-12T10:00Z — V0_22 ep 40 val=0.9380 (V0_16 was 0.9401)
+
+V0_22 (konjnd_w=1.0) progressing. ep 40 val=0.9380, slightly behind
+V0_16's 0.9401. The "min" validation now bottlenecks on tid (0.9437)
+rather than kadid — different group dynamics from the stronger
+konjnd weight.
+
+ETA ~7 more min. Chain will fire on completion.
+
+**Next tick (426)**: V0_22 at ep 80-90 (likely early-stop).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
