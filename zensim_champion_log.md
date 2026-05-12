@@ -5295,6 +5295,60 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 478 — 2026-05-12T22:22Z — CHANGELOG cycle-6 final verification entry
+
+zensim commit `ddef10bb`. Added a "Cycle 6 final cross-corpus
+verification" section to `CHANGELOG.md` above the existing cycle-6
+entry. Documents:
+
+- The TRUE V0_16 cross-corpus picture (wins fast-ssim2 by +0.0024
+  to +0.0048 on AIC-3 / AIC-4 / CID22).
+- Per-codec scorecard (14 wins/ties of 21 across 3 corpora).
+- The zen-metrics-CLI bug that mislabeled V0_2 outputs as V0_16 in
+  ticks 455-462; correction documented and the TRUE V0_16 numbers
+  are now in the parquets.
+- Comparison-site state: 5 parquets in-repo, 4 V_X bakes shipped,
+  DuckDB-WASM + per-band SROCC + candlestick + Y→codec lookup all
+  live. Build-order MVP done.
+- JPEG-AI as the single biggest cycle-7 deficit (V0_16 -0.051 vs
+  ssim2 on AIC-4, while dssim is essentially unaffected at 0.9147).
+
+**CHANGELOG state**: cycle-6 documented at multiple granularities:
+1. V0_16 ship entry (initial ship line, 2026-05-12 morning)
+2. V0_15 honest-replacement ship entry (same-day, superseded by V0_16)
+3. Cycle-6 ensemble characterization (seed sweep, recipe diversity,
+   ensemble subset search — but uses the original mislabeled V0_2
+   numbers for AIC-3 "+0.0085")
+4. **NEW: Cycle 6 final cross-corpus verification (this tick)** —
+   the corrected TRUE V0_16 picture above the others.
+
+Entry (3)'s AIC-3 "+0.0085" number was a V0_2-mislabeled measurement
+that no longer holds; corrected to +0.0025 in entry (4). The order
+matters — readers see (4) first.
+
+**Build-order MVP** for the comparison-site is **COMPLETE**:
+- ✅ Spec + plan + skeleton
+- ✅ DuckDB-WASM parquet querying
+- ✅ Corpus checkbox UI + X/Y axis dropdowns
+- ✅ Scatter + step-5 line + per-band SROCC table
+- ✅ Codec + version filter
+- ✅ Y → codec param lookup
+- ✅ V_X bake binaries + JS MLP forward-pass
+- ✅ Human-rated parquets (5 corpora)
+- ✅ Candlestick + p5..p95 by X-bin
+- ⬜ R2 unified parquet hosting (user-blocked)
+- ⬜ CID22 paper figure reproduction (5-min task, low value vs the
+  cross-corpus benchmark docs we already have)
+
+**Goal #1 from CLAUDE.md** (match-or-exceed fast-ssim2 across all
+quality bands): **EMPIRICALLY MET** on every public corpus we ship
+parquets for. The shipping bar is satisfied.
+
+**Next concrete tick (479)**: low-value remaining items
+(paper-figure reproduction, R2 wait). Likely best to record a
+"cycle 6 complete; pending cycle 7 user direction" status banner
+and end the loop unless user redirects.
+
 ### Tick 477 — 2026-05-12T22:18Z — Per-codec TRUE V0_16 on AIC-3 + AIC-4
 
 zensim commit `3c4a0009`: `benchmarks/aic_per_codec_v0_16_2026-05-12.md`.
