@@ -5295,6 +5295,51 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 482 — 2026-05-12T22:42Z — Superseded banners on 3 V0_2-mislabeled AIC docs
+
+zensim commit `23b07439`. First Edit attempt errored (harness lost
+read-state after Bash head); empty commit `34cbc7bd` landed
+between, harmless. Re-Read each file, re-Edit, second commit
+contains the actual banner additions.
+
+Three docs now carry top-of-file SUPERSEDED warnings linking to
+the canonical replacements:
+- `benchmarks/aic3_zensim_vs_baselines_2026-05-12.md` → points at
+  `cycle_6_finals_2026-05-12.md` + `aic_per_codec_v0_16_2026-05-12.md`
+- `benchmarks/aic4_zensim_vs_paper_metrics_2026-05-12.md` → same
+  pointers + the JPEG-AI cycle-7 actionable callout
+- `benchmarks/aic_combined_per_codec_2026-05-12.md` → corrects the
+  "Pattern 3: V0_16 loses HEVC/AV1" claim (that was V0_2; V0_16
+  fixed those gaps)
+
+Each banner includes the TRUE V0_16 number for that corpus, so a
+reader who lands on the doc gets the correct headline immediately
+without having to follow links.
+
+**Cycle-6 doc state is now self-consistent**: all 7 cycle-6
+benchmark docs either carry TRUE V0_16 numbers natively OR carry a
+SUPERSEDED banner pointing at the canonical TRUE V0_16 doc. No
+silent-V0_2-mislabel landmines remain.
+
+**Doc index recap**:
+- Canonical (TRUE V0_16):
+  - `cycle_6_finals_2026-05-12.md` (top-level)
+  - `cid22_full_v0_16_vs_ssim2_2026-05-12.md`
+  - `cid22_per_codec_v0_16_2026-05-12.md`
+  - `aic_per_codec_v0_16_2026-05-12.md`
+- Superseded with banner (V0_2-mislabeled):
+  - `aic3_zensim_vs_baselines_2026-05-12.md`
+  - `aic4_zensim_vs_paper_metrics_2026-05-12.md`
+  - `aic_combined_per_codec_2026-05-12.md`
+
+**Build-order MVP comparison-site state**: unchanged from tick 481.
+Live at <https://imazen.github.io/zensim/compare.html>; all 5
+parquets carry honest V0_16 columns; goal #1 EMPIRICALLY MET.
+
+**Next concrete tick (483)**: genuinely idle unless user redirects.
+The corrective doc cleanup leaves no remaining inconsistency I can
+think of within cycle-6 scope.
+
 ### Tick 481 — 2026-05-12T22:38Z — Cycle-6 finals canonical doc
 
 zensim commit `e06d01a2`: `benchmarks/cycle_6_finals_2026-05-12.md`.
