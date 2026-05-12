@@ -2103,6 +2103,35 @@ Saved script for fix-up: `/tmp/zensim_loop/ensemble_two_bakes.py`
 Next concrete tick: end-of-cycle work — could fix the ensemble
 script properly or pivot to Goal 4 (balanced holdout).
 
+### Tick 325 — 2026-05-12T03:05Z — *** ENSEMBLE WINS on JPEG synth (both axes) ***
+
+Fixed `ensemble_two_bakes.py` (grouping by `(image, codec,
+knob_tuple_json)`) and re-ran. **Both axes win**:
+
+| Metric | seed=1 TV=15 (V0_8) | seed=13 TV=15 | **Ensemble (avg)** |
+|---|--:|--:|--:|
+| Non-mono % | 5.87 % | 5.56 % | **5.34 %** ← within OLD 5.5 % gate! |
+| SROCC vs ssim2 (synth, JPEG, 1.7M) | 0.9283 | 0.9303 | **0.9311** |
+| (improvement vs V0_8) | — | +0.0020 | **+0.0028** |
+
+**Strict-better-than-both on a 1.7M-pair held-out-from-CID22
+synth corpus.** The ensemble:
+- Lowers non-mono BELOW the old 5.5% gate (vs V0_8's 5.87% over)
+- Improves rank-correlation with ssim2 by +0.0028
+
+Launched per-pair CID22 eval (`--per-pair-output`) for both bakes:
+- `/tmp/zensim_loop/v0_8_tv15_seed1_cid22_perpair.csv` (PID 3007253)
+- `/tmp/zensim_loop/v0_8_tv15_seed13_cid22_perpair.csv` (PID 3007254)
+
+Once both lands (~2 min), Python can average per-pair scores and
+compute CID22 SROCC + per-band for the ensemble.
+
+If CID22 ensemble SROCC > V0_8's 0.8948 with within-gate non-mono,
+this is a **V0_9 candidate** that ships if the runtime can do
+ensemble inference.
+
+Next concrete tick: read per-pair CSVs, compute ensemble CID22.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
