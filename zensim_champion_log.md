@@ -1539,6 +1539,38 @@ directions:
 Next concrete tick: read h192_tv10 CID22 + per-band; document
 V0_8 cycle conclusion.
 
+### Tick 304 — 2026-05-12T01:09Z — h192_tv10 CID22 = 0.8923 (below V0_7 0.8933); 4-more-seed sweep launched
+
+**h192_tv10 final CID22 = 0.8923** — between V0_7 (0.8933) and
+h128_tv20 (0.8897). +0.0028 above ssim2 (0.8895) but **−0.0010
+below V0_7**. Combined with 5.66% non-mono (over 5.5% target),
+ELIMINATED.
+
+**V0_8 hyperparam sweep complete. V0_7 seed=1 retains the ship.**
+
+Launched 4-more-seed sweep at (h=128, TV=10): seeds 5, 8, 13, 21
+(PIDs 2848517-2848520). Goal: investigate whether seed=1's 5.46%
+non-mono is reproducible at this hyperparameter point or was
+1-in-7 luck. ETA ~15-20 min each.
+
+If any of the new seeds beats V0_7's 0.8933 CID22 AND stays under
+5.5% non-mono, it becomes V0_8. If none do, V0_7 stays and we
+pivot to next-cycle directions (per-band-weighted TV, training
+densification, architecture).
+
+Updated bake leaderboard (clean-data, h=128, TV=10):
+| Seed | val_mean | Non-mono | CID22 | Status |
+|---:|--:|--:|--:|---|
+| 0 | 0.9443 | 5.67% | 0.8912 | archived |
+| **1 SHIP** | 0.9437 | 5.46% | **0.8933** | shipping |
+| 2 | 0.9407 | 5.78% | 0.8809 | archived |
+| 7 | 0.9415 | 5.78% | 0.8858 | archived |
+| 42 (V0_6) | 0.9418 | 5.94% | 0.8839 | archived |
+| 5/8/13/21 | running | — | — | sweep |
+
+Next concrete tick: monitor 4-seed sweep; estimate ~15-20 min to
+first results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
