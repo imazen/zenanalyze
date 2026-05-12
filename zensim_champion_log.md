@@ -3869,6 +3869,27 @@ we should sweep seeds before declaring V0_16 the optimum.
 **Next tick (384)**: monitor V0_18 progress; if seed=42 differs from
 seed=1, consider full seed sweep before locking V0_16 ship.
 
+### Tick 384 — 2026-05-12T07:11Z — V0_18 (seed=42) ep 30 val=0.9327 (V0_16 was 0.9345)
+
+V0_18 progress (PID 3308037):
+- ep 0: val=0.8753 (V0_16 ep 0 was 0.9002 — seed=42 init is worse)
+- ep 30: val=0.9327 (V0_16 ep 30 was 0.9345; -0.0018 behind)
+
+Seed variance is at least 0.002 at ep 30. Final result will reveal if
+V0_16's apparent +0.0005 lead over V0_15 was seed-noise or signal.
+
+**Statistical reality check**: V0_16 (0.8919) vs V0_15 (0.8914)
+difference of +0.0005 is within typical SROCC 95% CI (~±0.005 at
+n=4292 pairs). The V0_15 → V0_16 "improvement" may not be statistically
+significant. V0_16's B0/B1 absolute improvements (0.4214 vs 0.3933,
+0.4559 vs 0.4307) are larger and more likely real.
+
+If V0_18 lands within ~0.003 of V0_16, seed-noise explains all small
+V_X differences. If V0_18 is far off, V0_16 (seed=1) was lucky.
+
+**Next tick (385)**: V0_18 should be at ep 60-70. Continue monitoring;
+chain will fire on completion.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
