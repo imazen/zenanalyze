@@ -1391,6 +1391,30 @@ better on both axes.
 Next concrete tick: wait for h192_tv10 finish + eval; also let
 h128_tv20 CID22 eval complete for completeness.
 
+### Tick 299 — 2026-05-12T00:49Z — h128_tv20 CID22 eval at 60%; h192_tv10 ep 110 best 0.9419
+
+V0_8 sweep:
+- h128_tv20 DONE training. CID22 eval at 60% (2574/4292 pairs).
+  KADID = 0.9408, TID = 0.9503 (both in-train, comparable to V0_7).
+- h192_tv10 still RUN: epoch 110, val_mean=0.9145 (best=0.9419).
+  Cyclic LR will hit 1e-4 at epoch 140; expect peak there.
+
+Non-mono recap (V0_7 baseline 5.46%):
+- h128_tv20 already measured at 5.70% (eliminated for non-mono)
+- h192_tv10 will measure when training finishes (~5-10 min)
+
+Provisional ranking by val_mean:
+1. V0_7 seed=1: 0.9437 ✓ shipped
+2. h192_tv10: 0.9419 current (rising)
+3. h128_tv20: 0.9408 final (rejected on non-mono)
+
+Unless h192_tv10 surges past 0.9437 AND has acceptable non-mono,
+V0_7 retains the ship. The TV-up and h-up experiments both
+underperform.
+
+Next concrete tick: read h128_tv20 CID22 result (~2 min); check
+h192_tv10 epoch 140 (~5 min).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
