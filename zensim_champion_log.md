@@ -2071,6 +2071,38 @@ Saving seed=13 TV=15 bake for future ensemble work:
 Next concrete tick: cycle stable. Pivot to long-term goals or
 end session.
 
+### Tick 324 — 2026-05-12T03:01Z — Ensemble PoC; bug in script invalidates direct comparison
+
+Quick proof-of-concept: average seed=1 TV=15 + seed=13 TV=15 raw
+predictions and measure non-mono on JPEG unified parquet.
+
+**Bug in ensemble_two_bakes.py**: my hasty grouping by
+`(image_path, codec)` collapsed many separate knob-config curves
+into single curves, producing nonsensical 35 % non-mono rate (vs
+the correct ~5-6 % from `score_unified_with_bake.py`).
+
+Need to:
+- Group by `(image_path, codec, knob_tuple_json)` instead
+- Compare ensemble vs each individual bake on the SAME grouping
+
+Will fix in next tick if pursuing ensemble path.
+
+**Ensemble is a real long-term direction but requires more rigor**:
+- Runtime ensemble (load 2 bakes, average outputs): needs Rust
+  code changes in zensim runtime
+- Eval ensemble (this PoC's intent): needs proper grouping +
+  CID22-pipeline ensemble path
+- Both are next-cycle work
+
+For now: V0_8 (TV=15 seed=1) ships as the single-bake champion.
+Ensemble exploration deferred to future cycles.
+
+Saved script for fix-up: `/tmp/zensim_loop/ensemble_two_bakes.py`
+(needs knob_tuple_json grouping fix).
+
+Next concrete tick: end-of-cycle work — could fix the ensemble
+script properly or pivot to Goal 4 (balanced holdout).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
