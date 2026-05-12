@@ -2824,6 +2824,73 @@ parallel launch.
 **Next tick (351)**: collect V0_11+V0_12 CID22+AIC-3 results, compute
 per-band, compare to V0_8. If V0_12 wins, prep ship.
 
+### Tick 351 — 2026-05-12T04:50Z — V0_11/V0_12 CID22 in; B1 oversample HYPOTHESIS DISPROVED
+
+**FINAL CID22 results** (both bakes evaluated):
+
+| Bake | CID22 | B0 | **B1** | B2 | B3 | Near-PJND | Non-mono |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| ssim2 (ref) | 0.8895 | 0.4418 | 0.4694 | 0.7722 | 0.1121 | 0.3908 | 5.08% |
+| **V0_8 SHIP** | **0.8948** | 0.4321 | **0.4554** | 0.7872 | 0.1628 | n/a | 5.87% |
+| V0_9 | 0.8924 | 0.4391 | 0.4461 | 0.7848 | 0.1415 | 0.3692 | 5.46% |
+| V0_10 | 0.8877 | 0.4323 | 0.4339 | 0.7769 | 0.1873 | 0.3630 | 2.40% |
+| **V0_11 (TV=20)** | **0.8897** | 0.4021 | 0.4527 | 0.7811 | 0.1868 | 0.3563 | **2.33%** |
+| **V0_12 (B1 ovrs)** | **0.8895** | 0.4304 | **0.4439** | 0.7789 | **0.1972** | 0.3688 | **1.68%** |
+
+bakes md5: V0_11=`eed8d048`, V0_12=`758a62fe`.
+
+**HYPOTHESIS DISPROVED**: B1 oversample (16.2% → 23.6%) did NOT close
+B1 — V0_12 B1 SROCC = 0.4439 (vs V0_8's 0.4554; V0_12 WORSE by 0.011).
+
+The data sparsity theory was wrong: more synth B1 ≠ better CID22 B1.
+The synth B1 distribution doesn't match CID22 B1 distribution. Possible
+reasons:
+1. Synth B1 covers codec parameters that CID22 doesn't represent
+2. CID22 B1 includes content-class diversity (photo/screen/line-art)
+   that flat synth oversampling doesn't capture
+3. CID22 B1 includes near-PJND human-annotation noise that no synth
+   training can simulate
+
+**However, BOTH V0_11 and V0_12 set new smoothness records**:
+- V0_11: 2.33% non-mono (best yet, until V0_12)
+- **V0_12: 1.68% non-mono — NEW RECORD** (V0_10 was 2.40%, V0_8 5.87%)
+
+The non-mono floor keeps dropping. **V0_12 reaches 1/3 the V0_8
+non-mono rate** while maintaining ssim2-tied aggregate.
+
+**Pareto picture** (CID22 vs non-mono):
+- V0_8 SHIP: 0.8948 aggregate / 5.87% non-mono — TOP RIGHT
+- V0_11: 0.8897 / 2.33% — MIDDLE
+- V0_12: 0.8895 / **1.68%** — LEFT (best smoothness)
+
+V0_8 dominates Pareto on CID22 aggregate alone, but V0_12 dominates
+on smoothness. Choice depends on user preference.
+
+**Per-band Δssim2** (positive = beats ssim2):
+
+| Band | V0_8 | V0_11 | V0_12 |
+|---|--:|--:|--:|
+| B0 | -0.010 | -0.040 ✗ | -0.011 |
+| B1 | -0.014 | -0.017 | -0.025 |
+| B2 | +0.015 | +0.009 | +0.007 |
+| B3 | +0.051 | +0.075 | **+0.085** ✓ |
+| Near-PJND | -0.024 | -0.034 | -0.022 |
+
+V0_12 wins B3 (visually-lossless detection), best of any bake.
+V0_11 fails B0 (-0.040). V0_8 still has the most balanced spread.
+
+**Decision**: V0_8 remains the ship. V0_11 and V0_12 are smoothness-
+optimized variants that fail goal #1 (match-or-exceed ssim2 across
+all bands). Both have failed B1 closure too.
+
+AIC-3 results still pending (~30s).
+
+**Next tick (352)**: read AIC-3 V0_11/V0_12 + decide next-cycle
+direction. Options now: (a) wider/deeper MLP architectures, (b)
+image-type-aware MLP dispatch (multiple MLPs + classifier), (c)
+fundamentally different loss (per-band weighted ranknet), (d) accept
+V0_8 as good-enough and focus on Goal #6 (site).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
