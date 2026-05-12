@@ -4837,6 +4837,30 @@ Site methodology Section 6.4 updated with this finding.
 
 **Next tick (422)**: idle.
 
+### Tick 422 — 2026-05-12T09:48Z — Per-band CID22 for Pareto-optimal {V0_16, V0_20, V0_21} ensemble
+
+Per-band breakdown of the recommended 3-bake ensemble:
+
+| Band | n | Ensemble SROCC | ssim2 SROCC | Δ |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 324 | 0.4325 | 0.4418 | -0.009 |
+| B1 [50,65) | 1010 | 0.4512 | 0.4694 | -0.018 |
+| B2 [65,90) | **2915** | **0.7803** | 0.7722 | **+0.008** ✓ |
+| B3 (≥90) | 43 | noisy small-n | noisy | — |
+
+**The +0.0014 CID22 aggregate lift comes from B2** (the high-quality
+band, 68% of CID22 pairs). B0/B1 still trail ssim2 by 0.009-0.018 —
+those regions still need cycle-7 work (content-class dispatch, deeper
+arch, or specialized B0/B1 model).
+
+**Practical implication**: the ensemble shines where most user-facing
+encodes live (high quality), and the residual weakness at low quality
+(B0/B1) maps to images already considered "obviously distorted" by
+humans — less critical for production decisions but still on the
+roadmap.
+
+**Next tick (423)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
