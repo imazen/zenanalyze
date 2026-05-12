@@ -5295,6 +5295,45 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 452 — 2026-05-12T20:36Z — User corrections: stage-7 paper year, AIC-3/AIC-4 datasets, feat_* are zensim-not-zenanalyze
+
+User flagged three things during the cron tick:
+
+1. **CLAUDE.md spec item 7 still said "2024-paper charts"** —
+   stale from before the 2023 clarification. Fixed: now says
+   "2023-paper charts" pointing at our local PDF, with explicit
+   Tables 3/4/5/6 reproduction goal.
+2. **AIC datasets missing from the corpus list** — added AIC-3
+   CTC EPFL at `/mnt/v/dataset/aic3_ctc_epfl/` (decoded +
+   original) and AIC-4 sample at `/mnt/v/dataset/aic4_sample/`
+   with JND CSVs at `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/`.
+   These are MANDATORY for low-q human coverage — CID22's MOS
+   skews B2/B3, AIC carries the B0/B1 product-relevant data.
+3. **`feat_*` column meaning** — I had wrongly conflated zensim
+   per-pair features with zenanalyze image features. CORRECTION:
+   the unified parquets' `feat_0..feat_299` are **zensim** per-
+   pair similarity features (4 scales × 3 channels × 25 = 300),
+   of which the V_X bake MLP consumes the **first 228** (156
+   basic + 72 peak). Last 72 are unused-by-current-weights
+   masked/flatness features. zenanalyze image features (102
+   active IDs 0–121) live in DIFFERENT sweep parquets under
+   DIFFERENT column names (`feat_aq_map_p50`, etc., per zenanalyze
+   CONTEXT-HANDOFF.md) and are NOT in the unified compare-site
+   schema.
+
+zensim commits:
+- `e9b20d21` — CLAUDE.md spec item 7 fix + AIC-3/AIC-4 in corpus
+  list + expanded "open items requiring user input" detail.
+- `e06d8648` — COMPARE_PLAN.md `feat_*` correction (zensim per-
+  pair, not zenanalyze).
+
+The "Open items requiring user input" section in
+COMPARE_PLAN_2026-05-12.md now has explicit detail under each
+bullet — see lines 137+ of that doc. Three items still need
+user action: R2 public-read URL (r2.dev vs custom domain),
+dssim scoring pass (deferred), KonJND-1k restoration (blocked
+on external source).
+
 ### Tick 451 — 2026-05-12T20:30Z — Scaffolded compare.html + worker skeleton (MVP step 3)
 
 zensim commit `3119c84e`. Build-order step 3 from
