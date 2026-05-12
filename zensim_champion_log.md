@@ -4356,6 +4356,31 @@ on CID22 (biased) but +0.0033 above on AIC-3 (held-out)".
 **Next tick (403)**: nothing actionable until user provides direction.
 Will continue minimal status pings each tick.
 
+### Tick 403 — 2026-05-12T08:30Z — Methodology Section 9 'What's next' added
+
+zensim commit `52de1775`:
+- Added Section 9 "What's next (cycle 6 candidates)" to methodology page
+- 5 numbered candidates ordered by user-priority:
+  1. Image-type-aware MLP dispatch (user's stated direction)
+  2. Multi-bake ensemble at runtime
+  3. Deeper or wider architecture
+  4. Butter-concordant training data
+  5. Additional held-out datasets (AIC-4, JPEG XS)
+- Section 10 renumbered from 9 ("Known gaps")
+
+The page now offers a clear roadmap for future sessions.
+
+**Cycle 5 truly complete**:
+- All experiments documented
+- Site fully reflects state
+- V0_16 SHIP locked in runtime
+- Future-direction signposts on the methodology page
+- Handoff doc updated
+
+**Next tick (404)**: idle until user direction or substantial new
+material. The /loop cron continues firing but there's no productive
+recipe-iteration work left in scope.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
