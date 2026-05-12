@@ -3550,6 +3550,34 @@ hold V0_15 and document the tradeoff.
 **Next tick (372)**: V0_16 should be at ep 70-90 (early-stop imminent).
 Auto-eval will fire when done.
 
+### Tick 372 — 2026-05-12T06:24Z — V0_16 ep 90 val=0.9402; auto-eval chain re-armed with correct PID
+
+**V0_16 progress** (actual trainer PID 3222044, was tracking wrapper
+PID 3222018 by mistake):
+- ep 40: 0.9401
+- ep 80: 0.9364
+- ep 90: 0.9402 (new best by 0.0001)
+
+V0_16 at ep 90 = 0.9402 vs V0_15 at ep 90 = 0.9416. V0_16 (TV=20) is
+0.0014 BEHIND V0_15 (TV=15) at this stage. Higher TV typical
+pattern — more smoothing pressure reduces RankNet best.
+
+**Auto-eval chain bug** (and fix): the earlier chain (PID 3223149)
+watched PID 3222018 which was the bash WRAPPER (not the trainer).
+The wrapper exits seconds after spawning, so the chain fired
+prematurely and bailed with "BAKE MISSING".
+
+Fixed by re-arming chain (PID 3223779) with the correct trainer PID
+3222044 (found via `pgrep -f "v0_16_purged"`).
+
+**Lesson for future ticks**: always extract real trainer PID via
+`pgrep`, never trust the `$!` from the `nohup target/... &` line
+(that's the wrapper). The wrapper PID and trainer PID can differ
+when the trainer is started inside an eval'd shell.
+
+**Next tick (373)**: V0_16 likely still in cycle 3 (ep 100-150).
+Continue monitoring; chain will fire when trainer exits.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
