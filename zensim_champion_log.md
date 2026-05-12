@@ -1269,6 +1269,42 @@ direction.
 Next concrete tick: surface to user with the proposed runtime fix
 (Option A) — or move on to the B1 SROCC gap investigation.
 
+### Tick 294 — 2026-05-12T00:15Z — V0_8 sweep launched + site KonJND banner
+
+User directive (mid-loop): "keep pushing forward for a more ideal
+v08 and the site!"
+
+**V0_8 sweep launched** (parallel, ~15 min wall each):
+- `v0_8_clean_h192_tv10_seed1`: more hidden capacity (h=192)
+- `v0_8_clean_h128_tv20_seed1`: stronger TV (TV=20)
+- Both seed=1 (the winner from V0_7 sweep)
+- PIDs 2795714, 2795715
+
+The goal: close the B1 SROCC gap (V0_7 -0.027 vs ssim2). Hypotheses:
+1. h=192 has more capacity to learn the B1 distribution
+2. TV=20 enforces stronger monotonicity → may help B1 ranking via
+   smoother score-vs-quality curves
+
+**Site upgrades shipped** (zensim commit `e67752ac`):
+- Champion banner at top of index.html: V0_7 seed=1 numbers prominent
+- New "Goal 3 — KonJND-1k PJND validation" section showing the
+  paper-Table-4 reproduction with delta-vs-paper highlighting
+  (green if within paper stdev)
+- `js/app.js` loads `parity_table.json` and renders the KonJND table
+
+Site now visualizes:
+- 4 bakes (V0_5 / V0_6 / V0_7 seed=0 / V0_7 seed=1) per-band SROCC
+- Champion banner (current ship)
+- KonJND PJND validation against paper Table 4
+- Table 3 reproduction placeholder (Goal 3 pending)
+
+Defer runtime-fix work for now (per user directive to keep pushing
+V0_8 + site). The V0_4 test failures are documented in tick 293 as
+a follow-up.
+
+Next concrete tick: monitor V0_8 sweep progress; iterate on site
+(maybe add per-codec breakdown extraction).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
