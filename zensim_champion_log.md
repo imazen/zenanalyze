@@ -5318,6 +5318,39 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 493 — 2026-05-12T23:37Z — Found KonJND CSV; V0_26 launched with mixed-supervision
+
+**Found the missing-supervision ingredient**: per tick 492 analysis,
+V0_16 was "KonJND-aligned" per CLAUDE.md but V0_25 control trained
+without that. Located the KonJND-aligned features CSV at
+`/tmp/zensim_loop/konjnd_aligned_features.csv` (273 MB, 76104 rows,
+`ref_basename,human_score,f0..f227` format — already the
+`--human-csv` shape the trainer expects).
+
+The trainer (`train_v_next_mlp.py`) has NO `--konjnd-anchor-csv`
+flag — "KonJND alignment" in CLAUDE.md just means adding the
+pre-aligned KonJND features as another `--human-csv` input.
+
+**V0_26 LAUNCHED** (PID 3667819):
+- Same recipe as V0_25 + `--human-csv konjnd:.../konjnd_aligned_features.csv:1.0:0.0`
+- Both CSVs: safesyn (144k rows, w=1.0) + konjnd (76k rows, w=1.0)
+- Total: ~220k rows, h=128, TV=20, dssim=0.0 (control vs V0_16)
+- Log: `/tmp/zensim_loop/v0_26_konjnd_train.log`. ETA ~15 min wall
+  (extra ~2 min for the additional CSV load).
+
+**Hypothesis**: V0_26 lands ~ V0_16's 0.8919 if KonJND alignment
+is what was missing. Then a follow-up V0_27 = V0_26 + dssim=0.05
+or 0.1 might net-positive on JPEG-AI without hurting CID22.
+
+**Cycle-7 progress map**:
+- V0_24 v1 (no TV, dssim=0.3): 0.8315 CID22 ❌
+- V0_24 v2 (TV, dssim=0.3): 0.8254 ❌
+- V0_25 control (TV, dssim=0): 0.8505 ❌ (recipe drift)
+- **V0_26 (TV + KonJND, dssim=0)**: PENDING (this tick)
+- V0_27 (V0_26 + dssim=0.05 or 0.1): PENDING
+
+V0_16 still ship throughout.
+
 ### Tick 492 — 2026-05-12T23:27Z — V0_25 control → cycle-7 dssim outcomes documented
 
 zensim commit `56bcad5f`: `benchmarks/cycle_7_dssim_outcomes_2026-05-12.md`.
