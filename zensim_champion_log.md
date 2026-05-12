@@ -4464,6 +4464,33 @@ or far-below the 4.86 % strict target across every codec family.
 
 **Next tick (407)**: nothing critical; will continue minimal updates.
 
+### Tick 407 — 2026-05-12T08:46Z — Idle status; cycle 5 + 6-prep complete
+
+No new experiments fired. Cycle 6 needs user direction or substantial
+multi-tick work (image-type dispatch is the user-stated priority).
+
+**Current state validates V0_16 ship across the board**:
+- CID22 0.8919 (+0.0024 vs ssim2; seed-1 lucky)
+- AIC-3 0.7990 (+0.0025 vs ssim2; typical seed)
+- 4-seed ensemble AIC-3 = 0.7998 (+0.0033, recipe-level signal)
+- Non-mono ≤ 4.86% on every codec (AVIF/JXL 0%, WebP 0.5%, JPEG 2.30%)
+- B1 SROCC 0.4559 (closes V0_8 tainted gap HONESTLY)
+- Training data fully purged of CID22 contamination
+
+**Site documents everything** (URL: imazen.github.io/zensim).
+
+**Cycle 6 work options** (per methodology Section 9, priority order):
+1. Image-type-aware MLP dispatch (k-means foundation done; classifier
+   + per-cluster MLP + runtime dispatch needed)
+2. Multi-bake ensemble at runtime (4 bakes, average outputs)
+3. Deeper/wider architecture
+4. Butter-concordant training (script ready; needs post-purge re-filter)
+5. AIC-4 + additional held-out
+
+All are multi-tick projects. Awaiting user direction.
+
+**Next tick (408)**: idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
