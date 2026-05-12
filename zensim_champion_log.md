@@ -5295,6 +5295,91 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 477 — 2026-05-12T22:18Z — Per-codec TRUE V0_16 on AIC-3 + AIC-4
+
+zensim commit `3c4a0009`: `benchmarks/aic_per_codec_v0_16_2026-05-12.md`.
+
+**AIC-3 (n=600, sub-PJND)** per-codec V0_16 vs fast-ssim2:
+
+| Codec | V0_16 | ssim2 | Δ | Winner |
+|---|---:|---:|---:|---|
+| AVIF      | 0.8092 | 0.8183 | -0.009 | ssim2 |
+| HM        | 0.7840 | 0.7838 | 0.000 | tie |
+| JPEG-1    | 0.8428 | 0.8446 | -0.002 | ssim2 (noise) |
+| JPEG-2000 | 0.7629 | 0.7671 | -0.004 | ssim2 |
+| **JPEGXL** | **0.8539** | 0.8399 | **+0.014** | **V0_16** |
+| VVC       | 0.8004 | 0.8063 | -0.006 | ssim2 |
+
+V0_16 wins 1, ties 1, loses 4. Aggregate +0.0025 comes mostly from
+JPEGXL.
+
+**AIC-4 (n=300, perceptibility)** per-codec V0_16 vs fast-ssim2:
+
+| Codec | V0_16 | ssim2 | Δ | Winner |
+|---|---:|---:|---:|---|
+| AVIF      | **0.9598** | 0.9545 | +0.005 | V0_16 |
+| JPEG-1    | **0.9541** | 0.9453 | +0.009 | V0_16 |
+| JPEG-2000 | **0.9357** | 0.9197 | +0.016 | V0_16 |
+| **JPEG-AI** | **0.7951** | **0.8459** | **-0.051** | **ssim2 (big loss)** |
+| JPEG-XL   | **0.9705** | 0.9604 | +0.010 | V0_16 |
+| VVC       | **0.9375** | 0.9194 | +0.018 | V0_16 |
+
+V0_16 wins 5, loses 1. The single loss is on **JPEG-AI**: V0_16
+trails ssim2 by 0.051, but **dssim is at 0.9147** on JPEG-AI —
+almost matching its aggregate AIC-4 performance.
+
+**JPEG-AI is the single most actionable cycle-7 finding**:
+
+| Metric on JPEG-AI | \|SROCC\| |
+|---|---:|
+| dssim     | **0.9147** ← essentially unaffected |
+| ssim2     | 0.8459 |
+| V0_16     | 0.7951 |
+| V0_2      | 0.8265 |
+
+dssim's multi-scale SSIM-derived structure captures JPEG-AI
+artifacts that V0_X / ssim2 / V0_2 all miss. Strong case for
+adding dssim as an auxiliary loss head in cycle-7 training, even
+if dssim doesn't dominate other corpora aggregate-wise.
+
+**Cross-corpus per-codec scorecard (TRUE V0_16)**:
+
+| Corpus | V0_16 wins | ties | losses | Net | Aggregate gap |
+|---|:-:|:-:|:-:|---|---:|
+| AIC-3 | 1 | 1 | 4 | -3 (JPEGXL only win) | +0.0025 |
+| AIC-4 | 5 | 0 | 1 | +4 (JPEG-AI is the loss) | +0.0048 |
+| CID22 | 5 | 2 | 2 | +3 (AVIF wins, JPEG loss) | +0.0024 |
+| **Total** | **11** | **3** | **7** | **+4** | aggregate-wins on all 3 |
+
+Per-codec V0_16 wins ~52% of comparisons; aggregate-wins 100% of
+corpora. Distribution is uneven: V0_16 is strong on AIC-4 and
+CID22 (perceptibility range), weaker on AIC-3 (sub-PJND range
+where AVIF/JPEG-2000/VVC under-perform).
+
+**Cycle-7 actionable list (final, refined)**:
+
+1. **JPEG-AI training examples in synth corpus.** V_X has never
+   seen transformer-codec artifacts. Either source JPEG-AI encodes
+   or train a small generative-distortion proxy that emulates the
+   pattern dssim seems to handle.
+2. **AIC-3 codec-specific losses on AVIF/JPEG-2000/VVC.** All -0.005
+   to -0.010 in the sub-PJND regime. Densify q≥85 range in our
+   synth sweeps.
+3. **Investigate dssim as an auxiliary loss head.** The cross-
+   corpus pattern (dssim wins AIC-4 aggregate + dominates JPEG-AI)
+   suggests it captures something V_X currently doesn't model.
+4. **HEIC, JPEG on CID22 minor regressions** (V0_16 v V0_2): low
+   priority; both within ±0.006.
+
+**Build-order state**: 1–4, 6–11, 13 ✅. MVP comparison-site complete.
+Remaining: 5 (R2 unified parquets, user-blocked), 12 (UX polish), 14
+(dssim on unified, multi-hour), 15 (CID22 2023 paper figs).
+
+**Next concrete tick (478)**: build step 15 — reproduce CID22 paper
+Table 5 (band-cutoff table) on the comparison-site as a static
+sidebar. We have all the data; just need a `paper_reference_*.json`
+file and a Plotly bar/line render.
+
 ### Tick 476 — 2026-05-12T22:15Z — Per-codec TRUE V0_16 vs fast-ssim2 on CID22
 
 zensim commit `53a104a5`: `benchmarks/cid22_per_codec_v0_16_2026-05-12.md`.
