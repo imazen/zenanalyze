@@ -1796,6 +1796,26 @@ Next concrete tick: pivot to documentation / site improvements / next
 shipping policy decision. Or: build the multi-criterion eval ranker
 (combined-score sorter for future sweeps).
 
+### Tick 313 — 2026-05-12T01:45Z — Targeted TV=15 experiment: seeds 1 + 13
+
+**Hypothesis**: TV=15 (between V0_7's TV=10 and h128_tv20's TV=20)
+might:
+- For seed=1: lower B1 gap below V0_7's -0.027 while keeping
+  non-mono near 5.46%
+- For seed=13: lower non-mono below 5.58% (the closest non-mono to
+  target so far, after seed=1) while keeping its best-in-class
+  B1 (-0.009)
+
+If either lands a CID22 ≥ V0_7's 0.8933 AND non-mono ≤ 5.5% AND
+B1 closer to ssim2, that's a strict V0_8 upgrade.
+
+Launched 2 trainings in parallel (PIDs 2936963, 2936964):
+- `/tmp/zensim_loop/v0_8_tv15_h128_seed{1,13}.bin`
+- Same recipe as V0_7 except TV=15
+- Expected wall ~15-20 min each
+
+Next concrete tick: monitor; epoch ~140 first peak ~7-10 min.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
