@@ -4170,6 +4170,22 @@ V0_16 status.
 **Next tick (396)**: optional — run AIC-3 ensemble (V0_19/V0_20 need
 re-eval with --aic3); OR pivot to image-type dispatch.
 
+### Tick 396 — 2026-05-12T08:02Z — AIC-3 ensemble prep: re-running V0_19/V0_20 with --aic3
+
+V0_19/V0_20 per-pair re-eval launched with both `--cid22` and `--aic3`:
+- V0_19 (PID 3358832), out: `/tmp/zensim_loop/v0_19_per_pair_full.csv`
+- V0_20 (PID 3358833), out: `/tmp/zensim_loop/v0_20_per_pair_full.csv`
+
+ETA ~4 min total (CID22 ~75s + AIC-3 ~140s, in parallel).
+
+**Extended ensemble_seeds.py** with `--dataset NAME` flag so the same
+script can compute ensemble for CID22 OR AIC-3 CTC. Default still CID22.
+
+**Hypothesis**: AIC-3 ensemble should show the same pattern as CID22 —
+seed variance, V0_16 SHIP near the high tail, ensemble at ssim2 level.
+
+**Next tick (397)**: collect AIC-3 ensemble result + commit.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
