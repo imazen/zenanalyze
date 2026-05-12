@@ -2241,6 +2241,25 @@ the runtime infra for this (multi-class classifier head).
 Next concrete tick: await user authorization for AIC-3 CTC
 download + further next-cycle direction.
 
+### Tick 329 — 2026-05-12T03:29Z — AIC-3 CTC + AIC-4 downloads launched
+
+User authorized downloads + per-band TV first (defer MLP dispatch).
+
+**Downloads launched**:
+- AIC-4 Sample (1.08 GB ZIP) **DONE** at
+  `/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset.zip`
+- AIC-3 CTC (~1.5 GB FTP, EPFL MMSPG): in progress at
+  `/mnt/v/dataset/aic3_ctc_epfl/` (PID 3025151)
+
+**FTP credentials gotcha**: the agent had the username wrong as
+"jpeg-aic3@epfl.ch"; the actual is **`jpegaic@mmspgdata.epfl.ch`**
+(decoded from the page's Cloudflare email-obfuscation cfemail
+attribute). Login succeeds and listing returns
+`home/JPEG AIC-3 Dataset/2023-01/`.
+
+Next concrete tick: monitor downloads; plan per-band-weighted TV
+trainer feature.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
