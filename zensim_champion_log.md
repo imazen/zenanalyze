@@ -5295,6 +5295,60 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 460 — 2026-05-12T21:04Z — JS MLP forward-pass scaffolded (site step 10)
+
+zensim commit `742e9222`: `site/js/mlp.js` (~160 LOC). MVP build-order
+step 10 from `COMPARE_PLAN_2026-05-12.md` — enables in-browser V_X bake
+application against `feat_0..feat_227` columns the parquet sweeps carry.
+
+**Implementation**:
+- `parseZnpr(bytes)` — ZNPR v2 binary header walker: magic check,
+  Section reads, layer table, returns `{nInputs, nOutputs, layers,
+  scalerMean, scalerScale}` typed object.
+- `predict(model, features)` — mirrors `zenpredict::inference::forward`
+  exactly: StandardScaler (`x' = (x - mean) / safe_scale`, zero→1),
+  per-layer SAXPY matmul over biases, Identity/ReLU/LeakyReLU(α=0.01).
+- F32 dtype only for now (V_X bakes all use F32; F16/I8 TODO,
+  not needed for current set of bakes).
+
+**Smoke test** on V0_16 bake (`/home/lilith/work/zen/zensim/zensim/
+weights/v0_16_2026-05-12.bin`):
+- parsed: version=2, n_inputs=228, n_outputs=1, n_layers=2
+- layer 0: 228→128 activation=2 (LeakyReLU)
+- layer 1: 128→1 activation=0 (Identity)
+- scaler_mean/scale read correctly (values match what zensim's
+  trainer emits)
+- `predict([0.5]×228)` → 815.8024 (raw, pre-calibration)
+- `predict([0.0]×228)` → 115.4504 (bias-only baseline)
+
+Test script at `/tmp/mlp_test.mjs` (not committed — one-shot).
+
+**Cross-validation note**: `zenpredict-inspect` only handles v3 bakes;
+V0_16 is v2. Bit-equivalence vs Rust impl can be verified next tick
+by writing a tiny zensim integration test that calls
+`score_from_features` on a known input and compares against the JS
+output. For now the structural correctness is high-confidence (layer
+dims, activations, header offsets all match Rust source).
+
+**Cycle-7 unblocker**: with this JS module, the comparison-site can
+now offer "zensim V0_2 vs V0_16 vs V0_18 vs ..." as Y-axis options.
+Each bake is a separate `parseZnpr` + `predict` against the same
+`feat_*` columns — exactly what the spec called for. Independent of
+R2 upload status.
+
+**Next concrete tick (461)**:
+- Option A: wire `mlp.js` into `compare-worker.js` so the worker
+  loads a bake binary (`fetch(BASE_URL + 'weights/v0_16.bin')`),
+  applies it to parquet `feat_*` columns, and feeds the resulting
+  scores into the scatter/SROCC pipeline.
+- Option B: build a bit-equivalence test (Rust → JS) by writing
+  a small `zensim` example that takes a known 228-vec and emits
+  the raw score, then compare against `mlp.js`.
+
+Option B is the safer next step (proves correctness before wiring
+into prod). Option A is more visible (page lights up with real
+scores). Default to B unless user prefers A.
+
 ### Tick 459 — 2026-05-12T20:59Z — Combined AIC per-codec analysis (three patterns)
 
 Tick 458 said next step was scoring dssim on unified parquets, but
