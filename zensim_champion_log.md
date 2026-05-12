@@ -4978,6 +4978,41 @@ AIC-3 still running (480/600). Will collect + log next tick.
 
 **Next tick (430)**: V0_22 full results + extended subset search.
 
+### Tick 430 — 2026-05-12T10:20Z — V0_22 full results + subset search
+
+**V0_22 single-bake**:
+- CID22: 0.8870 (-0.0025 vs ssim2)
+- AIC-3: 0.7906 (-0.0059 vs ssim2 — WORST AIC-3 of any clean-data bake)
+- Non-mono: **1.96%** (BEST of any bake!)
+- Near-PJND: **0.3710** (BEST of any bake by +0.0163 over V0_16)
+
+**Subset search with V0_22**:
+| Subset | CID22 | AIC-3 |
+|---|--:|--:|
+| {V0_16, V0_21} (best CID22) | 0.8911 | 0.8024 |
+| {V0_16, V0_20, V0_21} (Pareto-best) | 0.8908 | **0.8051** |
+| {V0_16, V0_21, V0_22} | 0.8909 | 0.7990 |
+| {V0_16, V0_20, V0_21, V0_22} | 0.8908 | 0.8017 |
+| {V0_20, V0_21, V0_22} | 0.8898 | 0.8027 |
+
+V0_22 doesn't help the ensemble — its weak AIC-3 dilutes the combined
+result. **{V0_16, V0_20, V0_21} remains the Pareto-optimal 3-bake.**
+
+V0_22's value is **specialty-only**: best smoothness (1.96%) and best
+Near-PJND (0.3710). If a user prioritizes Near-PJND specifically (e.g.,
+visual-threshold calibration), V0_22 alone or in a Near-PJND-specific
+ensemble subset would be the pick.
+
+**Cycle 6+ conclusions stabilized**:
+- Single ship: V0_16 (best CID22 single bake)
+- General ensemble: {V0_16, V0_20, V0_21} (Pareto-optimal CID22+AIC-3)
+- Near-PJND specialty: V0_22
+
+Site bake history could add V0_22 as a smoothness-best entry. Let me
+queue that for next tick.
+
+**Next tick (431)**: V0_22 site row + scatter/step-5 + non-mono entry.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
