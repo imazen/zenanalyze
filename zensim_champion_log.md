@@ -4276,6 +4276,37 @@ This brings the handoff fully up to date with cycle 5 findings.
 **Next tick (400)**: idle / declare cycle 5 complete; cron will continue
 firing but no productive work remains until next directive.
 
+### Tick 400 — 2026-05-12T08:18Z — V0_18/V0_19/V0_20 added to site Pareto + bake index
+
+**4-seed non-mono numbers** (computed in parallel this tick):
+- V0_16 (seed=1): 2.30%
+- V0_18 (seed=42): **2.01%** (best of sweep)
+- V0_19 (seed=7): 2.84%
+- V0_20 (seed=123): 2.65%
+- Mean: 2.45%, range 0.83pp
+
+**Site updates** (zensim commit `7801299c`):
+- 3 new bake JSONs: V0_18_seed42, V0_19_seed7, V0_20_seed123
+- index.json entries with seed-sweep notes
+- NONMONO_PCT_BY_LABEL map extended
+- Pareto chart now plots all 4 seeds as blue dots (smoothness specialists),
+  V0_16 green (ship) — visualizes the trade-off space across seeds
+
+**Cycle 5 visualization complete**: users browsing the site can now see
+the full seed distribution + ensemble results + methodology disclosure.
+
+**Trade-off insight from non-mono**:
+- V0_16 (seed=1) — best CID22, mid non-mono
+- V0_18 (seed=42) — worst CID22, BEST non-mono
+- V0_19 (seed=7) — mid CID22, worst non-mono
+- V0_20 (seed=123) — mid CID22, best AIC-3
+
+No single seed dominates all axes. V0_16 is best balanced for the
+shipping criteria.
+
+**Next tick (401)**: cron will fire; will likely continue idle until
+user directive (image-type dispatch, dssim, blocklist).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
