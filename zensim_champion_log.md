@@ -3403,6 +3403,27 @@ Larger bins (n≥100) are more trustworthy.
 per-pair CSVs into one chart (multi-bake series). Re-run V0_8
 eval with `--per-pair-output` for comparison data.
 
+### Tick 367 — 2026-05-12T06:06Z — Step-5 chart now multi-bake; V0_8 per-pair eval running
+
+**Site JS updated** (zensim main):
+- `loadStep5Bakes()` now tries `v0_15` AND `v0_8_tainted` JSONs
+- `renderStep5()` plots one V_X series per bake + ssim2 + butter
+  (was hardcoded single-bake)
+- Per-bin `n` annotation moved below x-axis
+
+**V0_8 per-pair eval launched** (PID 3213922):
+- Uses archived `zensim/weights/archive/v0_8_tainted_2026-05-11.bin`
+- CID22 only (no AIC-3 — V0_8's AIC-3 numbers already known)
+- ETA ~3 min (CID22 at 429/4292 @20/s when checked)
+
+When V0_8 per-pair lands, will:
+1. Run `per_band_step5.py --label v0_8_tainted` to emit
+   `site/data/step5_bands/v0_8_tainted.json`
+2. Commit + push; site will show V0_15 vs V0_8 step-5 head-to-head
+
+**Next tick (368)**: collect V0_8 per-pair; emit step-5 JSON;
+commit multi-bake step-5 view.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
