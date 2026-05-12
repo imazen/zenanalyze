@@ -3468,6 +3468,31 @@ discriminative power).
 succeeds after the `enablement: true` fix. Also add V0_2 step-5
 since the per-pair CSVs include V0_2 distances.
 
+### Tick 369 — 2026-05-12T06:13Z — GH Pages deploys GREEN; V0_2 step-5 series added
+
+**GH Pages deploys**: 5 consecutive successful runs since the
+`enablement: true` fix (commit `885ea915`). Site live at
+<https://imazen.github.io/zensim/>.
+
+**V0_2 step-5 series added** (zensim commit `75265ded`):
+- `app.js renderStep5()` now also plots V0_2 (linear baseline) as a
+  dashed-dot light-blue line
+- Full step-5 chart now compares: V0_15 (green), V0_8_tainted (blue),
+  V0_2 (light-blue), fast-ssim2 (red dash), butter (gray dot)
+- V0_2 srocc is already in the per-pair JSONs (computed by
+  per_band_step5.py); just hadn't been plotted
+
+**Not generating** step-5 for V0_10/V0_11/V0_12: those bakes are
+tainted and have been deleted. Their per-pair CSVs exist but adding
+them would clutter the chart with archived bakes.
+
+**Next tick (370)**: V0_15 ship is solidified. Phase plan options:
+1. Generate KADID/TID step-5 for V0_15 + V0_8 (multi-dataset view)
+2. Compute non-mono per-band rate (% violations per MCOS bin)
+3. Run V0_15 on KonJND-1k for PJND anchor verification
+4. Try one more recipe variant (V0_16) on clean data — different TV
+5. Update CONTEXT-HANDOFF.md / next-session pickup
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
