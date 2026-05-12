@@ -5318,6 +5318,44 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 487 — 2026-05-12T23:08Z — Cycle-7 dssim trainer patch landed + data-prep gap documented
+
+Implemented `--dssim-weight` patch on `train_v_next_mlp.py`
+(zensim commit `dd9bd2bf`):
+
+- `TrainConfig.dssim_weight: float = 0.0` (default preserves V0_16
+  behavior).
+- `train(..., dssim_train=None)` accepts optional dssim array;
+  scales to quality space via `(1 - dssim) * 100`; pushes
+  `loss += dssim_weight * mse(pred, dssim_target)` per step.
+- CLI: `--dssim-weight 0.3` (suggested per plan; defaults to 0).
+- Main() reads `df["dssim"]` from the training dataframe when
+  `args.dssim_weight > 0`; raises a clear SystemExit if absent
+  (no silent fallthrough).
+
+Syntax-checked + `--help` shows the new flag.
+
+**Data-prep gap discovered & documented**:
+- The trainer reads unified parquets from
+  `/mnt/v/zen/zensim-training/2026-05-07/unified/` which have
+  feat_*/score_zensim/score_ssim2/score_butter but NO dssim column.
+- The synth CSV
+  `training_safe_synthetic_perceptual_clean.csv` HAS dssim (range
+  [0, 0.2]) but has a different schema (source_path/decoded_path
+  /codec/quality/gpu_ssimulacra2/dssim) and no feat_* columns.
+- Need a join script: match unified-parquet rows to synth-CSV rows
+  on `(image_basename, codec, q)`, merge dssim column, emit a new
+  parquet `unified_v15rdc_zenjpeg.parquet` (or pass dssim through a
+  separate `--dssim-csv` flag).
+
+Either path is ~30-60 lines + ~10 min wall. Documented in
+`scripts/v_next/CYCLE_7_DSSIM_COTRAIN_PLAN.md` (zensim commit
+`5d911bd2`).
+
+**Next concrete tick (488)**: write the dssim-join script,
+generate the dssim-augmented parquet OR add `--dssim-csv` flag,
+and launch the V0_24 training run.
+
 ### Tick 486 — 2026-05-12T23:01Z — User: vacation mode + 3-task auth; CORS bug fixed (the 404), v15 sweeps uploaded, cycle-7 dssim plan ready
 
 **User direction**: "you have user authoeization for all 3 tasks,
