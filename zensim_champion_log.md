@@ -2035,6 +2035,42 @@ enable GH Pages (needs user repo-settings auth) or pivot to long-
 term Goal 1 (WASM trainer parity tests) / Goal 4 (balanced
 holdout).
 
+### Tick 323 — 2026-05-12T02:57Z — seed=13 TV=15 final: BEATS ssim2 in B0 (only bake to do so)
+
+Read the previously-pending seed=13 TV=15 CID22 + per-band:
+
+| Band | seed=13 TV=15 | ssim2 | Δ | vs V0_8 (seed=1 TV=15) |
+|---|--:|--:|--:|---|
+| B0 (<50) | **0.4517** | 0.4418 | **+0.010 BEATS** | better (V0_8: -0.010) |
+| B1 [50,65) | 0.4593 | 0.4694 | -0.010 | comparable to V0_8 -0.014 |
+| B2 [65,90) | 0.7636 | 0.7722 | -0.009 LOSES | worse (V0_8: +0.015) |
+| B3 (≥90) | 0.1504 | 0.1121 | +0.038 BEATS | comparable (V0_8: +0.051) |
+| Near-PJND | 0.3687 | 0.3908 | -0.022 | comparable (V0_8: -0.024) |
+| **Aggregate CID22** | **0.8848** | 0.8895 | -0.005 | V0_8 wins +0.0100 |
+
+**seed=13 TV=15 is the only bake we've trained that BEATS fast-ssim2
+in B0** (+0.010). But it's slightly worse on the aggregate and B2.
+
+**Insight crystallized**: TV=15 with different seeds wins different
+bands. seed=1 TV=15 (V0_8 ship) → wins aggregate / B2 / B3.
+seed=13 TV=15 → wins B0 / B1 (and B3).
+
+**Bake ensemble opportunity**: averaging seed=1 + seed=13 TV=15
+predictions (both MCOS-aligned) could plausibly:
+- Keep B0/B1 from seed=13's strength
+- Keep B2/B3 from seed=1's strength
+- Average aggregate at ~(0.8948+0.8848)/2 ≈ 0.8898 (between)
+
+The ensemble would need a runtime path that loads TWO bakes and
+averages outputs. Not currently supported. Future Goal-1 work
+(WASM trainer + ensemble runtime) is the natural place to land it.
+
+Saving seed=13 TV=15 bake for future ensemble work:
+`/tmp/zensim_loop/v0_8_tv15_h128_seed13.bin` (md5 `6d934ad2`).
+
+Next concrete tick: cycle stable. Pivot to long-term goals or
+end session.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
