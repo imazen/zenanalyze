@@ -2132,6 +2132,49 @@ ensemble inference.
 
 Next concrete tick: read per-pair CSVs, compute ensemble CID22.
 
+### Tick 326 — 2026-05-12T03:09Z — Ensemble CID22: V0_8 single-bake wins aggregate (mixed per-band)
+
+Ensemble computed from per-pair CSVs (V0_8 seed=1 TV=15 + seed=13
+TV=15):
+
+**Aggregate CID22 SROCC**:
+- V0_8 (SHIPPED): **0.8948**
+- seed=13 TV=15: 0.8848
+- **Ensemble (avg)**: 0.8916 (BETWEEN both; -0.0032 vs V0_8)
+- ssim2: 0.8895
+
+**Per-band CID22**:
+- B0: ENS 0.4430 (≈ ssim2 0.4418)
+- B1: ENS 0.4608 (best of the 3 bakes; closer to ssim2 0.4694)
+- B2: V0_8 wins 0.7872 (ENS 0.7781)
+- B3: V0_8 wins 0.1628 (ENS 0.1450)
+- Near-PJND: ENS 0.3710 (slight edge over V0_8 0.3673)
+
+**Verdict**: ensemble is NOT a strict CID22 upgrade. V0_8 wins
+aggregate AND B2/B3. Ensemble wins B1/Near-PJND. Mixed.
+
+Earlier JPEG synth analysis showed ensemble BEATS both on non-mono
+(5.34% vs V0_8's 5.87%) AND on |SROCC| vs ssim2 (0.9311 vs 0.9283).
+But CID22-specific aggregate doesn't follow that pattern — V0_8
+single-bake is the better CID22 model.
+
+**Ensemble experiment outcome**:
+- Improves smoothness (5.34% vs 5.87%) ✓
+- Improves CID22 B1 / Near-PJND ✓
+- Hurts CID22 B2 / B3 / aggregate ✗
+- Net: not worth shipping for CID22
+
+**V0_8 retains the ship.** Ensemble path closed for now.
+
+Final cycle state:
+- V0_8 (seed=1 TV=15) shipping, md5 `67482691`
+- All session goals at stable resting state
+- Future cycles can pick up: runtime ensemble (Goal 1 long-term),
+  per-band-weighted TV (close B1 without ensemble cost), Goal 4
+  balanced holdout
+
+Next concrete tick: cycle complete. Pivot or end loop.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
