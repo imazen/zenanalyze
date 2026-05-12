@@ -1208,6 +1208,67 @@ Next concrete tick: investigate the B1 gap (V0_7 −0.027 vs ssim2)
 since that's the only meaningful per-band loss. Or: enable GH Pages
 (pending user authorization) so the site is publicly visible.
 
+### Tick 293 — 2026-05-12T00:13Z — ⚠ Pre-existing V0_4 test failure surfaces with V0_7
+
+Ran `cargo test -p zensim --features __experimental_versions
+--release` to sanity-check the V0_7 ship. **3 V0_4 tests fail**:
+
+- `v04_score_is_in_unit_range` — score out of [0, 100]
+- `v04_identical_inputs_near_perfect` — got -398.6 (expected ≥ 90)
+- `v04_degraded_does_not_exceed_identical`
+
+**Root cause** (pre-existing, NOT a V0_7 regression):
+
+The affine-calibrated bake outputs ~90 (MCOS-aligned) for identical
+inputs. The runtime then applies the V0_2/V0_4 score-mapping
+transform `100 - 18·d^0.7·sign(d)` ON TOP, treating the bake output
+as if it were a raw distance. Result: `100 - 18·90^0.7 ≈ -374.5`,
+which matches the observed -398.
+
+**This bug shipped with V0_5 too** — V0_5 was also affine-calibrated
+(α=33.27, β=-3.791) producing MCOS-aligned output, but the same
+runtime double-mapping was in effect. The bug went undetected
+because:
+- Test gated behind `__experimental_versions` (not in default
+  `cargo test`)
+- Eval via `dataset_metric_baseline --v04-bake` bypasses the runtime
+  score-mapping, reads the bake output directly → SROCC numbers
+  (0.8900 V0_5, 0.8933 V0_7) are correct
+- Production paths that use `Zensim::compute(...)` and read
+  `.score()` would have seen garbage outputs
+
+**zensim-train-core**: 15/15 tests still pass (unaffected, no V0_4
+runtime).
+
+**Impact on V0_7 ship**:
+- CID22 SROCC numbers (used everywhere) are unaffected; bake's
+  rank-correlation with truth is preserved by the affine.
+- Site data is unaffected.
+- ANY production code reading `.score()` from a `ZensimProfile::
+  PreviewV0_4` call gets corrupted scores. This affects V0_5 and V0_7
+  equally; the bug pre-dates this session.
+
+**This is a runtime-vs-bake-calibration architecture mismatch and
+should be fixed in a follow-up**:
+- Option A: Add a `ProfileParams` field marking "bake is already
+  calibrated; skip score-mapping transform" — non-breaking,
+  additive.
+- Option B: Calibrate the bake to a value that, after the runtime
+  transform, lands at MCOS. This is what V0_2/V0_4 expected
+  originally.
+
+**Recommendation**: Option A in next zensim-runtime patch. Surface
+to user; not blocking V0_7 ship since the bake itself is correct
+and the published SROCC numbers reflect the bake's actual behavior
+on the eval harness path.
+
+Per CLAUDE.md "NEVER relax test expectations without user
+confirmation": leaving the tests failing for now; will need user
+direction.
+
+Next concrete tick: surface to user with the proposed runtime fix
+(Option A) — or move on to the B1 SROCC gap investigation.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
