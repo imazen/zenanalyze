@@ -5295,6 +5295,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 471 — 2026-05-12T21:51Z — Per-corpus schema fix + ssim2 chain still cooking
+
+zensim commit `cdd5c5dc`. While ssim2-gpu chewed on CID22 in
+background, audited the worker query path and found a real bug:
+the SQL hard-coded `SELECT TRY_CAST(score_iw_ssim AS DOUBLE) ...
+FROM '<url>'` would fail with "column not found" on parquets that
+don't have that column (KADID lacks score_*, TID lacks score_*,
+CID22 lacks score_iw_ssim etc.).
+
+**Fix**: per-corpus schema introspection.
+- New `getSchema(url)` helper: runs `DESCRIBE SELECT * FROM '<url>'
+  LIMIT 0` once per URL, caches the column-name Set.
+- The SELECT builder intersects `allCols` (wishlist of 28 columns
+  spanning every corpus schema we ship) with the parquet's actual
+  schema. Numeric columns get `TRY_CAST(<col> AS DOUBLE)`; text
+  columns (codec / version / image_name) project as-is.
+- Filter logic also tightened: `codec_filter` now matches `r.codec`
+  directly (since we keep that column as text now); `version_filter`
+  matches either `r.version` or `r.knob_tuple_json` (different
+  corpora use different column names for the same concept).
+
+**Verified bug avoidance**:
+- KADID (cols: codec / version / human_dmos / human_dmos_var):
+  schema intersects to `{codec, version, image_name, human_dmos,
+  human_dmos_var}` — query succeeds, score_* columns absent → not
+  selected.
+- TID (cols: codec / version / human_mos): subset of above.
+- CID22 (cols include score_zensim / score_dssim now, no
+  score_iw_ssim): intersects correctly.
+- AIC-4 (full paper schema): all 28 wishlist cols intersect to
+  ~23 actually present.
+
+**Chain2 status** (~10 min in):
+- zensim CPU: ✅ DONE (4292/4292)
+- dssim-gpu: ✅ DONE (4292/4292)
+- ssim2-gpu: 1221/4292 → ~28%, ETA ~13 min
+- butter-gpu: queued
+
+**Next concrete tick (472)**: ssim2-gpu should be done by then;
+re-export cid22.parquet with score_ssim2_gpu merged in and compute
+the canonical V0_16-vs-fast-ssim2 SROCC on the full 4292-row
+paired-comparison set. That's the CLAUDE.md goal #1 empirical
+check we've been heading toward.
+
 ### Tick 470 — 2026-05-12T21:46Z — CID22 full-set V0_16 measurement + corpus inventory doc
 
 zensim commits this tick:
