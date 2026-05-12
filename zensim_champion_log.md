@@ -4415,6 +4415,36 @@ session.
 
 **zensim commit**: `<TBD>` (this tick's commit).
 
+### Tick 405 — 2026-05-12T08:38Z — V0_16 cross-codec non-mono: AVIF/JXL = 0.00%, WebP = 0.50%, JPEG = 2.30%
+
+Cross-codec smoothness validation for V0_16 SHIP:
+
+| Codec | Non-mono % | Notes |
+|---|--:|---|
+| AVIF | **0.00%** | Perfect smoothness |
+| JXL | **0.00%** | Perfect smoothness |
+| WebP | 0.50% | Near-perfect |
+| JPEG | 2.30% | Within target (4.86%) |
+| PNG | n/a | Lossless, no quality curves |
+
+V0_16's smoothness generalizes broadly across codecs. JPEG is the
+hardest case (coarser q steps, block-coded artifacts) but still
+crushes target. AVIF/JXL produce PERFECTLY smooth rankings — likely
+because they have smoother quality dials and produce more consistent
+artifacts as quality varies.
+
+**Insight for cycle 6**: smoothness is not the bottleneck. Goal #1
+("match-or-exceed ssim2 across all bands") is the remaining frontier.
+The recipe + ensemble already beats ssim2 on AIC-3; CID22 needs
+structural change (image-type dispatch, etc.) to clear ssim2 by
+margin > seed σ.
+
+**Site note**: should add cross-codec non-mono table to methodology
+or bake history for completeness.
+
+**Next tick (406)**: optional cross-codec non-mono table on site, or
+idle.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
