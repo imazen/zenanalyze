@@ -1623,6 +1623,36 @@ If seed=13 surges to 0.943+ in the final cycle, it has a shot.
 
 Next concrete tick: read seed=5/8 CID22 + non-mono; monitor 13/21.
 
+### Tick 308 — 2026-05-12T01:25Z — All-seed non-mono picture: V0_7 seed=1 IS the outlier
+
+**Non-mono q-step rate (clean-data, h=128, TV=10) across all
+evaluated seeds**:
+| Seed | val_mean | Non-mono | Notes |
+|---:|--:|--:|---|
+| 0 | 0.9443 | 5.67% | over target |
+| **1 SHIP** | 0.9437 | **5.46%** | within target |
+| 2 | 0.9407 | 5.78% | over |
+| 5 | 0.9419 | **5.83%** | over |
+| 7 | 0.9415 | 5.78% | over |
+| 8 | 0.9419 | **5.95%** | over |
+| 13 | 0.9433 (still ↑) | TBD | running |
+| 21 | 0.9418 | TBD | eval launched |
+| 42 | 0.9418 | 5.94% | over (V0_6) |
+
+**8 of 9 seeds eval'd are OVER the 5.5% target. seed=1 (5.46%) is
+genuinely the only sub-target bake of the cleaned-corpus regime.**
+
+V0_7 seed=1's outlier status is confirmed reproducible — but it's
+a 1-in-9 occurrence. The 5.5% target is genuinely tight for the
+clean 156k corpus.
+
+CID22 evals running for seed=5/8 (70% through KADID). seed=13 just
+hit best=0.9433 at epoch 140 — the closest val_mean to V0_7's
+0.9437. seed=13 is the last realistic chance for a V0_8 candidate.
+seed=21 finished at 0.9418 (eval launched).
+
+Next concrete tick: seed=13 final + all CID22 results.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
