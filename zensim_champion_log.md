@@ -5295,6 +5295,76 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 472 — 2026-05-12T21:51Z — 🚨 CID22 full-set V0_16 LOSES to fast-ssim2 by 0.022 SROCC
+
+zensim commit `a6e01395`: `benchmarks/cid22_full_v0_16_vs_ssim2_2026-05-12.md`.
+
+**The canonical CLAUDE.md goal #1 comparison on full 4292-pair CID22**:
+
+| Metric | \|SROCC\| vs MCOS (n=4292) |
+|---|---:|
+| **fast-ssim2-gpu** | **0.8894** |
+| dssim-gpu          | 0.8722 |
+| **zensim V0_16**   | **0.8674** |
+| bpp                | 0.6277 |
+
+V0_16 trails fast-ssim2 by **0.022 SROCC** on the full CID22 set.
+Goal #1 ("match-or-exceed fast-ssim2 across all bands") is NOT
+empirically met at this evaluation scale.
+
+**Per-codec V0_16 vs fast-ssim2** (8 of 9 codecs lose):
+
+| Codec | n | V0_16 | ssim2-gpu | Δ | Winner |
+|---|---:|---:|---:|---:|---|
+| AVIF_aom_s1       | 423 | 0.8592 | 0.8813 | -0.022 | ssim2 |
+| AVIF_aom_s7       | 539 | 0.8886 | 0.9140 | -0.025 | ssim2 |
+| **AVIF_aurora_fast** | 539 | **0.8001** | **0.8627** | **-0.063** | ssim2 (biggest gap) |
+| AVIF_aurora_slow  | 446 | 0.8384 | 0.8425 | -0.004 | ssim2 (noise) |
+| HEIC              | 392 | 0.8879 | 0.8920 | -0.004 | ssim2 (noise) |
+| JPEG              | 536 | 0.9424 | 0.9458 | -0.003 | ssim2 (noise) |
+| JPEG_2000         | 441 | 0.8598 | 0.8724 | -0.013 | ssim2 |
+| **JPEG_XL**       | 535 | **0.9246** | 0.9219 | **+0.003** | **V0_16** |
+| WebP              | 441 | 0.8928 | 0.9052 | -0.012 | ssim2 |
+
+V0_16 wins only on JPEG_XL. The biggest losses are on AVIF
+variants — consistent with the AIC-3 finding (V0_16 weak on
+HEVC/AV1-derived codecs).
+
+**Reconciliation with ship-doc 0.8919**: ship eval uses the 49-ref
+validation subset via `dataset_metric_baseline` (affine-calibrated,
+score-mapped); `zen-metrics batch` hits raw MLP output on full
+4292-row set. Both are valid measurements of different things. The
+**comparison-site renders the full-set number** (no cherry-picked
+subset), which is the honest goal #1 check.
+
+**Cross-corpus reconciliation**:
+
+| Corpus | n | V0_16 | ssim2 | gap |
+|---|---:|---:|---:|---:|
+| AIC-3 | 600  | 0.7962 | 0.7970 | -0.001 (tie) |
+| AIC-4 | 300  | 0.9107 | 0.9127 | -0.002 (tie) |
+| **CID22 (full)** | **4292** | **0.8674** | **0.8894** | **-0.022 (LOSS)** |
+
+The CID22 result is the outlier. V0_16 holds within ±0.002 on the
+AIC corpora but is materially below fast-ssim2 on CID22's full set.
+
+**Cycle-7 actionable** (refined from earlier ticks):
+1. Densify AVIF/HEIC/AV1-class distortion sampling in synth corpus.
+   The AVIF_aurora_fast -0.063 gap is the prime target.
+2. Investigate the 49-ref vs 4292-pair discrepancy: is the 49-ref
+   subset over-representing JPEG-class distortions that V0_X
+   trained well on?
+3. dssim as co-training signal (cross-corpus pattern continues).
+
+**Background chain**: butter-gpu still in flight (~44% at log-write).
+Next tick adds butter once it finishes — though butter typically
+ranks below all 3 above on CID22 per the AIC-4 finding.
+
+**Next concrete tick (473)**: merge butter-gpu when done; commit
+final 5-metric cid22.parquet. Then consider: is the V0_16 ship
+itself something to revisit given the 0.022 CID22 gap? That's a
+user-direction question, not a 5-min tick.
+
 ### Tick 471 — 2026-05-12T21:51Z — Per-corpus schema fix + ssim2 chain still cooking
 
 zensim commit `cdd5c5dc`. While ssim2-gpu chewed on CID22 in
