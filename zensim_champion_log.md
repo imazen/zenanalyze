@@ -2973,6 +2973,28 @@ genuinely the recipe optimum and we accept the floor.
 **Next tick (354)**: monitor V0_13 progress; site QA (open in browser
 if possible); commit V0_8 AIC-3 result to CLAUDE.md history.
 
+### Tick 354 — 2026-05-12T05:04Z — V0_13 ep 10 promising; auto-eval chain armed
+
+**V0_13 progress** (actual trainer PID 3109385, was tracking wrapper
+PID 3109383 by mistake — now corrected):
+- ep 0 val_mean = 0.9167 (highest start of any bake)
+- ep 10 val_mean = 0.9279
+- Per-epoch ~12.2s (2x slower than h=128, expected)
+
+**Auto-eval chain armed** (PID 3113114) — script
+`/tmp/zensim_loop/eval_v0_13_when_done.sh` waits on trainer PID,
+then runs CID22+AIC-3 SROCC + non-mono back-to-back. Uses
+`kill -0` check instead of `pgrep -f` to avoid the self-match
+infinite loop that bit the V0_11/V0_12 chain.
+
+**AIC-4 inspection**: sample dataset has full_resolution_images +
+PTC_images but NO public CSV (sample-only). Not useful for SROCC
+without the JND scores. Skipping AIC-4 ingestion for now.
+
+**Next tick (355)**: V0_13 should be at ~ep 20-30. Monitor progress.
+If V0_13 best val_mean clears V0_8's 0.9416 by a meaningful margin
+(say 0.005+), capacity-limit hypothesis is supported.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
