@@ -1343,6 +1343,24 @@ data densification, architecture).
 
 Next concrete tick: wait for sweep convergence; run eval script.
 
+### Tick 297 — 2026-05-12T00:41Z — V0_8 sweep tracking close to V0_7 ceiling
+
+V0_8 sweep continues:
+- h192_tv10: epoch 60, best=0.9402 (V0_7 ceiling 0.9437; gap -0.0035)
+- h128_tv20: epoch 100, best=0.9408 (gap -0.0029)
+
+h128_tv20 just entered cyclic-LR cycle 3 (epoch 100) which is
+where V0_7 seed=1 hit its peak (0.9437 around ep 100-140). h192_tv10
+similar pattern ~30 epochs behind.
+
+Best chances of beating V0_7 are in the next 30-50 epochs as cyclic
+LR drops back to 1e-4 (epochs 140 / 190 / 240).
+
+No bake files yet (trainers don't write until completion).
+
+Next concrete tick: re-check at epoch ~140; expect h128_tv20 to
+peak first.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
