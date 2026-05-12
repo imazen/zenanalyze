@@ -2521,6 +2521,28 @@ Plan for AIC-3 ingestion (next tick or two):
 
 Next: monitor V0_10 training; scaffold aic3_eval.rs script.
 
+### Tick 341 — 2026-05-12T04:14Z — AIC-3 pairs CSV built (600 pairs, 6 codecs)
+
+Wrote `zensim/scripts/v_next/aic3_pairs_csv.py` (~120 lines). Built
+`/tmp/zensim_loop/aic3_ctc_pairs.csv` with **600 paired rows**:
+
+- Codecs: AVIF/HM/JPEG-1/JPEG-2000/JPEGXL/VVC (100 each)
+- score.jnd distribution (all degraded, no ≥0):
+  - <-2: 120, [-2,-1.5): 120, [-1.5,-1): 120
+  - [-1,-0.75): 60, [-0.75,-0.5): 60
+  - [-0.5,-0.25): 60, [-0.25,0): 60
+- Zero missing ref/dist files
+- Columns: ref_path, dist_path, codec, quality_idx, quality_selected, score_jnd, method
+
+V0_10 (PID 3062154) still in warmup, no epoch logs yet (typical
+6s/epoch from V0_9 timing → log at epoch 10 ≈ 1 min mark).
+
+**Next step (next tick)**: extend `dataset_metric_baseline.rs` with
+a `--aic3` flag that calls a new `load_aic3()` loader reading the
+pairs CSV. score.jnd domain is [-3, 0]; use `human_score = score_jnd`
+(higher=better; identical=0, worst=-3). SROCC vs ssim2/zensim will be
+positive if both metrics rank consistently with human JND.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
