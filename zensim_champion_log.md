@@ -3306,6 +3306,50 @@ waiting).
 Continue monitoring; expect early-stop at ep 190 if no further
 improvement.
 
+### Tick 364 — 2026-05-12T05:52Z — V0_15 CID22 = 0.8914 (V0_8 INFLATION = +0.0034)
+
+**V0_15 final results** (early-stopped ep 190, best val 0.9427):
+- **CID22 SROCC = 0.8914** (vs ssim2 0.8895 → **+0.0019 above**)
+- **vs V0_8 tainted 0.8948 → V0_8 inflated by +0.0034**
+
+The inflation estimate held: V0_8's 0.0053 above ssim2 was actually
+0.0019 honest + 0.0034 leakage. Roughly 65% of V0_8's "advantage"
+was contamination noise.
+
+**V0_15 per-band CID22**:
+
+| Band | V0_15 | ssim2 | Δ | (V0_8 was) |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 0.3933 | 0.4418 | **-0.049** | -0.010 |
+| B1 [50,65) | 0.4307 | 0.4694 | **-0.039** | -0.014 |
+| B2 [65,90) | 0.7849 | 0.7722 | +0.013 | +0.015 |
+| B3 (≥90) | 0.1886 | 0.1121 | **+0.077** | +0.051 |
+| Near-PJND | 0.3453 | 0.3908 | **-0.046** | -0.024 |
+
+V0_15 has BIGGER per-band gaps to ssim2 than V0_8 did — V0_8's
+B0/B1 advantages were largely contamination artifacts. V0_15 honestly
+shows the model has weaker B0/B1 signal than ssim2.
+
+**V0_15 aggregate ≥ ssim2 (+0.0019)** but **per-band B0/B1/Near-PJND
+fall below ssim2 by significant margins**. Goal #1 (match-or-exceed
+all bands) is FAILED.
+
+Bake: `/tmp/zensim_loop/v0_15_purged_tv15_seed1.bin` md5 `bb09b939`.
+AIC-3 + non-mono pending (auto-eval chain running).
+
+**Ship recommendation**: replace V0_8 with V0_15 ANYWAY because:
+1. V0_8 contains contamination (deal-breaker per user directive)
+2. V0_15 aggregate still beats ssim2 (the shipping bar)
+3. V0_15's worse per-band coverage is the HONEST coverage — V0_8's
+   was a mirage
+4. B3 SROCC improvement (+0.077) is the real gain
+
+**STOP — ship swap is destructive (overwrites runtime weight + git push).
+Surface to user for explicit go-ahead before swapping.**
+
+**Next tick (365)**: collect AIC-3 + non-mono numbers; surface full
+comparison to user; await ship authorization.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
