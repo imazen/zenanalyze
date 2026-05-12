@@ -1747,6 +1747,55 @@ ETA ~5 min for seed=13 eval.
 Next concrete tick: read seed=13 CID22 + non-mono; finalize sweep
 verdict.
 
+### Tick 312 — 2026-05-12T01:42Z — V0_8 SWEEP COMPLETE: V0_7 seed=1 unbeaten; B1-gap insight
+
+**seed=13 final**:
+- CID22 = **0.8898** (V0_7 0.8933 → -0.0035)
+- Non-mono = **5.58%** (over 5.5% target by 0.08%)
+- Per-band CID22 vs ssim2: B0 -0.022, B1 **-0.009 (best of all bakes!)**,
+  B2 +0.003, B3 +0.038, Near-PJND -0.014
+
+ELIMINATED on both axes.
+
+**V0_8 SWEEP FULL VERDICT** (0 of 8 seeds beat V0_7 seed=1):
+
+| Seed | val_mean | Non-mono | CID22 | B1 gap | Pass both? |
+|---:|--:|--:|--:|--:|---|
+| 0 | 0.9443 | 5.67% | 0.8912 | -0.034 | ❌ |
+| **1 SHIP** | 0.9437 | **5.46%** | **0.8933** | -0.027 | **✓** |
+| 2 | 0.9407 | 5.78% | 0.8809 | (—) | ❌ |
+| 5 | 0.9419 | 5.83% | 0.8918 | (—) | ❌ |
+| 7 | 0.9415 | 5.78% | 0.8858 | (—) | ❌ |
+| 8 | 0.9419 | 5.95% | 0.8906 | (—) | ❌ |
+| 13 | 0.9433 | 5.58% | 0.8898 | **-0.009** | ❌ |
+| 21 | 0.9418 | 5.98% | 0.8821 | (—) | ❌ |
+| 42 | 0.9418 | 5.94% | 0.8839 | -0.025 | ❌ |
+
+Plus V0_8 hyperparam variants (also eliminated):
+- h128_tv20: CID22=0.8897, non-mono=5.70%, **B1 gap -0.017**
+- h192_tv10: CID22=0.8923, non-mono=5.66%
+
+**B1-gap insight**: seed=13 (TV=10, seed=13) has the **best B1**
+SROCC (-0.009 vs ssim2) of all bakes tested. h128_tv20 second-best
+(-0.017). V0_7 seed=1 is -0.027. **Higher TV and certain seeds
+DEMONSTRATIVELY help B1**, but at cost of B0 / aggregate / non-mono.
+
+**This is the next-cycle target**: design a bake that combines
+seed=13's B1 strength with V0_7's B0 / non-mono / aggregate
+strengths. Approaches:
+1. **Multi-criterion seed selection** — train N seeds, pick by a
+   combined score that weights B1 + aggregate + non-mono
+2. **Per-band-weighted TV** — apply TV=20 to B1-region pairs only,
+   TV=10 elsewhere (requires trainer feature)
+3. **Bake ensemble** — predict via mean of V0_7 + seed=13 outputs
+   (rank-preserving if both monotone; not currently supported)
+
+**V0_8 cycle CLOSES. V0_7 seed=1 (md5 `0ad0dace`) remains the ship.**
+
+Next concrete tick: pivot to documentation / site improvements / next
+shipping policy decision. Or: build the multi-criterion eval ranker
+(combined-score sorter for future sweeps).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
