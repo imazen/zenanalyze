@@ -2597,6 +2597,61 @@ held-out human-rated codec output.
 compare to V0_8; decide ship/hold. Also: log V0_8 AIC-3 result in
 `zensim/CLAUDE.md` shipping history.
 
+### Tick 344 — 2026-05-12T04:22Z — V0_10 verdict: best non-mono ever (2.40%) but FAILS goal #1
+
+**V0_10 results — smoothness specialist, NOT ship candidate**:
+
+| Bake | CID22 | AIC-3 | Non-mono | B1 vs ssim2 |
+|---|--:|--:|--:|--:|
+| ssim2 (ref) | 0.8895 | 0.7965 | 5.08% | 0 |
+| V0_7 (TV=10) | 0.8933 | — | 5.46% | -0.027 |
+| **V0_8 SHIPPED (TV=15)** | **0.8948** | **0.8043** | 5.87% | **-0.014** |
+| V0_9 ([10,20,10,10]) | 0.8924 | — | 5.46% | -0.023 |
+| **V0_10 ([15,25,15,15])** | **0.8877** ✗ | **0.7945** ✗ | **2.40%** ✓ | **-0.036** ✗ |
+
+**V0_10 fails goal #1** (match-or-exceed fast-ssim2 across all bands):
+- CID22: 0.8877 < ssim2's 0.8895 (-0.0018)
+- AIC-3: 0.7945 < ssim2's 0.7965 (-0.0020)
+- B1: -0.036 (the band we were trying to close — REGRESSED past V0_9)
+
+**V0_10 wins non-mono massively**: 2.40% (vs V0_2 floor 4.86%, ssim2
+5.08%, V0_7/V0_9 5.46%, V0_8 5.87%). This is the best smoothness number
+of any bake, meeting the ORIGINAL strict 4.86% target.
+
+**Hypothesis disproved**: V0_8's B1 closure (from -0.027 to -0.014) was
+NOT due to cross-band TV strength. Heavy per-band TV `[15,25,15,15]`
+over-regularizes and:
+- Drives B1 ranking WORSE (-0.036) — TV pushes monotonicity at the
+  expense of B1 transition-zone ranking
+- Drops B2 close to ssim2 (+0.005 vs V0_8's +0.015)
+- BUT lifts B3 to best-ever +0.075 (visually-lossless detection gains)
+- AND drops non-mono to 2.40% (a structural smoothness gain)
+
+**Per-band V0_10 vs V0_8**:
+
+| Band | V0_8 Δssim2 | V0_10 Δssim2 |
+|---|--:|--:|
+| B0 | -0.010 | -0.010 |
+| B1 | -0.014 | -0.036 |
+| B2 | +0.015 | +0.005 |
+| B3 | +0.051 | **+0.075** |
+| Near-PJND | -0.024 | -0.028 |
+
+**Conclusion**: V0_8 remains the best ship. V0_10 is a data point that
+heavy TV trades B1/B2 for smoothness + B3. B1 closure needs a different
+mechanism than TV — probably more B1-band training data or a B1-
+specific loss term.
+
+**Cycle 2 thoughts** for next experiments:
+1. Moderate per-band: `[15, 20, 15, 15]` (between V0_8 and V0_10)
+2. B1-biased data sampler: oversample synth pairs whose ssim2 ∈ [50, 65)
+3. Fundamental rethink: B1 is a perceptual transition — needs human-labeled
+   anchors there. KonJND-1k anchors at PJND ≈ 63 (B1 center!) but we already
+   include it. Maybe up the KonJND train weight from 0.5 → 1.0.
+
+**Next tick (345)**: launch V0_11 with `[15, 20, 15, 15]` (closer to
+V0_8) and/or konjnd weight 1.0. Cleanup stale polling shells (kpkill done).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
