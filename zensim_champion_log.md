@@ -2891,6 +2891,56 @@ image-type-aware MLP dispatch (multiple MLPs + classifier), (c)
 fundamentally different loss (per-band weighted ranknet), (d) accept
 V0_8 as good-enough and focus on Goal #6 (site).
 
+### Tick 352 — 2026-05-12T04:55Z — AIC-3 results in; V0_11 BEATS V0_8 on AIC-3 (different optima)
+
+**FINAL TABLE** (V0_8 + V0_11 + V0_12 head-to-head):
+
+| Bake | CID22 | AIC-3 | Non-mono | B0 | B1 | B3 | Verdict |
+|---|--:|--:|--:|--:|--:|--:|--|
+| ssim2 (ref) | 0.8895 | 0.7965 | 5.08% | 0.4418 | 0.4694 | 0.1121 | — |
+| **V0_8 SHIP** | **0.8948** | 0.8043 | 5.87% | 0.4321 | **0.4554** | 0.1628 | best CID22 |
+| V0_11 (TV=20) | 0.8897 | **0.8056** | **2.33%** | **0.4021** ✗ | 0.4527 | 0.1868 | best AIC-3 + smooth |
+| V0_12 (B1 ovrs) | 0.8895 | 0.7972 | **1.68%** | 0.4304 | 0.4439 | **0.1972** | best non-mono + B3 |
+
+**KEY INSIGHT**: CID22 and AIC-3 disagree on which bake is best.
+- V0_8 wins CID22 (+0.0053 vs ssim2)
+- V0_11 wins AIC-3 (+0.0091 vs ssim2)
+- V0_12 ties ssim2 (0.0000 on both aggregates) but best smoothness
+
+This is **dataset-specific overfitting evidence**. V0_8's recipe (flat
+TV=15) is optimized to CID22 distribution; V0_11's flat TV=20 generalizes
+better cross-dataset (AIC-3 holdout).
+
+**Goal #1 check (match-or-exceed ssim2 across all bands)**:
+- V0_8: CID22 ✓, AIC-3 ✓, but B0 -0.010, B1 -0.014, Near-PJND -0.024
+- V0_11: CID22 ✓ (+0.0002), AIC-3 ✓, but B0 -0.040 ✗ (significant)
+- V0_12: CID22 = (tie), AIC-3 = (tie), B1 -0.025 ✗
+
+NONE strictly match-or-exceed ssim2 across ALL bands. V0_8 has the
+smallest per-band deficits (max -0.024 in Near-PJND); V0_11 has B0
+regression of -0.040 which is significant; V0_12 has B1 regression.
+
+**Recommendation**: V0_8 remains the ship (best overall balance).
+V0_11 is a viable "smooth + cross-dataset" alternative if user
+prioritizes those properties; the B0 weakness is real though.
+
+**Site update** (Goal #6 progress):
+- Added `site/data/bakes/V0_11_flat_tv20.json`
+- Added `site/data/bakes/V0_12_b1_oversample.json`
+- Updated `site/data/index.json` with both new entries
+- Pushed to zensim main
+
+**Next-cycle direction options** for the user:
+1. **Continue TV recipe sweeps** — diminishing returns; V0_8 may be near optimum
+2. **Architecture: h=256 or 2-hidden-layer MLP** — more capacity for B1 patterns
+3. **Image-type-aware MLP dispatch** (user-requested) — multiple specialized MLPs + classifier picker
+4. **Lock V0_8 and focus on Goal #6 (site)** — surface Pareto picture to users
+5. **Better validation synth (ssim2 + butter agreement)** — cleaner B1 labels (user-prereq)
+
+**Next tick (353)**: Lock V0_8 ship status, focus on site polish.
+Build Plotly.js chart of Pareto (CID22 vs non-mono) showing all bakes.
+Document the V0_11/V0_12 results in CLAUDE.md shipping history.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
