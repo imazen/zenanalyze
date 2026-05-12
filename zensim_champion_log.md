@@ -3518,6 +3518,38 @@ a viable swap target.
 **Next tick (371)**: V0_16 will be at ~ep 30-40. Continue monitoring;
 also start KonJND PJND eval for V0_15 (uses different harness flag).
 
+### Tick 371 — 2026-05-12T06:20Z — V0_16 ep 40 val=0.9401 (between V0_15 and V0_8); auto-eval armed
+
+**V0_16 progress** (clean + TV=20, PID 3222018):
+- ep 0: 0.9002 (vs V0_15 ep 0 = 0.9083)
+- ep 10: 0.9183
+- ep 20: 0.9257
+- ep 30: 0.9345
+- ep 40: **0.9401** ← set as best
+
+Comparison at ep 40 across recipes:
+- V0_8 (tainted, TV=15): 0.9402 — inflated
+- V0_15 (clean, TV=15): 0.9391
+- **V0_16 (clean, TV=20): 0.9401**
+
+V0_16 with stronger TV is converging slightly faster on val_mean.
+ETA early-stop ep 90 or new cycle peak at ep 140.
+
+**Auto-eval chain armed** (PID 3223149) — script
+`/tmp/zensim_loop/eval_v0_16.sh` waits for V0_16 trainer, runs
+CID22+AIC-3 + non-mono + step-5 JSON gen in sequence.
+
+**Decision criteria** for V0_16 ship swap:
+- CID22 ≥ V0_15's 0.8914 (clean ship bar)
+- Non-mono ≤ V0_15's 2.51% (already-met strict 4.86% gate)
+- B0/B1 SROCC at least matching V0_15 (no further regression)
+
+If V0_16 wins on all 3, propose ship swap. If only some wins,
+hold V0_15 and document the tradeoff.
+
+**Next tick (372)**: V0_16 should be at ep 70-90 (early-stop imminent).
+Auto-eval will fire when done.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
