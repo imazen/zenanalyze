@@ -2796,6 +2796,34 @@ Total chain time: ~25 min (waits + 4 evals × ~3 min each).
 **Next tick (350)**: V0_11 should be evaluated. Read results, log,
 update site.
 
+### Tick 350 — 2026-05-12T04:46Z — V0_11 nonmono = 2.33% (best yet); CID22 evals running parallel
+
+**V0_11 nonmono = 2.33%** — best of any bake (vs V0_10 2.40%, V0_7
+5.46%, V0_8 5.87%, ssim2 5.08%). Flat TV=20 produces structural
+smoothness comparable to per-band [15,25,15,15] but with simpler recipe.
+
+**Training final** (both early-stopped):
+- V0_11 best val_mean = 0.9408 (ep 90, plateau)
+- V0_12 best val_mean = 0.9417 (ep 40, plateau) — **matches V0_8's 0.9416**
+
+**Both CID22+AIC-3 evals running in parallel** (PIDs 3093060/3093209):
+- V0_11: 1287/4292 (26.7/s, ETA 113s)
+- V0_12: 858/4292 (24.8/s, ETA 138s)
+- ETA ~2-3 min until both complete
+
+**Chain script bug** discovered: `pgrep -f "v0_11_flat_tv20"` matched
+the chain_evals.sh command line itself (which contained that pattern
+as an argument), causing infinite wait. Killed + replaced with direct
+parallel launch.
+
+**Predictions**:
+- V0_11 (flat TV=20): CID22 ~0.890-0.895, B1 ~-0.020, AIC-3 ~0.795-0.805
+- V0_12 (B1 oversample): CID22 ~0.895-0.905, B1 ~-0.005 (CLOSURE),
+  AIC-3 ~0.805-0.815, non-mono ~5-6%
+
+**Next tick (351)**: collect V0_11+V0_12 CID22+AIC-3 results, compute
+per-band, compare to V0_8. If V0_12 wins, prep ship.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
