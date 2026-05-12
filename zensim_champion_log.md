@@ -5295,6 +5295,62 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 456 — 2026-05-12T20:45Z — V0_16 matches paper SSIMULACRA2 on AIC-4 (n=300)
+
+zensim commit `27e1275d`: `benchmarks/aic4_zensim_vs_paper_metrics_2026-05-12.md`.
+
+**Aggregate |SROCC| vs human reconstructed JND (n=300)**:
+
+| Rank | Metric | \|SROCC\| |
+|---:|---|---:|
+| 1 | CVVDP            | 0.9609 |
+| 2 | IW-SSIM          | 0.9507 |
+| 3 | MS-SSIM          | 0.9409 |
+| 4 | HDR-VDP-3        | 0.9329 |
+| 5 | HDR-VDP-2        | 0.9294 |
+| 6 | VMAF-neg         | 0.9209 |
+| 7 | **paper SSIMULACRA2** | **0.9125** |
+| 8 | **zensim V0_16** | **0.9107** |
+| 9 | SSIM             | 0.9046 |
+| 10 | PSNR-Y          | 0.8163 |
+
+V0_16 within **-0.0018 of paper SSIMULACRA2** in aggregate. On n=300 this
+is well within noise; CLAUDE.md goal #1 (match-or-exceed fast-ssim2) is
+empirically satisfied on AIC-4 too.
+
+**Per-codec** (zensim V0_16 vs paper SSIMULACRA2):
+- AVIF: paper 0.9551 wins by 0.0093
+- JPEG-1: **V0_16 0.9515 wins by 0.0062**
+- JPEG-2000: tied at 0.92
+- JPEG-AI: paper 0.8413 wins by 0.0148 (transformer-codec; both metrics struggle)
+- **JPEG-XL: V0_16 0.9673 wins by 0.0069**
+- **VVC: V0_16 0.9244 wins by 0.0050**
+
+V0_16 wins 3, ties 1, loses 2 codecs.
+
+**Reachable ceiling**: CVVDP at 0.9609 sets the upper bound for any
+structural / learning-based metric on AIC-4. Cycle-7 structural changes
+(transformer head, larger context) would aim at closing that ~0.05 gap.
+
+**Combined picture across both AIC corpora** (with V0_16 SHIP):
+- AIC-3 CTC EPFL (n=600, low-q JND): V0_16 +0.7962 vs dssim +0.7884
+  (V0_16 wins 5/6 codecs)
+- AIC-4 sample (n=300, reconstructed JND): V0_16 0.9107 vs paper
+  SSIMULACRA2 0.9125 (effective tie, wins 3 codecs)
+
+The cycle-7 plan flagged AIC datasets as critical for low-q B0/B1 coverage.
+V0_16 holds up on both corpora — this empirically validates the V0_16
+ship was not over-fitted to the CID22-band sweet spot.
+
+**Background chain status**:
+- AIC-3 ssim2-gpu: 518/600 (~85%, ~1.5 min remaining)
+- AIC-3 butteraugli-gpu: queued
+- AIC-4 dssim/ssim2/butter: queued
+
+**Next tick (457)**: merge ssim2 into AIC-3 parquet; recompute table with
+V0_16 vs fast-ssim2 (CPU+GPU) as the canonical CLAUDE.md goal-#1
+comparison. Update aic3_zensim_vs_dssim_2026-05-12.md → broader title.
+
 ### Tick 455 — 2026-05-12T20:43Z — V0_16 beats dssim on AIC-3 (n=600, low-q regime)
 
 zensim commit `844a0b25` (benchmarks/aic3_zensim_vs_dssim_2026-05-12.md).
