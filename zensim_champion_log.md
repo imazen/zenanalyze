@@ -2402,6 +2402,16 @@ AIC-3 at 648 MB / 1.5 GB.
 
 Next concrete tick: V0_9 at ep ~100 (~5 min); first peak.
 
+### Tick 335 — 2026-05-12T03:49Z — V0_9 ep 80 still best=0.9411; cycle 2 didn't lift it
+
+V0_9 at epoch 80, best val_mean=0.9411 (from epoch 40). Cyclic LR
+cycle 2 (epochs 50-90) didn't produce a new best yet. Cycle 3
+peaks at epoch 140 — where V0_7/V0_8 hit their highs.
+
+AIC-3 at 742 MB / 1.5 GB (50%).
+
+Next: check at epoch ~140.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
