@@ -3812,6 +3812,33 @@ V0_17 eval chain running (CID22 ~10% done at 429/4292).
 **Next tick (382)**: collect V0_17 CID22+AIC-3 results; decide if V0_17
 ships (probably not, but check B0/B1).
 
+### Tick 382 — 2026-05-12T07:04Z — V0_17 FAILS goal #1: CID22 0.8849 < ssim2 0.8895
+
+**V0_17 CID22 = 0.8849** (BELOW ssim2 0.8895 AND below V0_16's 0.8919).
+TV=25 over-regularizes. V0_17 is NOT a ship candidate.
+
+V0_17 per-band CID22:
+- B0: 0.4331 (V0_16 was 0.4214 — V0_17 slightly BETTER on B0!)
+- B1: 0.4553 (V0_16 0.4559 — tied)
+- B2: 0.7644 (V0_16 0.7802 — V0_17 WORSE, -0.016)
+- B3: 0.1497 (V0_16 0.1723 — V0_17 WORSE, -0.023)
+- Near-PJND: 0.3573 (V0_16 0.3547 — tied)
+
+**V0_17 trade**: gains B0 closure but loses B2/B3 + aggregate. Same
+pattern as V0_10's per-band [15,25,15,15] — heavy TV hurts B2/B3.
+
+**TV optimum confirmed at TV=20 (V0_16)** for clean training data. 
+- TV=15 (V0_15): under-regularized, B1 too weak
+- TV=20 (V0_16): optimum on B0/B1/aggregate
+- TV=25 (V0_17): over-regularized, B2/B3 collapse
+
+AIC-3 + non-mono pending. Will not affect ship decision (V0_17 already
+fails goal #1 on CID22 aggregate).
+
+**Next tick (383)**: log V0_17 AIC-3 + non-mono numbers; archive V0_17
+bake (not a ship); phase plan: image-type-aware dispatch or freeze
+ship at V0_16 and focus on coefficient blocklist (out-of-repo).
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
