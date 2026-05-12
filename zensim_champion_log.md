@@ -1476,6 +1476,29 @@ from hyperparam-sweep to:
 
 Next concrete tick: h192_tv10 final at epoch 190 (~3 min).
 
+### Tick 302 — 2026-05-12T01:01Z — h192_tv10 DONE best=0.9429; CID22 eval launched
+
+h192_tv10 training **COMPLETE**:
+- Best val_mean = 0.9429 at epoch 140
+- Early-stop at epoch 190
+- Bake at `/tmp/zensim_loop/v0_8_clean_h192_tv10_seed1.bin`
+  (md5 `046a4a9b`, 178,692 bytes — larger than h=128 bakes 119,812)
+- val_mean delta vs V0_7 seed=1: −0.0008
+
+CID22 eval + non-mono check launched (PIDs 2828457, 2828458). Both
+should finish within ~5 min.
+
+**Provisional ranking** (val_mean):
+1. V0_7 seed=1 SHIPPED: 0.9437 / non-mono 5.46% / CID22 0.8933
+2. h192_tv10: 0.9429 / non-mono ? / CID22 ?
+3. h128_tv20: 0.9408 / non-mono 5.70% / CID22 0.8897 (eliminated)
+
+If h192_tv10 has acceptable non-mono AND CID22 > V0_7's 0.8933, it
+ships. Otherwise V0_7 stays.
+
+Next concrete tick: read h192_tv10 CID22 + non-mono → V0_8
+ship-or-stand decision.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
