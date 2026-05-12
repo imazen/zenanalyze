@@ -5318,6 +5318,38 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 490 — 2026-05-12T23:21Z — V0_24 v2 LAUNCHED with TV active + dssim head
+
+zensim commit `f12ade90`. Cycle-7 v2 trainer unblockers:
+
+1. **NaN-aware dssim mask**: train() now does
+   `mask = ~isnan(dst[idx]); if mask.any(): dssim_mse =
+   ((pred[mask] - dst[idx][mask])**2).mean()`. Sweep rows (no
+   dssim column → NaN after concat) cleanly skip the dssim term
+   instead of getting pulled toward target=100.
+2. **load_human_csv preserves real codec+quality** when present:
+   added `codec_real` + `quality` columns to the
+   `safe_synth_clean_features_with_dssim_qc.csv` (positional
+   merge from synth CSV, same script as the dssim merge).
+   Trainer's loader uses these if available, falling back to
+   `codec="human-<name>", q=0` for backwards compat.
+
+**V0_24 v2 LIVE** (PID 3653076):
+- Command: `--sweeps NONE --human-csv "safesyn:.../safe_synth_clean_features_with_dssim_qc.csv:1.0:0.0" --tv-weight 20 --dssim-weight 0.3`
+- **TV regularizer: 104,319 adjacent-q pairs, weight=20.0** ✅
+- **dssim co-training: weight=0.3, target range [61.83, 100.00]** ✅
+- Trajectory looks healthy: val_srocc 0.10 at epoch 0 → 0.94 at
+  epoch 22. Will continue 300 epochs (~10 min wall).
+- Log: `/tmp/zensim_loop/v0_24_v2_train.log`.
+
+**This is the proper V0_24 A/B**: exact V0_16 recipe + only
+`--dssim-weight 0.3` added. Result will isolate the dssim signal.
+
+**Next concrete tick (491)**: poll training, bake, eval on
+CID22 + AIC-3 + AIC-4. Decision: ship V0_24 v2 IFF (a) CID22 ≥
+V0_16's 0.8919, (b) AIC-4 JPEG-AI > V0_16's 0.7951, (c) non-mono
+≤ 6%.
+
 ### Tick 489 — 2026-05-12T23:17Z — V0_24 v1 trained + failed; recipe-drift root-cause; v2 plan
 
 zensim commit `41b304c0`:
