@@ -1816,6 +1816,18 @@ Launched 2 trainings in parallel (PIDs 2936963, 2936964):
 
 Next concrete tick: monitor; epoch ~140 first peak ~7-10 min.
 
+### Tick 314 — 2026-05-12T01:49Z — TV=15 sweep early-epoch
+
+TV=15 sweep progress (early):
+- seed=1: best=0.9314 (running)
+- seed=13: best=0.9243 (running)
+
+Both still in early epochs (~30-40 estimated). V0_7's trajectory at
+same point was ~0.9268-0.9418, so TV=15 looks slightly lower at this
+stage. Cyclic LR will peak ~ep 100 / 140.
+
+Next concrete tick: monitor at ~ep 100; expect first val_mean peak.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
