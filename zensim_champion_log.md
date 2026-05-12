@@ -5295,6 +5295,48 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 469 — 2026-05-12T21:42Z — CID22 metrics chain launched (workaround for 16-bit PNGs)
+
+Launched the CID22 metric backfill but immediately hit `zen-metrics`
+CLI limitation: 539 of 3805 CID22 distorted PNGs are 16-bit
+(all `cld_avif/`-encoder outputs, which decoded the AVIF to 16-bit
+PNG sidecars). The CLI errored on the first 16-bit row with:
+
+  `decoder returned unsupported pixel format Rgb16; expected an 8-bit
+  format. 16-bit and float source images are not yet wired through
+  the CLI.`
+
+**Workaround**: parallel ImageMagick `convert -depth 8` on the 539
+16-bit files into `/tmp/cid22_metrics/8bit/` (25s wall, 8-way
+parallel). Built `pairs_8bit.tsv` with dist paths remapped for those
+539 rows; the other 3753 unaffected.
+
+**Chain2 launched in background** (`/tmp/cid22_metrics/chain2.sh`):
+- zensim CPU on 4292 pairs (separate cores, no GPU contention)
+- dssim-gpu sequence: dssim → ssim2 → butter on the same GPU
+- Est. wall: ~30 min per GPU metric × 3 = ~90 min total
+- zensim CPU runs concurrently and likely finishes first
+
+**Progress at tick close** (~30s after launch):
+- dssim-gpu: 146/4292
+- zensim CPU: 243/4292
+- ssim2-gpu and butter-gpu: pending in chain
+
+**Note on the CLI bug**: 16-bit RGB decode failure should be filed
+as a zenmetrics CLI issue. The `image` crate path the CLI uses
+emits Rgb16 for these PNGs; the metric kernels assume `Rgb8`. Per
+the cycle-7 roadmap this is a small wire-up (decode to 8-bit on
+demand or accept Rgb16 inputs natively). Out of scope for the
+comparison-site work; tracked for next session.
+
+**Next concrete tick (470)**: poll chain2 progress. Once at least
+dssim-gpu + zensim CPU finish (~30 min from launch), re-export
+`site/data/parquet/cid22.parquet` with score_dssim + score_zensim
+merged in. ssim2 / butter follow when their batches complete.
+
+After the merge, the comparison-site will show V0_16 vs fast-ssim2
+vs dssim vs MCOS on the gold-standard CID22 corpus end-to-end.
+
 ### Tick 468 — 2026-05-12T21:36Z — CID22/KADID/TID parquets exported (build-order step 11)
 
 zensim commit `af59da76`. Three gold-standard human-rated corpora are
