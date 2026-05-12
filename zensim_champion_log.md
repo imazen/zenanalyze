@@ -5295,6 +5295,56 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 450 — 2026-05-12T20:25Z — User directive: interactive comparison-site spec + plan
+
+User-requested feature (zensim CLAUDE.md commits `ad3bfd15` +
+`a5b5ae97`): an interactive gh-pages comparison widget where the
+user picks corpora + X-axis-metric + Y-axis-metric + filters, and
+the page renders scatter / step-5 line / per-band SROCC table /
+candlestick + CI by band / codec-param lookup, with CPU work on
+a Web Worker.
+
+**User stack decisions** (asked + answered this tick):
+- Query engine: **DuckDB-WASM**
+- Hosting: existing R2 bucket `s3://zentrain/zensim-compare-site/`
+- Multi-zensim: **apply V_X .bin MLPs in JS Web Worker** against
+  the parquet's `feat_*` columns (these ARE zenanalyze features —
+  102 active IDs 0–121 expanded to 228 via 4-scale packing; the
+  user asked specifically about this)
+- Paper: **2023 edition** (user clarification, replacing the
+  spec's "2024" typo — the paper is already on disk)
+
+**Inventory done**:
+- 7 codec-sweep unified parquets at
+  `/mnt/v/zen/zensim-training/2026-05-07/unified/` (~2.37M rows,
+  ~1.3 GB). Schema: `image_path / codec / q / knob_tuple_json /
+  encoded_bytes / encode_ms / decode_ms / score_zensim /
+  score_ssim2 / score_butteraugli_max / score_butteraugli_pnorm3
+  / feat_0..feat_N`.
+- R2 access verified via env `R2_ACCESS_KEY_ID/SECRET/ACCOUNT_ID`;
+  bucket `zentrain` is reachable.
+- Missing from local store: dssim (multi-hour Rust pass deferred),
+  human MOS/DMOS/PJND parquets (export-to-parquet step required
+  for CID22/KADID/TID; KonJND-1k corpus still missing).
+
+**Plan committed** at `zensim/site/COMPARE_PLAN_2026-05-12.md`
+(zensim `6237bba9`): 15-step build order. Steps 1–2 ✅ (CLAUDE.md
+spec + this plan doc). Steps 3–9 are the MVP (skeleton →
+parquet round-trip → corpus checkbox UI → scatter+step-5+SROCC →
+codec filter → Y→codec lookup). Step 10 is the V_X bake-in-JS.
+Step 13 is the candlestick + CI mode. Step 14 is dssim. Step 15
+is paper-figure reproduction.
+
+**Open items needing user response**: R2 public-read URL
+setup (r2.dev preview vs custom domain) — to be confirmed before
+upload. dssim and KonJND-1k restoration deferred per existing
+backlog.
+
+**Next concrete tick (451)**: scaffold `site/compare.html` +
+`site/js/compare.js` + `site/js/compare-worker.js` skeleton with
+DuckDB-WASM load + hello-world scatter (no real data yet). Land
+as a separate commit so each MVP step is reviewable.
+
 ### Tick 449 — 2026-05-12T20:17Z — CI fix verification + status snapshot
 
 Verified the 4-commit CI fix sequence landed:
