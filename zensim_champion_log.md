@@ -2326,6 +2326,46 @@ AIC-4 ZIP extracted (610 PNG files in `JPEG_AIC-4_Sample_Dataset/`).
 Next concrete tick: patch TvRegularizer struct — ~2 hours of focused
 work but can start with the data-model changes.
 
+### Tick 332 — 2026-05-12T03:37Z — Per-band TV: Rust impl SHIPPED
+
+zensim commit `6f2487fa` — full Rust support for per-band TV:
+
+**`zensim-validate/src/mlp_train.rs`**:
+- `TvRegularizer` gains `band_id: Option<Vec<u8>>` and
+  `band_weights: Option<[f64; 4]>` fields
+- TV gradient inner loop scales by `band_weights[band_id[k]]`
+  when set; falls back to flat `weight` otherwise
+
+**`zensim-validate/src/bin/zensim_mlp_train.rs`**:
+- TV pairs parser auto-detects `band_id` column from header
+- New `--tv-band-weights B0,B1,B2,B3` CLI flag (parsed via
+  `parse_band_weights` helper)
+- Construction passes through
+
+**`zensim/src/profile.rs`**: `ProfileParams::custom()` defaults
+`skip_score_mapping = false` (V0_2 semantics for training code).
+
+**Backward-compat**: omitting both `--tv-band-weights` and
+`band_id` column preserves flat TV behavior.
+
+**Combined TV pairs file built** at
+`/tmp/zensim_loop/combined_clean_tv_pairs_bands.tsv`:
+- 141,055 safesyn pairs (band IDs from script)
+- 75,096 KonJND pairs (band_id=2 default — F-JND scores not
+  MCOS-aligned, B2 is safe default)
+- Total: 216,152 pairs (matches V0_8 ship)
+
+**Ready to launch V0_9 with**:
+```bash
+zensim_mlp_train ... \
+  --tv-pairs-file /tmp/zensim_loop/combined_clean_tv_pairs_bands.tsv \
+  --tv-band-weights 10,20,10,10 \
+  --seed 1 (or 13)
+```
+
+Next concrete tick: launch V0_9 training with `[10, 20, 10, 10]`
+weights at seed=1; eval CID22 + non-mono.
+
 Marker collision per global CLAUDE.md protocol:
 
 - `.workongoing` in all three repos shows `2026-05-11T18:55:51Z
