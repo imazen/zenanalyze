@@ -5318,6 +5318,39 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 491 — 2026-05-12T23:24Z — V0_24 v2 also regressed; V0_25 control launched
+
+zensim commit `5c203de7`: V0_24 v2 result doc.
+
+**V0_24 v2 eval on CID22**:
+- V0_24 v2 SROCC = **0.8254** (-0.067 vs V0_16's 0.8919)
+- Per-band: loses to fast-ssim2 in every band (B0 to Near-PJND).
+
+**TV regularizer WAS active in v2** (104,319 pairs, weight=20),
+so the v1 recipe-drift hypothesis is no longer the (sole) cause.
+v2 is actually slightly WORSE than v1 (0.8254 vs 0.8315).
+
+**Two surviving hypotheses**:
+
+1. **dssim_weight=0.3 is too aggressive**: the auxiliary MSE head
+   pulls the network off the ssim2 ranking objective enough to
+   hurt CID22 SROCC.
+2. **V0_16's recipe wasn't fully captured in our docs**: V0_16
+   likely used KADID + TID supervision (per CLAUDE.md), possibly
+   KonJND-1k anchor, possibly concordance filtering. Our V0_24
+   v1/v2 ran on safe-synth alone.
+
+**V0_25 control** (PID 3659110) launched: same recipe + data as
+V0_24 v2 EXCEPT `--dssim-weight 0.0`. If V0_25 lands ≈ V0_16's
+0.8919, then dssim_weight=0.3 is the cause. If V0_25 also lands
+below 0.88, recipe drift remains and we need to archeologically
+reconstruct V0_16's true training command.
+
+Log: `/tmp/zensim_loop/v0_25_control_train.log`. ETA ~10 min.
+
+**Next concrete tick (492)**: poll V0_25 → bake → eval. Decide
+direction based on V0_25's CID22 SROCC.
+
 ### Tick 490 — 2026-05-12T23:21Z — V0_24 v2 LAUNCHED with TV active + dssim head
 
 zensim commit `f12ade90`. Cycle-7 v2 trainer unblockers:
