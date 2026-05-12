@@ -5295,6 +5295,47 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 446 — 2026-05-12T20:05Z — Fixed E0603 in zensim_mlp_train test (Clippy + Test + MSRV + Coverage)
+
+zensim commit `5da0097e`. Investigated the second CI-failure pattern
+across Test, Clippy, MSRV, Coverage, Test (ubuntu/macos/windows/arm):
+all converged on the same root cause —
+
+```
+error[E0603]: module `mlp` is private
+  --> zensim-validate/src/bin/../mlp_train.rs:951:17
+   |
+951| use zensim::mlp::{Model, Predictor};
+   |                 ^^^ private module
+```
+
+In `zensim/src/lib.rs:211` the module is declared `pub(crate) mod mlp`
+(intentional — Model/Predictor are crate-internal re-exports of
+zenpredict types). The `#[cfg(test)]` block in mlp_train.rs imported
+through `zensim::mlp::*`, which works inside zensim's own tests but
+not from `zensim-validate` (an external crate using zensim as a dep).
+
+**Fix**: `use zenpredict::{Model, Predictor};` (one-character path
+change; zenpredict is already a workspace dep at
+`zensim-validate/Cargo.toml:15`). Per zensim/src/mlp/mod.rs:44 the
+types are literally re-exports of zenpredict's, so this is the
+canonical public path.
+
+**Verified locally**:
+- `cargo check --workspace --all-features --exclude zensim-wasm-tests
+  --tests`: clean, 7.99s
+- `cargo test --bin zensim_mlp_train --no-run`: clean, 8.74s
+  (compiles, didn't run the full test which would need synth data)
+
+CI should now clear all the build-dependent failures: Test (all 8
+platforms), Clippy, MSRV, Coverage, and the Format job (cleared by
+tick 445's e4282436 cargo fmt).
+
+**Outstanding CI items**: none expected after fmt + this fix. If
+something remains red, it'd be a separate issue (e.g., dependabot
+flag on the existing low-severity vulnerability in `main` that's
+mentioned in every push response).
+
 ### Tick 445 — 2026-05-12T20:02Z — Cleared cargo fmt drift in zensim (CI fix)
 
 zensim commit `e4282436`. CI has been failing for ~2 hours on every
