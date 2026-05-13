@@ -5318,6 +5318,75 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 652 — 2026-05-13T13:39Z — Cycle-14 outcomes doc updated with low-q-boost falsification + val≠CID22 lesson
+
+Added low-q-boost falsification finding to `cycle_14_per_band_tv_outcomes_2026-05-13.md`:
+- Updated cycle-14 verdict table — low-q-boost marked FALSIFIED with
+  full CID22/AIC-3/AIC-4 numbers
+- Updated trainer infrastructure section — `--low-q-boost` flag flagged
+  as "works correctly but cycle-9 hypothesis doesn't transfer"
+- Added lesson #6 to cycle-15+ guidance: **val_mean is NOT a reliable
+  CID22 proxy**. Per-band TV (V0_17) lifts val AND CID22. low-q-boost
+  lifts val but HURTS CID22 -0.0090. Every cycle-15+ candidate MUST
+  be CID22-evaluated directly.
+- Added low-q-boost bake to artifacts inventory
+
+Committed at zensim `11e96824`, pushed main.
+
+This closes out the cycle-14-era trainer-flag testing comprehensively:
+- per-band TV → V0_17 ship candidate (verified)
+- mid-q-boost → confirmed σ-stabilizer (cycle-12)
+- low-q-boost → falsified on cross-corpus despite val lift
+- All three flags have permanent CID22 data points
+
+Pure doc tick.
+
+### Tick 651 — 2026-05-13T13:35Z — low-q-boost CID22 0.8829 — val_mean MISLED, falsified on cross-corpus
+
+low-q-boost 1.5 training (`bt1z6utlv`) finished at ep190 (1028s wall).
+val_mean best 0.9413. CID22 + AIC-3 + AIC-4 evals show **HUGE
+REGRESSION**:
+
+| Metric | low-q-boost 1.5 | V0_16 SHIP | Δ vs V0_16 |
+|---|---:|---:|---:|
+| **CID22 SROCC** | **0.8829** | 0.8919 | **-0.0090** ❌ |
+| AIC-3 SROCC | 0.7961 | 0.7990 | -0.0029 ❌ |
+| AIC-4 SROCC | 0.9125 | 0.9175 | -0.0050 ❌ |
+| val_mean (KADID+TID+KonJND) | **0.9413** | 0.9403 | +0.0010 (misleading!) |
+
+**Mechanism**: low-q-boost re-weights per-row pair sampling to favor
+B0/B1 rows (the boost-targeted band). KADID has heavy B0/B1
+distortion concentration (analytic blur/noise/color shifts), so val
+SROCC on KADID lifts. But CID22's codec-output distortions span all
+bands and require balanced ranking — biasing toward B0/B1 hurts
+B2/B3 ranking accuracy where CID22 has most of its weight (B2 has
+2915 of CID22's 4292 pairs).
+
+**Useful FALSIFICATION**: val_mean (especially when KADID-dominated)
+is NOT a reliable proxy for CID22 SROCC. The lift-in-val + drop-in-test
+pattern matches multiple prior cycles where Adam optimized into the
+train distribution at the cost of held-out generalization.
+
+This contradicts cycle-14's per-band TV mechanism finding:
+- Per-band TV lifts val_mean modestly AND lifts CID22 (because TV
+  penalizes within-curve non-monotonicity, which the codec-curves
+  in CID22 reward).
+- low-q-boost lifts val_mean BUT HURTS CID22 (re-weights sampling
+  toward bands that KADID/TID rewards more than CID22).
+
+**The two cycle-14-era flags (per-band TV vs low-q-boost) have
+OPPOSITE empirical effects on CID22** despite both reading as
+"val_mean improvers". Documentary lesson for cycle-15+.
+
+**Conclusion: low-q-boost is FALSIFIED as a SROCC lever on cross-corpus
+eval.** Useful infrastructure (the flag exists, works correctly), but
+the cycle-9 hypothesis (low-q boost helps B0/B1) is confirmed for KADID
+val SROCC only — not for CID22 / AIC-3 / AIC-4 generalization.
+
+Artifacts:
+- `benchmarks/rust_v0_X_2026-05-13_v0_16_plus_lowq15.{raw.bin,bin,train.log}`
+  (raw md5 `b73499d2`, calibrated `92469d8f`)
+
 ### Tick 650 — 2026-05-13T13:30Z — low-q-boost ANOTHER NEW BEST: val_mean 0.9413 at ep140 (+0.0010 vs V0_16)
 
 low-q-boost 1.5 training (`bt1z6utlv`) at epoch 160 (867s wall):
