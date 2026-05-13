@@ -5318,6 +5318,72 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 540 — 2026-05-13T05:07Z — V0_26 site parquet sign BUG fixed across 3 corpora
+
+Per tick 539's flag, audited V0_26 column sign in all 3 site
+parquets. CONFIRMED: V0_26 was merged at tick 497 storing RAW
+`v04_distance` (no `100 - x` flip), causing inverted SROCC.
+
+**Pre-fix signed SROCCs**:
+
+| Corpus | V0_16 | V0_26 | V0_31 | V0_38 |
+|---|--:|--:|--:|--:|
+| CID22 | +0.8919 | **-0.8639** ❌ | +0.8628 | +0.8817 |
+| AIC-3 | +0.7990 | **-0.8027** ❌ | +0.8031 | +0.7969 |
+| AIC-4 | -0.9175 | **+0.9097** ❌ | -0.9176 | -0.9027 |
+
+V0_26 has consistently inverted sign relative to V0_16/V0_31/V0_38
+across all 3 corpora.
+
+**Root cause** (traced via `/tmp/zensim_loop/v0_26_full_per_pair.csv`):
+
+V0_26's per-pair CSV `v04_distance` column has range [7.4, 77.7]
+mean 29.7 — matches the site parquet's V0_26 column directly. The
+tick 497 merge script omitted the `score = 100 - distance` flip
+that the later V0_31 (tick 506) and V0_38 (tick 521) merges
+applied.
+
+**Fix** (zensim commit `0da64555`): rewrote V0_26 column in all
+3 site parquets as `score_new = 100 - score_old`. Verified:
+
+| Corpus | V0_26 new range | New SROCC vs human | V0_31 SROCC (sanity) | sign_match |
+|---|---|--:|--:|---|
+| CID22 | [22.33, 92.59] | **+0.8639** ✓ | +0.8628 | ✓ |
+| AIC-3 | [17.54, 93.62] | **+0.8027** ✓ | +0.8031 | ✓ |
+| AIC-4 | [46.12, 93.78] | **-0.9097** ✓ | -0.9176 | ✓ |
+
+(AIC-4 retains negative-signed SROCC vs `human_jnd` because of
+human_jnd's own sign convention — same negative direction as
+V0_31/V0_38/V0_16. Sign-match is the relevant check.)
+
+**Side effect of fix on absolute SROCC magnitudes**: unchanged
+(rank-preserving transform). The fix is purely a sign correction
+for the comparison site's display direction.
+
+Artifacts produced:
+- 3 modified parquets at `/home/lilith/work/zen/zensim/site/data/parquet/`
+- Site fix commit zensim `0da64555` (deploys via GH Pages on push)
+
+**Quality-of-shipping improvement**: users on the live comparison
+site will now see V0_26's quality direction match V0_16/V0_31/V0_38
+(higher score = higher quality). Previously V0_26 looked inverted
+in scatter plots.
+
+**Cycle status update**:
+
+Cycle-11 deliveries to date:
+1. V0_26 (cycle-7 candidate, site) — **sign now correct**
+2. V0_31 (cycle-8 candidate, site)
+3. V0_38 (cycle-10a candidate, site)
+4. `soft_iso_smooth.py` (cycle-11 free smoother)
+5. 5 cycle outcomes docs + 1 recovery summary
+6. 3 trainer flags
+
+**Next tick (541)**: All cycle-11 housekeeping done. Cron will
+keep firing; no productive autonomous work remains without user
+direction on cycle-12 strategic axis (data acquisition,
+architecture, runtime ensemble logic).
+
 ### Tick 539 — 2026-05-13T05:05Z — CID22 soft-iso doesn't help SROCC (too sparse to matter)
 
 Tested whether soft-iso (directional, auto-detected from ssim2
