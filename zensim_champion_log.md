@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 529 — 2026-05-13T03:34Z — Cycle-11 runtime-ensemble experiment FALSIFIED
+
+Per tick 528 cycle-11 strategic option 4 ("Ensemble at runtime —
+currently V0_16 is single bake. An ensemble of {V0_16, V0_26,
+V0_31, V0_38} could win per-band coverage without a single new
+training run."), tested simple averaging + rank-based ensembles
+of the 4 site bakes.
+
+**Simple-average ensemble SROCC** (vs human_mos/human_jnd):
+
+| Variant | CID22 | AIC-3 | AIC-4 |
+|---|--:|--:|--:|
+| V0_16 alone | **0.8919** | 0.7990 | **0.9175** |
+| V0_31 alone | 0.8628 | **0.8031** | **0.9176** |
+| V0_38 alone | 0.8817 | 0.7969 | 0.9027 |
+| ENS-4 (all 4 avg) | 0.8903 | 0.7985 | 0.9149 |
+| ENS-2 (V0_16+V0_38) | 0.8908 | 0.7996 | 0.9111 |
+| ENS-2 (V0_16+V0_31) | 0.8825 | 0.8012 | 0.9171 |
+| ENS-3 (V0_16+V0_31+V0_38) | 0.8844 | 0.8010 | 0.9132 |
+
+**Rank-based ensemble** (averaging ranks instead of scores):
+
+| Variant | CID22 | AIC-3 | AIC-4 |
+|---|--:|--:|--:|
+| RANK-ENS-4 | 0.8896 | 0.7994 | 0.9153 |
+| WEIGHTED-RANK V0_16=3x | 0.8918 | 0.7993 | 0.9168 |
+| **WEIGHTED-RANK V0_16=5x + V0_38=1x** | **0.8921** | 0.7995 | 0.9157 |
+
+**Best ensemble result**: V0_16=5x + V0_38=1x rank-weighted →
+CID22 **0.8921** (vs V0_16 alone 0.8919, +0.0002 — within noise).
+
+**Cycle-11 ensemble verdict: FALSIFIED for aggregate metrics.**
+The 4 site bakes have highly correlated rankings (all V_X 228-feat
+MLPs trained on overlapping data). Simple ensembling pulls the
+aggregate SROCC toward the lower-performing bakes; it doesn't
+produce Pareto improvements on any of CID22, AIC-3, or AIC-4.
+
+The only way to beat V0_16 alone via ensembling would require
+**per-band selection** (V0_38 for B0/B3 queries, V0_16 for B1/B2),
+but that requires knowing the human score first — circular.
+
+**Cycle-11 ensemble option closed** (no new bakes needed; pure
+analysis over existing site parquets).
+
+Artifacts produced this tick:
+- No new bakes (analysis-only over `score_zensim_v0_*` columns in
+  3 site parquets)
+
+**Recovery cycle truly truly final**. V0_16 SHIP is the best the
+recovery cycle can produce in autonomous mode at this MLP +
+training-data scale. Ensemble doesn't help.
+
+**Next tick (530)**: All cheap cycle-11 levers exhausted. Cron
+will keep firing. Options:
+- (a) Just refresh markers (loop is genuinely at "no useful work"
+  point per the constraint set).
+- (b) Investigate per-codec or per-band weighted ensembles
+  that compute the weight from features (not from human_score).
+  Like training a tiny gating model. This is multi-day work.
+- (c) Pivot to non-zensim work (e.g., the dssim AIC-3 backfill
+  that the stale task notification mentioned might still be
+  incomplete).
+
+Pick (a) for tick 530 if cron fires without new direction. The
+constraint says "5-10 minutes focused work"; without a new
+strategic direction from the user, refreshing markers is the
+correct passive action.
+
 ### Tick 528 — 2026-05-13T03:30Z — Recovery cycle summary doc committed; future-agent index complete
 
 Wrote `~/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
