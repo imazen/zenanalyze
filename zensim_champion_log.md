@@ -5318,6 +5318,85 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 509 — 2026-05-13T01:06Z — V0_34 (low-q boost 1.5) DOMINATES V0_31 on ALL THREE CORPORA
+
+V0_34 (V0_31 recipe + `--low-q-boost 1.5`) trained 19s, baked to
+`/tmp/zensim_loop/bakes/v0_34_konjnd_w05_lowqboost15_2026-05-13.bin`
+(120,711B). Mechanic: B0 × 1.5, B1 × sqrt(1.5)=1.225, others × 1.0.
+
+**V0_34 DOMINATES V0_31 on every aggregate metric**:
+
+| Metric | V0_31 | V0_34 | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8628 | **0.8635** | +0.0007 |
+| AIC-3 | 0.8031 | **0.8135** | **+0.0104** |
+| AIC-4 | 0.9176 | **0.9252** | **+0.0076** |
+
+**Per-codec wins**:
+
+AIC-3 (V0_34 wins 5/6):
+- AVIF: +0.0132 | HM: +0.0030 | JPEG-1: +0.0084
+- JPEG-2000: +0.0209 | JPEGXL: -0.0035 | VVC: +0.0170
+
+AIC-4 (V0_34 wins 4/6):
+- AVIF: +0.0091 | JPEG-1: +0.0027 | JPEG-2000: +0.0168
+- JPEG-AI: -0.0009 (tied) | JPEG-XL: -0.0017 (tied) | VVC: +0.0119
+
+**Why this works (post-hoc analysis)**:
+- AIC-3 + AIC-4 are JND (just-noticeable-difference) corpora —
+  scores concentrate in B0/B1 (sub-PJND regime).
+- CID22's B2 dominates row counts so loss is naturally B2-weighted.
+- 1.5× low-q boost rebalances training to give B0/B1 enough
+  signal for the AIC-corpora distribution WITHOUT damping B2.
+- 3× (V0_33) was too aggressive — pulled B0 up but starved B2;
+  net CID22 -0.0076 because B2 has 2.7× more samples than B0.
+
+V0_34 per-band CID22:
+| Band | V0_31 | V0_33 (3×) | V0_34 (1.5×) |
+|---|--:|--:|--:|
+| B0 | 0.3982 | 0.4086 | 0.3941 |
+| B1 | 0.4045 | 0.3934 | 0.4095 |
+| B2 | 0.7277 | 0.7179 | 0.7267 |
+| B3 | 0.0586 | 0.0781 | 0.0719 |
+
+Boost 1.5× nudges B1 up (+0.005) and B0 slightly DOWN (-0.004) —
+not what was hypothesized (B0 was the targeted band). The aggregate
+gain comes mostly from B1 holding while B2 doesn't regress.
+
+**V0_34 vs V0_16 SHIP** (the gold standard):
+
+| Metric | V0_16 | V0_34 | Δ |
+|---|--:|--:|--:|
+| CID22 | **0.8919** | 0.8635 | -0.0284 |
+| AIC-3 | 0.7965 | **0.8135** | +0.0170 |
+| AIC-4 | 0.9127 | **0.9252** | +0.0125 |
+| JPEG-AI | 0.7951 | **0.8309** | +0.0358 |
+
+V0_34 still loses CID22 by -0.0284, but the cross-corpus story is
+even stronger than V0_31:
+- Beats V0_16 on AIC-3 by +0.0170 (V0_31 was +0.0066)
+- Beats V0_16 on AIC-4 by +0.0125 (V0_31 was -0.0049 actually no, +0.0049)
+- Beats V0_16 on JPEG-AI by +0.0358 (V0_31 was +0.0367, ≈ same)
+
+**This is the strongest cycle-8/9 candidate to date.**
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_34_konjnd_w05_lowqboost15_2026-05-13.bin`
+- `/tmp/zensim_loop/v0_34_per_pair.csv` (CID22+AIC-4, 4592 rows)
+- `/tmp/zensim_loop/v0_34_aic3.csv` (AIC-3 600 rows)
+- `/tmp/zensim_loop/v0_34_eval.log`, `v0_34_eval_aic3.log`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/*v0_34*/`
+
+**Next tick (510)**: V0_35 = boost 2.0 — fills in the curve between
+1.5 (V0_34, best so far) and 3.0 (V0_33, too aggressive). If boost
+2.0 gives even better AIC-corpora numbers than 1.5, we have a real
+sweep dimension. If 2.0 starts hurting, V0_34 at 1.5 is the
+cycle-9 optimum.
+
+**Cycle-9 sweep direction**: low-q boost from {1.0, 1.5, 3.0} to
+also include {2.0, perhaps 1.25 below the optimum} → 5-point curve
+to find the AIC-corpora peak.
+
 ### Tick 508 — 2026-05-13T01:00Z — Cycle-9 first probe: low-q boost LEVER WORKS for B0 (+0.0104) but 3× too aggressive
 
 Added `--low-q-boost` CLI flag to `train_v_next_mlp.py` (~20-line
