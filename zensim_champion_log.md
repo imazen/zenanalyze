@@ -5318,6 +5318,46 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 608 — 2026-05-13T10:21Z — Cycle-14 at epoch 70 (val_mean 0.9460 best); non-determinism investigation came up empty
+
+**Cycle-14 training** (background `bz3xzw8wl`): epoch 70/300, val_mean
+0.9425 (best 0.9460 at ep40). Trajectory tracking the rerun closely;
+TV-band-weights penalty is slightly higher loss but otherwise similar.
+~7 more min wall to expected early-stop.
+
+**Non-determinism source investigation** (zero result):
+- `mlp_train.rs` uses no parallelism (`rayon`/`par_iter` not used in
+  the trainer)
+- No `HashMap` / `HashSet` (iteration-order-sensitive)
+- SplitMix64 RNG with explicit seed — deterministic
+- `zenpredict` (the bake serializer) has had ZERO commits since
+  2026-05-11 — bake encoding unchanged
+- `mlp_train.rs` itself has had no edits since `6f2487f` (2026-05-12)
+  — same source code as at V0_16 train time
+
+The mystery: at fixed seed=1, same source, same deps, same data file
+timestamps (May 12 01:21 < V0_16 May 12 09:28), the trainer should
+produce bit-identical output. It does not. Possible remaining
+explanations require a real test:
+1. Some hidden non-determinism in the build itself (rustc version
+   differences between V0_16 build and today)
+2. `cargo build` cache not actually using identical compile artifacts
+3. The CSV file may have been written between then and now (unlikely
+   without mtime change)
+4. V0_16 SHIP was actually trained with a DIFFERENT seed than
+   documented (e.g., the script in shell history used `--seed 7` or
+   similar, but CONTEXT-HANDOFF records "seed=1")
+
+**Cheap diagnostic** that would localize: re-train V0_15 recipe
+(TV=15 instead of TV=20, otherwise identical) at seed=1 and compare
+the raw bake md5 to the V0_15 archive at
+`zensim/weights/archive/v0_15_2026-05-12.bin`. If bytes match, the
+trainer IS deterministic and V0_16's documented seed=1 must be wrong.
+If bytes differ, there's an undocumented build-environment dependency.
+
+This would take ~7 min wall. Not running it this tick — cycle-14 has
+the GPU's only training slot.
+
 ### Tick 607 — 2026-05-13T10:17Z — Rerun's per-band non-mono profile is ALSO different from V0_16's; cycle-14 training at epoch 30
 
 **Per-band non-mono measurement on the rerun bake** vs V0_16 ship on
