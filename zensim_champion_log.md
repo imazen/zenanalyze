@@ -5318,6 +5318,33 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 649 — 2026-05-13T13:26Z — low-q-boost SURPRISE: NEW BEST val_mean 0.9409 at ep90 — exceeds V0_16
+
+**Reversal of tick 648 prediction**: low-q-boost found a new best
+at ep90 = **0.9409**, exceeding V0_16's all-time best 0.9403 by
++0.0006. Patience reset to ep90, so early-stop now at ep140.
+
+| Epoch | val_mean | best |
+|---:|---:|---:|
+| 40 | 0.9387 | 0.9387 |
+| 80 | 0.9387 | 0.9387 (tied, no reset) |
+| **90** | **0.9409** | **0.9409** (NEW BEST) |
+| 100 | 0.9166 | 0.9409 (cosine restart) |
+| 110 | 0.9243 | 0.9409 |
+| 120 | 0.9398 | 0.9409 |
+
+low-q-boost 1.5 + V0_16 4-group recipe shows a real (positive)
+direction at the per-row sampling lever. The +0.0006 val_mean lift
+is similar in magnitude to V0_17's val_mean improvements over V0_16.
+
+CID22 SROCC projection: V0_17-style val_mean lift (0.9424 → CID22
+0.8932) suggests low-q-boost CID22 might land around 0.8920-0.8930
+(slightly above V0_16 ship). If it does, it's a single-bake
+alternative to V0_17 with V0_16-shape architecture (228→128→1, no
+concat needed).
+
+ETA ep140 ~5 more min. Will eval.
+
 ### Tick 648 — 2026-05-13T13:22Z — low-q-boost at ep70, best val_mean 0.9387 still trails V0_16's 0.9403
 
 low-q-boost 1.5 training at epoch 70 (383s wall). Best val_mean
