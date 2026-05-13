@@ -5318,6 +5318,65 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 542 — 2026-05-13T05:14Z — Hidden=256 single-seed FALSIFIED on CID22 (-0.014)
+
+Tested V0_kadid_tid recipe at `--hidden 256` (vs default 128).
+Cheapest cycle-10b architecture knob — single CLI change.
+
+**V0_kadid_tid + hidden=256 seed=3 results**:
+
+| Metric | h=128 (V0_38 seed=3) | h=256 seed=3 | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8817 | 0.8682 | **-0.0135** ❌ |
+| AIC-4 | 0.9027 | 0.8925 | -0.0102 ❌ |
+| Non-mono | 6.20% | **5.55%** | **-0.65%** ✓ |
+| Bake size | 120,802 B | 238,560 B | +1.98× (twice as big) |
+
+**h=256 single-seed verdict: bad trade**. The smoothness improvement
+(non-mono -0.65%) is interesting but doesn't compensate for the CID22
+regression (-0.014 = ~3.5σ on the seed-variance scale σ=0.004).
+
+The bake doubles in size (228×128 + 128×1 → 228×256 + 256×1
+weights). The 2× memory cost doesn't buy SROCC; only buys smoother
+predictions (which soft-iso already provides essentially for free).
+
+**Apply cycle-9-trap caveat**: this is a single-seed result. The
+-0.014 might be on the lower seed tail — multi-seed sweep could
+reveal mean closer to V0_38 family. BUT: -0.014 is far enough
+outside expected seed-σ-noise that it's likely real direction.
+With AIC-4 also down -0.010, the trade is clearly not Pareto.
+
+**11th cheap recipe knob FALSIFIED.** Now the only remaining
+untested architecture lever is 300-feat input (requires runtime
+profile changes — not cheap; multi-tick infra).
+
+Artifacts produced this tick:
+- 1 new bake: `v0_kadid_tid_h256_seed3_2026-05-13.bin` (238,560 B, 2× size)
+- 1 per-pair CSV, 1 eval log
+- 1 non-mono computation
+- 1 run dir
+
+**Updated cycle-11 axes table** (now 11 falsifications):
+
+| Knob | Verdict |
+|---|---|
+| Init kaiming vs glorot | kaiming +0.006 |
+| Ranknet group image vs dataset | image +0.007 |
+| Val policy mean vs min | mean +0.004 |
+| Konjnd aligned vs full | aligned +0.029 |
+| KonJND weight 0.5 vs 0.3 | 0.5 +0.011 |
+| KonJND weight 0.5 vs 1.0 (V0_kadid_tid) | tie within σ |
+| Low-q row boost | no effect (5 seeds) |
+| Low-q pair boost | -0.0043 AIC-4 (6 seeds) |
+| External TV pairs file | unusable |
+| TV-weight 20 vs 40 | 20 +0.006 AIC-4 |
+| **Hidden=128 vs 256** | **128 +0.014 CID22 (single seed; clear direction)** |
+
+**Next tick (543)**: Cycle truly exhausted on the V_X 228-feat
+MLP axis. Architecture pivot to 300-feat is the next cheap-ish
+lever but requires zensim/src/profile.rs runtime changes — not
+autonomous-safe. Refresh markers until user direction.
+
 ### Tick 541 — 2026-05-13T05:11Z — Recovery summary extended with cycle-11 deliverables + feasibility audit
 
 Updated `~/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
