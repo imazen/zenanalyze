@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 506 — 2026-05-13T00:51Z — V0_31 merged into 3 site parquets + compare.js dropdown
+
+zensim commit `115b1020`. V0_31 (cycle-8 AIC-4 winner) added to the
+live comparison site:
+
+- CID22: merged 4292/4341 (verified |SROCC|=0.8628 against `human_mos`)
+- AIC-3: merged 600/600 (verified |SROCC|=0.8031 against `human_jnd`)
+- AIC-4: merged 300/300 (verified |SROCC|=0.9176 against `human_jnd`)
+
+Score conversion: site parquets store SCORES (higher=better, range
+0-100), but `dataset_metric_baseline --per-pair-output` emits raw
+`v04_distance` (higher=worse). Merge applied `score = 100 - distance`
+which preserves SROCC magnitude and matches the existing V0_26
+merge convention.
+
+Updated `compare.js` dropdown (lines 56-60):
+```js
+{ id: "score_zensim_v0_31", label: "zensim V0_31 cycle-8 AIC-4 winner (KonJND w=0.5)" },
+```
+
+Sits alongside V0_16 SHIP, V0_26 cycle-7 candidate. Users can now
+directly compare V0_16 / V0_26 / V0_31 on the live comparison-site
+across CID22, AIC-3, AIC-4 corpora — both scatter and per-band
+SROCC views — without re-running experiments.
+
+**Cycle-8 artifacts NOW SHIPPED to site**:
+- ✅ V0_31 bake (`/tmp/zensim_loop/bakes/v0_31_konjnd_w05_2026-05-13.bin`)
+- ✅ V0_31 column in 3 site parquets (rank-preserving merge verified)
+- ✅ V0_31 in comparison-site Y-axis dropdown
+- ✅ Reproducibility verified (V0_32 seed=42 → AIC-4 0.9184, Δ=+0.0008)
+
+The cycle-7 + cycle-8 candidate set is now visible on the live site:
+```
+V0_16 SHIP                  CID22 0.8919 | JPEG-AI 0.7951 | AIC-4 0.9127
+V0_26 cycle-7 candidate     CID22 0.8639 | JPEG-AI 0.8387 | AIC-4 0.9097
+V0_31 cycle-8 AIC-4 winner  CID22 0.8628 | JPEG-AI 0.8318 | AIC-4 0.9176
+```
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/site/data/parquet/cid22.parquet`
+  (+ `score_zensim_v0_31` column)
+- `/home/lilith/work/zen/zensim/site/data/parquet/aic3_ctc_epfl.parquet`
+  (+ same)
+- `/home/lilith/work/zen/zensim/site/data/parquet/aic4_sample.parquet`
+  (+ same)
+- `/home/lilith/work/zen/zensim/site/js/compare.js` (+ V0_31 dropdown)
+
+Push: zensim `115b1020`, deployed via GH Pages on push to main.
+
+**Next tick (507)**: Cycle-8 is now SHIPPED via the site. Options
+for next focused work:
+- (a) Run V0_33 = w=0.75 (between V0_31 and V0_26) to fill in the
+  Pareto curve — but adding more points has diminishing value;
+  the shape is now clear (CID22-flat for w∈[0.25, 1.0], JPEG-AI
+  monotonic-increasing with w).
+- (b) Investigate the **B0/B1 SROCC gap** that all KonJND-trained
+  bakes share (B0 ≈ 0.40, B1 ≈ 0.40 vs ssim2 B0=0.44, B1=0.47).
+  This is the structural cycle-8/9 issue — KonJND signal helps
+  AIC-4 generalization but doesn't address CID22's low-quality
+  ranking failure.
+- (c) Document cycle-8 closure with a benchmark file under
+  `zensim/benchmarks/cycle_8_outcomes_2026-05-13.md` summarizing
+  the Pareto curve mapping (V0_16/V0_26/V0_30/V0_31/V0_32).
+
+Pick (c) for tick 507 — closes cycle-8 with a permanent, committed
+reference doc (same pattern as cycle-7 outcomes doc). Then if more
+time available, examine (b)'s B0/B1 structural issue for cycle-9.
+
 ### Tick 505 — 2026-05-13T00:43Z — V0_32 seed=42 CONFIRMS V0_31's AIC-4 lead is reproducible
 
 V0_32 (V0_31 recipe + seed=42 vs seed=1) trained in 16s and baked
