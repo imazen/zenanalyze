@@ -5318,6 +5318,32 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 650 — 2026-05-13T13:30Z — low-q-boost ANOTHER NEW BEST: val_mean 0.9413 at ep140 (+0.0010 vs V0_16)
+
+low-q-boost 1.5 training (`bt1z6utlv`) at epoch 160 (867s wall):
+
+| Epoch | val_mean | best | vs V0_16 best (0.9403) |
+|---:|---:|---:|---:|
+| 40 | 0.9387 | 0.9387 | -0.0016 |
+| 90 | 0.9409 | 0.9409 | +0.0006 (first cross) |
+| **140** | **0.9413** | **0.9413** | **+0.0010** (NEW BEST) |
+| 160 | 0.9235 | 0.9413 | (cosine restart dip) |
+
+low-q-boost is **structurally above** V0_16 from ep90 onward.
+Each cosine cycle's minimum produces a new best. Pattern matches
+V0_17 cycle-14-s1 (which best=0.9424 at ep140).
+
+Updated CID22 projection: val_mean 0.9413 → CID22 likely ~0.892-0.894
+based on V0_17 pattern. May approach or clear the 0.8934 loop target
+as a SINGLE-BAKE candidate (no concat needed, 228→128→1 architecture).
+
+Patience reset to ep140 → early-stop ep190. ~3 more min wall.
+
+This is the SECOND positive finding from cycle-14-era trainer
+infrastructure (after the V0_17 concat). low-q-boost = cycle-9's
+B0+B1 weighting reborn at the per-row sampling level vs the original
+MSE-loss level (Python trainer).
+
 ### Tick 649 — 2026-05-13T13:26Z — low-q-boost SURPRISE: NEW BEST val_mean 0.9409 at ep90 — exceeds V0_16
 
 **Reversal of tick 648 prediction**: low-q-boost found a new best
