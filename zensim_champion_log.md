@@ -5318,6 +5318,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 543 — 2026-05-13T05:18Z — Hidden=64 single-seed: sweet spot for AIC-4 (+0.010) but CID22 -0.011
+
+Tested `--hidden 64` (vs h=128 default and h=256 from tick 542)
+on V0_kadid_tid recipe, seed=3.
+
+**3-way hidden-size comparison (V0_kadid_tid seed=3)**:
+
+| hidden | CID22 | AIC-4 | Non-mono | Bake size |
+|--:|--:|--:|--:|--:|
+| 64 | 0.8710 | **0.9122** ★ | 6.90% | 61.9 KB |
+| **128** (V0_38) | **0.8817** ★ | 0.9027 | 6.20% | 120.8 KB |
+| 256 | 0.8682 | 0.8925 | 5.55% | 238.6 KB |
+
+**Architecture-size pattern**:
+- **Smaller (h=64)**: better AIC-4, worse CID22, rougher
+- **Default (h=128)**: best CID22, mid AIC-4, mid smoothness
+- **Larger (h=256)**: smoothest, worse on both SROCC metrics
+
+h=128 is the CID22 sweet spot. h=64 surprisingly wins AIC-4
+(+0.010 vs h=128) but at single-seed scale.
+
+**Cycle-9-trap caveat**: this is one seed each at h=64 and h=256.
+The h=64 AIC-4 win could be upper-tail outlier. Mean across
+seeds might be tied with h=128's 0.9046 family mean. Need 3-5
+seeds to verify reproducibility.
+
+**For users who care about AIC-4 specifically**: a multi-seed
+h=64 sweep at V0_kadid_tid recipe might deliver a real AIC-4
+specialist (half the bake size + slightly better AIC-4). Could
+be worth a future cycle.
+
+**12th architecture knob (h=64) documented** at single-seed scale.
+Combined with 11 prior cheap recipe knobs + the cycle-9-trap
+lesson, the cycle-12 design space looks like:
+
+```
+Cheap recipe knobs:          11/11 falsified (-> V0_38 family is local optimum)
+Architecture (h):            128 best for CID22 / 64 might win AIC-4
+Architecture (300-feat):     untested, needs runtime profile changes
+Data acquisition:            untested, needs user authorization
+Runtime ensemble:            tested cycle-11 (no Pareto win)
+Soft-iso post-processor:     SHIPPED (cycle-11 free smoother)
+```
+
+Artifacts produced this tick:
+- 1 new bake: `v0_kadid_tid_h64_seed3_2026-05-13.bin` (61.9 KB)
+- 1 per-pair CSV, 1 eval log, 1 non-mono measurement
+
+**Next tick (544)**: cycle truly exhausted on cheap knobs at
+single-seed scale. If anything continues, would be a multi-seed
+sweep at h=64 to confirm the AIC-4 single-seed win. ~3 min wall.
+
 ### Tick 542 — 2026-05-13T05:14Z — Hidden=256 single-seed FALSIFIED on CID22 (-0.014)
 
 Tested V0_kadid_tid recipe at `--hidden 256` (vs default 128).
