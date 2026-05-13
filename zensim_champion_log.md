@@ -5318,6 +5318,44 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 500 — 2026-05-13T00:16Z — V0_29 launched: V0_26 recipe + 10× smaller constant LR
+
+Per tick 499's recommended next step (d): testing whether the issue
+is step size vs schedule. V0_28 (cosine, same magnitude) hurt CID22.
+V0_29 = V0_26 recipe + LR 3e-4 (vs 3e-3) held constant.
+
+Hypothesis: smaller-LR-constant might find a flatter minimum that
+generalizes better to CID22's distribution shift, where V0_26's
+3e-3 LR found a sharp local min that overfit synth+KonJND.
+
+V0_29 launched (PID 3698997):
+- `--lr 3e-4` (NEW — was 3e-3 in V0_26)
+- `--lr-schedule constant` (V0_26 default; not cosine)
+- All other knobs identical to V0_26
+- Log: `/tmp/zensim_loop/v0_29_train.log`
+- Epoch 50 progress: val_srocc=0.9493 (slower convergence as
+  expected; V0_28 was at 0.9977 by epoch 233)
+- ETA ~12-15 min wall
+
+Decision criteria (next tick 501):
+- V0_29 CID22 ≥ V0_26's 0.8639 AND JPEG-AI ≥ V0_26's 0.8387:
+  closes hypothesis "step-size vs schedule"; report as a slight
+  cycle-7 improvement.
+- V0_29 CID22 < V0_26: confirms LR isn't the lever; cycle-7
+  truly exhausted on this axis. Pivot to cycle-8 design.
+- V0_29 CID22 > V0_16's 0.8919 (target): unlikely but would be a
+  real ship candidate.
+
+**Cycle-7 tree at tick 500**:
+```
+V0_16 (SHIP, CID22 0.8919, JPEG-AI 0.7951)
+V0_25 (TV+safesyn, const LR 3e-3):            0.8505 / —
+ └─ V0_26 (+ KonJND, const LR 3e-3):          0.8639 / 0.8387
+     ├─ V0_27 (+ dssim 0.1, const LR 3e-3):   0.8658 / 0.7791 ❌
+     ├─ V0_28 (+ cosine LR 3e-3):             0.8550 / 0.8242 ❌
+     └─ V0_29 PENDING (+ const LR 3e-4):      ? / ?
+```
+
 ### Tick 499 — 2026-05-13T00:14Z — V0_28 FALSIFIES cosine-LR hypothesis; cycle-7 doubly closed
 
 V0_28 (V0_26 recipe + `--lr-schedule cosine`) finished training
