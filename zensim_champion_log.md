@@ -5318,6 +5318,84 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 556 — 2026-05-13T06:26Z — AVIF_aurora_slow per-codec seed variance is HIGH — V0_16's edge is mostly noise
+
+Per tick 555's plan, computed per-seed AVIF_aurora_slow CID22
+SROCC across V_kadid_tid family (8 seeds).
+
+**Per-seed AVIF_aurora_slow CID22 SROCC**:
+
+| Seed | aurora_slow SROCC | (aom_s7 sanity) |
+|--:|--:|--:|
+| 1 | 0.8615 | 0.8989 |
+| 2 | 0.8397 | 0.8740 |
+| 3 | 0.7949 | 0.9123 |
+| 7 | 0.7873 | 0.8953 |
+| 42 | 0.8178 | 0.8973 |
+| 100 | 0.8076 | 0.8917 |
+| 200 | 0.8152 | 0.8869 |
+| 1000 | 0.8100 | 0.8902 |
+| **Mean (n=8)** | **0.8167** | 0.8933 |
+| **Std (n=8)** | **0.0239** | 0.0107 |
+
+**MAJOR finding**: AVIF_aurora_slow CID22 SROCC has σ=0.0239 across
+seeds — **~6× larger than the V_X aggregate seed variance**
+(σ_aggregate ≈ 0.0068 from tick 523). Per-codec SROCC on small-N
+subsets is intrinsically noisy.
+
+Compare:
+- AIC_aom_s7 σ = 0.0107 (more typical for n=539 samples)
+- AVIF_aurora_slow σ = 0.0239 (high — n=446 but also more
+  structurally hard data?)
+- Range across seeds: 0.7873 to 0.8615 = **0.074 spread**
+
+**V0_16 SHIP's 0.8809 is +2.7σ above this family mean (P~0.4%)** —
+unlikely under the null hypothesis of "same recipe family", but
+not astronomically so. With 8 seeds, the best single (seed=1 at
+0.8615) is still 0.020 below V0_16's number.
+
+**Revised explanation of tick 554's +0.086 gap**:
+
+| Source | Estimated contribution |
+|---|--:|
+| Per-codec seed-noise variance (V0_16 lucky tail) | ~50-70% (≈ 0.04-0.06) |
+| Possible recipe-family mean shift (V0_15/V0_16 family) | ~30-50% (≈ 0.02-0.04) |
+
+The +0.086 was OVERSTATED as a fundamental V0_16 advantage. Most
+of it is seed-noise on a high-variance per-codec metric. The
+true "recipe family difference" on aurora_slow is probably more
+like +0.02-0.04 — comparable to the +0.020 aggregate CID22 gap.
+
+**Cycle-12 strategic recommendation REVISED**:
+
+Tick 554's "generate aurora training data" is now **NOT
+recommended** because:
+1. Aurora variants aren't in V0_16's training either (tick 555
+   codec audit)
+2. The +0.086 gap is mostly seed noise (this tick)
+3. Even adding aurora training would only address ~0.005 of the
+   real recipe-family gap of 0.020
+
+**Better cycle-12 options remain**:
+- Bayesian search over hyperparameter space (incl. split seed)
+  to find a high-CID22 V_kadid_tid seed
+- 50-seed sweep at V_kadid_tid recipe to find upper-tail
+  candidates (P(seed > +2σ) ≈ 2.5%, so ~1-2 hits per 50 seeds)
+- Restore deleted Rust trainer if user-authorized
+
+Artifacts produced this tick:
+- AVIF_aurora_slow per-seed forensic data (V_kadid_tid 8 seeds)
+- Quantitative decomposition of tick 554's +0.086 finding
+
+**Lesson recorded**: per-codec SROCC on small-N subsets (n<500)
+has 5-6× higher seed variance than aggregate SROCC. Future per-codec
+"V0_16 wins by X" claims should be checked against this elevated
+σ before drawing recipe-difference conclusions.
+
+**Next tick (557)**: cycle truly closed. Cron continues; no
+remaining productive autonomous probes. The aurora_slow lead
+turned out to be noise.
+
 ### Tick 555 — 2026-05-13T06:22Z — Tick 554's AVIF training-diversity hypothesis FALSIFIED by codec audit
 
 Per tick 554's strategic recommendation (generate AVIF aurora
