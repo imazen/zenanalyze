@@ -5318,6 +5318,61 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 522 — 2026-05-13T02:32Z — Cycle-10 outcomes doc committed; V0_38 = cycle-10a champion record
+
+zensim commit `b311aa6e`. Created
+`benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md` (~240 lines,
+~10 KB) — full record of cycle-10 work:
+
+- 5-seed sweep at default V0_kadid_tid weights (CID22 mean 0.8731,
+  +0.0128 vs V0_31 baseline, p=0.033 SIGNIFICANT)
+- 3 V0_4-exact variants attempted, all FAILED (konjnd_anchor w=1.0,
+  w=0.1, KonJND-weight=0.3)
+- 5-seed ensemble result (CID22 0.8764 lifts mean by +0.0033 but
+  loses to best single seed=3 at 0.8817)
+- Per-band breakdown: B0 + B3 BEAT ssim2 (V0_38 is a specialist)
+- Remaining V0_16 gap (~0.010) attributed to unrecoverable
+  recipe details
+- 4 cycle-10 next-step options (10b hidden bump, 10c blocked,
+  10d data hunt, 10e seed-tail scan)
+
+**Cycle-10a CLOSED** with the strongest cycle-7-through-10 result:
+V0_38 (V0_kadid_tid seed=3, CID22 0.8817) shipped to comparison
+site. Mean +0.0128 CID22 above V0_31, p=0.033. First multi-seed-
+verified Pareto improvement of the recovery cycle.
+
+**Key lesson recorded**: **Data axis dwarfs recipe axis.**
+Cycle-7/8/9/9b all sit within ~0.01 of V0_31 baseline on CID22
+SROCC (recipe knobs), while adding KADID+TID DATA lifts +0.013
+(real signal). Future cycles should prioritize data acquisition
+over recipe tuning.
+
+**Cycle-7/8/9/9b/10a all CLOSED with permanent records**:
+- `zensim/benchmarks/cycle_7_dssim_outcomes_2026-05-12.md`
+- `zensim/benchmarks/cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+- `zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`
+- `zensim/benchmarks/cycle_9b_pair_boost_outcomes_2026-05-13.md`
+- `zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`
+  (committed in zensim `b311aa6e`)
+
+**Next tick (523)**: cycle-10a is fully shipped + documented.
+Useful focused work options:
+- (a) Cycle-10e: V0_kadid_tid at seeds {100, 200, 1000} to scan
+  upper tail. If any seed lands at 0.89+, that's a real
+  V0_16-competitive single bake. Cheap (~50s).
+- (b) Cycle-10b: V0_kadid_tid + hidden=192 (one CLI change), seed
+  scan. Tests capacity hypothesis.
+- (c) Pivot to V0_16 reproduction hunt: search for the 144k purged
+  CSV that V0_16 actually trained on (cycle-10d).
+
+Pick (a) for tick 523 — cheapest, directly tests "is V0_16 just
+a seed-tail outlier of V0_kadid_tid?" If even one of 3 new seeds
+hits 0.89+, the answer is yes and V0_16 isn't fundamentally
+different from V0_kadid_tid.
+
 ### Tick 521 — 2026-05-13T02:31Z — V0_38 cycle-10a B0/B3 specialist merged into 3 site parquets
 
 zensim commit `4edc426c`. V0_38 = V0_kadid_tid seed=3 best single
