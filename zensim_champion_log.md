@@ -5318,6 +5318,42 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 497 — 2026-05-13T00:02Z — V0_26 candidate merged into 3 site parquets
+
+zensim commit `ab7d6fd8`. V0_26 evaluation expanded to all 3 corpora
+via `--per-pair-output`; `score_zensim_v0_26` column added:
+
+- AIC-3: merged 600/600 (|SROCC| = 0.8027 verified)
+- AIC-4: merged 300/300 (|SROCC| = 0.9097 verified)
+- CID22: merged 4292/4341 (|SROCC| = 0.8639 verified)
+
+(rank-preserving merge confirmed; absolute scores stored.)
+
+Updated `compare.js` dropdown: new option "zensim V0_26 cycle-7
+candidate (KonJND-aligned, no dssim)" alongside V0_16 SHIP. Users
+can now directly compare them on the live comparison-site.
+
+**This makes the V0_16 vs V0_26 tradeoff explorable** without
+needing to re-run experiments. The site renders the per-codec
+SROCC story for either bake on any of the 3 in-repo human-rated
+corpora.
+
+**Cycle-7 ARTIFACTS NOW SHIPPED**:
+- ✅ V0_26 bake (`/tmp/zensim_loop/bakes/v0_26_konjnd_dssim0_2026-05-13.bin`)
+- ✅ V0_26 column in 3 site parquets
+- ✅ V0_26 in comparison-site Y-axis dropdown
+- ✅ 4 cycle-7 benchmark docs (V0_24 v1, v2, V0_26, V0_27)
+- ✅ Cycle-7 outcomes doc with verdict
+
+V0_16 stays ship; V0_26 is preserved as the cycle-7 candidate for
+future cycle-8 (where the path forward is JPEG-AI corpus
+acquisition, not auxiliary loss).
+
+**Next concrete tick (498)**: cycle-7 is fully shipped + accessible
+to users. If anything else productive, would be: bake V0_24 v2 /
+V0_25 / V0_27 columns into the parquets too for full comparison.
+But those add minimal information beyond V0_16/V0_26.
+
 ### Tick 496 — 2026-05-12T23:58Z — V0_27 FALSIFIES dssim co-training; cycle-7 truly done
 
 zensim commit `5857a1a8`. V0_27 (V0_26 base + `--dssim-weight 0.1`)
