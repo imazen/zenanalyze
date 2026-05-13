@@ -5318,6 +5318,27 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 576 — 2026-05-13T07:57Z — Idle: markers refreshed; loop at zero productive autonomous progress
+
+Last untested Rust trainer default = hidden=32. Already tested
+h=64 single-seed (-0.011 CID22 vs h=128) and h=64 5-seed (mean
+-0.005, within noise). h=32 would be even smaller, almost certainly
+worse than h=64. Skipping as no-value test.
+
+State: 575+ ticks logged, 7 cycles explored, all knob configurations
+exhausted across cycles 7-13. V0_16 SHIP CID22 0.8919 ceiling
+remains beyond autonomous-mode reach.
+
+Recovery cycle truly final. No new artifacts this tick.
+
+**Cycle-13 paths requiring user authorization to advance**:
+- Full Rust trainer restore + run with exact V0_15/V0_16 args
+- Bayesian seed-sweep (50+ seeds at V_kadid_tid recipe)
+- Data acquisition (JPEG-AI public corpus, additional human-MOS)
+- Architecture pivot (300-feat input, deeper MLP, ensemble gating)
+
+**Next tick (577)**: Loop continues from cron with marker refresh only.
+
 ### Tick 575 — 2026-05-13T07:53Z — Idle: early stopping inferable from epochs sweep — also falsified
 
 State audit: only untested Rust trainer default is **early stopping
