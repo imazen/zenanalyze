@@ -5318,6 +5318,34 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 641 — 2026-05-13T12:55Z — Cycle-14 permanent outcomes doc committed
+
+Wrote `zensim/benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`
+(committed at zensim `0907ab81`). 10.8 KB, ~260 lines covering:
+
+1. Multi-seed verification falsifying single-seed cycle-14 lift
+2. Ensemble math discovery + concat MLP construction
+3. Full 3-way mixing Pareto sweep
+4. V0_17 ship candidate (3-way 0.65/0.30/0.05) complete verification
+5. Per-band TV mechanism interpretation
+6. 5 lessons recorded for cycle-15+
+7. Full artifacts inventory (12 bakes + per-pair CSVs + site bake)
+
+This matches the cycle outcomes doc pattern used for cycles 7/8/9/9b/10/12.
+Future agents can resume the cycle-14 work from this single doc
+without scrolling through 50+ tick log entries.
+
+The 7 cycle-outcomes docs now permanently in zensim/benchmarks/:
+- cycle_7_dssim_outcomes_2026-05-12.md
+- cycle_8_konjnd_pareto_outcomes_2026-05-13.md
+- cycle_9_lowq_boost_outcomes_2026-05-13.md
+- cycle_9b_pair_boost_outcomes_2026-05-13.md
+- cycle_10_kadid_tid_outcomes_2026-05-13.md
+- cycle_12_midq_boost_outcomes_2026-05-13.md
+- **cycle_14_per_band_tv_outcomes_2026-05-13.md** (new)
+
+Pure doc tick. No source edits, no new bakes.
+
 ### Tick 640 — 2026-05-13T12:51Z — V0_17 added as comparison-site bake (runtime ship UNCHANGED)
 
 Added V0_17 to the live comparison site at https://imazen.github.io/zensim/
