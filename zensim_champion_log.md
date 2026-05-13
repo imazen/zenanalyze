@@ -5318,6 +5318,29 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 644 — 2026-05-13T13:07Z — V0_17 candidate documented in CHANGELOG + CONTEXT-HANDOFF (not yet shipped)
+
+Added V0_17 candidate documentation to two key user-facing docs
+(no source/runtime/bake changes):
+
+1. **`zensim/CHANGELOG.md`** — new `[Unreleased]` section
+   "V0_17 SHIP CANDIDATE: 228→384→1 concat MLP" with full
+   verification matrix (11 of 13 metrics) + 5-step ship procedure
+2. **`zensim/CONTEXT-HANDOFF.md`** — dedicated "V0_17 candidate
+   ready" section before "What just shipped"; 7-step ship procedure;
+   bake md5 + path + size
+
+Committed at zensim `bc513627`, pushed main.
+
+Documents the candidate so that:
+- Future agents reading either doc immediately see V0_17 status
+- User can find ship procedure in either doc without scrolling tick log
+- "Not yet shipped" status is explicit — no confusion about runtime vs candidate
+
+**V0_17 is fully documented**: outcomes doc, recovery summary,
+CHANGELOG, CONTEXT-HANDOFF, comparison site, tick log. Runtime ship
+is V0_16, candidate awaits explicit user "go" for swap.
+
 ### Tick 643 — 2026-05-13T13:04Z — Added cycle-14-s7 and cycle-14-s42 as band-specialist site bakes
 
 Added 2 more comparison-site bake columns (same pattern as V0_17 at
