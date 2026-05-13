@@ -5318,6 +5318,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 559 — 2026-05-13T06:40Z — Mid-q boost 1.5 shows TIGHT positive signal (3-seed mean +0.004 CID22)
+
+Per tick 558's strategic insight (V0_16 wins B1+B2), implemented
+`--mid-q-boost` flag in trainer. Mechanic: multiply train_weight
+for rows with 50 ≤ score < 90 (B1+B2) by boost factor.
+
+Trainer diff (uncommitted pending verification):
+```python
+ap.add_argument("--mid-q-boost", type=float, default=1.0, ...)
+
+if args.mid_q_boost != 1.0:
+    boost = float(args.mid_q_boost)
+    b1b2_mask = (target_vals >= 50.0) & (target_vals < 90.0)
+    mult[b1b2_mask] = boost
+    df["train_weight"] *= mult
+```
+
+**3-seed sweep at mid-q-boost=1.5 (V0_kadid_tid recipe)**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8758 | 0.8982 |
+| 3 | 0.8756 | 0.9060 |
+| 42 | 0.8740 | 0.9054 |
+| **Mean (n=3)** | **0.8751** | **0.9032** |
+| Range | **0.0018** ← VERY tight | 0.0078 |
+
+**Vs V0_kadid_tid baseline (n=8, h=128 default)**:
+- CID22: +0.0039 mean (baseline 0.8712)
+- AIC-4: -0.0014 (essentially tied, baseline 0.9046)
+- 3-seed range 0.0018 is **MUCH tighter** than baseline σ=0.0068 —
+  possibly real consistent effect, or 3 seeds happen to be close.
+
+**Welch's t-test (n=3 vs n=8)**:
+- Δ = +0.0039, SE ≈ 0.0024
+- t ≈ 1.6, df ≈ 9, p ≈ 0.13 → **BORDERLINE n.s.**
+
+**Cycle-9 trap warning**: 3 seeds at single boost is exactly the
+sample size where false positives appeared in cycles 9, 9b, and
+10a' (each had ≤3 seeds initially with apparent wins that vanished
+at 5+). Need ≥5 seeds at mid-q=1.5 before claiming a real effect.
+
+**vs V0_16 SHIP**: mid-q-1.5 mean 0.8751 is still -0.0168 below
+V0_16's 0.8919. Even if real, doesn't crack V0_16. But it's the
+FIRST positive signal across cycle-7-through-12 cheap knobs after
+many falsifications.
+
+Artifacts produced:
+- 3 new bakes: `v0_kadid_tid_midq15_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+- Trainer change (NOT committed pending seed-verification)
+
+**Next tick (560)**: Add 2-3 more seeds at mid-q-boost=1.5 to
+reach 5-seed sample size. If mean holds at ~0.875+ with tight σ,
+commit the trainer flag and call this a real (small) cycle-12
+finding. If mean drops to V_kadid_tid baseline 0.871 at 5 seeds,
+cycle-9 trap caught us again — falsify.
+
 ### Tick 558 — 2026-05-13T06:36Z — Per-band decomposition: V0_38 BEATS V0_16 on B0; V0_16 wins B1-B3
 
 Pure-analysis tick — per-band CID22 SROCC for V0_16 vs V0_38
