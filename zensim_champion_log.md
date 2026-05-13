@@ -5318,6 +5318,33 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 601 — 2026-05-13T09:42Z — V0_16 per-band confirmation on v15rc — bimodal pattern is stable across both canonical zenjpeg parquets
+
+Ran V0_16 on `unified_v15rc_zenjpeg.parquet` (694MB, 486,540 pairs,
+14s wall) to confirm the tick 600 bimodal finding holds on the
+second canonical zenjpeg sweep.
+
+| Band | v15r raw % | v15rc raw % | Δ |
+|---|--:|--:|--:|
+| B0 (<50) | 5.64% | 5.76% | +0.12 |
+| **B1 [50,65)** | **7.55%** | **7.03%** | -0.52 |
+| **B2 [65,90)** | **3.76%** | **4.15%** | +0.39 |
+| **B3 (≥90)** | **8.10%** | **8.43%** | +0.33 |
+| aggregate | 5.83% | 5.82% | -0.01 |
+
+Pattern is stable: B2 reliably under target (3.8-4.2%), B1+B3 reliably
+elevated (7-8%). Confirms the V0_16 + per-band-TV cycle-14 candidate
+in tick 600 is built on a robust signal, not a v15r-specific artifact.
+The +0.39 difference on B2 between sweeps is the rounding-floor; all
+other deltas are noise.
+
+After-iso: 0.00% across all bands on both parquets.
+
+Artifact: `/tmp/v0_16_per_band_v15rc.log`
+
+No source edits this tick. Pure validation. Loop continues at zero
+net structural progress.
+
 ### Tick 600 — 2026-05-13T09:38Z — Per-band non-mono Pareto matrix across all 4 site bakes; V0_16 is bimodal (worst B1+B3, best B2)
 
 Ran the new per-band table from tick 599 on the 3 remaining site bakes
