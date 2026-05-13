@@ -57,9 +57,13 @@ eval): KADID 0.8432 / TID 0.8401 / **CID22 0.8893** / non-mono ~8.26%.
 
 This is the Rust-mlp_train.rs-trained bake from
 `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_ssim2_holdout_20260501T045510.bin`.
-The Rust trainer was deleted in PR #29 (commit `e613224`, 2026-05-07);
-its source is recovered at `zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs`
-(885 LOC).
+The Rust trainer was deleted in PR #29 (commit `e613224`, 2026-05-07)
+and **RESTORED on 2026-05-10** (commit `ec40ec8`); it is LIVE at
+`zensim/zensim-validate/src/mlp_train.rs` and produced V0_15 + V0_16
+(current ship). Pre-deletion snapshot preserved at
+`zensim/docs/phase4_reference/mlp_train_rust_e3f8748.rs` for
+historical reference only. To reproduce V0_16, run
+`bash zensim/benchmarks/recipe_v0_16.sh`.
 
 ### Loop session conclusion (Tick 75, 2026-05-11) — V0_5 STAYS SHIP
 
@@ -213,7 +217,9 @@ NOT recipe tuning. Realistically requires:
 ### Phase 4 trainer infrastructure (zensim main, after 2026-05-10)
 
 `scripts/v_next/train_v_next_mlp.py` now has 7 flags ported from
-the deleted Rust trainer:
+the Rust trainer (NOTE: corrected 2026-05-13 — the Rust trainer was
+RESTORED on 2026-05-10 and is LIVE; these Python flags mirror its
+current behavior, they're not a reconstruction from a snapshot):
 
 | Flag | Default | Rust-faithful value |
 |---|---|---|

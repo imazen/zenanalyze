@@ -8,10 +8,20 @@ distance score) given a feature vector. Different shape, same
 zentrain pipeline (Pareto / teacher fit / distill / inspection /
 safety / triage / bake → ZNPR v2 or v3).
 
-This trainer is the **canonical home** for any future zensim metric
-work — replaces the in-tree zensim-validate Rust trainer that was
-stripped on 2026-05-07 (commit `e613224` "supplant via zentrain")
-plus my v_next/Python prototype that lived briefly in zensim/scripts/.
+This trainer is the **Python-side canonical home** for zensim metric
+work. NOTE (corrected 2026-05-13): the parallel Rust trainer at
+`zensim-validate/src/mlp_train.rs` was deleted on 2026-05-07 (commit
+`e613224`) and RESTORED on 2026-05-10 (commit `ec40ec8`). It is LIVE
+and is the trainer that produced the current ship V0_16 (CID22
+0.8919). Both trainers coexist:
+  - Rust trainer = authoritative for V_X SHIP bakes (run via
+    `target/release/zensim_mlp_train`; recipe captured at
+    `zensim/benchmarks/recipe_v0_16.sh`); uses per-step group-weighted
+    pair sampling.
+  - This Python trainer = research / ablation / cycle experiments;
+    uses batched RankNet with per-row MSE weighting. The mechanisms
+    differ on `train_weight` semantics (per cycle-13 finding); pick
+    the trainer that matches the recipe semantic you need.
 
 Recipe (per RECOVERY_PLAN_2026-05-08.md Phase 3):
   - Primary signal: training_safe_synthetic_extended.csv (340k rows,
@@ -24,7 +34,9 @@ Recipe (per RECOVERY_PLAN_2026-05-08.md Phase 3):
     `--val-policy min` — pick the epoch where the min over datasets
     is highest)
   - Optional features (port from v06-rebalance / v06-film / v06-moe
-    Rust trainers stripped on 2026-05-07):
+    Rust experimental trainer variants — those specific variants WERE
+    stripped on 2026-05-07 and not restored; the BASE trainer
+    `zensim-validate/src/mlp_train.rs` is LIVE since 2026-05-10):
     * `--zenanalyze-tsv ...` + `--zenanalyze-features dct_compressibility_y,...`
       append N zenanalyze features to the 228 zensim features
     * `--mlp-magnitude-match-lambda` + `--alpha`
