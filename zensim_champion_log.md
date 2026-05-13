@@ -5318,6 +5318,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 504 — 2026-05-13T00:34Z — V0_31 evaluated; V0_31 is BEST AIC-4 BAKE EVER
+
+V0_31 (V0_26 recipe + KonJND weight=0.5, halfway between V0_30 and
+V0_26) trained in 16s. Bake at
+`/tmp/zensim_loop/bakes/v0_31_konjnd_w05_2026-05-13.bin` (120,712B).
+
+**Pareto curve now mapped at 4 weight points**:
+
+| KonJND w | Bake | CID22 | AIC-3 | AIC-4 | JPEG-AI |
+|--:|---|--:|--:|--:|--:|
+| 0.0 | V0_16 (SHIP) | **0.8919** | 0.7965 | 0.9127 | 0.7951 |
+| 0.25 | V0_30 | 0.8702 | 0.8062 | 0.9159 | 0.7975 |
+| **0.5** | **V0_31** | 0.8628 | 0.8031 | **0.9176** ★ | 0.8318 |
+| 1.0 | V0_26 (candidate) | 0.8639 | 0.8027 | 0.9097 | **0.8387** |
+
+**Key finding — Pareto curve is FLAT in CID22 between w=0.25 and
+w=1.0**: V0_30 (0.8702), V0_31 (0.8628), V0_26 (0.8639) are all in
+a 0.0074-wide band. The "cliff" really is between w=0 and w=0.25
+(-0.022 CID22 drop). After crossing the cliff, more KonJND weight
+costs almost no additional CID22 but does buy JPEG-AI gain monotonically.
+
+**V0_31 is the AIC-4 winner** of all bakes tested:
+- AIC-4 overall: 0.9176 (+0.0049 vs V0_16, +0.0017 vs V0_30, +0.0079 vs V0_26)
+- AIC-3 overall: 0.8031 (tied with V0_30/V0_26)
+- JPEG-AI specifically: 0.8318 (between V0_30 and V0_26)
+
+Per-codec AIC-4: AVIF=0.9579, JPEG-1=0.9184, JPEG-2000=0.9329,
+JPEG-AI=0.8318, JPEG-XL=0.9697, VVC=0.9261. All ≥ V0_16's
+corresponding numbers except JPEG-1 (slightly lower).
+
+CID22 per-band: B0=0.3982, B1=0.4045, B2=0.7277, B3=0.0586,
+Near-PJND=0.3353. B2 is -0.045 below ssim2 — same pattern as the
+other KonJND-trained bakes.
+
+**Cycle-8 candidate interpretation**:
+
+V0_31 is NOT a CID22 ship candidate (-0.029 below V0_16). BUT it's
+the strongest cross-corpus generalist:
+- Beats V0_16 on AIC-3 (+0.007), AIC-4 (+0.005), JPEG-AI (+0.037).
+- Ties V0_26 on CID22 (-0.001), AIC-3 (+0.000), beats on AIC-4
+  (+0.008), loses JPEG-AI (-0.007).
+- Vs V0_30: ties CID22 (-0.007), AIC-3 (-0.003), beats AIC-4
+  (+0.002), beats JPEG-AI (+0.034).
+
+If the user prioritizes **cross-corpus breadth over CID22 raw
+aggregate**, V0_31 is the cycle-8 winner. If CID22 stays gold,
+V0_16 remains ship.
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_31_konjnd_w05_2026-05-13.bin` (120,712B)
+- `/tmp/zensim_loop/v0_31_per_pair.csv` (5,192 rows)
+- `/tmp/zensim_loop/v0_31_eval.log`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T183043_v0_31_konjnd_w05_seed1_2026-05-13/`
+
+**Next tick (505)**: V0_32 = V0_31 recipe + seed=42. Tests seed
+stability of V0_31's AIC-4 winner property. If V0_32 also produces
+AIC-4 ≥ 0.915 (within 0.003 of V0_31's 0.9176), the Pareto find is
+reproducible and we can recommend V0_31 as a cycle-8 candidate for
+the user to consider alongside V0_26.
+
+If V0_32 substantially differs on AIC-4 (e.g. 0.910), V0_31's lead
+was seed-lucky and we need to sweep more seeds.
+
 ### Tick 503 — 2026-05-13T00:33Z — V0_30 evaluated; Pareto cliff between w=0 and w=0.25
 
 V0_30 (V0_26 recipe + KonJND weight=0.25 vs V0_26's 1.0) trained in
