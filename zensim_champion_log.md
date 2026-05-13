@@ -5318,6 +5318,28 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 647 — 2026-05-13T13:19Z — low-q-boost training trailing V0_16 at every checkpoint
+
+low-q-boost 1.5 training (`bt1z6utlv`) at epoch 30 (168s wall):
+
+| Epoch | val_mean | V0_16 baseline same-epoch | Δ |
+|---:|---:|---:|---:|
+| 0 | 0.8954 | 0.9002 | -0.0048 |
+| 10 | 0.9125 | 0.9183 | -0.0058 |
+| 20 | 0.9215 | 0.9257 | -0.0042 |
+| 30 | 0.9312 | 0.9345 | -0.0033 |
+
+low-q-boost trails V0_16 at every checkpoint by 0.003-0.006 in
+val_mean. The B0 row-weight boost shifts training away from
+KADID/TID's main distortion concentrations (which are in B1-B3 for
+the most part, per KADID's quality dial distribution).
+
+Cosine LR will dip at ep50, climb back. Even if late best is +0.001
+over V0_16, that wouldn't be a meaningful ship win (within seed σ
+0.0044).
+
+ETA ~13 more min wall. Will eval anyway for completeness.
+
 ### Tick 646 — 2026-05-13T13:15Z — Untested cycle-15 candidate started: V0_16 + --low-q-boost 1.5
 
 Started the last untested cycle-14-era trainer flag: `--low-q-boost 1.5`
