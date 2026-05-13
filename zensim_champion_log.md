@@ -5318,6 +5318,42 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 606 — 2026-05-13T10:14Z — Cycle-14 candidate kicked off (V0_16 recipe + --tv-band-weights 10,30,10,30)
+
+Started background task `bz3xzw8wl` with V0_16 recipe args (h=128,
+seed=1, ep=300, lr=1e-3, val=min, max-features=228, TV=20) PLUS
+`--tv-band-weights 10,30,10,30` (B1+B3 pushed 3× harder per tick 600
+bimodal finding).
+
+Confirmed in startup log:
+- TV pair file loaded same 130,558 pairs as the rerun
+- `band_weights=Some([10.0, 30.0, 10.0, 30.0])` parsed correctly
+- low_q_boost=1.0, mid_q_boost=1.0 (defaults; not using row-boost
+  flags this run)
+- epoch 0 val_mean 0.9202 (slightly above rerun's 0.9075 — different
+  TV-weight gradient at epoch 0)
+
+Output:
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.raw.bin`
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.train.log`
+
+ETA ~7-10 min wall (likely early-stops around epoch 140 same as rerun).
+
+**Reasoning for running autonomously**: the cycle-14 candidate is
+informative regardless of which of the 5 user-decision paths is
+picked. Per-band TV either:
+- (A) Closes the B1+B3 gap → cycle-14 candidate is real (path 3
+  validated), and the recipe non-reproducibility issue (paths 1/2)
+  matters less because we have a better bake
+- (B) Doesn't help → per-band TV is not the lever; cycle-14 needs a
+  different mechanism; user should focus on paths 1/2 (debug
+  reproducibility) or path 4 (keep V0_16)
+
+Either outcome reduces the option space for the user's decision.
+
+Will report final CID22 SROCC + per-band when training + eval finish
+(~10 min total). User decisions from tick 605 still pending.
+
 ### Tick 605 — 2026-05-13T10:11Z — V0_16 RERUN COMPLETE — CID22 = 0.8761, BELOW V0_16's 0.8919 by -0.0158 (recipe is NOT bit-reproducible); + Rust trainer gains --low-q-boost / --mid-q-boost flags
 
 **Three deliverables this tick**:
