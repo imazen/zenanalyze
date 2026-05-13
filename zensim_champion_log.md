@@ -5318,6 +5318,48 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 502 — 2026-05-13T00:28Z — V0_30 launched: light KonJND (weight 0.25 vs V0_26's 1.0)
+
+Pivot from cycle-7 to cycle-8 first probe. The 300-feat input axis
+(tick 501 option a) requires runtime profile changes (zensim/src
+hardcodes 228 in `LINEAR_WEIGHTS_PREVIEW_V0_1.len()`, profile.rs:43
+declares PreviewV0_4 with 228, etc) — that's multi-tick work.
+
+Cheaper alternative: **dial the KonJND weight**. V0_16 (SHIP, CID22
+0.8919) used NO KonJND. V0_26 (cycle-7 candidate, CID22 0.8639)
+used KonJND at weight 1.0 alongside safesyn at weight 1.0. The
+KonJND signal helped JPEG-AI by +0.044 but cost CID22 -0.028.
+
+Hypothesis: KonJND at weight 0.25 (vs V0_26's 1.0) sits between
+V0_16 (0) and V0_26 (1.0) — should preserve more of V0_16's CID22
+fit while picking up some of V0_26's JPEG-AI gain.
+
+V0_30 launched (PID 3706901):
+- `--human-csv konjnd:...:0.25:0.0` (NEW — weight 0.25)
+- `--human-csv safesyn:...:1.0:0.0` (unchanged from V0_26)
+- LR 3e-3 const (V0_26 baseline)
+- TV=20, h=128, 300 epochs, seed=1 — all V0_26 values
+- Log: `/tmp/zensim_loop/v0_30_train.log`
+- ETA ~12-15 min wall
+
+Decision criteria (next tick 503):
+- V0_30 CID22 ≥ V0_16's 0.8919 AND JPEG-AI > V0_16's 0.7951:
+  ship candidate (no tradeoff against V0_16).
+- V0_30 CID22 ∈ [V0_26 0.8639, V0_16 0.8919] AND JPEG-AI ∈
+  [V0_16 0.7951, V0_26 0.8387]: interpolation worked; map the
+  Pareto curve via weights 0.1/0.5/0.75.
+- V0_30 CID22 < V0_26: surprising — would mean KonJND helps even
+  more at lower weight, or there's seed variance noise.
+
+**Cycle-8 tree at tick 502**:
+```
+V0_16 (SHIP, CID22 0.8919, JPEG-AI 0.7951) ← KonJND weight = 0
+                                              ↓
+                                       V0_30 PENDING (weight 0.25)
+                                              ↓
+V0_26 (CID22 0.8639, JPEG-AI 0.8387) ← KonJND weight = 1.0
+```
+
 ### Tick 501 — 2026-05-13T00:25Z — V0_29 CATASTROPHIC; cycle-7 truly exhausted on LR axis
 
 V0_29 (V0_26 + LR 3e-4 const, 300 epochs) finished training in 16s
