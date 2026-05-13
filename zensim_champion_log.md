@@ -5318,6 +5318,31 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 614 — 2026-05-13T10:51Z — Recovery summary corrected with konjnd finding; V0_16 reproduction at epoch 80 still bit-perfect
+
+**Recovery summary update**: added explicit correction box to
+`recovery_cycle_summary_2026-05-13.md` "Final state" section noting:
+- Prior claim "0.020 gap is unrecoverable per-run state" was WRONG
+- Actual cause: missing konjnd group in documented recipe
+- Trainer IS deterministic
+- V0_38's 0.020 trail vs V0_16 reflects the missing-konjnd-group
+  effect, not unrecoverable state
+- Adding konjnd@0.5 to V_kadid_tid recipe should close most of that
+  gap (untested as of this tick)
+
+Also corrected the bake-recipe row for V0_16 in the table (was
+"unknown extras", now "safesyn+kadid+tid+konjnd@0.5").
+
+**V0_16 reproduction progress** (background `bnv365vho`): epoch 80
+(437s wall), val_mean 0.9364, best 0.9401 at ep40 — STILL bit-matching
+V0_16 ship log at every checkpoint (9 sampled epochs now: 0/10/20/30/40/50/60/70/80).
+
+Wall time 437.1s for V0_16 at ep80 vs our 437.1s — wall-clock perfectly
+matched too (well within OS noise margin).
+
+ETA: V0_16 took 1071s wall total (early-stop ep 190). We're at 437s
+on ep80, ~10 more minutes.
+
 ### Tick 613 — 2026-05-13T10:46Z — V0_16 reproduction tracking bit-perfect at epoch 30; verified V0_15/V0_18/V0_19/V0_20 all used the same 4-group recipe
 
 **Reproduction progress** (background `bnv365vho`):

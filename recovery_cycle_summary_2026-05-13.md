@@ -19,19 +19,34 @@ on V0_16, particularly on:
 - JPEG-AI codec ranking (cycle-7's original motivation)
 - Cross-corpus generalization (AIC-3 + AIC-4)
 
-## Final state (2026-05-13 03:28 UTC)
+## Final state (2026-05-13 03:28 UTC, revised 10:42 UTC)
 
 **V0_16 SHIP retained as the runtime weight** — not unseated by
 any recovery candidate. The 0.020-CID22 gap between V0_16 and
 the best recovery candidate (V0_38) appears to be in unrecoverable
 per-run state (split seed, batch sampling order).
 
+> **CORRECTION (tick 612, 2026-05-13 10:42 UTC)**: the "0.020 gap is
+> unrecoverable" claim was WRONG. The actual cause was that
+> CONTEXT-HANDOFF.md and the recipe runner documented only 3 training
+> groups for V0_16 (safesyn + kadid + tid); V0_16 was actually
+> trained with **4 groups including konjnd@0.5**. Found in
+> `/tmp/zensim_loop/v0_16_train.stdout` at tick 612. Retraining
+> seed=1 with the full 4-group recipe reproduces V0_16 bit-identical
+> at every sampled epoch. The trainer IS deterministic; the recipe
+> was incomplete in our docs.
+>
+> V0_38 was the best V_kadid_tid recipe (3 groups, NO konjnd) bake;
+> its 0.020 trail vs V0_16 reflects the missing-konjnd-group effect,
+> not unrecoverable per-run state. Adding konjnd@0.5 to the V_kadid_tid
+> recipe should close most of that gap (untested as of tick 614).
+
 **Live comparison site** (https://imazen.github.io/zensim/) now
 hosts 4 zensim variants for user toggling:
 
 | Bake | Recipe | CID22 | AIC-3 | AIC-4 | Best for… |
 |---|---|--:|--:|--:|---|
-| V0_16 SHIP | unknown extras | **0.8919** | 0.7965 | 0.9127 | balanced (gold standard) |
+| V0_16 SHIP | safesyn+kadid+tid+konjnd@0.5 (CORRECTED tick 612) | **0.8919** | 0.7965 | 0.9127 | balanced (gold standard) |
 | V0_26 | + KonJND w=1.0 | 0.8639 | 0.8027 | 0.9097 | JPEG-AI codec |
 | V0_31 | + KonJND w=0.5 | 0.8628 | 0.8031 | **0.9176** | AIC-4 (cross-codec) |
 | V0_38 | + KonJND+KADID+TID | **0.8817** | 0.7969 | 0.9027 | B0/B3 low-q + lossless |
