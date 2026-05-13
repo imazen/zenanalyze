@@ -5318,6 +5318,10 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 578 — 2026-05-13T08:05Z — Idle: marker refresh only
+
+No new work. Loop continues at zero net progress.
+
 ### Tick 577 — 2026-05-13T08:01Z — Idle: marker refresh; cycle truly exhausted
 
 Markers refreshed across zensim/zenanalyze/zenmetrics. No new
