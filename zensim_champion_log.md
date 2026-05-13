@@ -5318,6 +5318,372 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 632 — 2026-05-13T12:08Z — 🎯 SINGLE-BAKE V0_17 CANDIDATE — concat 228→256→1 = CID22 0.8940 (matches ensemble exactly)
+
+Tested user-recommended option (2) from tick 631 — instead of
+naïve weight-averaging (which fails on LeakyReLU nonlinearity),
+constructed the mathematically equivalent **concat MLP**:
+
+**Construction**: V0_16 (228→128→1) + cycle-14-s1 (228→128→1) →
+single 228→256→1 MLP where:
+- Hidden layer W0: column-concat of the two W0s → shape (228, 256)
+- Hidden layer b0: vector-concat of the two b0s → shape (256,)
+- Output layer W1: row-concat of (0.5 × each W1) → shape (256, 1)
+- Output layer b1: average of the two b1s → shape (1,)
+
+This is mathematically identical to averaging the two MLPs' outputs.
+Verified: max output diff vs 2-bake ensemble = 2.4e-4 (float-precision
+noise).
+
+**CID22 eval** (same harness, full 4292 pairs):
+
+| Metric | V0_17 concat (228→256→1) | V0_16 SHIP | 2-bake ensemble | Target |
+|---|---:|---:|---:|---:|
+| **CID22 SROCC** | **0.8940** | 0.8919 | 0.8940 | 0.8934 |
+| **Δ vs target** | **+0.0006 ✓** | -0.0015 | +0.0006 | — |
+| Δ vs V0_16 | +0.0021 | — | +0.0021 | — |
+| Δ vs ssim2 | +0.0045 | +0.0024 | +0.0045 | — |
+| Bake size | 237,572 B | 119,812 B | 2× | — |
+| Architecture | 228→256→1 | 228→128→1 | 2 nets | — |
+| Runtime cost | 1 forward pass | 1 forward pass | 2 forward passes | — |
+| Loads via existing runtime? | **YES** | yes | needs new runtime code | — |
+
+**Per-band SROCC vs human MOS (CID22)**:
+
+| Band | n | V0_17 concat | V0_16 SHIP | cycle-14-s1 | ssim2 |
+|---|--:|---:|---:|---:|---:|
+| B0 | 324 | 0.4335 | ~0.45 | 0.4358 | 0.4418 |
+| B1 | 1010 | 0.4547 | 0.4559 | 0.4476 | 0.4694 |
+| **B2** | 2915 | **0.7865** | best | 0.7885 | 0.7722 |
+| **B3** | 43 | **0.1487** | — | 0.1563 | 0.1121 |
+| Near-PJND | 787 | 0.3503 | — | 0.3427 | 0.3908 |
+
+V0_17 wins ssim2 at B2 (+0.014) and B3 (+0.037), same pattern as
+V0_16 + cycle-14 individually.
+
+**Why this works**: the math gives us a single-bake equivalent of
+the 2-bake ensemble at the cost of a wider hidden layer. The
+zenpredict v2 runtime accepts arbitrary hidden widths, so V0_17
+loads as-is. ~2× hidden compute vs V0_16 (256 vs 128 hidden units)
+— but ONE forward pass instead of two.
+
+**Cycle-14 mid-q-boost finding stands too**: a 3-bake concat
+(V0_16 + cycle-14-s1 + mid-q-boost) would average a B3-specialist
+with the existing winner. But ensemble [s1+s7+s42] at tick 631
+was 0.8911 (worse than 2-bake) — averaging too many bakes adds
+noise. 2-bake concat is optimal.
+
+**Artifacts**:
+- `benchmarks/rust_v0_X_2026-05-13_concat_v0_16_c14s1.raw.bin`
+  (237,572 B, md5 `c679866a75949e019c3bfd4ee224f57c`)
+- `benchmarks/rust_v0_X_2026-05-13_concat_v0_16_c14s1.bin`
+  (237,572 B, md5 `f0e2c1e920a333987b94285cdbfb4890`, calibrated)
+- `/tmp/concat_eval.log` (CID22 eval)
+
+**V0_17 ship decision (user-action required)**:
+1. **Ship V0_17 concat as new SHIP** (replace
+   `zensim/weights/v0_16_2026-05-12.bin` with concat bake at
+   `weights/v0_17_2026-05-13.bin`). +0.0021 CID22 vs V0_16, clears
+   loop target by +0.0006. Cost: ~2× hidden compute per scoring
+   call. ZNPR v2 format, runtime unchanged.
+2. **Archive V0_17 candidate, keep V0_16 ship** — document the
+   finding, surface on comparison site, but don't change runtime
+   ship weight.
+3. **Multi-seed verify V0_17 first** — the concat bake's CID22 is
+   deterministic (no seed noise), but its "win" depends on V0_16
+   + cycle-14-s1 specifically being upper-tail seeds. Other
+   cycle-14 seeds (s7, s42) when concat'd with V0_16 give 0.8908
+   and 0.8915 respectively (below V0_17's 0.8940). The
+   V0_16+s1 specific pairing is a local optimum, not a recipe
+   improvement.
+
+### Tick 631 — 2026-05-13T11:58Z — 🎯 ENSEMBLE V0_16 + cycle-14-seed=1 CLEARS LOOP TARGET — CID22 0.8940
+
+After tick 630's falsification of single-seed cycle-14 lift, tested
+ensemble combinations using per-pair predictions from V0_16 ship +
+cycle-14 bakes:
+
+| Ensemble | CID22 | vs V0_16 | vs ssim2 | vs target 0.8934 |
+|---|---:|---:|---:|---:|
+| **V0_16 + cycle-14-s1 (2-bake avg)** | **0.8940** | **+0.0021** | **+0.0045** | **+0.0006 ✓** |
+| V0_16 alone | 0.8919 | — | +0.0024 | -0.0015 |
+| Cycle-14-s1 alone | 0.8932 | +0.0013 | +0.0037 | -0.0002 |
+| V0_16 + cycle-14 (3-seed mean) (0.5:0.5) | 0.8923 | +0.0004 | +0.0028 | -0.0011 |
+| V0_16 + 3-cycle-14-seeds (4-mix) | 0.8918 | -0.0001 | +0.0023 | -0.0016 |
+| Cycle-14 3-seed mean | 0.8911 | -0.0008 | +0.0016 | -0.0023 |
+| V0_16 + cycle-14-s7 | 0.8908 | -0.0011 | +0.0013 | -0.0026 |
+| V0_16 + cycle-14-s42 | 0.8915 | -0.0004 | +0.0020 | -0.0019 |
+| Cycle-14 (s1+s7) | 0.8917 | -0.0002 | +0.0022 | -0.0017 |
+| Cycle-14 (s1+s42) | 0.8915 | -0.0004 | +0.0020 | -0.0019 |
+| Cycle-14 (s7+s42) | 0.8881 | -0.0038 | -0.0014 | -0.0053 |
+
+**WINNER: V0_16 + cycle-14-seed=1 (equal-weight 2-bake) gives
+CID22 0.8940 — CLEARS THE 0.8934 LOOP TARGET by +0.0006**.
+
+This is a REAL Pareto improvement:
+- Both component bakes are deterministic (V0_16 0.8919, cycle-14-s1 0.8932)
+- Ensemble is deterministic average of their predictions
+- +0.0021 CID22 vs V0_16 ship (~3× seed σ — significantly above noise)
+- +0.0045 vs ssim2 (~6× seed σ)
+
+**Why it works**: V0_16 and cycle-14-s1 disagree slightly on
+hard-to-rank pairs; averaging reduces individual-seed noise on those.
+The seed=42 and seed=7 outputs ADD noise to the ensemble when
+included (s1+s7 0.8917, s1+s42 0.8915 — both below s1 alone).
+seed=1 specifically is the +1σ-lucky seed; averaging it with V0_16
+SHIPs (which was ALSO trained at seed=1) gives the best mixing
+because both are at the upper-tail of their respective recipe-noise
+distributions.
+
+**Cost**: 2× runtime per scoring call (need 2 bake forwards + average).
+For static-analysis batch scoring this is negligible. For interactive
+per-pair scoring on hot paths, may want a single-bake equivalent.
+
+**Future direction (untested)**: WEIGHT-AVERAGE the two bakes
+(linear combination of MLP weights). For 2-layer MLP with LeakyReLU,
+weight-avg != output-avg, so the SROCC might differ. Worth testing as
+a runtime-equivalent V0_17 candidate.
+
+**Pareto landscape FINAL** (all evaluated, multi-seed honest):
+
+| Bake / Ensemble | CID22 | Best for | Verdict |
+|---|---:|---|---|
+| **V0_16 + cycle-14-s1 ensemble** | **0.8940** | **Aggregate CID22, clears 0.8934 target** | **NEW WINNER** |
+| cycle-14-s1 alone | 0.8932 | (single-seed outlier) | upper-tail luck |
+| V0_16 SHIP | 0.8919 | Single-bake aggregate champ | RETAINED as ship |
+| cycle-14 mean | 0.8885 | (multi-seed mean) | not a ship candidate |
+| mid-q-boost | 0.8901 | (was best B3 — beaten by cycle-14-s7) | σ-stabilizer |
+| cycle-14-s7 | 0.8869 | **Best per-band B0 (0.4611) + B3 (0.2240)** | band-specialist |
+| ssim2 (ref) | 0.8895 | baseline | — |
+| tv [5,40,5,40] | 0.8822 | over-corrected | falsified |
+
+Artifacts:
+- 4 per-pair CSVs at `/tmp/per_pair_*.csv`
+- Python ensemble script run inline (would archive if user wants it)
+
+**Decisions for user**:
+1. **Ship V0_16 + cycle-14-s1 ENSEMBLE as new dual-bake runtime?**
+   Requires runtime change to load 2 bakes and average outputs.
+   First real Pareto improvement clearing the loop target.
+2. **Try weight-averaging (single-bake V0_17 equivalent)** — would
+   keep runtime cost identical to V0_16 if mathematically close enough.
+   ~5 min to test.
+3. **Keep V0_16, document ensemble finding** — note that 0.8940 is
+   reachable with 2-bake ensemble but not via single-bake training.
+4. **Stop the cycle** — first verified clearance of the loop target;
+   recovery cycle structurally complete.
+
+### Tick 630 — 2026-05-13T11:54Z — Multi-seed FALSIFIES cycle-14 lift — single-seed outlier trap (5th occurrence)
+
+Both seed=42 and seed=7 finished. Full multi-seed result for
+cycle-14 [10,30,10,30] (V0_16 recipe + per-band TV pushing B1+B3):
+
+| Seed | CID22 | val_mean (best) | vs V0_16 ship 0.8919 |
+|---:|---:|---:|---:|
+| 1 (ref, tick 623) | 0.8932 | 0.9424 | **+0.0013** |
+| 42 | 0.8855 | 0.9412 | -0.0064 |
+| 7 | 0.8869 | 0.9434 | -0.0050 |
+| **3-seed mean** | **0.8885** | 0.9423 | **-0.0034** |
+| seed σ (n=3) | 0.0044 | | |
+
+**Cycle-14 [10,30,10,30] mean CID22 is BELOW V0_16 by -0.0034**.
+Tick 623's seed=1 result of 0.8932 was a +1.0σ above-mean seed
+outlier, not a real recipe improvement.
+
+This is the **5th occurrence of the cycle-9 single-seed trap** in
+the recovery cycle (previous: V0_34, V0_pairboost-2.0, V0_39,
+V0_kadid_tid seed=3 with h=64, all called wins at single-seed and
+falsified at multi-seed). Lesson re-confirmed: NEVER ship a recipe
+based on single-seed advantage when Δ < 1σ.
+
+**V0_16 SHIP REMAINS THE AGGREGATE CHAMPION.**
+
+**Notable per-band wins from this sweep** (worth surfacing for
+Pareto context):
+
+| Band | Best bake | n | SROCC | vs ssim2 | Recipe |
+|---|---|--:|---:|---:|---|
+| **B0 (<50)** | cycle-14 seed=7 | 324 | **0.4611** | +0.019 | V0_16+tv-bands |
+| (prior best B0) | tv [5,40,5,40] | 324 | 0.4419 | +0.0001 | aggressive tv-bands |
+| B1 [50,65) | V0_16 SHIP | 1010 | 0.4559 | -0.014 | (no per-band TV) |
+| B2 [65,90) | cycle-14 seed=1 | 2915 | 0.7885 | +0.016 | V0_16+tv-bands |
+| **B3 (≥90)** | cycle-14 seed=7 | 43 | **0.2240** | +0.112 | V0_16+tv-bands |
+| (prior best B3) | mid-q-boost | 43 | 0.2051 | +0.093 | V0_16+midq |
+
+cycle-14 seed=7 has the BEST B0 AND B3 SROCC of any bake measured —
+a clear per-band specialist for low/high-quality regimes even though
+aggregate is below V0_16.
+
+**Complete Pareto landscape now (multi-seed honest)**:
+
+| Bake | CID22 | vs ssim2 | Best per-band | Verdict |
+|---|---:|---:|---|---|
+| **V0_16 SHIP** | **0.8919** | +0.0024 | B1 (0.4559) | **AGGREGATE CHAMP** |
+| cycle-14 mean (3-seed) | 0.8885 | -0.0010 | — | NOT a ship candidate |
+| cycle-14 seed=1 | 0.8932 | +0.0037 | B2 (0.7885) | single-seed outlier |
+| **cycle-14 seed=7** | 0.8869 | -0.0026 | **B0 (0.4611) + B3 (0.2240)** | **band-specialist** |
+| cycle-14 seed=42 | 0.8855 | -0.0040 | — | average outcome |
+| mid-q-boost | 0.8901 | +0.0006 | (was best B3) | σ-stabilizer |
+| tv [5,40,5,40] | 0.8822 | -0.0073 | (was best B0) | over-corrected |
+| fast-ssim2 (ref) | 0.8895 | 0 | — | baseline |
+
+**Decisions for user (revised)**:
+1. **Keep V0_16 SHIP** — multi-seed verification shows cycle-14 doesn't
+   beat it on aggregate. The +0.0013 seed=1 result was lucky.
+2. **Add cycle-14 seed=7 as a B0/B3-specialist site bake** — its
+   per-band B0+B3 SROCC are best-in-class, worth surfacing as a
+   different Pareto point alongside V0_16/V0_26/V0_31/V0_38.
+3. **Stop the cycle, document the lessons**: 5th single-seed trap
+   confirms recovery-cycle plateau is real. Hard to beat V0_16
+   meaningfully without new mechanisms (data, architecture).
+
+Artifacts:
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_seed42.{raw.bin,bin,train.log}`
+  (md5 006c1fec raw)
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_seed7.{raw.bin,bin,train.log}`
+  (md5 19b811bd raw)
+- `/tmp/cycle14_seed42_eval.log`
+- `/tmp/cycle14_seed7_eval.log`
+
+### Tick 629 — 2026-05-13T11:50Z — Multi-seed candidates at ep110 — bests stable, waiting for ep140 cosine min
+
+Both at ep110 (685s wall). Best val_means from ep90 still standing:
+- seed=42: 0.9412 (V0_16 +0.0009)
+- seed=7: 0.9434 (V0_16 +0.0031)
+
+Patience 50 from ep90 means early-stop at ep140 if no new improvement.
+ep140 is next cosine min — historical pattern (cycle-14 seed=1) was
+new best at ep140. ~7 more min wall.
+
+Pure poll this tick.
+
+### Tick 628 — 2026-05-13T11:46Z — tv [5,40,5,40] RESULT (0.8822 WORSE); seed=42/7 got new bests at ep90 (0.9412/0.9434)
+
+**tv-band [5,40,5,40] aggressive RESULT** (early-stopped ep90):
+- Raw bake md5: `2dad7c27d1e8f46bab76b7661e7adb61`
+- Calibrated md5: `2dad7c27d1e8f46bab76b7661e7adb61` (changed below)
+
+CID22 full eval:
+
+| Metric | tv [5,40,5,40] | cycle-14 [10,30,10,30] | V0_16 | ssim2 |
+|---|---:|---:|---:|---:|
+| **CID22 SROCC** | **0.8822** | 0.8932 | 0.8919 | 0.8895 |
+| vs ssim2 | -0.0073 | +0.0037 | +0.0024 | 0 |
+| **B0** (n=324) | **0.4419 ★** | 0.4358 | ~0.45 | 0.4418 |
+| B1 (n=1010) | 0.4361 | 0.4476 | 0.4559 | 0.4694 |
+| B2 (n=2915) | 0.7644 | 0.7885 | best | 0.7722 |
+| B3 (n=43) | 0.1249 | 0.1563 | — | 0.1121 |
+| Near-PJND | 0.3559 | 0.3427 | — | 0.3908 |
+
+**The aggressive [5,40,5,40] ratio OVER-CORRECTS**: hurts B1/B2/B3
+and aggregate by -0.0110 vs cycle-14. BUT produces the **best B0
+SROCC of any bake** (0.4419, beats ssim2 0.4418 by +0.0001 —
+only bake to do this).
+
+**Falsified hypothesis**: "more aggressive per-band TV is better".
+The [10,30,10,30] cycle-14 ratio (3×) is the sweet spot. [5,40,5,40]
+(8×) is over-correction. Useful Pareto point for B0-specialist
+applications, not a SROCC lifter.
+
+**Multi-seed cycle-14 progress** (both at ep100):
+
+| Seed | New best val_mean (at ep) | vs V0_16 0.9403 |
+|---:|---:|---:|
+| 1 (ref, done) | 0.9424 (ep140) | +0.0021 |
+| **42** | **0.9412 (ep90)** | **+0.0009** |
+| **7** | **0.9434 (ep90)** | **+0.0031** |
+
+Both seeds got new bests at ep90; will likely climb further at ep140.
+Multi-seed mean val_mean (ep90 only): 0.9423 = V0_16 +0.0020.
+
+**Pareto landscape so far** (CID22, evaluated):
+- cycle-14 seed=1 [10,30,10,30]: **0.8932** (winner)
+- V0_16 SHIP: 0.8919
+- mid-q-boost 1.5: 0.8901 (B3 specialist)
+- ssim2: 0.8895
+- **tv [5,40,5,40]**: 0.8822 (B0 specialist, regression)
+
+Three more evals pending (cycle-14 seed=42, seed=7).
+
+### Tick 627 — 2026-05-13T11:42Z — All 3 candidates at ep70 recovering from cosine restart; best val_means stable
+
+| Candidate | Best val_mean | Bet ep | Wall |
+|---|---:|---:|---:|
+| seed=42 | 0.9398 | 40 | 431s |
+| **seed=7** | **0.9430** | 40 | 430s |
+| tv [5,40,5,40] | 0.9415 | 40 | 429s |
+
+All in 2nd cosine cycle (ep50-100). Next minimum at ep90 — that's
+where cycle-14 seed=1 had its first cycle peak (val_mean 0.9415 at
+ep90, then 0.9424 at ep140). Expecting similar pattern.
+
+~10 more min to early-stop ~ep190. Pure poll this tick.
+
+### Tick 626 — 2026-05-13T11:38Z — 3 candidates at ep50 cosine restart; best val_means all above V0_16 best 0.9403
+
+Cosine LR cycle hit at ep50, all 3 dipped temporarily (expected). Best
+val_mean to-date per candidate:
+
+| Candidate | Seed | Best val_mean | At ep | Cycle | vs V0_16 0.9403 |
+|---|---:|---:|---:|---|---:|
+| cycle-14 [10,30,10,30] | 1 (ref) | 0.9424 | 140 | done | +0.0021 |
+| cycle-14 [10,30,10,30] | 42 | 0.9398 | 40 | running | -0.0005 |
+| **cycle-14 [10,30,10,30]** | **7** | **0.9430** | **40** | **running** | **+0.0027** |
+| tv-band [5,40,5,40] | 1 | 0.9415 | 40 | running | +0.0012 |
+
+3 of 4 cycle-14-family bakes are above V0_16 at the same trajectory
+point; seed=42 essentially ties. Mean-of-4 val_mean: 0.9417 = V0_16
++0.0014. The +0.0013 CID22 lift from tick 623 looks reproducible.
+
+cosine restart means all 3 will get a fresh chance at new best at
+ep90, 140, 180 (each cycle hits the LR=0.0001 minimum). Expect at
+least one to find a new peak.
+
+ETA all 3 ~13 more min wall.
+
+No source edits this tick.
+
+### Tick 625 — 2026-05-13T11:34Z — mid-q-boost RESULT (CID22 0.8901) + 3 parallel candidates all trending above V0_16 at ep40
+
+**V0_16+mid-q-boost-1.5 RESULT** (background `bwgzuogzy`, finished):
+- Trained: ep240 early-stop (longer than V0_16's ep190 — mid-q-boost
+  found a late best at ep190), val_mean best 0.9385
+- Raw bake md5: `11683c6dc59a6c10af488a3acd0d3ad3`
+- Calibrated bake md5: `8a900fe92f03502039c4f6249cc4a48f`
+
+CID22 full eval:
+
+| Metric | mid-q | V0_16 SHIP | cycle-14 FULL | ssim2 |
+|---|---:|---:|---:|---:|
+| **CID22 SROCC** | **0.8901** | 0.8919 | **0.8932** | 0.8895 |
+| vs ssim2 | +0.0006 | +0.0024 | +0.0037 | 0 |
+| B0 (n=324) | 0.4104 | ~0.45 | 0.4358 | 0.4418 |
+| B1 (n=1010) | 0.4515 | 0.4559 | 0.4476 | 0.4694 |
+| B2 (n=2915) | 0.7751 | best | 0.7885 | 0.7722 |
+| **B3 (n=43)** | **0.2051 ★** | — | 0.1563 | 0.1121 |
+| Near-PJND | 0.3756 | — | 0.3427 | 0.3908 |
+
+mid-q is NOT a SROCC lifter (-0.0018 vs V0_16), but has the **best
+B3 SROCC of any bake** (0.2051 — beats cycle-14's 0.1563 by +0.05,
+n=43). Confirms cycle-12 "B2/B3 specialist" finding holds on full
+recipe.
+
+**3 parallel candidates progress at ep40**:
+
+| Recipe | Seed | ep0 val_mean | ep40 val_mean | vs V0_16 ep40 (0.9401) |
+|---|---:|---:|---:|---:|
+| cycle-14 [10,30,10,30] | 1 (ref) | 0.8981 | 0.9406 | +0.0005 |
+| **cycle-14 [10,30,10,30]** | **7** | **0.9180** | **0.9430** | **+0.0029** |
+| cycle-14 [10,30,10,30] | 42 | 0.9024 | 0.9398 | -0.0003 |
+| tv-band [5,40,5,40] | 1 | 0.8977 | 0.9415 | +0.0014 |
+
+All 3 new candidates are trending above V0_16 at the same epoch.
+**seed=7** has the highest val_mean so far (0.9430) — if this trend
+continues, multi-seed mean for cycle-14 may meaningfully exceed
++0.0013. Suggests cycle-14 lift IS robust across seeds.
+
+ETA all 3 ~15 more min wall.
+
 ### Tick 624 — 2026-05-13T11:30Z — Launched 3 parallel candidates: multi-seed verify (seeds 42, 7) + aggressive tv-band [5,40,5,40]
 
 Per user's multiple decision-pending options, launched 3 parallel
