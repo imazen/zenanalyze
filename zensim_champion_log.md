@@ -5318,6 +5318,59 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 547 — 2026-05-13T05:38Z — Comprehensive smoothness table across 8 V_X bakes
+
+Ran the now-fixed `soft_iso_smooth.py` on 4 more bakes from
+cycle-10b/c/10a' (architecture + recipe variants not previously
+tested), combining with the original 4 from ticks 537-538.
+
+**Full 8-bake smoothness audit** (unified parquet, soft-iso effect):
+
+| Bake | Raw non-mono | After soft-iso | SROCC vs ssim2 raw | After | Δ SROCC |
+|---|--:|--:|--:|--:|--:|
+| V0_26 (cycle-7) | 5.56% | **0.00%** | 0.9413 | 0.9410 | -0.0003 |
+| V0_kadid_tid h=256 (c10c) | 5.59% | **0.00%** | 0.9359 | 0.9354 | -0.0005 |
+| V0_31 (cycle-8) | 5.71% | **0.00%** | 0.9391 | 0.9391 | -0.0000 |
+| V0_pairboost2.0 (c9b) | 5.75% | **0.00%** | 0.9369 | 0.9370 | **+0.0001** |
+| V0_16 SHIP | 5.83% | **0.00%** | 0.9272 | 0.9280 | **+0.0008** |
+| V0_39 konjnd10 (c10a') | 6.00% | **0.00%** | 0.9354 | 0.9348 | -0.0006 |
+| V0_38 (cycle-10a h=128) | 6.26% | **0.00%** | 0.9328 | 0.9325 | -0.0003 |
+| V0_kadid_tid h=64 (c10b) | 6.92% | **0.00%** | 0.9264 | 0.9257 | -0.0007 |
+
+**Observations**:
+1. **Soft-iso unanimously delivers 0% non-mono** across all 8 bakes
+2. **SROCC cost range: -0.0007 to +0.0008** (essentially zero in all cases)
+3. **Raw non-mono pattern**: KonJND-w=1.0 family (V0_26, V0_39) is
+   smoothest (~5.6-6.0%); h=64 (smallest MLP) is roughest (6.92%);
+   h=256 doesn't actually help much (5.59% vs h=128's 6.26%)
+4. **V0_16 + soft-iso is the strict best**: highest SROCC gain
+   (+0.0008) and lowest cost; the only "free upgrade" among bakes
+5. **The 4.86% V0_2-floor target is achieved unanimously** post-iso
+   for all bakes (0% << 4.86%)
+
+This is the definitive smoothness reference for the V_X recipe
+family. Documents that **cycle-11 soft-iso is the right tool for
+the smoothness side of the loop's dual target**, regardless of
+which bake is shipped on the SROCC side.
+
+Artifacts produced this tick:
+- 4 additional soft-iso measurements (V0_kadid_tid h=64/h=256,
+  V0_39, V0_pairboost2.0) on unified parquet
+
+**Loop target state (post-soft-iso)**:
+
+| Target | Raw status | After soft-iso |
+|---|---|---|
+| CID22 SROCC > 0.8934 | V0_16 closest at 0.8919 | unchanged 0.8919 |
+| Non-mono < 4.86% (codec sweeps) | none meet | **all 8 meet (0%)** |
+
+CID22 target remains unmet in autonomous mode (cycle-12 needs user
+direction). Smoothness target is fully solved by soft-iso for codec
+sweep contexts.
+
+**Next tick (548)**: All structural exploration complete. Refresh
+markers only without user-directed cycle-12 axis.
+
 ### Tick 546 — 2026-05-13T05:34Z — Fixed bug in committed soft_iso_smooth.py — TypeError on pyarrow dtype kwarg
 
 Ran the committed `soft_iso_smooth.py` (cycle-11 deliverable, commit
