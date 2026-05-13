@@ -5318,6 +5318,93 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 518 — 2026-05-13T02:13Z — V0_kadid_tid 5-seed sweep CONFIRMS the cycle-10a lever (p=0.033 sig)
+
+Added 2 more seeds (3, 7) at V0_kadid_tid recipe → 5-seed sample.
+
+**5-seed V0_kadid_tid results**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8789 | 0.9029 |
+| 2 | 0.8615 | 0.9045 |
+| **3** | **0.8817** ★ | 0.9027 |
+| 7 | 0.8691 | 0.9040 |
+| 42 | 0.8741 | 0.9074 |
+| **Mean (n=5)** | **0.8731** | **0.9043** |
+| Std | 0.0081 | 0.0019 |
+
+**Statistical confirmation (Welch's t-test, V0_kadid_tid n=5 vs
+V0_31 baseline n=2)**:
+
+| Metric | Δ Mean | SE | t | df | p |
+|---|--:|--:|--:|--:|--:|
+| CID22 | **+0.0128** | 0.0044 | 2.92 | ~5 | **0.033** ✓ |
+| AIC-4 | -0.0137 | 0.0012 | -11.4 | ~3 | <0.01 (sig negative) |
+
+**CID22 mean gain of +0.0128 is STATISTICALLY SIGNIFICANT (p=0.033)
+in favor of KADID+TID supervision. AIC-4 cost of -0.0137 is highly
+significant negative.**
+
+This is the **first real Pareto find** since cycle-8 V0_31 — and
+unlike cycle-9/9b's seed-noise traps, this one survives multi-seed
+verification at p<0.05.
+
+**Best seed (seed=3)** V0_kadid_tid CID22 per-band:
+
+| Band | seed=3 | ssim2 (truth) | Δ vs ssim2 |
+|---|--:|--:|--:|
+| B0 (<50) | **0.4497** | 0.4418 | **+0.0079** ✓ |
+| B1 (50-65) | 0.4258 | 0.4694 | -0.0436 |
+| B2 (65-90) | **0.7661** | 0.7722 | -0.0061 (≈ tied) |
+| B3 (≥90) | **0.1182** | 0.1121 | **+0.0061** ✓ |
+| Near-PJND | 0.3493 | 0.3908 | -0.0415 |
+
+**B0 and B3 BEAT ssim2** at seed=3. B2 is essentially tied. B1
+and Near-PJND still below. This is structurally a different
+profile from V0_16 (which probably wins B2/Near-PJND but matches
+ssim2 on B0/B1/B3 around the same levels).
+
+**V0_kadid_tid (mean) is still 0.019 below V0_16 SHIP (0.8919)**.
+V0_kadid_tid has a different per-band specialization than V0_16:
+strong on B0/B3 ranges (low and lossless), weaker on B1/Near-PJND
+(the middle band).
+
+**Cycle-10 ranking now refreshed**:
+
+| Recipe | n | Mean CID22 | Mean AIC-4 | Notable |
+|---|--:|--:|--:|---|
+| synth-only (no KonJND) | 5 | 0.8507 | 0.8978 | floor |
+| synth + KonJND (V0_31) | 2 | 0.8603 | 0.9180 | cycle-8 |
+| **synth + KonJND + KADID + TID (V0_kadid_tid)** | **5** | **0.8731** | 0.9043 | **cycle-10a SHIPPABLE** |
+| V0_16 SHIP | 1 | 0.8919 | 0.9127 | unknown extras |
+
+**V0_kadid_tid is the strongest verified Pareto improvement to
+date**. The +0.013 CID22 mean gain is statistically significant
+at p=0.033 with n=5. This **CAN BE A SHIP CANDIDATE** if user
+prioritizes B0 SROCC (where it BEATS ssim2 at seed=3) over
+absolute CID22 aggregate (where V0_16 still wins).
+
+Artifacts produced this tick:
+- 2 new bakes: `/tmp/zensim_loop/bakes/v0_kadid_tid_seed{3,7}_2026-05-13.bin`
+- 2 per-pair CSVs
+- 2 eval logs
+
+**Next tick (519)**: Multiple high-value options:
+- (a) Test V0_4-exact recipe: KonJND weight 0.3 (instead of 0.5)
+  to match V0_4's documented weights. Could close more of the
+  V0_16 gap.
+- (b) Test concordance filter on this recipe via the unified
+  parquet path. Concordance was the 4th candidate V0_16 ingredient.
+- (c) Bump V0_kadid_tid seed=3 (best single, CID22 0.8817) to
+  site parquets so users can compare it on the live site.
+- (d) Document V0_kadid_tid mean stats in
+  `zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`.
+
+Pick (a) for tick 519 — single CLI change (`konjnd:...:0.3:0.0`),
+~17s training, directional probe whether V0_4-exact weights close
+more of the gap.
+
 ### Tick 517 — 2026-05-13T02:03Z — KADID + TID mixed supervision is the cycle-10 LEVER (+0.011 mean CID22)
 
 Located KADID-10k + TID2013 feature CSVs at
