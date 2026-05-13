@@ -5318,6 +5318,45 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 598 — 2026-05-13T09:30Z — V0_16 recipe captured as durable shell runner (`benchmarks/recipe_v0_16.sh`)
+
+Wrote `benchmarks/recipe_v0_16.sh` (197 lines, chmod +x) to capture the
+V0_16 SHIP recipe as a one-command reproducer. Committed at zensim
+`8541c092` and pushed main.
+
+What the script does:
+1. **Pre-flight**: verify the 4 input files exist (safesyn CSV at
+   `/tmp/zensim_loop/safe_synth_clean_features.csv`, kadid + tid
+   features at `/mnt/v/zen/zensim-training/2026-05-07/v06-features/`,
+   TV pairs at `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv`).
+   Documents regeneration paths in header if /tmp was wiped.
+2. **Build** the `zensim_mlp_train` binary (V0_16-aligned defaults
+   since tick 594).
+3. **Train** with the exact V0_16 recipe: safesyn:1.0 + kadid:0.3 +
+   tid:0.3, `--tv-pairs-file --tv-weight 20`. All other hyperparams
+   use binary defaults.
+4. **Affine-calibrate** via `scripts/v_next/affine_calibrate_znpr_v2.py`
+   with α=28.0366 β=-5.0738 (V0_16's exact coefficients).
+5. **CID22 eval** via `dataset_metric_baseline --v04-bake --cid22-only`.
+
+Also tightened the binary's clap `about` string from "V0_5 recipe" to
+refer to V0_16 + this runner (was historical from tick 43 when the
+binary was first wired). Rebuild 2.80s clean.
+
+**Why this matters (per user's "regular memory loss" principle)**: the
+V0_16 invocation lived in shell history + a docstring + CONTEXT-HANDOFF
+prose. None of those are executable. The runner is the durable
+single-command form. Future agents can `bash benchmarks/recipe_v0_16.sh`
+without reconstructing the recipe from logs.
+
+**Status**: script written + committed + pushed. **NOT executed** —
+training is ~10–30 min CPU + produces a published-format bake; running
+the script is the user-authorized step that's still pending.
+
+Artifacts:
+- `benchmarks/recipe_v0_16.sh` (committed at zensim `8541c092`)
+- `bash -n` syntax-check clean
+
 ### Tick 597 — 2026-05-13T09:28Z — Per-codec soft-iso default-on matrix: V0_16's non-mono is JPEG-specific
 
 Ran the soft-iso default-on script on the remaining unified parquets to
