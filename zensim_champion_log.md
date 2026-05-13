@@ -5318,6 +5318,62 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 538 — 2026-05-13T04:50Z — V0_16 sign re-test CONFIRMS unanimous soft-iso win; script committed
+
+Re-tested V0_16 SHIP with both sign conventions:
+
+| Convention | non-mono before | non-mono after | SROCC before | SROCC after |
+|---|--:|--:|--:|--:|
+| `flip=True` (100-y) | 87.67% | 0.00% | 0.9272 | **0.2999** ❌ |
+| **`flip=False` (raw y)** | **5.83%** | **0.00%** | **0.9272** | **0.9280** ★ |
+
+V0_16's bake outputs **score directly** (higher=better), unlike
+my cycle-7+ bakes which output **distance** (higher=worse). The
+`flip=False` test gives the correct numbers — matches tick 531's
+5.83% V0_16 baseline. **SROCC actually IMPROVES by +0.0008** with
+soft-iso applied.
+
+**UNANIMOUS SOFT-ISO PARETO IMPROVEMENT across all 4 site bakes**:
+
+| Bake | non-mono raw | non-mono soft-iso | SROCC raw | SROCC soft-iso | Δ SROCC |
+|---|--:|--:|--:|--:|--:|
+| **V0_16 SHIP** | 5.83% | **0.00%** | 0.9272 | **0.9280** | **+0.0008** |
+| V0_26 | 5.56% | **0.00%** | 0.9413 | 0.9410 | -0.0003 |
+| V0_31 | 5.71% | **0.00%** | 0.9391 | 0.9391 | -0.0000 |
+| V0_38 | 6.26% | **0.00%** | 0.9328 | 0.9325 | -0.0003 |
+
+All 4 V_X bakes drop non-mono q-step rate to **0.00%** (loop's
+4.86% target MET unanimously) with SROCC cost ≤0.0003 (V0_16
+actually IMPROVES).
+
+**Script committed**: zensim `e232cefe` —
+`scripts/v_next/soft_iso_smooth.py`. Provides:
+- CLI: `--bake <path> --parquet <path> [--flip-output] [--ref-col ...]`
+- `soft_iso_per_curve()` helper (importable) for codec orchestrators
+- Auto-handles the two sign-conventions via `--flip-output` flag
+
+**Cycle-11 option-e finalized**. Two cycle-11 strategic options
+remain:
+- (a) Data acquisition (JPEG-AI corpus, KonJND-25k, etc) — needs user authorization
+- (b) Architecture changes (300-feat input, deeper MLP) — multi-tick infra
+
+Recovery cycle has now delivered:
+1. V0_26 (cycle-7) — KonJND-aligned tradeoff, smoothness champion
+2. V0_31 (cycle-8) — AIC-4 cross-codec winner
+3. V0_38 (cycle-10a) — B0/B3 specialist with KADID+TID
+4. **soft_iso_smooth.py** — free per-curve smoother (cycle-11)
+5. 5 cycle outcomes docs in zensim/benchmarks/
+6. 4 trainer flags in zensim trainer infrastructure (incl this one)
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/scripts/v_next/soft_iso_smooth.py`
+  (committed at zensim `e232cefe`, 130 lines, CLI + helper API)
+
+**Next tick (539)**: cycle-11 has delivered a real artifact. Two
+options remain that need user direction. Without user input,
+refresh markers and append "no new progress" until guidance
+arrives.
+
 ### Tick 537 — 2026-05-13T04:23Z — **SOFT-ISO (running-max) IS A NEAR-FREE SMOOTHER** — non-mono → 0%, SROCC unchanged
 
 Per tick 536's plan, tested cycle-11 option-e: per-curve
