@@ -5318,6 +5318,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 567 — 2026-05-13T07:22Z — Recovery summary extended with cycle-12 — autonomous loop's permanent index complete
+
+Updated `recovery_cycle_summary_2026-05-13.md` (zenanalyze commit
+`f4ce10dd`) with cycle-12 deliverables section. Now covers all
+recovery cycle work through cycle-12.
+
+**Summary additions**:
+1. `--mid-q-boost` flag explained (mild stabilizer, σ 4× tighter,
+   trades B0 for B2/B3)
+2. Per-band seed-σ reference table (from tick 557)
+3. V0_16 vs V0_38 vs mid-q-1.5 Pareto-profile differentiation
+4. Cycle-12 falsified combinations list
+
+**Total recovery cycle summary (now permanent for future agents)**:
+
+- **6 cycles** explored (cycles 7-12, not counting cycle 11 in count
+  since it ran inline with cycle 10)
+- **567 tick log entries** in `zensim_champion_log.md`
+- **3 positive findings**:
+  - V0_38 cycle-10a (KADID+TID supervision, on site)
+  - `soft_iso_smooth.py` cycle-11 (verified Pareto smoothness)
+  - `--mid-q-boost 1.5` cycle-12 (mild stabilizer, σ 4× tighter)
+- **14+ knob configurations falsified** at multi-seed scale
+- **8 permanent docs** for future agents to resume work:
+  - `zensim/benchmarks/cycle_7_dssim_outcomes_2026-05-12.md`
+  - `zensim/benchmarks/cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+  - `zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`
+  - `zensim/benchmarks/cycle_9b_pair_boost_outcomes_2026-05-13.md`
+  - `zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`
+  - `zensim/benchmarks/cycle_12_midq_boost_outcomes_2026-05-13.md`
+  - `zenanalyze/recovery_cycle_summary_2026-05-13.md` (high-level)
+  - `zenanalyze/zensim_champion_log.md` (this — 567 ticks)
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
+  extended with cycle-12 section (committed at zenanalyze `f4ce10dd`)
+
+**Cycle-12 is permanently recorded.** All productive autonomous
+recovery cycle exploration now has both per-cycle outcomes docs
+and high-level summary index.
+
+**Next tick (568)**: Loop runs out of cheap autonomous probes.
+Refresh markers only until user-directed cycle-13 strategy.
+
 ### Tick 566 — 2026-05-13T07:19Z — Cycle-12 outcomes doc committed; 6th cycle doc closes the recovery cycle
 
 zensim commit `94592b82`. Created
