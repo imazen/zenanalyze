@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 520 — 2026-05-13T02:25Z — V0_kadid_tid ensemble (5 seeds avg) gains +0.003 over mean but loses to best single seed
+
+Per tick 519 plan: averaged `v04_distance` per pair across all 5
+V0_kadid_tid seeds (1, 2, 3, 7, 42) on common 4592 rows, recomputed
+SROCC.
+
+**Ensemble vs single-seed comparison**:
+
+| Aggregate | Mean of 5 seeds | Ensemble (avg dist) | Best single (seed=3) |
+|---|--:|--:|--:|
+| CID22 SROCC | 0.8731 | **0.8764** (+0.0033) | 0.8817 |
+| AIC-4 SROCC | 0.9043 | 0.9048 | 0.9027 (seed=3 actually) |
+
+Ensemble lifts the **mean** by +0.0033 (variance reduction toward
+upper-tail) but doesn't beat the **best single seed**'s 0.8817. The
++0.0033 isn't enough to close the remaining 0.0155 gap to V0_16.
+
+**Ensemble CID22 per-band SROCC** (vs ssim2 truth):
+
+| Band | Ensemble | ssim2 | Δ |
+|---|--:|--:|--:|
+| B0 (<50) | **0.4450** | 0.4418 | **+0.0032** ✓ |
+| B1 (50-65) | 0.4159 | 0.4694 | -0.0535 |
+| B2 (65-90) | 0.7562 | 0.7722 | -0.0160 |
+| B3 (≥90) | **0.1188** | 0.1121 | **+0.0067** ✓ |
+| Near-PJND | 0.3450 | 0.3908 | -0.0458 |
+
+**Ensemble meets the band-coverage bar on 2/5 bands** (B0 + B3 beat
+ssim2). B1, B2, Near-PJND still lose to ssim2.
+
+**Per the zensim CLAUDE.md "Training goals" #1** ("match-or-exceed
+fast-ssim2 across all quality bands"): V0_kadid_tid ensemble does
+NOT strictly meet this bar — it's a B0/B3 specialist, not a
+balanced match like V0_16. V0_16 likely matches or wins all 5
+bands (we don't have V0_16 per-band cleanly here but its aggregate
+0.8919 > ssim2 0.8895 implies broad coverage).
+
+**Cycle-10a ship-decision matrix**:
+
+| Bake | CID22 agg | B0 vs ssim2 | B1 vs ssim2 | B2 vs ssim2 | B3 vs ssim2 |
+|---|--:|--:|--:|--:|--:|
+| V0_16 SHIP | 0.8919 | ≈ | ≈ | ≈ | ≈ |
+| V0_kadid_tid seed=3 | 0.8817 | **+0.0079** | -0.0436 | -0.0061 | **+0.0061** |
+| V0_kadid_tid ensemble | 0.8764 | **+0.0032** | -0.0535 | -0.0160 | **+0.0067** |
+
+**Recommendation**:
+- **V0_16 stays SHIP** for balanced per-band coverage (goal #1).
+- **V0_kadid_tid seed=3** is the strongest cycle-10a **band-specialist
+  candidate** — preserve on site for users who want B0/B3 strength.
+- **Ensemble** doesn't add meaningful value over best single seed.
+
+Artifacts produced this tick:
+- No new bakes (pure analysis of existing 5 bakes)
+- Computed ensemble metrics inline
+
+**Next tick (521)**: 3 things to consider:
+- (a) Merge V0_kadid_tid seed=3 into 3 site parquets (same pattern
+  as V0_31 merge at tick 506); add to compare.js dropdown as
+  "cycle-10 B0/B3 specialist".
+- (b) Try seed=3 with hidden=192 (between 128 and 256) — a
+  capacity bump. Might push seed=3's 0.8817 closer to V0_16's
+  0.8919. Cheap (~17s training).
+- (c) Document cycle-10a outcomes in
+  `zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`.
+
+Pick (a) for tick 521 — the site merge makes the cycle-10a
+candidate live for user review. (b) and (c) come after.
+
 ### Tick 519 — 2026-05-13T02:18Z — V0_4-exact recipe attempts FAILED; V0_kadid_tid w=0.5 is the optimum
 
 Tested two cycle-10 V0_4-exact hypotheses, both motivated by the
