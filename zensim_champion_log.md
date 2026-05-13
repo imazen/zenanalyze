@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 531 — 2026-05-13T03:42Z — Smoothness audit of 4 site bakes — none hit 4.86% target
+
+Per the dual loop target ("CID22 SROCC > 0.8934 AND non-monotonic
+q-step rate < 4.86%"), audited the **non-monotonic q-step rate**
+for all 4 site bakes against the unified v15r_zenjpeg parquet
+(1,785,696 rows, 93,984 adjacent-q curves).
+
+**Tool**: `zensim/scripts/v_next/score_unified_with_bake.py` —
+pure-numpy ZNPR v2 forward pass + per-curve adjacent-q reversal
+counter.
+
+**Results**:
+
+| Bake | Non-mono rate | CID22 SROCC | Combined notes |
+|---|--:|--:|---|
+| **V0_26** | **5.48%** ← best | 0.8639 | smoothness champion |
+| V0_31 | 5.64% | 0.8628 | balanced |
+| V0_16 SHIP | 5.83% | **0.8919** | CID22 winner; smoothness ok |
+| V0_38 (cycle-10a) | **6.20%** ← worst | 0.8817 | B0/B3 specialist; rough |
+
+**Smoothness verdict**: NONE of the 4 site bakes meet the loop's
+4.86% target. The V0_2 floor at 4.86% was set when V0_2's
+recipe was rigid; the V_X (MLP) recipes naturally produce
+rougher curves because they fit data more closely.
+
+Per zensim CLAUDE.md (locked 2026-05-11), the smoothness gate
+was **raised to 6.0%** to accommodate V0_8's B1-for-smoothness
+trade. Under that revised gate:
+- V0_26: 5.48% ✓ meets 6.0%
+- V0_31: 5.64% ✓ meets 6.0%
+- V0_16 SHIP: 5.83% ✓ meets 6.0%
+- V0_38: 6.20% ✗ FAILS 6.0% (barely — by 0.20%)
+
+**V0_38 just barely fails the revised smoothness gate.** This
+adds another mark against V0_38 as a ship candidate.
+
+V0_26 is the smoothness champion (5.48% vs ssim2 GT 5.08%). It
+trades aggregate CID22 SROCC for the cleanest q-step behavior.
+
+**No new bakes produced** this tick — pure analysis over existing
+bakes. 4 non-mono numbers documented.
+
+**Updated cycle-7-through-10 ship-decision matrix** (with
+smoothness column):
+
+```
+Bake          CID22    AIC-3   AIC-4   non-mono   notes
+V0_16 SHIP    0.8919   0.799   0.918   5.83%      gold standard
+V0_26 c7      0.8639   0.803   0.910   5.48%      smoothness champion
+V0_31 c8      0.8628   0.803   0.918   5.64%      AIC-4 winner
+V0_38 c10a    0.8817   0.797   0.903   6.20%      B0/B3 specialist; just fails 6.0% gate
+```
+
+**Recovery cycle FINAL TRULY FINAL state**:
+- V0_16 SHIP unchanged
+- 3 candidate bakes on site for user toggling
+- Smoothness audit documents all 4 vs target
+- Cycle 7/8/9/9b/10/11 fully explored + falsified at recipe knob layer
+- Cycle-11 needs strategic user direction
+
+Artifacts produced this tick:
+- 4 non-mono q-step rates recorded (passive analysis)
+
+**Next tick (532)**: At this point the loop has audited every
+documented metric. Further autonomous productive work requires
+user direction. Cron will keep firing; refresh markers and
+record "no work" ticks until user provides cycle-11 direction.
+
 ### Tick 530 — 2026-05-13T03:38Z — `--ranknet-group dataset` test FALSIFIED (last recipe knob exhausted)
 
 Tested V0_kadid_tid seed=3 with `--ranknet-group dataset` (vs
