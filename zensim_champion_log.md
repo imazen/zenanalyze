@@ -5318,6 +5318,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 566 — 2026-05-13T07:19Z — Cycle-12 outcomes doc committed; 6th cycle doc closes the recovery cycle
+
+zensim commit `94592b82`. Created
+`zensim/benchmarks/cycle_12_midq_boost_outcomes_2026-05-13.md`
+(~180 lines, ~8 KB).
+
+Cycle-12 outcomes doc covers:
+- Trainer change (`--mid-q-boost` flag, zensim `4da7d1fa`)
+- Boost-factor sweep (1.0/1.5/2.0) with non-monotonic finding
+- Per-band decomposition (TRUE mechanism: trades B0 for B2/B3)
+- 2 combo tests (low-q+mid-q FALSIFIED, rank+mid-q no-op)
+- V0_38 vs mid-q-1.5 Pareto profile comparison
+- Full cycle status final table
+
+**6 cycle outcomes docs now permanent in `zensim/benchmarks/`**:
+- `cycle_7_dssim_outcomes_2026-05-12.md`
+- `cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+- `cycle_9_lowq_boost_outcomes_2026-05-13.md`
+- `cycle_9b_pair_boost_outcomes_2026-05-13.md`
+- `cycle_10_kadid_tid_outcomes_2026-05-13.md`
+- `cycle_12_midq_boost_outcomes_2026-05-13.md` ← this tick
+
+**Recovery cycle delivery inventory (FINAL)**:
+
+| Category | Count | Items |
+|---|--:|---|
+| Site bakes | 4 | V0_16 (SHIP), V0_26, V0_31, V0_38 |
+| Cycle outcomes docs | 6 | cycles 7/8/9/9b/10/12 |
+| Recovery summary docs | 1 | `recovery_cycle_summary_2026-05-13.md` |
+| Trainer flags | 4 | low-q-boost, low-q-pair-boost, tv-pairs-file, mid-q-boost |
+| Post-processor scripts | 1 | soft_iso_smooth.py |
+| Site bug fixes | 1 | V0_26 sign-flip |
+| Tick log entries | **566** | this log |
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_12_midq_boost_outcomes_2026-05-13.md`
+  (committed at zensim `94592b82`, ~180 lines)
+
+**Cycle TRULY structurally final.** All productive autonomous
+work documented permanently in zensim/benchmarks/ + zenanalyze
+recovery_summary. Future agents resume from these 8 docs.
+
+**Next tick (567)**: cron continues; refresh markers only.
+
 ### Tick 565 — 2026-05-13T07:16Z — Mid-q-boost per-band profile: trades B0 for B2/B3 (different from V0_38)
 
 Per-band mean CID22 SROCC across 5 mid-q-1.5 seeds vs 8 baseline:
