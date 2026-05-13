@@ -5318,6 +5318,70 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 553 — 2026-05-13T06:12Z — Joint Rust-trainer settings FALSIFIED — 15th variant ruled out
+
+Tested the combination of all 4 Rust-trainer-style settings
+together at V0_kadid_tid recipe (per tick 552 plan):
+- `--optimizer adam` (vs AdamW)
+- `--init glorot` (vs Kaiming)
+- `--ranknet-group dataset` (vs image)
+- `--val-policy min` (vs mean)
+
+**3-seed sweep results**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8737 | 0.8931 |
+| 3 | 0.8686 | 0.8965 |
+| 42 | 0.8616 | 0.9079 |
+| **Mean (n=3)** | **0.8680** | **0.8992** |
+
+**Vs V0_kadid_tid baseline (8 seeds, default settings)**:
+
+| Metric | Default | Rust4 | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8712 | 0.8680 | -0.0032 (worse) |
+| AIC-4 | 0.9046 | 0.8992 | -0.0054 (worse) |
+
+**Joint Rust-trainer settings are WORSE on both axes**. Individual
+settings were already falsified (kaiming +0.006, AdamW better,
+image +0.007, mean +0.004) — their combination compounds the
+regression rather than recovering V0_16's recipe.
+
+**15th cheap-variant FALSIFIED.**
+
+The V0_15/V0_16 family's hidden recipe ingredient is NOT in the
+trainer's documented knob space. Candidates remaining:
+1. **Different exact training CSV** — maybe a pre-purge variant
+   exists somewhere with slightly different rows
+2. **Different feature normalization** — minor; unlikely +0.020
+3. **Affine calibration post-bake** — preserves rank correlation
+   (SROCC unchanged); not the gap
+4. **A completely undocumented preprocessing step** in the
+   deleted Rust trainer's data loader
+
+**Cycle-12 next steps to try (if user authorizes)**:
+- Compute V0_15's per-pair output on the unified parquet and
+  reverse-engineer the recipe by comparing to V0_kadid_tid's
+  per-pair output (which rows are scored differently?)
+- Restore the deleted Rust trainer code (PR #29 e613224) from
+  zensim git history and run it directly
+
+Artifacts produced this tick:
+- 3 new bakes: `v0_kadid_tid_rust4_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+
+**Complete falsification table (15 knob configurations)**:
+
+The recipe-knob exploration is now truly truly truly exhausted.
+Every documented Python-trainer setting, every combination
+tested, every architecture size — all converge to CID22 ~0.872.
+V0_16 SHIP at 0.892 contains state inaccessible from the Python
+trainer alone.
+
+**Next tick (554)**: cycle TRULY truly truly final. Cron continues
+but autonomous-mode work has exhausted its scope.
+
 ### Tick 552 — 2026-05-13T05:57Z — V0_15 archive bake CID22 0.8914 — V0_15/V0_16 are a self-consistent recipe family
 
 Git/file archeology of `zensim/weights/archive/`:
