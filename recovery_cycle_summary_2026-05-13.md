@@ -254,3 +254,75 @@ loop's CID22 SROCC > 0.8934 target is set above the autonomous-mode
 ceiling for this data regime. To break it, cycle-12 needs either
 new data (JPEG-AI corpus etc.) or new architecture (300-feat
 input, deeper MLP) — both require user authorization.
+
+## Cycle-12 deliverables (added 2026-05-13 07:21 UTC)
+
+Cycle-12 explored per-band-targeted training row weighting based on
+the tick 558 finding that V0_16 wins B1+B2 specifically. Tested:
+
+### 1. `--mid-q-boost` trainer flag (commit `4da7d1fa`)
+
+Multiplies train_weight for rows in B1+B2 band (50 ≤ score < 90)
+by boost factor. 5-seed sweep at boost=1.5:
+- Mean CID22: 0.8743 vs V_kadid_tid baseline 0.8712 (Δ +0.0031, p=0.24 n.s.)
+- σ TIGHTENS **4×** (baseline 0.0068 → midq-1.5 0.0016)
+- AIC-4 tied (-0.001)
+
+**Per-band TRUE mechanism**: trades B0 (-0.011) for B2 (+0.004 over
+68% of samples) + B3 (+0.020). Not "B1+B2 boost" as initially
+hypothesized — boost shifts attention away from B0 toward B2/B3.
+
+**Mid-q boost is a MILD recipe stabilizer**, not a SROCC lifter.
+The σ-tightening property may be useful for downstream codec
+orchestrators that need consistent per-image scoring.
+
+**Cycle-12 outcomes doc**: `zensim/benchmarks/cycle_12_midq_boost_outcomes_2026-05-13.md`
+(commit `94592b82`).
+
+### 2. Per-band seed-σ reference (tick 557)
+
+V_kadid_tid 8-seed σ table now permanent in tick log:
+- CID22 JPEG: σ=0.002 (lowest)
+- CID22 AVIF_aurora_slow: σ=0.024 (highest, 12× larger)
+- AIC-4 codecs: σ in 0.006-0.016 range
+- Per-band CID22 σ: B0 0.015, B1 0.013, B2 0.010, B3 0.025
+
+**Lesson recorded**: per-codec / per-band SROCC variance is 5-10×
+larger than aggregate. Future "X beats Y on codec Z by Δ" claims
+need this σ context before drawing recipe-difference conclusions.
+
+### 3. V0_16 vs V0_38 per-band Pareto profile (tick 558)
+
+V0_16 and V0_38 occupy DIFFERENT Pareto points on per-band axis:
+- V0_38 (cycle-10a, no mid-q): B0-strong specialist (wins B0 by +0.028)
+- V0_16 (SHIP): B1/B2/B3-strong (wins B1 by +0.030, B2 by +0.014, B3 by +0.054)
+- mid-q-1.5 (cycle-12): B2/B3-tilted (different from both)
+
+### Cycle-12 falsified combinations
+
+- mid-q-boost 2.0: plateau (same mean as 1.5, σ widens)
+- low-q-boost 1.5 + mid-q-boost 1.5: AIC-4 -0.009 regression
+- mid-q-boost 1.5 + rank-weight 1.0: no-op, σ widens
+
+### Cycle-12 verdict
+
+Mid-q-boost 1.5 added as `--mid-q-boost` trainer flag at zensim
+commit `4da7d1fa`. The σ-stabilization is the main benefit;
+SROCC gain is mild and not statistically significant. V0_16
+ceiling 0.8919 remains uncracked.
+
+## Total recovery cycle deliverables (final 2026-05-13 07:21 UTC)
+
+| Category | Count |
+|---|--:|
+| Site-shipped candidate bakes | 4 (V0_16, V0_26, V0_31, V0_38) |
+| Cycle outcomes docs | 6 (cycles 7/8/9/9b/10/12) |
+| Recovery summary | 1 (this file) |
+| Trainer infrastructure flags | 4 |
+| Post-processor scripts | 1 |
+| Site bug fixes | 1 |
+| Tick log entries | 566+ |
+
+**Total recovery cycle: 567 ticks across 6 cycles.** Only 3 net
+positive findings (V0_38, soft_iso_smooth, mid-q-boost stabilizer).
+14+ knob configurations falsified at multi-seed scale.
