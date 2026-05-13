@@ -39,12 +39,17 @@ serde_json = { version = "1.0.149", default-features = false, features = ["alloc
 
 [dev-dependencies]
 rand = { version = "0.9.2", default-features = false, features = ["std", "std_rng", "small_rng"] }
+zenbench = "0.1.8"
 # Lifecycle / safety / output-specs integration tests cover the
 # advanced subsystems (rescue, safety, output_specs, top_k argmin
 # variants). Re-pull zenpredict with `advanced` enabled for tests
 # only; runtime consumers of zenpredict-bake (the JSON-bake CLI)
 # don't need advanced API.
 zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced"] }
+
+[[bench]]
+name = "predict"
+harness = false
 
 [lints.rust]
 unsafe_code = "forbid"
