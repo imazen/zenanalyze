@@ -5318,6 +5318,92 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 524 — 2026-05-13T02:43Z — Cycle-10 ingredient hunt: 4 candidates ruled out; gap remains structural
+
+Hunted for V0_16's missing training ingredients. Key discovery:
+**our `safe_synth_clean_features_with_dssim_qc.csv` already IS the
+144,791-row V0_16-clean dataset** (just renamed with dssim/qc columns
+added). So training data was never the issue.
+
+**Ingredient eliminations this tick**:
+
+| Candidate | Test | Result |
+|---|---|---|
+| 144k purged safesyn CSV | already using (just renamed) | not the gap |
+| Auto-built TV pairs | log shows 104,736 pairs built per run | not the gap |
+| `konjnd_full_features.csv` (vs aligned) | V0_kadid_tid seed=3 + konjnd_full | **CATASTROPHIC** CID22 0.5905, AIC-4 0.7430 |
+| `--val-policy min` (vs mean) | V0_kadid_tid seed=3 + min | -0.004 CID22 (worse) |
+
+**Found candidate files**:
+- `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_perceptual_clean.csv`
+  — 144,791 rows, raw pairs schema (matches V0_16 doc exactly)
+- `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv` — 205,654
+  pre-built TV pairs (the V0_16-specific TV file). NOT used by our
+  trainer because auto-build path is active.
+- `/tmp/zensim_loop/konjnd_full_features.csv` — alternative KonJND
+  variant with raw-score targets. CATASTROPHIC when used in place
+  of `konjnd_aligned` (so aligned IS the right one).
+
+**Cycle-10 V0_16-reproduction status**:
+- Training data: ✓ on V0_16's 144k clean
+- TV pairs: ✓ auto-built from synth rows (104k pairs)
+- KonJND data: ✓ aligned variant (konjnd_full is wrong)
+- KADID + TID supervision: ✓ added per V0_4 spec
+- Hidden=128, TV=20, LR=3e-3 const, mse_rank, rank_weight=0.5: ✓ V0_4 documented
+- val_policy: tested mean+min, mean wins by 0.004
+
+**Yet V0_16 SHIP still leads by +3.0σ on CID22**. The remaining gap
+is NOT in any documented ingredient we've reproduced. Possibilities:
+
+1. **Concordance filter (`ssim2_butter`)** — requires `score_ssim2`
+   + `score_butteraugli_max` columns in safesyn. Our CSV doesn't have
+   them. To test: join the 144k clean CSV with metric values from
+   unified parquets (preserving CID22-purge), then run with filter.
+   Multi-tick data-pipeline work.
+2. **External pre-built TV pairs file** — V0_16 may have used the
+   205,654-row `combined_purged_tv_pairs_bands.tsv` instead of
+   auto-built. To test: add `--tv-pairs-file` flag to trainer,
+   load TSV, pass as np.array to train(). Single-feature work.
+3. **Affine calibration post-bake** — doesn't change SROCC, just
+   MAE. Not the gap.
+4. **Different feature normalization** — minor; unlikely to give
+   +0.020 SROCC.
+5. **Different MLP init seed convention** — different `--init`
+   flag value? Tested `kaiming` (default); V0_16 might have used
+   `glorot`.
+
+Artifacts produced this tick:
+- 2 new bakes: `v0_kadid_tid_konjndfull_seed3` and
+  `v0_kadid_tid_valpolicymin_seed3` (both worse than baseline)
+- 2 per-pair CSVs, 2 eval logs
+
+**Cycle status update**:
+
+Cycle-10a (KADID+TID supervision): VERIFIED Pareto +0.0128 mean
+CID22 over V0_31. V0_38 shipped to site.
+
+Cycle-10b/c/d/e (deeper hypotheses): all eliminated or blocked.
+
+**Cycle-10 is at the end of cheap exploration.** V0_kadid_tid is
+the recovered cycle-10 candidate; closes the V0_16 gap by ~62%
+(V0_31 → V0_38 covers +0.013 of the 0.032 gap V0_31 vs V0_16).
+
+**Next tick (525)**: Two options:
+- (a) Implement `--tv-pairs-file` flag + test the 205k pre-built
+  V0_16 TV pairs. Quick implementation (~10 lines of np.loadtxt
+  + tv_pairs_train assignment), then single training run.
+  Probability of significant gain: low (~20%) since our auto-built
+  TV pairs are likely equivalent.
+- (b) Test `--init glorot` vs current `kaiming`. Single CLI flag.
+  Probability of gain: low (~10%) but cheap.
+- (c) Document cycle-10 as completed and pivot. Accept that V0_38
+  is the best we can do without joining synth CSV with metric
+  columns (concordance filter path).
+
+Pick (a) for tick 525 — small implementation that exhausts the
+last documented V0_16 ingredient (external TV pairs). After that,
+cycle-10 is fully explored.
+
 ### Tick 523 — 2026-05-13T02:36Z — V0_kadid_tid 8-seed tail scan FALSIFIES "V0_16 is upper-tail" hypothesis
 
 Trained + baked + evaluated 3 more seeds (100, 200, 1000) at
