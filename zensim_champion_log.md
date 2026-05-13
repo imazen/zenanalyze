@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 515 — 2026-05-13T01:48Z — Cycle-9b infrastructure committed + outcomes doc; cycle-10c blocked
+
+Two zensim commits:
+- `a700b10f` — trainer change: `--low-q-pair-boost` flag wired
+  through `ranknet_loss()` + CLI + TrainConfig
+- `a855419f` — cycle-9b outcomes doc
+  (`benchmarks/cycle_9b_pair_boost_outcomes_2026-05-13.md`, ~180
+  lines) — captures 6-seed FALSIFIED result + cycle-9b
+  conjecture-refinement lesson + cycle-10 options
+
+**Cycle-10c attempted but blocked**: The `--concordance-filter
+ssim2_butter` mechanism requires `score_ssim2` + `score_butteraugli_max`
+columns in the training data, but the synth CSV
+`safe_synth_clean_features_with_dssim_qc.csv` doesn't have them.
+The columns DO exist in the unified parquets at
+`/mnt/v/zen/zensim-training/2026-05-07/unified/*.parquet`, but
+those predate the 2026-05-12 CID22 contamination purge — using
+them naively would inject CID22 leak.
+
+Cycle-10c would require a preprocessing pass to:
+1. Join the synth CSV with metric columns from a purge-aware
+   metric source
+2. OR rebuild safesyn from a parquet path that doesn't carry
+   contamination
+3. Then apply `--concordance-filter ssim2_butter`
+
+This is a non-trivial data-pipeline task (multi-tick), needs
+user direction. Skipping for this tick.
+
+**Cycle-7/8/9/9b ALL CLOSED**. The CID22 SHIP ceiling at 0.8919
+(V0_16) is structurally robust to every recipe lever tested:
+- dssim co-training (cycle-7) ❌
+- cosine LR (cycle-7) ❌
+- smaller LR (cycle-7) ❌
+- KonJND weight tuning (cycle-8) — partial (AIC-4 win only)
+- Low-q row-weight boost (cycle-9) ❌
+- Low-q pair-resampling boost (cycle-9b) ❌
+
+Artifacts produced:
+- `/home/lilith/work/zen/zensim/scripts/v_next/train_v_next_mlp.py`
+  (committed at zensim `a700b10f`)
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_9b_pair_boost_outcomes_2026-05-13.md`
+  (committed at zensim `a855419f`)
+
+**Next tick (516)**: The autonomous-experiment trajectory has
+exhausted the cheap-lever space. Useful focused work:
+- (a) **V0_31 5-seed baseline confirmation** — currently we have
+  n=2 (V0_31 + V0_32) for the boost-1.0 baseline. Adding 3 more
+  seeds {2, 3, 7} would give n=5 to match cycle-9/9b sweep size,
+  enabling cleaner Welch's tests. Cheap (~50s).
+- (b) **Investigate whether V0_16 is itself a seed outlier**. The
+  V_X cycle-7/8/9/9b plateau mean is ~0.86 with σ~0.005; V0_16's
+  0.8919 is 6σ above plateau mean. Either V0_16 used a different
+  recipe (KADID/TID supervision?) OR is itself a lucky outlier.
+  Run 5 seeds of "V0_31 recipe minus KonJND" to map the no-KonJND
+  baseline distribution. Cheap (~50s).
+- (c) **Document cycle-7/8/9/9b summary in zenanalyze** — single
+  high-level summary doc in `zenanalyze/` pointing to the cycle-7,
+  cycle-8, cycle-9, cycle-9b docs in zensim. Useful for resuming
+  later.
+
+Pick (b) for tick 516 — directly tests the "is V0_16 a seed
+outlier" hypothesis cheaply. If V0_31-minus-KonJND mean ~0.85 and
+V0_16 0.8919 is far above the distribution, V0_16 had something
+extra (KADID/TID mixed supervision suspected). If V0_31-minus-KonJND
+sometimes hits 0.89+, then V0_16 might just be lucky and the
+plateau is wider than we thought.
+
 ### Tick 514 — 2026-05-13T01:37Z — Cycle-9b FALSIFIED by 6-seed sweep — same trap as cycle-9
 
 5 more seeds (2, 3, 7, 42, 100) at pair-boost 2.0 trained + baked +
