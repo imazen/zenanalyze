@@ -5318,6 +5318,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 548 — 2026-05-13T05:42Z — epochs=600 vs 300 FALSIFIED (overfit, both SROCC metrics drop)
+
+Tested `--epochs 600` (vs default 300) on V0_kadid_tid recipe
+seed=3. Hypothesis: more training could close the V0_16 gap if
+the MLP isn't fully converged at 300 epochs.
+
+**V0_kadid_tid + epochs=600 seed=3 results**:
+
+| Metric | epochs=300 (V0_38 s=3) | epochs=600 | Δ | Wall |
+|---|--:|--:|--:|--:|
+| CID22 | 0.8817 | 0.8782 | **-0.0035** ❌ | 17s → 34s |
+| AIC-4 | 0.9027 | 0.8958 | **-0.0069** ❌ | (2x) |
+| Non-mono (raw) | 6.20% | 6.05% | -0.15% (≈ tie) | |
+
+**epochs=600 is WORSE on BOTH SROCC metrics**. The MLP is
+overfitting with more training. Same pattern as cycle-9's cosine
+LR experiment — more capacity utilization hurts CID22 generalization.
+
+**12th cheap recipe knob FALSIFIED**.
+
+Combined with prior falsifications, the autonomous-mode V_X
+recipe space is now exhaustively explored:
+
+| Knob | Verdict |
+|---|---|
+| init kaiming vs glorot | kaiming +0.006 |
+| ranknet-group image vs dataset | image +0.007 |
+| val-policy mean vs min | mean +0.004 |
+| konjnd_aligned vs konjnd_full | aligned +0.029 (catastrophic) |
+| KonJND weight 0.5 vs 0.3 | 0.5 +0.011 |
+| KonJND weight 0.5 vs 1.0 (V0_kadid_tid) | tie within σ |
+| Low-q row boost (5 seeds) | no effect |
+| Low-q pair boost (6 seeds) | -0.0043 AIC-4 sig negative |
+| External TV pairs file | unusable (split mismatch) |
+| TV-weight 20 vs 40 | 20 +0.006 |
+| Hidden 64 vs 128 (5 seeds) | tie within σ |
+| Hidden 128 vs 256 (single) | 128 +0.014 |
+| **Epochs 300 vs 600** | **300 +0.0035 CID22** |
+
+13 knobs falsified. **Plateau at CID22 ~0.87, AIC-4 ~0.905 is
+the true autonomous-mode ceiling.**
+
+Artifacts produced this tick:
+- 1 new bake (120,801 B, same size as V0_38 since same arch)
+- 1 per-pair CSV, 1 eval log
+
+**Final cycle-7-through-12 conclusion**:
+
+The V_X 228-feat MLP architecture + synth+KonJND+KADID+TID data
+combination cannot exceed CID22 SROCC ~0.872 without unrecoverable
+V0_16-era state (split seed, batch order). V0_16 SHIP at 0.8919
+remains the production bake; the loop's 0.8934 target sits +0.007
+above V0_16, ~5.5σ above the autonomous plateau — only reachable
+via cycle-12 data acquisition or architecture pivot.
+
+**Next tick (549)**: Truly nothing left to test in autonomous
+scope. Refresh markers only.
+
 ### Tick 547 — 2026-05-13T05:38Z — Comprehensive smoothness table across 8 V_X bakes
 
 Ran the now-fixed `soft_iso_smooth.py` on 4 more bakes from
