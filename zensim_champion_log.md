@@ -5318,6 +5318,26 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 616 — 2026-05-13T10:59Z — V0_16 reproduction at epoch 160; full md5s captured for upcoming bit-compare
+
+V0_16 reproduction (background `bnv365vho`) at epoch 160, 867s wall.
+All 15 sampled epochs (0/10/20/30/40/50/60/70/80/90/100/110/120/130/
+140/150/160) bit-match V0_16 ship's training log including ep140's
+best val_mean=0.9403. ~3 min to early-stop at ep190.
+
+**Full md5s for upcoming bit-compare**:
+- V0_16 ORIGINAL raw bake: `b3f5fc596f8c4f3b2792295823549c7b`
+  (at `/tmp/zensim_loop/v0_16_purged_tv20_seed1.bin`, 119,812 bytes,
+  dated May 12 02:27)
+- V0_16 SHIP (calibrated): `baf3fdcb194e59df4bb4967eded824ed`
+  (at `zensim/weights/v0_16_2026-05-12.bin`)
+- V0_15 SHIP (calibrated, ref): `73d5e418779bdf3de65eec46cdb7f721`
+
+If our tick-612 reproduction produces md5 `b3f5fc59…` for the raw
+bake → 100% bit-identical reproduction confirmed. After applying
+V0_16's α=28.0366 β=-5.0738 affine calibration, md5 should be
+`baf3fdcb…` for the calibrated.
+
 ### Tick 615 — 2026-05-13T10:55Z — V0_16 reproduction at epoch 110 — 11 sampled epochs all bit-match (ep110 val_mean=0.9313 exact)
 
 V0_16 reproduction (background `bnv365vho`) at epoch 110, 598s wall.
