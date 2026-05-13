@@ -5318,6 +5318,53 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 565 — 2026-05-13T07:16Z — Mid-q-boost per-band profile: trades B0 for B2/B3 (different from V0_38)
+
+Per-band mean CID22 SROCC across 5 mid-q-1.5 seeds vs 8 baseline:
+
+| Band | baseline (n=8) | mid-q-1.5 (n=5) | Δ | Notable |
+|---|--:|--:|--:|---|
+| B0 (<50) | 0.4342 | 0.4228 | **-0.0114** | mid-q LOSES B0 |
+| B1 (50-65) | 0.4072 | 0.4086 | +0.0014 | tied |
+| B2 (65-90) | 0.7484 | 0.7527 | +0.0044 | small gain (68% of samples) |
+| B3 (≥90) | 0.0952 | 0.1158 | **+0.0205** | gain (small-n) |
+| Near-PJND | 0.3394 | 0.3466 | +0.0072 | small gain |
+
+**Mid-q boost's TRUE mechanism**: it doesn't boost B1/B2 uniformly
+(as hypothesized from tick 558). Instead it trades B0 (-0.011) for
+B2 (+0.004 over 68% of samples) + B3 (+0.020 over small-n).
+The aggregate +0.003 CID22 gain is a sample-weighted average:
+- B0 loss × 324 rows × 0.011 ≈ -3.6 contribution
+- B2 gain × 2915 rows × 0.004 ≈ +11.7 contribution
+- Plus smaller B1/B3/Near-PJND adjustments
+- Net: positive on aggregate, but B0 actually regresses
+
+**vs V0_38 (cycle-10a, "B0/B3 specialist")** per-band:
+
+| Band | V0_38 (seed=3) | mid-q-1.5 (seed=1) | Specialty |
+|---|--:|--:|---|
+| B0 | **0.450** | 0.437 | V0_38 |
+| B1 | 0.426 | 0.418 | tied |
+| B2 | **0.766** | 0.753 | V0_38 still wins |
+| B3 | 0.118 | 0.116 | tied |
+| Near-PJND | 0.349 | 0.355 | mid-q slight |
+
+V0_38 has STRONGER per-band on most bands at seed=3 (single seed
+upper-tail), but mid-q-1.5 5-seed MEAN profile shifts toward
+B2/B3 strength on average across the distribution.
+
+**Useful documented finding**: mid-q-boost may be useful for
+downstream pipelines that prioritize medium-high quality ranking
+(B2/B3 = 65+ score range, e.g., near-PJND threshold setting in
+production codec orchestrators) — at the cost of B0 (low-q) accuracy.
+
+Artifacts produced this tick:
+- Per-band mean comparison (5 mid-q seeds vs 8 baseline seeds)
+- Profile differentiation: V0_38 (B0-strong, mid-q-1.5 (B2/B3-tilted)
+
+**Next tick (566)**: Cycle-12 fully characterized. No remaining
+cheap autonomous probes. Refresh markers until user direction.
+
 ### Tick 564 — 2026-05-13T07:09Z — rank-weight=1.0 + mid-q-1.5 also a no-op (17th variant)
 
 Tested rank-weight=1.0 (vs default 0.5) combined with mid-q-1.5
