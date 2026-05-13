@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 539 — 2026-05-13T05:05Z — CID22 soft-iso doesn't help SROCC (too sparse to matter)
+
+Tested whether soft-iso (directional, auto-detected from ssim2
+slope per curve) improves the **CID22 SROCC** target on the site
+parquet zensim columns.
+
+**Result**:
+
+| Bake | CID22 BEFORE | AFTER soft-iso | Δ | Corrections |
+|---|--:|--:|--:|--:|
+| V0_16 | 0.8919 | 0.8919 | -0.0001 | 18 |
+| V0_31 | 0.8628 | 0.8628 | +0.0001 | 19 |
+| V0_38 | 0.8817 | 0.8818 | +0.0001 | 26 |
+| V0_26* | 0.8639 | **0.1148** ❌ | -0.7491 | 3,859 |
+
+*V0_26 column appears to have inverted sign convention in the
+site parquet (3,859 corrections vs <30 for others suggests
+auto-direction picked the wrong way). The earlier rank-preserving
+merge at tick 497 may have used a different flip than V0_31/V0_38.
+TODO: re-check V0_26 site column.
+
+**Why CID22 soft-iso fails to help**:
+
+CID22 has only **~10 rows per (ref, codec) curve** on average
+(4,292 rows / 433 curves). With so few points per curve, adjacent-q
+violations are rare — only 18-26 corrections out of 4,292 rows for
+V0_16/V0_31/V0_38. Not enough volume to materially shift cross-pair
+SROCC ranks.
+
+Soft-iso shines on the **unified parquet** (1.78M rows, 93,984
+curves with ~18 q-points each) where ~138k corrections meaningfully
+fix within-curve smoothness. CID22 is too sparse per-curve.
+
+**Cycle-11 option-e closure**:
+- ✅ Works on unified parquet (codec-sweep evaluation): 0% non-mono, SROCC preserved
+- ❌ Doesn't help CID22 SROCC: too sparse, ~0.0001 lift only
+- ⚠️ V0_26 column needs re-check (3,859 spurious corrections)
+
+**The loop's CID22 > 0.8934 target REMAINS UNMET.** Soft-iso
+isn't the lever for CID22 SROCC. It's the lever for the
+non-monotonic q-step rate on codec-sweep evaluations.
+
+Artifacts produced this tick:
+- Pure analysis script — no committed artifact
+- V0_26 column flag for follow-up audit
+
+**Recovery cycle SHIPPED artifacts** (final inventory):
+
+| Artifact | Path | Status |
+|---|---|---|
+| V0_26 cycle-7 candidate | site parquet column | LIVE |
+| V0_31 cycle-8 candidate | site parquet column | LIVE |
+| V0_38 cycle-10a candidate | site parquet column | LIVE |
+| 5 cycle outcomes docs | `zensim/benchmarks/cycle_*.md` | committed |
+| Recovery summary doc | `zenanalyze/recovery_cycle_summary_2026-05-13.md` | committed |
+| `--low-q-boost` flag | trainer | committed `4b998258` |
+| `--low-q-pair-boost` flag | trainer | committed `a700b10f` |
+| `--tv-pairs-file` flag | trainer | committed `c4cacfba` |
+| `soft_iso_smooth.py` | `zensim/scripts/v_next/` | committed `e232cefe` |
+
+**Total cycle-11 contributions**: 4 candidate bakes, 5 cycle docs,
+1 summary doc, 3 trainer flags, 1 post-processor script.
+
+**Next tick (540)**: Re-test V0_26 with the correct sign convention
+on the CID22 parquet. If it works, the soft-iso pattern is uniform
+across all 4 site bakes; if not, V0_26 has a deeper merge issue
+worth flagging.
+
 ### Tick 538 — 2026-05-13T04:50Z — V0_16 sign re-test CONFIRMS unanimous soft-iso win; script committed
 
 Re-tested V0_16 SHIP with both sign conventions:
