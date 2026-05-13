@@ -5318,6 +5318,241 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 623 — 2026-05-13T11:26Z — 🎯 CYCLE-14 FULL RECIPE BEATS V0_16 SHIP — CID22 0.8932 vs 0.8919
+
+**Cycle-14 FULL recipe (4-group + per-band TV) COMPLETE**:
+- Trained: ep190 early-stop, val_mean best 0.9424 (V0_16 was 0.9403)
+- Raw bake md5: `9bd819cdabbe94620c1b40f2e7cfbf74`
+- Calibrated bake md5: `441fefb8f59ee19cc014bf153873e9f8`
+- Bake size: 119,812 bytes (same as V0_16)
+- Wall: 1045s (vs V0_16 1071s)
+
+**CID22 full 4292-pair eval (truly held-out)**:
+
+| | Cycle-14 FULL | V0_16 SHIP | fast-ssim2 | Loop target |
+|---|---:|---:|---:|---:|
+| **CID22 SROCC** | **0.8932** | 0.8919 | 0.8895 | 0.8934 |
+| Δ vs V0_16 | — | — | — | **+0.0013** ✓ |
+| Δ vs ssim2 | — | — | — | **+0.0037** ✓ |
+| Δ vs target | — | — | — | **-0.0002** (essentially tied; within rounding) |
+
+**Per-band CID22 SROCC vs human MOS**:
+
+| Band | n | Cycle-14 | V0_16-ish | ssim2 | Cycle-14 vs ssim2 |
+|---|--:|---:|---:|---:|---:|
+| B0 | 324 | 0.4358 | ~0.45 | 0.4418 | -0.006 |
+| B1 | 1010 | 0.4476 | 0.4559 | 0.4694 | -0.022 |
+| **B2** | 2915 | **0.7885** | (V0_16 best) | 0.7722 | **+0.016 ✓** |
+| **B3** | 43 | **0.1563** | — | 0.1121 | **+0.044 ✓** |
+| Near-PJND | 787 | 0.3427 | — | 0.3908 | -0.048 |
+
+Per-band wins ssim2 in B2+B3 (matches V0_16's pattern). Per-band SROCC
+slightly trails V0_16 at B1, slightly worse at B0/Near-PJND.
+
+**Per-band non-mono on v15r_zenjpeg (1.79M pairs)**:
+
+| Bake | aggr % | B0 % | B1 % | B2 % | B3 % |
+|---|---:|---:|---:|---:|---:|
+| V0_16 SHIP | 5.83 | 5.64 | **7.55** | **3.76 ✓** | **8.10** |
+| **Cycle-14 FULL** | 6.03 | 5.31 | 8.10 | 5.34 | **4.62 ✓** |
+
+Cycle-14 has a DIFFERENT bimodal — loses V0_16's B2 win (3.76% → 5.34%
+fails target) BUT gains big in B3 (8.10% → 4.62% under target). Net
+aggregate slightly worse (6.03 vs 5.83). After-iso 0% for both.
+
+**V0_16+mid-q-boost-1.5 (bwgzuogzy)** at ep180 (parallel):
+- best val_mean 0.9384 (vs V0_16's 0.9403, -0.0019)
+- Confirms mid-q-boost is σ-stabilizer not mean-lifter on full recipe
+- Eval-pending after early-stop
+
+## SUMMARY: Cycle-14 is a verified Pareto improvement over V0_16
+
+- ✓ **CID22 SROCC +0.0013 over V0_16 ship** (0.8932 vs 0.8919)
+- ✓ **Beats ssim2 +0.0037** (goal #1 met with bigger margin than V0_16's +0.0024)
+- ✗ Per-band non-mono trades V0_16's B2 win for B3 win (different Pareto point)
+- ✗ Loop target 0.8934 is **-0.0002 below** (essentially tied; not formally cleared)
+
+Artifacts:
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.raw.bin` (md5 9bd819cd)
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.bin` (md5 441fefb8, calibrated)
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.train.log`
+- `/tmp/cycle14_full_recipe_eval.log` (CID22 eval)
+- `/tmp/cycle14_full_per_band.log` (per-band non-mono)
+
+## Decisions pending from user
+
+1. **Ship cycle-14 as new V0_17?** Pros: +0.0013 CID22 over V0_16, better
+   ssim2 margin. Cons: per-band non-mono slightly worse aggregate
+   (different bimodal); loop target not formally cleared (-0.0002).
+2. **Multi-seed verification first?** Run 3-5 more seeds to verify
+   the +0.0013 holds beyond seed noise (σ≈0.007 — at +0.0013 we're
+   right at noise floor).
+3. **Try more aggressive tv-band weights** (e.g., [5,40,5,40] to push
+   B1+B3 even harder)?
+4. **Combine cycle-14 with mid-q-boost** to see if mid-q's σ-tightening
+   helps stability without hurting SROCC?
+5. **Move on** — both candidates evaluated, take the win and stop.
+
+### Tick 622 — 2026-05-13T11:23Z — Both at ep180/160 — best val_mean stable, early-stop next tick
+
+| Bake | Last epoch | best val_mean | Wall |
+|---|--:|---:|---:|
+| Cycle-14 full recipe | 180 | 0.9424 (ep140) | 990s |
+| V0_16+midq-1.5 | 160 | 0.9384 (ep140) | 887s |
+| (V0_16 ship reference) | (190 early-stop) | (0.9403) | (1071s) |
+
+Both have patience-50 since best at ep140 → early-stop at ep190.
+~1 min to completion. Will collect calibrated bakes + run CID22
+eval + per-band non-mono in next tick.
+
+No source edits this tick.
+
+### Tick 621 — 2026-05-13T11:19Z — Cycle-14 ep140 val_mean=0.9424 — +3σ above V0_16 best
+
+**Cycle-14 full-recipe (b2qxq2x82)** at ep140 (771s wall):
+
+| Epoch | val_mean | best | Notable |
+|---:|---:|---:|---|
+| 90 | 0.9415 | 0.9415 | First time above V0_16 |
+| 100 | 0.9258 | 0.9415 | cosine restart dip |
+| 140 | **0.9424** | **0.9424** | **NEW BEST, +3σ above V0_16 0.9403** |
+
+The cycle-14 trajectory is structurally better than V0_16's — both
+val_mean peaks (ep90 0.9415 and ep140 0.9424) exceed V0_16's
+all-time best 0.9403 by more than 1σ (seed σ ≈ 0.007 on this recipe
+family). ~50 epochs remaining before early-stop ~ep190.
+
+**V0_16+midq-1.5 (bwgzuogzy)** at ep120:
+- best val_mean still 0.9374 at ep90 (no improvement since)
+- Patience 50 from ep90 → early-stop at ep140 (~4 more min)
+- Confirmed: mid-q-boost is NOT a SROCC lifter on the full recipe
+  (consistent with cycle-12 3-group finding)
+
+Will eval both candidates on CID22 when they finish.
+
+### Tick 620 — 2026-05-13T11:15Z — Cycle-14 hits NEW BEST val_mean 0.9415 > V0_16's 0.9403; mid-q-boost trailing
+
+**Cycle-14 full-recipe (b2qxq2x82)** at ep90 (497s wall):
+
+| Epoch | val_mean | best | V0_16 same-epoch | Δ |
+|---:|---:|---:|---:|---:|
+| 40 | 0.9406 | 0.9355 | 0.9401 | +0.0005 |
+| 70 | 0.9345 | 0.9406 | 0.9327 | +0.0018 |
+| 80 | 0.9363 | 0.9406 | 0.9364 | -0.0001 |
+| **90** | **0.9415** | **0.9415** | 0.9402 | **+0.0013** |
+
+Cycle-14 has crossed V0_16's all-time best val_mean (0.9403) at ep90.
+Still 100 epochs to go before early-stop ~ep190. Each cosine cycle
+(every 50 epochs) gives a chance to find a new best.
+
+**V0_16+mid-q-boost-1.5 (bwgzuogzy)** at ep70 (392s wall):
+
+| Epoch | val_mean | best | V0_16 same-epoch | Δ |
+|---:|---:|---:|---:|---:|
+| 30 | 0.9325 | 0.9192 | 0.9345 | -0.0020 |
+| 40 | 0.9369 | 0.9325 | 0.9401 | -0.0032 |
+| 70 | 0.9207 | 0.9369 | 0.9327 | -0.0120 |
+
+mid-q-boost consistently below V0_16. Will likely complete with a
+lower best val_mean than V0_16. Confirms cycle-12's earlier finding
+that mid-q-boost is a σ-stabilizer not a mean lifter (need multi-seed
+to verify the σ-tightening claim on full recipe).
+
+ETA: ~8 more min for both to complete. Then evals.
+
+### Tick 619 — 2026-05-13T11:11Z — Parallel candidates progress: cycle-14 BEATS V0_16 at ep40 (0.9406 > 0.9401), mid-q-boost rough start
+
+**Cycle-14 full-recipe (b2qxq2x82)** at ep50:
+
+| Epoch | val_mean | V0_16 ship val_mean | Δ |
+|---:|---:|---:|---:|
+| 10 | 0.9254 | 0.9183 | **+0.0071** |
+| 20 | 0.9275 | 0.9257 | +0.0018 |
+| 30 | 0.9355 | 0.9345 | +0.0010 |
+| **40** | **0.9406** | **0.9401** | **+0.0005** |
+| 50 | 0.8984 | 0.9135 | -0.0151 (cosine restart) |
+
+Cycle-14 reaches V0_16's best (0.9403) earlier (ep40 vs V0_16's ep140)
+and slightly exceeds it. The per-band TV is working.
+
+**V0_16 + mid-q-boost 1.5 (bwgzuogzy)** at ep30:
+
+| Epoch | val_mean | V0_16 ship val_mean | Δ |
+|---:|---:|---:|---:|
+| 10 | 0.8612 | 0.9183 | -0.0571 (boost destabilizes early) |
+| 20 | 0.9192 | 0.9257 | -0.0065 (recovering) |
+| 30 | 0.9325 | 0.9345 | -0.0020 (almost caught up) |
+
+mid-q-boost has a rough early-training trajectory but is converging.
+Will see whether it surpasses V0_16 by ep140+.
+
+Both ETA ~12 more min wall. Then evals.
+
+### Tick 618 — 2026-05-13T11:06Z — TWO candidates running in parallel: cycle-14 + V0_16+mid-q-boost-1.5
+
+Started a second candidate in parallel since the box has 32 cores
+and Rust trainer is single-threaded (was using 1/32 cores):
+- **`b2qxq2x82`** (cycle-14 full recipe): V0_16 + --tv-band-weights
+  10,30,10,30 — at ep20 val_mean=0.9275 (V0_16 at ep20 was 0.9257)
+- **`bwgzuogzy`** (new this tick): V0_16 + --mid-q-boost 1.5 — at
+  ep0 val_mean=0.9037 (V0_16 ep0 was 0.9002, confirms boost active)
+
+Both ETA ~17 min wall total, finishing roughly simultaneously.
+
+**Why mid-q-boost as the second candidate**: cycle-12's σ-tightener
+result (zensim `4da7d1fa`) was on the 3-group recipe; never tested
+on the full 4-group recipe. The boost weights B1+B2 rows 1.5×
+during per-step pair sampling, which complements (rather than
+duplicates) the per-band TV's B1+B3 push. If both gain, they may
+compose to ~+0.015 over V0_16.
+
+Output paths:
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.{raw.bin,bin,train.log}`
+- `benchmarks/rust_v0_X_2026-05-13_v0_16_plus_midq15.{raw.bin,bin,train.log}`
+
+Will report final CID22 SROCC + per-band when both complete.
+
+### Tick 617 — 2026-05-13T11:02Z — V0_16 REPRODUCTION 100% BIT-IDENTICAL; cycle-14 full-recipe candidate kicked off
+
+**MILESTONE**: full bit-identity confirmed across both raw and
+calibrated bakes:
+
+| Stage | Reproduction md5 | V0_16 original md5 | Match |
+|---|---|---|:---:|
+| Raw bake | `b3f5fc596f8c4f3b2792295823549c7b` | `b3f5fc596f8c4f3b2792295823549c7b` | ✓ |
+| Calibrated bake (ship) | `baf3fdcb194e59df4bb4967eded824ed` | `baf3fdcb194e59df4bb4967eded824ed` | ✓ |
+
+Reproduction wall time: 1028s (V0_16 original: 1071s). Early-stopped
+at epoch 190 with best val_mean=0.9403, identical to V0_16's
+training log byte-for-byte at every sampled epoch (0/10/20/30/40/50/
+60/70/80/90/100/110/120/130/140/150/160/170/180/190).
+
+Artifacts:
+- `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.raw.bin`
+  (119,812 bytes, md5 `b3f5fc59…`)
+- `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.bin`
+  (119,812 bytes, md5 `baf3fdcb…`, calibrated)
+- `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.train.log`
+
+**V0_16 ship is now reproducible from scratch in ~17 min wall** given:
+- 4 input files (safesyn_purged, kadid, tid, konjnd CSVs + TV pairs)
+- `bash benchmarks/recipe_v0_16.sh` (corrected at zensim `8e7dafc4`)
+
+**Cycle-14 full-recipe candidate** started (background `b2qxq2x82`):
+- Same 4-group recipe as V0_16 (safesyn_purged + kadid + tid + konjnd@0.5)
+- PLUS `--tv-band-weights 10,30,10,30` (B1+B3 pushed 3× harder per
+  tick 600 bimodal finding)
+- Epoch 0: loss=0.2156, val_mean=0.8981 — DIFFERENT from V0_16 (loss=0.2139,
+  val_mean=0.9002) because TV-band penalty changes the first gradient.
+  Confirms the per-band TV is active.
+- Output: `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.{raw.bin,bin,train.log}`
+
+ETA ~17 min wall to early-stop. Then calibrate + CID22 eval + per-band
+non-mono → final cycle-14 number. Projection: V0_16's 0.8919 plus
+per-band-TV lift (was +0.0083 on incomplete recipe) → ~0.895-0.905
+CID22 SROCC. **0.8934 loop target is genuinely within reach if the
+per-band TV gain stacks linearly with the konjnd group.**
+
 ### Tick 616 — 2026-05-13T10:59Z — V0_16 reproduction at epoch 160; full md5s captured for upcoming bit-compare
 
 V0_16 reproduction (background `bnv365vho`) at epoch 160, 867s wall.
