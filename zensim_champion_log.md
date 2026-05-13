@@ -5318,6 +5318,70 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 558 — 2026-05-13T06:36Z — Per-band decomposition: V0_38 BEATS V0_16 on B0; V0_16 wins B1-B3
+
+Pure-analysis tick — per-band CID22 SROCC for V0_16 vs V0_38
+with V_kadid_tid 8-seed family σ as the noise reference.
+
+**Per-band CID22 V0_16 vs V0_38 with σ-distance**:
+
+| Band | n | V0_16 | V0_38 | Δ | family σ | σ-dist | Real effect? |
+|---|--:|--:|--:|--:|--:|--:|---|
+| **B0 (<50)** | 324 | 0.4214 | **0.4497** | **-0.0283** | 0.0146 | 1.9σ | **V0_38 WINS** |
+| **B1 (50-65)** | 1010 | **0.4559** | 0.4258 | **+0.0302** | 0.0127 | 2.4σ | **V0_16 WINS** |
+| **B2 (65-90)** | 2915 | **0.7802** | 0.7661 | +0.0141 | 0.0104 | 1.4σ | V0_16 marginal |
+| **B3 (≥90)** | 43 | **0.1723** | 0.1182 | +0.0541 | 0.0252 | 2.1σ | V0_16 marginal |
+| Near-PJND (58-68) | 787 | 0.3547 | 0.3493 | +0.0054 | 0.0067 | 0.8σ | noise |
+
+**Major finding — V0_38 specifically WINS on B0** (-0.028 vs V0_16,
+1.9σ above noise). The cycle-10a KADID+TID supervision DID
+genuinely help low-quality ranking, exactly as tick 518 claimed
+("B0/B3 specialist"). This is a real Pareto property of V0_38.
+
+**V0_16's aggregate +0.020 CID22 win is composed of**:
+- B0: V0_38 wins by 0.028 (real, V0_16 LOSES here)
+- B1: V0_16 wins by 0.030 (real, V0_16's biggest clean win)
+- B2: V0_16 wins by 0.014 (marginal, but B2 has 68% of samples
+  so dominates aggregate)
+- B3: V0_16 wins by 0.054 (marginal, small-n)
+
+**Per-band seed-σ reference** (V_kadid_tid 8 seeds, CID22):
+
+| Band | n | Family mean | σ | Range |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 324 | 0.4342 | 0.0146 | 0.0376 |
+| B1 (50-65) | 1010 | 0.4072 | 0.0127 | 0.0342 |
+| B2 (65-90) | 2915 | 0.7484 | 0.0104 | 0.0292 |
+| B3 (≥90) | 43 | 0.0952 | 0.0252 | 0.0640 |
+| Near-PJND (58-68) | 787 | 0.3394 | 0.0067 | 0.0192 |
+
+Per-band σ scales inversely with n (mostly): B3 with n=43 has
+highest σ (0.025), Near-PJND with n=787 has lowest (0.007).
+
+**Strategic insight for cycle-12**:
+
+V0_16 and V0_38 have **opposite band-specializations**:
+- V0_38 wins B0 (low quality artifacts)
+- V0_16 wins B1, B2, B3 (everything from medium to lossless)
+
+V0_16's B1 and B2 dominance is the actual structural advantage —
+the cycle-10a B0 specialization isn't the failure mode of V_kadid_tid;
+the failure is B1+B2 where V0_38 trails by 0.030+0.014.
+
+A theoretical cycle-12 candidate: **band-targeted boost on B1+B2
+synth pairs**. Cycle-9/9b only tested LOW-q boosts. Boosting B1/B2
+training rows might be the missing knob. But again — single-seed
+cycle-9 trap warning applies.
+
+Artifacts produced this tick:
+- Per-band V0_16 vs V0_38 decomposition with σ-distance scoring
+- Per-band seed-σ reference table (5 bands, 8 seeds)
+- Strategic insight: V0_16 wins B1/B2, not B0/B3
+
+**Next tick (559)**: Could test a B1/B2 boost variant. Single-seed
+result wouldn't be conclusive per the cycle-9 trap. Would need ≥3
+seeds to verify (~50s wall). Cheap and within autonomous scope.
+
 ### Tick 557 — 2026-05-13T06:32Z — Per-codec seed-σ reference table + V0_15 soft-iso confirmation
 
 Two productive housekeeping items this tick:
