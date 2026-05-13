@@ -5318,6 +5318,53 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 603 — 2026-05-13T09:51Z — User authorized V0_16 rerun on truly-clean data + Rust trainer is canonical path forward; rerun running
+
+**User directives** received this tick:
+1. "rerun with truly clean data" — V0_16 recipe rerun on
+   `/tmp/zensim_loop/safe_synth_clean_features.csv` (144,791 rows
+   post-purge). Started in background via `bash benchmarks/recipe_v0_16.sh
+   --suffix _rerun_clean_0946`. Background task ID `b1c625gug`.
+   Output: `/tmp/v0_16_rerun_*.log` + future bake at
+   `benchmarks/rust_v0_X_2026-05-13_rerun_clean_0946.bin`.
+2. "permission to do everything except publish to cratesio - edit
+   zentrain, zensim, zenmetrics as needed" — workspace-wide edit
+   authority for the 3 active codec/metric repos. crates.io publish
+   stays gated on user approval per CLAUDE.md.
+3. "so we should modify and improve the rust trainer, rather than use
+   python" — explicit strategic direction. New experiments and recipe
+   features land in `zensim-validate/src/mlp_train.rs` +
+   `zensim_mlp_train` binary going forward; Python trainer is
+   research/legacy. Resolves the cycle-13 finding that Python and
+   Rust have different `train_weight` semantics — Rust is the
+   authoritative side.
+
+**Training progress at log time**: epoch 40/300 (188s wall, val_mean
+0.9468 climbing). Expected ~1500s total wall (~25 min). Will report
+final eval when complete.
+
+**Hallucination-trigger fixes committed cross-repo this tick**:
+- zensim `76e27c00` — `scripts/v_next/train_v_next_mlp.py` 3 comment
+  fixes (Cycle-13 sample-weight, lr_schedule, ranknet_sample_weights)
+  now reference the LIVE Rust trainer
+- zenanalyze `4b7dd819` — `zentrain/tools/zensim_metric_train.py`
+  docstring + `everything.md` inventory corrected: Rust trainer was
+  deleted 5-07 then RESTORED 5-10, is LIVE, produced V0_15+V0_16
+
+**Plan for next several ticks** (per user direction "modify and improve
+the rust trainer"):
+1. Wait for V0_16 rerun to finish (verify reproducibility, expect
+   CID22 0.886–0.892)
+2. Run cycle-14 candidate: V0_16 recipe + `--tv-band-weights
+   10,30,10,30` (push B1+B3 3× harder per tick 600 bimodal finding).
+   The flag exists at zensim `6f2487f` but has never been exercised.
+3. Port useful Python flags to Rust trainer: `--low-q-boost` (cycle-9
+   B0/B1 row weighting), `--mid-q-boost` (cycle-12 σ-tightener), per
+   the user's "best params and tools as defaults" principle applied
+   to the canonical (Rust) trainer
+4. Add per-band SROCC logging per-epoch (CLAUDE.md per-band rule
+   applied to Rust trainer)
+
 ### Tick 602 — 2026-05-13T09:45Z — Recovery summary extended with post-correction work (ticks 593-601)
 
 Added "Post-correction work (2026-05-13 09:11–09:42 UTC)" section to
