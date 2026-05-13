@@ -5318,6 +5318,71 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 535 — 2026-05-13T04:12Z — Baseline non-mono audit of metric columns in unified parquet
+
+Pure analysis tick — extracted adjacent-q reversal rates for all
+score columns in `unified_v15r_zenjpeg.parquet` (1,785,696 rows,
+93,984 curves, 1,691,712 adjacent-q pairs).
+
+**Baseline metric non-mono rates** (vs same parquet):
+
+| Metric | Non-mono | Bad curves | Δ vs target 4.86% |
+|---|--:|--:|--:|
+| **score_zensim (V0_2 linear)** | **4.93%** | 48,318 (51%) | +0.07% |
+| score_ssim2 (gold truth) | 5.14% | 51,184 (54%) | +0.28% |
+| **V0_26 (cycle-7)** | 5.48% | — | +0.62% |
+| V0_31 (cycle-8) | 5.64% | — | +0.78% |
+| V0_kadid_tid TV=40 (3 seeds) | 5.91% | — | +1.05% |
+| V0_39 KonJND=1.0 (5 seeds) | 5.94% | — | +1.08% |
+| score_butteraugli_pnorm3 | 5.94% | 49,466 | +1.08% |
+| V0_16 SHIP | 5.83% | — | +0.97% |
+| V0_38 (cycle-10a single seed) | 6.20% | — | +1.34% |
+| score_butteraugli_max | **15.02%** | 89,112 (95%) | +10.16% |
+
+**Key findings**:
+
+1. **V0_2 (linear) at 4.93% is the SMOOTHEST metric** on this
+   data — even smoother than ssim2 (5.14%). It's the floor we're
+   working against.
+2. **The 4.86% target in the loop instructions matches V0_2 within
+   a hair (0.07%)** — V0_2's floor moves slightly across parquet
+   revisions; 4.86% was the value at CLAUDE.md authoring time.
+3. **No MLP bake (V0_X) gets close to V0_2's smoothness** — the
+   228-feat MLP architecture is intrinsically rougher than the
+   linear weight model.
+4. **Butter-max is shockingly non-monotonic (15%)** — butteraugli
+   pnorm3 is much smoother (5.94%) but still loses to V0_2.
+5. **V0_26 is the smoothest MLP** at 5.48% (closer to ssim2
+   than V0_16 SHIP).
+
+**Implications for cycle-11**:
+
+- **No autonomous mode lever can close the gap from V0_X MLP
+  smoothness (~5.5-6.0%) to V0_2 floor (4.93%)** without an
+  architecture change. The smoothness gap is structural.
+- To meet a strict 4.86% target while keeping CID22 SROCC,
+  cycle-11 would need:
+  - (a) Architectural smoothing (e.g., final-layer monotonic
+    enforcement, isotonic post-processing, or a smoothed-MLP variant)
+  - (b) Heavier TV regularizer at training time — but tick 534
+    showed TV=40 doesn't help; would need TV=100+ which probably
+    over-regularizes CID22 SROCC
+  - (c) Post-bake monotonic projection (e.g., isotonic regression
+    on each (image, codec) curve) — converts adjacent-q reversals
+    to ties. Doesn't change SROCC since rank-preserving.
+
+Option (c) is cheap and might be the missing piece. Could be
+applied as a runtime post-processor without retraining.
+
+Artifacts produced this tick:
+- Pure analysis; non-mono numbers tabulated above
+
+**Next tick (536)**: Try option (c) — post-hoc isotonic projection
+of V0_38 scores. For each (image_basename, codec, knob_tuple_json)
+curve, sort by q, ensure scores are monotonic in q. Should improve
+non-mono rate without changing aggregate SROCC. Cheap (numpy-only
+analysis).
+
 ### Tick 534 — 2026-05-13T04:03Z — TV=40 doesn't help (3-seed mean ties V0_38); 9th recipe knob FALSIFIED
 
 Tested V0_kadid_tid + TV=40 (vs TV=20 default) at 3 seeds.
