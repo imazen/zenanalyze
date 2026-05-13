@@ -5318,6 +5318,60 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 555 — 2026-05-13T06:22Z — Tick 554's AVIF training-diversity hypothesis FALSIFIED by codec audit
+
+Per tick 554's strategic recommendation (generate AVIF aurora
+variants), audited ALL candidate training CSVs at `/mnt/v/output/zensim/synthetic-v2/`
+to confirm the diversity hypothesis.
+
+**Codec distribution across all candidate CSVs**:
+
+| CSV | Row count | Codec set |
+|---|--:|---|
+| `training_safe_synthetic.csv` (pre-purge 218k) | 196,086 | 6 codecs (no aurora) |
+| `training_concordant.csv` | 196,561 | 6 codecs (same as above) |
+| `training_safe_synthetic_extended.csv` (340k) | 305,134 | 7 codecs (+ zenjpeg-420-e1) |
+| `training_safe_synthetic_perceptual_clean.csv` (144k purge) | 144,791 | 6 codecs (same) |
+| `safe_synth_clean_features_with_dssim_qc.csv` (our V_X) | 144,791 | 6 codecs (same) |
+
+**ALL CSVs have only 6 codec variants** — NONE include aurora
+encoders. The 6 codecs are:
+- mozjpeg-rs-420-e4
+- zenjpeg-420-e2 (with optional XYB or e1 variants)
+- zenavif-s5-e6 (the ONLY AVIF in any training data)
+- zenjxl-e7
+- zenwebp-default-m4
+
+**Hypothesis FALSIFIED**: V0_16's +0.086 AVIF_aurora_slow win is
+NOT explained by training-data codec diversity. The audit
+definitively shows neither V0_16 NOR our V_X training was on
+broader AVIF coverage. Both were on the same 1-AVIF training
+distribution.
+
+**So what explains the +0.086 gap?**
+
+The cleanest remaining hypotheses:
+1. **Random / chance generalization** — single-seed AVIF_aurora_slow
+   SROCC has wide variance with n=446 samples. V0_16's 0.881 might
+   be upper-tail; V0_38's 0.795 might be lower-tail. Without
+   per-seed AVIF_aurora_slow on V0_kadid_tid family, can't say.
+2. **Some feature in the 228-dim input correlates with aurora-slow
+   distortions** in a way V0_16's specific weight realization
+   captures but V_kadid_tid's doesn't. Architecture-realization
+   noise, not data-driven.
+
+**Cheap reality-check**: compute AVIF_aurora_slow per-seed SROCC
+across the 8-seed V0_kadid_tid family. If one seed hits +0.08
+above the family mean, V0_16's number is just a lucky tail. If
+all 8 cluster around 0.795, V0_16 genuinely captures aurora_slow
+differently.
+
+Artifacts produced this tick:
+- Codec distribution audit across 5 candidate training CSVs
+
+**Next tick (556)**: per-seed AVIF_aurora_slow forensics on V_kadid_tid
+family. Quick analysis on existing per-pair CSVs (no new bakes).
+
 ### Tick 554 — 2026-05-13T06:19Z — FORENSIC: V0_16's CID22 edge concentrated in AVIF_aurora_slow (+0.086 SROCC)
 
 Pure forensic analysis on the CID22 site parquet: compared per-codec
