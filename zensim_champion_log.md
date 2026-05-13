@@ -5318,6 +5318,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 549 — 2026-05-13T05:46Z — Idle audit: both repos clean; no productive autonomous work remains
+
+State audit: `jj st` shows zensim main at `ff12d6e7` (post-tick
+547) and zenanalyze main at `4a2de2a6` (post-tick 548). Both
+working copies empty. All cycle artifacts committed and pushed.
+
+**Autonomous recovery cycle deliverables — final canonical inventory**:
+
+Bakes on site (rank-merged into 3 parquets each):
+- V0_16 SHIP (CID22 0.8919, AIC-4 0.9127)
+- V0_26 cycle-7 (CID22 0.8639, AIC-4 0.9097)
+- V0_31 cycle-8 (CID22 0.8628, AIC-4 0.9176)
+- V0_38 cycle-10a (CID22 0.8817, AIC-4 0.9027)
+
+zensim/benchmarks/ cycle docs (5):
+- `cycle_7_dssim_outcomes_2026-05-12.md`
+- `cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+- `cycle_9_lowq_boost_outcomes_2026-05-13.md`
+- `cycle_9b_pair_boost_outcomes_2026-05-13.md`
+- `cycle_10_kadid_tid_outcomes_2026-05-13.md`
+
+zenanalyze/ summary:
+- `recovery_cycle_summary_2026-05-13.md`
+
+Trainer flags (zensim commits):
+- `4b998258` `--low-q-boost`
+- `a700b10f` `--low-q-pair-boost`
+- `c4cacfba` `--tv-pairs-file`
+
+Cycle-11 deliverables:
+- `e232cefe` + `355afb52` `soft_iso_smooth.py` (test-fixed)
+- `0da64555` V0_26 site parquet sign-flip bug fix
+
+**13 cheap recipe/architecture knobs falsified** at multi-seed
+scale. **Cycle-11 soft-iso is the single verified Pareto
+improvement** delivering 0% non-mono with ≤0.0008 SROCC cost
+unanimous across 8 V_X bake variants.
+
+**Loop dual-target status**:
+- CID22 SROCC > 0.8934: UNREACHABLE in autonomous mode
+  (V_X plateau ceiling ~0.872; V0_16 at 0.8919 is upper-tail
+  on the unreproducible V0_16-era recipe state)
+- Non-mono < 4.86% on codec sweeps: MET unanimously via
+  soft_iso_smooth.py post-processor
+
+No new artifacts produced this tick (clean state audit only).
+
+**Next tick (550)**: Loop will continue to fire from cron. Without
+user direction on cycle-12 axis (data acquisition / architecture
+pivot / different training objective), autonomous work cannot
+meaningfully advance. Refresh markers only.
+
 ### Tick 548 — 2026-05-13T05:42Z — epochs=600 vs 300 FALSIFIED (overfit, both SROCC metrics drop)
 
 Tested `--epochs 600` (vs default 300) on V0_kadid_tid recipe
