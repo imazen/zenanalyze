@@ -5318,6 +5318,29 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 568 — 2026-05-13T07:25Z — Idle: refresh markers only; no productive autonomous work remains
+
+State: cycles 7-12 documented, V0_16 SHIP unchanged, 3 positive
+findings shipped (V0_38 / soft_iso_smooth.py / --mid-q-boost),
+14+ knob falsifications recorded. Mid-q-boost is interior Pareto
+point (CID22 0.8743 < V0_38's 0.8817, AIC-4 0.9036 < V0_31's
+0.9176) — not worth additional site merge.
+
+The autonomous loop is operating at zero net progress. Cycle-13
+requires user-directed strategic axis:
+- (a) Restore deleted Rust trainer (PR #29 e613224) to reproduce
+  V0_15/V0_16 recipe family at multi-seed scale
+- (b) Acquire JPEG-AI / additional human-MOS data for cycle-12
+  data-axis push
+- (c) 300-feat input architecture (V_X is currently 228-feat;
+  synth CSV has feat_0..299)
+- (d) Different training objective (contrastive losses,
+  Bayesian split-seed search)
+
+Markers refreshed. No new artifacts this tick.
+
+**Next tick (569)**: cron continues; refresh markers only.
+
 ### Tick 567 — 2026-05-13T07:22Z — Recovery summary extended with cycle-12 — autonomous loop's permanent index complete
 
 Updated `recovery_cycle_summary_2026-05-13.md` (zenanalyze commit
