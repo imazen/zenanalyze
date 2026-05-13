@@ -5318,6 +5318,41 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 643 — 2026-05-13T13:04Z — Added cycle-14-s7 and cycle-14-s42 as band-specialist site bakes
+
+Added 2 more comparison-site bake columns (same pattern as V0_17 at
+tick 640):
+
+- **score_zensim_v0_17_c14_s7** — cycle-14 seed=7 bake (per-band TV
+  [10,30,10,30] at different seed). Best B0 SROCC 0.4611 (beats
+  ssim2 0.4418 +0.019) AND best B3 SROCC 0.2240 (beats ssim2 0.1121
+  +0.112) of any V_X bake measured.
+- **score_zensim_v0_17_c14_s42** — cycle-14 seed=42 bake. Best
+  AIC-4 SROCC 0.9201 (beats V0_16 SHIP by +0.0026, the only bake
+  to exceed V0_16's AIC-4 lead).
+
+Both columns merged into all 3 site parquets:
+- cid22.parquet (4292/4341 matched, 49 self-pair NaNs)
+- aic3_ctc_epfl.parquet (600/600 matched)
+- aic4_sample.parquet (300/300 matched)
+
+compare.js dropdown updated with 2 new entries.
+
+Committed at zensim `709f4597`, pushed main.
+
+**Site Pareto comparison now 7 bakes deep**:
+- V0_16 SHIP (current production)
+- V0_17 (cycle-14 concat, aggregate winner)
+- V0_17-c14-s7 (B0+B3 specialist)
+- V0_17-c14-s42 (AIC-4 specialist)
+- V0_26 / V0_31 / V0_38 (cycle-7/8/10a candidates)
+
+Users can compare any of these against fast-ssim2, dssim, butter on
+the live site. Each represents a different Pareto point —
+collectively they map the full V_X recipe family's trade space.
+
+Runtime ship still V0_16 (unchanged).
+
 ### Tick 642 — 2026-05-13T13:00Z — Recovery summary index extended with cycle-14 section
 
 Added "Cycle-14 deliverables" section to `recovery_cycle_summary_2026-05-13.md`:
