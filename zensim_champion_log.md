@@ -5318,6 +5318,96 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 510 — 2026-05-13T01:15Z — V0_35/V0_36 reveal V0_34's AIC-4 win was SEED-LUCKY; cycle-9 small CID22 gain real but tiny
+
+Two new bakes for cycle-9 sweep + reproducibility:
+
+**V0_35** (boost 2.0, seed=1): expected to fill curve between 1.5
+and 3.0. Result: WORSE than both V0_34 (1.5) and V0_33 (3.0).
+- CID22 0.8468 (vs V0_34's 0.8635 → -0.0167)
+- AIC-4 0.9139 (vs V0_34's 0.9252 → -0.0113)
+- Per-band B1 dropped to 0.3766 (V0_34: 0.4095, big regression)
+
+**V0_36** (boost 1.5, seed=42): reproducibility check on V0_34's
+apparent Pareto win. Result: confirms CID22 but NOT AIC-4.
+- CID22 0.8639 (vs V0_34 seed=1's 0.8635 → +0.0004, ≈ tied)
+- AIC-4 0.9124 (vs V0_34 seed=1's 0.9252 → **-0.0128**)
+
+**Seed-pair comparison** (boost 1.0 vs boost 1.5, 2 seeds each):
+
+| Config | seed=1 | seed=42 | Mean |
+|---|--:|--:|--:|
+| boost 1.0 CID22 | 0.8628 (V0_31) | 0.8578 (V0_32) | 0.8603 |
+| boost 1.5 CID22 | 0.8635 (V0_34) | 0.8639 (V0_36) | **0.8637** |
+| boost 1.0 AIC-4 | 0.9176 (V0_31) | 0.9184 (V0_32) | 0.9180 |
+| boost 1.5 AIC-4 | 0.9252 (V0_34) | 0.9124 (V0_36) | **0.9188** |
+
+**Findings**:
+
+1. **CID22 mean gain from boost 1.5 is +0.0034**. Small but
+   consistent across both seeds. boost 1.5 sits above boost 1.0
+   by ~0.0034 on the CID22 mean — a real-but-tiny improvement.
+
+2. **AIC-4 mean gain from boost 1.5 is +0.0008**. NEGLIGIBLE.
+   V0_34's headline 0.9252 was seed-lucky — V0_36 (seed=42) gives
+   0.9124, and the mean is essentially V0_31's 0.9180.
+
+3. **V0_34's apparent dominance was a noise artifact.** The seed
+   variance for boost 1.5 on AIC-4 is 0.0128 — ~16× larger than at
+   boost 1.0 (Δ=0.0008). The recipe is more seed-fragile at higher
+   boost levels.
+
+4. **V0_35 (boost 2.0) is anomalously bad** — even worse than V0_33
+   (boost 3.0). Likely a seed × boost interaction: the optimizer
+   lands in a different basin depending on boost magnitude. Would
+   need 3+ seeds at boost 2.0 to distinguish basin-effect from
+   noise.
+
+**Honest cycle-9 verdict (so far)**:
+
+Low-q boost is a REAL lever for CID22 with mean +0.003 gain at
+1.5× boost — but the gain is tiny and the cross-corpus story is
+within seed noise. Not enough to break the V0_16 SHIP ceiling
+(V0_16 CID22 0.8919 vs boost-1.5 mean 0.8637 → still -0.028 below
+SHIP).
+
+Cycle-9 isn't a winner from this axis alone. The structural
+B0/B1 ceiling is real and not easily lifted with row reweighting.
+
+**Cycle-7+8+9 final state**:
+
+| Bake | CID22 | AIC-3 | AIC-4 | JPEG-AI | Best for… |
+|---|--:|--:|--:|--:|---|
+| V0_16 SHIP | **0.8919** | 0.7965 | 0.9127 | 0.7951 | CID22 (gold standard) |
+| V0_26 cycle-7 | 0.8639 | 0.8027 | 0.9097 | **0.8387** | JPEG-AI codec |
+| V0_31 cycle-8 | 0.8628 | 0.8031 | 0.9176 | 0.8318 | (preserved on site) |
+| V0_34 cycle-9 | 0.8635 | 0.8135 | 0.9252* | 0.8309 | seed-lucky outlier |
+| V0_36 cycle-9 | 0.8639 | — | 0.9124 | — | V0_34 seed confirm |
+
+*= seed-lucky single run; mean across 2 seeds is 0.9188 (≈ V0_31).
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_35_konjnd_w05_lowqboost2_2026-05-13.bin` (120,714B)
+- `/tmp/zensim_loop/bakes/v0_36_konjnd_w05_lowqboost15_seed42_2026-05-13.bin` (120,712B)
+- `/tmp/zensim_loop/v0_35_per_pair.csv`, `v0_36_per_pair.csv`
+- `/tmp/zensim_loop/v0_35_eval.log`, `v0_36_eval.log`
+
+**Next tick (511)**: Cycle-9 is at a natural pause. Options:
+- (a) Run 3-4 more seeds at boost 1.5 to establish true mean +
+  variance. ~60s wall total. Would let us SAY "boost 1.5 is +0.003
+  CID22 mean, σ=0.003" with confidence.
+- (b) Document cycle-9 closure with seed-variance findings in
+  `zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`.
+- (c) Move to cycle-10: investigate the cycle-9 falsified
+  hypothesis ("V0_X bakes are seed-sensitive at high boost") by
+  running V0_X seed-sweep at boost 0 (V0_31) to confirm baseline
+  variance.
+
+Pick (a) for tick 511 — cheap, removes ambiguity from cycle-9
+conclusion. After (a), if mean CID22 ≥ V0_31 by >2σ, cycle-9 has
+a real (if small) result. If not, cycle-9 closes as "no useful
+lever found".
+
 ### Tick 509 — 2026-05-13T01:06Z — V0_34 (low-q boost 1.5) DOMINATES V0_31 on ALL THREE CORPORA
 
 V0_34 (V0_31 recipe + `--low-q-boost 1.5`) trained 19s, baked to
