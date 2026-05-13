@@ -5318,6 +5318,78 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 569 — 2026-05-13T07:30Z — Deleted Rust trainer reveals KEY recipe difference (sampling vs loss weighting)
+
+Per tick 568's option (a) ("restore deleted Rust trainer"), checked
+feasibility by inspecting commit `e6132243` which deleted
+`zensim-validate/src/mlp_train.rs` (885 lines).
+
+**Code is fully recoverable** via `git show e6132243^:zensim-validate/src/mlp_train.rs`.
+
+**CRITICAL FINDING**: The Rust trainer uses **fundamentally different
+`train_weight` semantics** than our Python trainer.
+
+**Rust trainer** (line 96-97 of `mlp_train.rs`):
+> "per-pair sampling probability is `train_weight / total_weight`,
+> so doubling `train_weight` doubles the sampling rate"
+
+The Rust trainer biases **RankNet PAIR SAMPLING PROBABILITY** by
+train_weight. KADID/TID at weight 0.3 means 30% as many pairs
+sampled from those groups compared to synth at weight 1.0.
+
+**Python trainer** (our cycle-7-12 implementation):
+- `train_weight` is a multiplier on per-row MSE loss
+- RankNet pair sampling is UNWEIGHTED — all rows in pair pool equally
+
+**These are different objectives.** Our cycle-7-12 Python
+experiments could **never match V0_15/V0_16's Rust-trainer
+recipe**, even with identical `--human-csv NAME:PATH:WEIGHT` args,
+because:
+
+| Recipe element | Rust semantics | Python semantics |
+|---|---|---|
+| `safesyn:1.0` | synth gets 100% pair-sampling | synth gets 1.0× MSE weight |
+| `kadid:0.3` | kadid gets 30% pair-sampling | kadid gets 0.3× MSE weight |
+| MSE term | unweighted | per-row weighted |
+| RankNet term | weighted by sampling | unweighted |
+
+This is the recipe difference we've been hunting for 17 ticks of
+falsified knob testing. **V0_15/V0_16 were trained with a
+sampling-bias mechanism that the Python trainer doesn't implement.**
+
+**Architecture of the deleted Rust trainer**:
+- Adam with cosine annealing
+- RankNet pairwise loss
+- ValidationPolicy::Min default
+- Per-group `train_weight` controls RankNet pair sampling
+- 228 → n_hidden → 1 architecture (matches our setup)
+
+**Cycle-13(a) is genuinely actionable** but requires:
+1. Restore `mlp_train.rs` + `mlp_importance.rs` to zensim-validate
+2. Re-add the CLI args + dispatch in `main.rs` (per the commit message)
+3. Rebuild zensim-validate
+4. Run with V_kadid_tid-style recipe
+
+**Multi-tick infrastructure work; needs user authorization** since
+it modifies a workspace crate's source.
+
+Artifacts produced this tick:
+- Git archeology: confirmed e6132243^ has 885-line `mlp_train.rs`
+- Key recipe-difference finding (sampling-weight vs loss-weight)
+- Cycle-13(a) feasibility: TRUE but multi-tick + needs user OK
+
+**Lesson learned**: cycle-7-12 falsifications were inevitable
+because we never had the right `train_weight` semantic. The
+V0_15/V0_16 recipe wasn't a "different combination of Python
+knobs" but a "different fundamental loss-weighting mechanism".
+
+**Next tick (570)**: option to either (a) start the Rust trainer
+restoration (needs user OK) or (b) implement Python-trainer
+`--ranknet-sample-weight` flag that mimics the Rust sampling
+behavior (autonomous-safe, ~30-60 lines). Pick (b) for tick 570 if
+user hasn't authorized (a) — fixes the recipe-mechanism gap in
+the autonomous-mode Python trainer.
+
 ### Tick 568 — 2026-05-13T07:25Z — Idle: refresh markers only; no productive autonomous work remains
 
 State: cycles 7-12 documented, V0_16 SHIP unchanged, 3 positive
