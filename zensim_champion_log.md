@@ -5318,6 +5318,47 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 541 — 2026-05-13T05:11Z — Recovery summary extended with cycle-11 deliverables + feasibility audit
+
+Updated `~/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
+(zenanalyze commit `26492d0b`) with the cycle-11 work that landed
+after the original summary at tick 528.
+
+**New summary additions**:
+
+1. **Cycle-11 deliverables section** documenting `soft_iso_smooth.py`
+   (commit `e232cefe`) and V0_26 sign-fix (commit `0da64555`)
+2. **Per-bake soft-iso verification table** showing all 4 site
+   bakes drop non-mono to 0% with SROCC cost ≤0.0003
+3. **Cycle-11 axes explored but NOT delivered** — full
+   enumeration of TV=40, init glorot, ranknet-group dataset,
+   val_policy min, V0_4-exact recipes, runtime ensemble
+4. **Combined-target feasibility audit** — explicit conclusion
+   that BOTH loop targets (CID22 > 0.8934 AND non-mono < 4.86%)
+   cannot be met simultaneously in autonomous mode:
+   - V0_16 SHIP: CID22 0.8919 ✗ (-0.0015), non-mono 5.83% ✗
+   - V0_16 + soft-iso: CID22 0.8919 ✗, non-mono 0.00% ✓
+   - V0_38: CID22 0.8817 ✗, non-mono 6.20% ✗
+   - V0_38 + soft-iso: CID22 0.8817 ✗, non-mono 0.00% ✓
+   - **No recipe variant closes CID22 SROCC gap** (gap below
+     V_X seed σ ≈ 0.004 — it's noise-level)
+
+**Conclusion documented**: V0_16 SHIP retained as production
+bake; CID22 > 0.8934 target is set above the autonomous-mode
+ceiling for this data regime; cycle-12 needs user-directed new
+data or new architecture.
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
+  (extended, committed at zenanalyze `26492d0b`)
+
+**Recovery cycle full inventory is now permanent**. Any future
+agent can resume from the summary doc without re-tracing ticks.
+
+**Next tick (542)**: All cycle-11 housekeeping complete. Cron
+will keep firing; no productive autonomous work remains. Will
+refresh markers only and append a one-line "loop idle" tick.
+
 ### Tick 540 — 2026-05-13T05:07Z — V0_26 site parquet sign BUG fixed across 3 corpora
 
 Per tick 539's flag, audited V0_26 column sign in all 3 site
