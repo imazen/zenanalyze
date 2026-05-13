@@ -720,6 +720,7 @@ impl<'a> Model<'a> {
     /// Codec runtime SHOULD refuse to load a bake whose
     /// `safety_compact.passed == 0` unless the consumer explicitly
     /// opts into `force_load`.
+    #[cfg(feature = "advanced")]
     pub fn safety_compact(&self) -> Option<crate::SafetyCompact> {
         self.metadata
             .get_pod::<crate::SafetyCompact>(crate::keys::SAFETY_COMPACT)
@@ -729,6 +730,7 @@ impl<'a> Model<'a> {
     /// metadata key. Returns an empty `Vec` when the key is absent.
     /// Length equals the bake's `n_cells` (the categorical-bytes
     /// head dim).
+    #[cfg(feature = "advanced")]
     pub fn cell_rescue_hints(&self) -> alloc::vec::Vec<crate::CellHint> {
         let Some(entry) = self.metadata.get(crate::keys::CELL_RESCUE_HINTS) else {
             return alloc::vec::Vec::new();
@@ -751,6 +753,7 @@ impl<'a> Model<'a> {
     /// from the `zentrain.zq_fallback_table` metadata key. Returns
     /// an empty `Vec` when the key is absent. Used by the
     /// `KnownGoodFallback` rescue strategy.
+    #[cfg(feature = "advanced")]
     pub fn zq_fallback_table(&self) -> alloc::vec::Vec<crate::FallbackEntry> {
         let Some(entry) = self.metadata.get(crate::keys::ZQ_FALLBACK_TABLE) else {
             return alloc::vec::Vec::new();
@@ -772,6 +775,7 @@ impl<'a> Model<'a> {
     /// Codec uses [`crate::output_first_out_of_distribution`] to
     /// detect picks where the MLP is extrapolating past its
     /// training envelope.
+    #[cfg(feature = "advanced")]
     pub fn output_bounds(&self) -> alloc::vec::Vec<crate::OutputBound> {
         let Some(entry) = self.metadata.get(crate::keys::OUTPUT_BOUNDS) else {
             return alloc::vec::Vec::new();

@@ -50,6 +50,7 @@ impl FeatureBound {
 /// assert_eq!(first_out_of_distribution(&[2.0, 0.0], &bounds), Some(0));
 /// assert_eq!(first_out_of_distribution(&[0.5, f32::NAN], &bounds), Some(1));
 /// ```
+#[cfg(feature = "advanced")]
 pub fn first_out_of_distribution(features: &[f32], bounds: &[FeatureBound]) -> Option<usize> {
     debug_assert_eq!(
         features.len(),
@@ -76,6 +77,7 @@ pub fn first_out_of_distribution(features: &[f32], bounds: &[FeatureBound]) -> O
 /// argmin — any out-of-range output indicates the MLP is
 /// extrapolating past its training envelope; route to
 /// `RescueStrategy::KnownGoodFallback`.
+#[cfg(feature = "advanced")]
 pub type OutputBound = FeatureBound;
 
 /// Index of the first model output outside its training-distribution
@@ -100,6 +102,7 @@ pub type OutputBound = FeatureBound;
 /// // Picker emitted NaN (numeric loss). Out of distribution.
 /// assert_eq!(output_first_out_of_distribution(&[f32::NAN, 80.0], &bounds), Some(0));
 /// ```
+#[cfg(feature = "advanced")]
 pub fn output_first_out_of_distribution(
     predictions: &[f32],
     bounds: &[OutputBound],

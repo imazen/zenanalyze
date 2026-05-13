@@ -116,6 +116,7 @@ impl<'a> Predictor<'a> {
     /// Same as [`Self::predict`]: feature-length mismatch, etc. The
     /// spec pipeline itself is infallible — invalid (offset, len)
     /// pairs were rejected at load time.
+    #[cfg(feature = "advanced")]
     pub fn predict_with_specs(&mut self, features: &[f32]) -> Result<&[OutputValue], PredictError> {
         forward(
             &self.model,
@@ -208,6 +209,7 @@ impl<'a> Predictor<'a> {
     /// element before forward pass. See
     /// [`Self::predict_transformed`] for the rationale on which
     /// entry point codec runtimes should call.
+    #[cfg(feature = "advanced")]
     pub fn predict_with_specs_transformed(
         &mut self,
         features: &[f32],
@@ -325,6 +327,7 @@ impl<'a> Predictor<'a> {
         ))
     }
 
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_top_k<const K: usize>(
         &mut self,
         features: &[f32],
@@ -344,6 +347,7 @@ impl<'a> Predictor<'a> {
         ))
     }
 
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_top_k_in_range<const K: usize>(
         &mut self,
         features: &[f32],
@@ -373,6 +377,7 @@ impl<'a> Predictor<'a> {
 
     /// Pick + log-domain confidence (gap to second-best). Returns
     /// `None` when the mask permits zero entries.
+    #[cfg(feature = "advanced")]
     pub fn pick_with_confidence(
         &mut self,
         features: &[f32],
@@ -393,6 +398,7 @@ impl<'a> Predictor<'a> {
         ))
     }
 
+    #[cfg(feature = "advanced")]
     pub fn pick_with_confidence_in_range(
         &mut self,
         features: &[f32],
@@ -430,6 +436,7 @@ impl<'a> Predictor<'a> {
     ///
     /// Returns `None` when no entry is allowed by the mask.
     /// `mask.len()` must be ≥ `n_outputs`.
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_with_scorer<F>(
         &mut self,
         features: &[f32],
@@ -448,6 +455,7 @@ impl<'a> Predictor<'a> {
 
     /// Top-`K` argmin under a caller-supplied score function.
     /// Slots beyond the number of mask-allowed entries are `None`.
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
         &mut self,
         features: &[f32],
@@ -471,6 +479,7 @@ impl<'a> Predictor<'a> {
     /// `None`. The scorer's `out` is the full predict output (so
     /// the closure can read any head); `i` is the cell index within
     /// the sub-range.
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_top_k_with_scorer_in_range<const K: usize, F>(
         &mut self,
         features: &[f32],
@@ -505,6 +514,7 @@ impl<'a> Predictor<'a> {
     /// the scorer's `out` slice is the full predictor output, so
     /// the closure can compute `out[N_CELLS + i]` for the time head
     /// while ranking by cell index `i`.
+    #[cfg(feature = "advanced")]
     pub fn argmin_masked_with_scorer_in_range<F>(
         &mut self,
         features: &[f32],

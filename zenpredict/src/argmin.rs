@@ -201,6 +201,7 @@ pub fn argmin_masked(
 ///
 /// Same NaN, tie-breaking, and mask-length contract as
 /// [`argmin_masked`].
+#[cfg(feature = "advanced")]
 pub fn argmin_masked_top_k<const K: usize>(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
@@ -265,7 +266,7 @@ pub fn argmin_masked_in_range(
     let slice = predictions.get(start..end)?;
     argmin_masked(slice, mask, transform, offsets)
 }
-
+#[cfg(feature = "advanced")]
 pub fn argmin_masked_top_k_in_range<const K: usize>(
     predictions: &[f32],
     range: (usize, usize),
@@ -328,6 +329,7 @@ pub fn argmin_masked_top_k_in_range<const K: usize>(
 /// // Cell 2: e^12 ≈ 162 754 + 1200 = 163 954
 /// assert_eq!(pick, Some(0));
 /// ```
+#[cfg(feature = "advanced")]
 pub fn argmin_masked_with_scorer<F>(n: usize, mask: &AllowedMask<'_>, scorer: F) -> Option<usize>
 where
     F: Fn(usize) -> f32,
@@ -360,6 +362,7 @@ where
 ///
 /// Same NaN, tie-breaking, mask-length, and closure-panic contract
 /// as [`argmin_masked_with_scorer`].
+#[cfg(feature = "advanced")]
 pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(
     n: usize,
     mask: &AllowedMask<'_>,
@@ -415,6 +418,7 @@ where
 /// `gap = +∞` when only one mask entry is allowed; `0.0` if every
 /// score ties at the top. Returns `None` when the mask permits
 /// zero entries.
+#[cfg(feature = "advanced")]
 pub fn pick_with_confidence(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
@@ -425,6 +429,7 @@ pub fn pick_with_confidence(
     pick_confidence_from_top_k(predictions, transform, offsets, top)
 }
 
+#[cfg(feature = "advanced")]
 pub fn pick_with_confidence_in_range(
     predictions: &[f32],
     range: (usize, usize),
@@ -473,6 +478,7 @@ pub(crate) fn pick_confidence_from_top_k(
 /// threshold_mask(&rates, 0.95, &mut gate);
 /// assert_eq!(gate, [true, false, false, true]);
 /// ```
+#[cfg(feature = "advanced")]
 pub fn threshold_mask(rates: &[f32], threshold: f32, out: &mut [bool]) {
     assert_eq!(
         rates.len(),

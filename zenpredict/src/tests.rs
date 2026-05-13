@@ -47,6 +47,7 @@ fn argmin_with_per_output_offsets_shifts_pick() {
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn argmin_top_k_returns_sorted_indices() {
     let pred = [3.0f32, 1.0, 4.0, 1.5, 9.0];
     let mask = [true; 5];
@@ -56,6 +57,7 @@ fn argmin_top_k_returns_sorted_indices() {
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn pick_with_confidence_reports_gap() {
     let pred = [3.0f32, 1.0, 4.0, 1.5, 9.0];
     let mask = [true; 5];
@@ -67,6 +69,7 @@ fn pick_with_confidence_reports_gap() {
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn pick_with_confidence_inf_when_only_one_allowed() {
     let pred = [3.0f32, 1.0, 4.0];
     let mask = [false, true, false];
@@ -78,6 +81,7 @@ fn pick_with_confidence_inf_when_only_one_allowed() {
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn threshold_mask_finite_gate() {
     // INFINITY is non-finite → treated like NaN, gated out. The
     // mask gate is intentionally finite-only because `INFINITY` in
@@ -90,6 +94,7 @@ fn threshold_mask_finite_gate() {
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn first_out_of_distribution_finds_first() {
     let bounds = [
         FeatureBound::new(0.0, 1.0),
@@ -162,12 +167,14 @@ fn argmin_short_mask_panics() {
 
 #[test]
 #[should_panic(expected = "mask.len()")]
+#[cfg(feature = "advanced")]
 fn argmin_with_scorer_short_mask_panics() {
     let m = AllowedMask::new(&[true, true]); // len 2 < n=3
     let _ = argmin::argmin_masked_with_scorer(3, &m, |i| i as f32);
 }
 
 #[test]
+#[cfg(feature = "advanced")]
 fn rescue_default_threshold_three_pp() {
     let policy = RescuePolicy::default();
     assert!((policy.rescue_threshold - 3.0).abs() < f32::EPSILON);
