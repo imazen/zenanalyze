@@ -5318,6 +5318,66 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 512 — 2026-05-13T01:27Z — Cycle-9 outcomes doc committed; cycle-7/8/9 trio CLOSED
+
+zensim commit `0adaacdc`. Created
+`zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`
+(~200 lines, ~7 KB) closing cycle-9 with permanent record:
+
+- Trainer change (`--low-q-boost` flag at zensim 4b998258)
+- 4-point boost-axis sweep at seed=1 (1.0/1.5/2.0/3.0)
+- 5-seed sweep at boost=1.5 + variance estimation
+- Welch's t-test: AIC-4 boost 1.5 vs 1.0, t≈-1.7, p≈0.17 (n.s.)
+- Cycle status table: cycle-7/8/9 falsifications + V0_31 partial win
+
+**Key lessons recorded for future cycles**:
+1. V_X 228-feat MLP recipe seed std: σ≈0.004 CID22, σ≈0.008 AIC-4.
+2. Cycle-7/8/9 recipe variations are all within ~0.01 of each
+   other on CID22 — likely a single noisy plateau. V0_16 SHIP at
+   0.8919 is ~6σ above this plateau (either different recipe or
+   lucky outlier).
+3. Single-seed comparisons mislead when Δ < 1σ. Future "X improves
+   Y" claims need ≥3 seeds + Welch's t-test.
+4. The MSE-only weighting doesn't affect RankNet pair sampling
+   (where most rank-correlation signal lives). Future cycle-9b
+   could test pair-resampling-based boost.
+
+**Cycle-7/8/9 trio CLOSED**:
+
+```
+Cycle 7:  dssim/cosine-LR/small-LR — FALSIFIED
+Cycle 8:  KonJND-weight Pareto    — V0_31 wins AIC-4 only
+Cycle 9:  Low-q row-weight boost  — FALSIFIED (no mean gain)
+```
+
+V0_16 SHIP unchanged. V0_26 + V0_31 preserved as cycle-7/8
+alternatives on live site.
+
+Artifacts produced:
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`
+  (committed in zensim `0adaacdc`)
+
+**Cycle-10 strategic options** (none cheap; all require user
+direction):
+
+- **Data axis**: acquire JPEG-AI public test set + train on it.
+  Cycle-7 V0_26 + cycle-8 V0_31 + cycle-9 sweep all show that
+  KonJND adds JPEG-AI signal but costs CID22. Maybe direct
+  JPEG-AI training data fixes the trade.
+- **Architecture axis**: 300-feat input (synth CSV already has
+  feat_0..299). Requires trainer + bake-format + runtime
+  profile changes. Multi-tick infrastructure work.
+- **Cycle-9b**: pair-resampling-based low-q boost (boost RankNet,
+  not just MSE). Same cheap-experiment shape as cycle-9 but at
+  the right loss term. ~30 min of work to implement + sweep.
+
+**Next tick (513)**: cycle-9b is the cheapest cycle-10 entry. The
+implementation: modify `ranknet_loss` or its pair-sampler to
+oversample low-q pairs (B0/B1) by factor `--low-q-pair-boost`.
+Run a quick 1-seed sweep at boost levels {1.0, 2.0, 5.0} to see if
+the rank-loss-based approach gives different behavior than the
+cycle-9 MSE-based approach.
+
 ### Tick 511 — 2026-05-13T01:22Z — Cycle-9 FALSIFIED: 5-seed sweep at boost 1.5 shows NO mean improvement
 
 Trained + baked + evaluated 3 more seeds (2, 3, 7) at boost=1.5 to
