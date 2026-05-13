@@ -5318,6 +5318,40 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 604 — 2026-05-13T09:55Z — Fixed recipe-runner eval-flag bug + training healthy at epoch 90 (val_mean 0.9475 new best)
+
+**Bug fix**: `benchmarks/recipe_v0_16.sh` had `--cid22-only` flag for the
+eval step which doesn't exist in `dataset_metric_baseline`. Actual
+flag is `--cid22 <path-to-validation-set-dir>`. Fixed in the script
+on disk so future invocations work; the currently-running training
+loaded the old version into bash memory at tick 603 invocation, so
+when training finishes its eval step will fail with "unknown arg" —
+will manually re-invoke eval with the correct flag after training
++ calibration complete.
+
+**Training progress** (background task `b1c625gug`, started tick 603):
+
+| Epoch | Wall | val_mean | best | safesyn | kadid | tid |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 5s | 0.9075 | -inf | 0.9930 | 0.9075 | 0.9105 |
+| 40 | 189s | 0.9468 | 0.9419 | 0.9962 | 0.9468 | 0.9562 |
+| 80 | 374s | 0.9439 | 0.9468 | 0.9954 | 0.9439 | 0.9548 |
+| 90 | 420s | **0.9475** | 0.9468 | 0.9962 | **0.9475** | 0.9589 |
+
+Cosine LR cycles (period 50) working: val_mean dips during restart,
+climbs to new best. No early-stop triggered yet (patience=50 epochs
+since last best). On track for ~25 min total wall.
+
+**Decisions deferred** (small per-tick budget while training runs):
+- Porting `--low-q-boost` / `--mid-q-boost` from Python to Rust trainer:
+  inspected pair sampler. Requires per-row sampling-weight CDF inside
+  the within-group sampler (currently uniform `(rng % n)`). ~40 LOC
+  change to `mlp_train.rs` + `zensim_mlp_train.rs`. Not on critical
+  path for cycle-14 (which uses already-shipped `--tv-band-weights`).
+  Deferring until after cycle-14 candidate run.
+- Marking Python trainer as legacy: deferred to a doc-only tick post
+  V0_16 reproduction verification.
+
 ### Tick 603 — 2026-05-13T09:51Z — User authorized V0_16 rerun on truly-clean data + Rust trainer is canonical path forward; rerun running
 
 **User directives** received this tick:
