@@ -5318,6 +5318,34 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Ticks 654-663 — 2026-05-13T13:47Z–T14:23Z — Idle rollup (10 consecutive idle ticks)
+
+10 consecutive idle ticks (4-min cron firings, ~36 min total). Markers
+refreshed each tick. No autonomous work remains beyond V0_17 candidate
+ship pending user authorization.
+
+Per the tick 588 pattern, consolidating into a single committed entry
+so the log doesn't bloat with per-tick idle entries.
+
+**State at end of rollup**:
+- V0_17 ship candidate at `benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin`
+  (calibrated md5 `2775812d`, 355,332 bytes, 228→384→1)
+- Wins V0_16 on 11 of 13 metrics
+- 7-step ship procedure documented in CHANGELOG + CONTEXT-HANDOFF
+- All cycle-14-era trainer flags tested (per-band TV verified via V0_17,
+  mid-q-boost σ-stabilizer, low-q-boost falsified)
+- Cycle-14 outcomes doc + recovery summary index current
+- Site comparison shows V0_17 + cycle-14-s7 + cycle-14-s42
+
+Loop continues at zero net structural progress. Next user direction
+options:
+1. **Ship V0_17** — execute the documented 7-step swap
+2. **Cycle-15 strategic axis** — new data acquisition, architecture
+   pivot (300-feat MLP, FiLM, MoE), or different training objective
+3. **Stop the cron loop** — recovery cycle delivered
+
+Will start a fresh rolling-idle block at tick 664 if no new direction.
+
 ### Tick 653 — 2026-05-13T13:43Z — Idle: cycle-14 trainer-flag testing genuinely complete
 
 Markers refreshed. No productive autonomous next step:
