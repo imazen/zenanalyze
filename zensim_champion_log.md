@@ -5318,6 +5318,32 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 646 — 2026-05-13T13:15Z — Untested cycle-15 candidate started: V0_16 + --low-q-boost 1.5
+
+Started the last untested cycle-14-era trainer flag: `--low-q-boost 1.5`
+(Rust port from Python, committed at zensim `dacd425f` but never
+exercised on full recipe). Background task `bt1z6utlv`.
+
+Recipe: V0_16 full 4-group recipe + `--low-q-boost 1.5` (per-row
+sampling-CDF based row weighting that boosts B0 by full and B1 by
+sqrt(1.5)).
+
+Confirmed at epoch 0:
+- `low_q_boost: 1.5` shown in MlpHyperparams print
+- val_mean=0.8954 (V0_16 baseline ep0 was 0.9002) — boost is active
+
+Hypothesis: low-q-boost might lift B0/B1 SROCC, complementing V0_17's
+B2/B3 strengths. If it gives +0.01-ish CID22 over V0_16, it's a
+candidate for either standalone V0_18 or composition into a 4-way
+concat with V0_17.
+
+ETA ~17 min wall to early-stop.
+
+Output:
+- `benchmarks/rust_v0_X_2026-05-13_v0_16_plus_lowq15.{raw.bin,train.log}`
+
+Will eval + report when complete.
+
 ### Tick 645 — 2026-05-13T13:11Z — V_X family bake inventory verified — all in git tracking
 
 Verified all cycle-14-era bakes are committed to git (will survive
