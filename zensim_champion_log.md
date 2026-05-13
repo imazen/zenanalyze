@@ -5318,6 +5318,81 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 557 — 2026-05-13T06:32Z — Per-codec seed-σ reference table + V0_15 soft-iso confirmation
+
+Two productive housekeeping items this tick:
+
+**Item 1: V0_15 archive bake non-mono audit** (soft-iso script):
+- Raw non-mono: 6.42%
+- After soft-iso: 0.00%
+- SROCC vs ssim2 BEFORE: 0.9254, AFTER: 0.9263 (Δ +0.0008)
+- 140,402 corrections (7.9% of scores)
+
+V0_15 benefits from soft-iso almost identically to V0_16 (5.83%
+raw, +0.0008 SROCC gain). Confirms soft-iso applies uniformly
+to the V_15/V_16 recipe family too.
+
+**Item 2: Per-codec seed-σ reference table** (V_kadid_tid 8 seeds):
+
+| Dataset | Codec | n_pairs | Mean SROCC | Std (8s) | Range |
+|---|---|--:|--:|--:|--:|
+| CID22 | JPEG | 536 | 0.9386 | **0.0023** | 0.0074 |
+| CID22 | JPEG_XL | 535 | 0.9159 | **0.0031** | 0.0107 |
+| CID22 | HEIC | 392 | 0.8743 | **0.0045** | 0.0104 |
+| CID22 | JPEG_2000 | 441 | 0.8580 | **0.0050** | 0.0134 |
+| AIC-4 | VVC | 50 | 0.9269 | 0.0060 | 0.0201 |
+| AIC-4 | AVIF | 50 | 0.9537 | 0.0061 | 0.0174 |
+| CID22 | WebP | 441 | 0.8905 | 0.0072 | 0.0243 |
+| AIC-4 | JPEG-2000 | 50 | 0.9349 | 0.0083 | 0.0281 |
+| AIC-4 | JPEG-XL | 50 | 0.9501 | 0.0093 | 0.0320 |
+| CID22 | AVIF_aom_s7 | 539 | 0.8933 | 0.0110 | 0.0383 |
+| CID22 | AVIF_aom_s1 | 423 | 0.8654 | 0.0123 | 0.0429 |
+| AIC-4 | JPEG-1 | 50 | 0.9196 | 0.0151 | 0.0456 |
+| AIC-4 | JPEG-AI | 50 | 0.8423 | 0.0157 | 0.0450 |
+| **CID22** | **AVIF_aurora_fast** | 539 | 0.8207 | **0.0177** | 0.0602 |
+| **CID22** | **AVIF_aurora_slow** | 446 | 0.8167 | **0.0239** ★ | 0.0742 |
+
+**Key seed-σ findings**:
+
+1. **AVIF_aurora variants have HIGHEST seed σ** (0.018-0.024) —
+   ~10× larger than CID22_JPEG's 0.002. The aurora encoders'
+   distortions are systematically harder to score consistently.
+2. **Standard JPEG codecs have LOWEST seed σ** — well below 0.005.
+   V0_16's wins on JPEG, JPEG_XL, JPEG_2000 are above the noise
+   floor (V0_16 - V0_38 = +0.000 to +0.017 on these; even +0.003
+   is statistically meaningful at σ=0.002).
+3. **Per-codec σ scales inversely with n_pairs** — AIC-4 codecs at
+   n=50 have higher σ than CID22 codecs at n=400+. But aurora
+   variants (n=400+) STILL have high σ — it's a structural property
+   of the codec output.
+
+**Updated understanding of V0_16 vs V0_38 +0.020 CID22 gap**:
+
+By codec:
+- AVIF_aurora_slow: V0_16 +0.086 (σ=0.024) → ~3.6σ above family
+  mean. Likely upper-tail but possibly small real recipe diff.
+- JPEG_XL: V0_16 +0.017 (σ=0.003) → ~5.7σ. STATISTICALLY REAL.
+- HEIC: V0_16 +0.012 (σ=0.005) → ~2.4σ. Marginally real.
+- AVIF_aurora_fast: V0_16 +0.010 (σ=0.018) → 0.6σ. Pure noise.
+- WebP: V0_16 +0.008 (σ=0.007) → 1.1σ. Within noise.
+- JPEG_2000: V0_16 +0.010 (σ=0.005) → 2σ. Borderline real.
+
+**V0_16's BIGGEST real-effect win is JPEG_XL +0.017 (5.7σ)**, not
+aurora_slow. This points at V0_16's training catching JPEG_XL
+distortions better than ours. JPEG_XL was in our training data
+(`zenjxl-e7`).
+
+**No new strategic action this tick** — analysis confirms cycle-12
+needs a real recipe-distribution difference (likely the deleted
+Rust trainer), not codec coverage.
+
+Artifacts produced this tick:
+- V0_15 soft-iso measurement
+- Per-codec seed-σ reference table (15 codec/dataset combos)
+
+**Next tick (558)**: cycle truly final. Cron continues; no new
+productive autonomous probes.
+
 ### Tick 556 — 2026-05-13T06:26Z — AVIF_aurora_slow per-codec seed variance is HIGH — V0_16's edge is mostly noise
 
 Per tick 555's plan, computed per-seed AVIF_aurora_slow CID22
