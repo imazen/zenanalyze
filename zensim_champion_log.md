@@ -5318,6 +5318,32 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 645 — 2026-05-13T13:11Z — V_X family bake inventory verified — all in git tracking
+
+Verified all cycle-14-era bakes are committed to git (will survive
+across sessions):
+
+| Bake | git-tracked? | Use case |
+|---|:---:|---|
+| `rust_v0_X_2026-05-13_concat_3way_65_30_5.{raw.bin,bin}` | ✓ | **V0_17 SHIP CANDIDATE** |
+| `rust_v0_X_2026-05-13_concat_v0_16_c14s1.{raw.bin,bin}` | ✓ | V0_17 w=0.5 (prior variant) |
+| `rust_v0_X_2026-05-13_concat_w04_v0_16_c14s1.{raw.bin,bin}` | ✓ | V0_17 w=0.4 (intermediate) |
+| `rust_v0_X_2026-05-13_cycle14_full_recipe.{raw.bin,bin}` | ✓ | cycle-14 seed=1 component |
+| `rust_v0_X_2026-05-13_cycle14_full_seed7.{raw.bin,bin}` | ✓ | cycle-14 seed=7 (B0+B3 specialist) |
+| `rust_v0_X_2026-05-13_cycle14_full_seed42.{raw.bin,bin}` | ✓ | cycle-14 seed=42 (AIC-4 specialist) |
+| `rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.{raw.bin,bin}` | ✓ | initial cycle-14 (3-group, incomplete recipe) |
+| `rust_v0_X_2026-05-13_true_v0_16_recipe.{raw.bin,bin}` | ✓ | V0_16 bit-identical reproduction |
+| `rust_v0_X_2026-05-13_rerun_clean_0946.{raw.bin,bin}` | ✓ | 3-group V0_16-recipe rerun |
+| `rust_v0_X_2026-05-13_v0_16_plus_midq15.{raw.bin,bin}` | ✓ | V0_16+mid-q-boost (falsified) |
+| `rust_v0_X_2026-05-13_v0_16_tvband_5_40_5_40.{raw.bin,bin}` | ✓ | aggressive tv-band (over-corrected) |
+| `rust_v0_X_2026-05-13_weight_avg_v0_16_c14s1.{raw.bin,bin}` | ✓ | weight-avg attempt (falsified) |
+
+All 12 cycle-14 bakes preserved. Future agents can reproduce any
+evaluation by checking out main + running the documented eval
+command.
+
+Pure verification tick, no source / runtime / bake changes.
+
 ### Tick 644 — 2026-05-13T13:07Z — V0_17 candidate documented in CHANGELOG + CONTEXT-HANDOFF (not yet shipped)
 
 Added V0_17 candidate documentation to two key user-facing docs
