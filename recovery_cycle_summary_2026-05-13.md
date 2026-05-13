@@ -377,3 +377,100 @@ val_policy=min + epochs=300`) on the truly-clean post-purge CSV.
 Compare CID22 SROCC to V0_15's archived 0.8914 and V0_16's 0.8919.
 This was always the cheap, available path — the autonomous recovery
 loop missed it because it cached a stale "deleted" claim.
+
+## Post-correction work (2026-05-13 09:11–09:42 UTC, ticks 593-601)
+
+The 9-tick session after the hallucination correction did the
+following durable work (per user directive: "make best params and
+tools the default ones").
+
+### 1. Default-on configuration changes (zensim commit `21efc115`)
+
+- `scripts/v_next/score_unified_with_bake.py` — soft-iso projection
+  applied by default with auto-detected sign convention; reports
+  both raw and post-iso non-mono; opt-out via `--no-soft-iso`.
+  Validated end-to-end on V0_16 against `unified_v13_zenjpeg.parquet`
+  (raw 2.30% matches `CONTEXT-HANDOFF.md` canonical) and
+  `unified_v15r_zenjpeg.parquet` (raw 5.83% matches cycle-11 tick 538
+  canonical).
+- `site/js/compare-worker.js` — `applySoftIsoPerCurve` +
+  `countCurveViolations` helpers applied to bake-scored Y axes
+  before SROCC / step-5 / box-plot. Reference metrics passed through
+  unchanged.
+- `zensim-validate/src/bin/zensim_mlp_train.rs` defaults: `--hidden`
+  64 → 128, `--seed` 42 → 1, `--max-features` `Option<usize>` → `usize`
+  default 228, `about` string updated from "V0_5 recipe" to refer to
+  V0_16 + the new runner. Build clean 2.80s.
+
+### 2. Permanent V0_16 reproducer (zensim commit `8541c092`)
+
+`benchmarks/recipe_v0_16.sh` (197 lines, executable) — one-command
+V0_16 SHIP retrain. Pre-flight checks the 4 input files exist,
+builds the Rust trainer binary, trains with V0_16 recipe args,
+affine-calibrates with V0_16's α=28.0366 β=-5.0738, runs CID22
+eval. Per-script docstring documents how to regenerate the 4 input
+files if `/tmp` was wiped.
+
+### 3. CLAUDE.md per-band reporting compliance (zensim commit `ed17fe98`)
+
+`score_unified_with_bake.py` gained per-band non-mono q-step rate
+table per the CLAUDE.md "Per-band reporting rule" — adjacent-q
+reversals bucketed by band of the lower-q endpoint, reported as a
+table with n, raw %, after-iso % per band. Validated against the
+CID22 Table 5 cuts (B0 <50, B1 [50,65), B2 [65,90), B3 ≥90).
+
+### 4. Hallucination-trigger fix (zensim commit `21efc115`)
+
+`docs/phase4_reference/README.md` opening header rewritten with
+explicit CURRENT STATUS callout: the trainer is LIVE, this doc
+preserves the pre-deletion source as historical reference. Three
+sessions hallucinated the (now-LIVE) Rust trainer as deleted by
+reading the old framing.
+
+### 5. Structural finding: V0_16's per-band non-mono is BIMODAL
+
+Per-band Pareto matrix across 4 site bakes on
+`unified_v15r_zenjpeg.parquet` (canonical 1.79M-pair sweep, 4 bakes
+× 44s = ~3 min):
+
+| Bake | aggr | B0 % | B1 % | B2 % | B3 % | Profile |
+|---|---:|---:|---:|---:|---:|---|
+| V0_16 SHIP | 5.83% | 5.64% | **7.55%** | **3.76%✓** | **8.10%** | bimodal: best B2, worst B1+B3 |
+| V0_26 | 5.48% | 5.71% | 5.33% | 4.59% | 3.53% | flat profile, KonJND-w=1.0 |
+| V0_31 | 5.64% | 5.94% | 5.32% | 4.57% | 3.63% | flat, KonJND-w=0.5 |
+| V0_38 | 6.20% | 6.43% | 6.17% | 4.91% | 3.43% | uniformly rougher; CID22 SROCC champ |
+
+Confirmed stable on `unified_v15rc_zenjpeg.parquet` (B1 7.03%, B3
+8.43%, B2 4.15% — same bimodal shape).
+
+V0_16 wins the smoothness contest at high quality (B2: 3.76%, only
+bake meeting the 4.86% target raw) at the cost of medium (B1:
+7.55%) and visually-lossless (B3: 8.10%) smoothness. V0_26/V0_31
+trade B2 for flatter B1+B3 profiles.
+
+### 6. Cycle-14 candidate identified (needs user authorization)
+
+**V0_16 recipe + `--tv-band-weights 10,30,10,30`** (B1+B3 weighted
+3× higher than B0+B2 in the TV penalty). Per-band TV weights flag
+shipped at zensim `6f2487f` as future infrastructure; never
+exercised. Expected outcome: reduce V0_16's B1+B3 raw non-mono from
+7.55%/8.10% toward V0_26's 5.3%/3.5% while preserving V0_16's CID22
+SROCC lead and B2 smoothness.
+
+Compute cost: ~30 min wall to train (Rust trainer, single seed
+initially; multi-seed verification if results look promising) +
+1 min to eval. Produces a published-format bake; requires user
+authorization per CLAUDE.md.
+
+### Post-correction deliverables summary
+
+| Category | Item |
+|---|---|
+| Default-on changes | soft-iso (Python + JS), trainer defaults (3 fields), binary about-string |
+| New scripts | `benchmarks/recipe_v0_16.sh` |
+| Compliance fix | per-band non-mono in `score_unified_with_bake.py` |
+| Doc fix | `docs/phase4_reference/README.md` opening |
+| Structural finding | V0_16's bimodal per-band non-mono (B1+B3 elevated, B2 already under target) |
+| Cycle-14 candidate | V0_16 + per-band-TV-against-B1+B3 (pending user authorization) |
+| zensim main commits | `21efc115`, `03bb2c51`, `8541c092`, `ed17fe98` (4 commits pushed) |
+| zenanalyze main commits | `4c88f118`, `6011c859`, `406655b3`, `0a4d9ce0`, `8ea464f9`, `f08fe6ef`, `5ec33edf`, `0afe1ad2` (8 log commits pushed) |

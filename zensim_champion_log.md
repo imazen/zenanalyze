@@ -5318,6 +5318,29 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 602 — 2026-05-13T09:45Z — Recovery summary extended with post-correction work (ticks 593-601)
+
+Added "Post-correction work (2026-05-13 09:11–09:42 UTC)" section to
+`recovery_cycle_summary_2026-05-13.md` so the 9-tick post-hallucination
+discovery cycle is captured in the durable cross-session reference.
+Sections:
+
+1. Default-on configuration changes (zensim `21efc115`)
+2. Permanent V0_16 reproducer `benchmarks/recipe_v0_16.sh` (zensim `8541c092`)
+3. CLAUDE.md per-band reporting compliance fix (zensim `ed17fe98`)
+4. Hallucination-trigger fix at `docs/phase4_reference/README.md`
+5. Structural finding: V0_16's bimodal per-band non-mono (B1+B3 elevated, B2 under target)
+6. Cycle-14 candidate identified (V0_16 + `--tv-band-weights 10,30,10,30`)
+7. Deliverables summary table with all 4 zensim + 8 zenanalyze commit hashes
+
+Future agents reading the summary will see both the corrected
+chronology (Rust trainer is LIVE, not deleted) AND the post-correction
+structural findings (per-band non-mono Pareto, cycle-14 candidate)
+without having to scroll through 600+ tick log entries to reconstruct
+the state.
+
+Pure doc consolidation; no source edits.
+
 ### Tick 601 — 2026-05-13T09:42Z — V0_16 per-band confirmation on v15rc — bimodal pattern is stable across both canonical zenjpeg parquets
 
 Ran V0_16 on `unified_v15rc_zenjpeg.parquet` (694MB, 486,540 pairs,
