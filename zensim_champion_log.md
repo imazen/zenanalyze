@@ -5318,6 +5318,89 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 523 — 2026-05-13T02:36Z — V0_kadid_tid 8-seed tail scan FALSIFIES "V0_16 is upper-tail" hypothesis
+
+Trained + baked + evaluated 3 more seeds (100, 200, 1000) at
+V0_kadid_tid recipe → 8-seed total sample.
+
+**8-seed V0_kadid_tid CID22 distribution**:
+
+| Seed | CID22 |
+|--:|--:|
+| 1 | 0.8789 |
+| 2 | 0.8615 |
+| 3 | **0.8817** ★ (best) |
+| 7 | 0.8691 |
+| 42 | 0.8741 |
+| 100 | 0.8706 |
+| 200 | 0.8650 |
+| 1000 | 0.8689 |
+| **Mean (n=8)** | **0.8712** |
+| Std (n=8) | 0.0068 |
+| Max | 0.8817 |
+
+**V0_16 SHIP distance from 8-seed distribution**:
+- (0.8919 - 0.8712) / 0.0068 = **+3.0σ**
+- P(V0_16 ∈ V0_kadid_tid upper tail) ≈ **0.13%**
+
+**HYPOTHESIS FALSIFIED**: V0_16 is NOT a seed-tail outlier of
+V0_kadid_tid's distribution. None of the 3 new seeds (100, 200,
+1000) hit 0.89+. The max across 8 seeds remains seed=3's 0.8817,
+which is 0.0102 below V0_16's 0.8919.
+
+V0_16 used **materially different training ingredients** beyond
+{synth + KonJND + KADID + TID}. Candidates from CLAUDE.md:
+
+1. **Different `safesyn` CSV** — V0_16 trained on the 144,791-row
+   purged variant (`safe_synth_clean_features.csv`). We've been
+   using a 156k variant (with dssim/qc columns).
+2. **`--concordance-filter ssim2_butter`** applied to safesyn —
+   drops rows where ssim2/butter rank-disagree within a curve.
+3. **Different TV-pairs file** — V0_16 used
+   `combined_purged_tv_pairs_bands.tsv` (205,654 pairs); we've
+   been letting the trainer auto-build TV pairs.
+
+**8-seed AIC-4 distribution** (for completeness):
+
+| Seed | AIC-4 |
+|--:|--:|
+| 1 | 0.9029 |
+| 2 | 0.9045 |
+| 3 | 0.9027 |
+| 7 | 0.9040 |
+| 42 | 0.9074 |
+| 100 | 0.9008 |
+| 200 | 0.9061 |
+| 1000 | 0.9087 |
+| **Mean (n=8)** | **0.9046** |
+| Std (n=8) | 0.0027 |
+
+AIC-4 std 0.0027 is small. AIC-4 family mean 0.9046 is below V0_16's
+0.9127 by 0.008 (~3σ) — V0_16 also wins AIC-4 by a measurable margin.
+
+**Cycle-10 plateau is now well-characterized**: V0_kadid_tid family
+sits at CID22 0.8712 ± 0.0068 (n=8), AIC-4 0.9046 ± 0.0027 (n=8).
+V0_16 SHIP is +3σ above on both. The gap is structural, not
+stochastic.
+
+Artifacts produced:
+- 3 new bakes: `/tmp/zensim_loop/bakes/v0_kadid_tid_seed{100,200,1000}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+
+**Next tick (524)**: Hunt for V0_16's exact training CSV
+(cycle-10d). Search known paths:
+- `/mnt/v/output/zensim/synthetic-v2/safe_synth_clean_features.csv`
+- `/mnt/v/dataset/safe_synth_clean*.csv`
+- `/mnt/v/zen/zensim-training/2026-05-07/*` for 144k-row variant
+- Plus any TV-pairs file with `combined_purged` in name
+
+If found: launch V0_kadid_tid recipe with that CSV as safesyn
+source. Compare CID22 SROCC against current 0.8817 best to see
+if the data swap closes the V0_16 gap.
+
+If not found: cycle-10d is blocked. Move to cycle-10b (hidden
+capacity bump) as alternative.
+
 ### Tick 522 — 2026-05-13T02:32Z — Cycle-10 outcomes doc committed; V0_38 = cycle-10a champion record
 
 zensim commit `b311aa6e`. Created
