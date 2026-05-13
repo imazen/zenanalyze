@@ -311,18 +311,69 @@ commit `4da7d1fa`. The σ-stabilization is the main benefit;
 SROCC gain is mild and not statistically significant. V0_16
 ceiling 0.8919 remains uncracked.
 
-## Total recovery cycle deliverables (final 2026-05-13 07:21 UTC)
+## Cycle-13 ERROR — false premise (CORRECTED 2026-05-13 09:10 UTC)
+
+**Cycle-13 (ticks 568-592) was built on a hallucination.**
+
+Tick 569 inspected commit `e6132243` (2026-05-07, "drop in-tree MLP
+trainer") and concluded the Rust trainer was deleted. **It was
+restored 5 commits later** at `ec40ec8` ("tick 41 — restore Rust
+mlp_train") on the same branch. As of 2026-05-13:
+
+- `zensim-validate/src/mlp_train.rs` exists in main (1106 lines,
+  modified 2026-05-12 14:05)
+- `zensim-validate/src/bin/zensim_mlp_train.rs` is the standalone
+  CLI binary
+- Subsequent commits on main: `f3ff312` (CLI), `e79b7a7` (V0_5
+  trained), `4ada315` (TV regularizer), `6f2487f` (per-band TV),
+  `5da0097` (test fix)
+
+The "we need to restore the deleted Rust trainer" recommendation
+across ticks 569-592 is FALSE. The binary is callable today as:
+
+```
+cargo run -p zensim-validate --bin zensim_mlp_train --release -- \
+  --group safesyn:/path/to/features.csv:1.0:0.0 \
+  --group kadid:/path/to/kadid.csv:0.3:1.0 \
+  --group tid:/path/to/tid.csv:0.3:1.0 \
+  --hidden 64 --epochs 300 --tv-weight 15 \
+  --out benchmarks/rust_v0_X_<date>.bin
+```
+
+This is the trainer that produced V0_15/V0_16. To reproduce them,
+just run it.
+
+**Lesson recorded**: memory of "X is deleted" frozen at commit Y
+is invalid once the file is restored at commit Y+N. Verify by
+reading the working tree before recommending restoration. The
+`Before recommending from memory` discipline in CLAUDE.md was not
+followed across multiple sessions.
+
+**What cycle-13 DID produce** (still useful, not falsified):
+- `--ranknet-sample-weights` flag in Python trainer (commit
+  `8e121e0f`) — implements RankNet sampling-bias in Python; useful
+  infrastructure even though it doesn't independently match V0_16
+- Genuine finding: Python `train_weight` is an MSE-loss multiplier
+  while Rust `train_weight` is a RankNet pair-sampling probability.
+  These ARE different mechanisms; the Rust trainer is the
+  authoritative implementation, callable today via the binary above.
+
+## Total recovery cycle deliverables (corrected 2026-05-13 09:10 UTC)
 
 | Category | Count |
 |---|--:|
 | Site-shipped candidate bakes | 4 (V0_16, V0_26, V0_31, V0_38) |
 | Cycle outcomes docs | 6 (cycles 7/8/9/9b/10/12) |
 | Recovery summary | 1 (this file) |
-| Trainer infrastructure flags | 4 |
-| Post-processor scripts | 1 |
-| Site bug fixes | 1 |
-| Tick log entries | 566+ |
+| Trainer infrastructure flags | 5 (low-q-row, low-q-pair, tv-pairs-file, mid-q, ranknet-sample-weights) |
+| Post-processor scripts | 1 (soft_iso_smooth.py) |
+| Site bug fixes | 1 (V0_26 sign-flip) |
+| Tick log entries | 593+ |
 
-**Total recovery cycle: 567 ticks across 6 cycles.** Only 3 net
-positive findings (V0_38, soft_iso_smooth, mid-q-boost stabilizer).
-14+ knob configurations falsified at multi-seed scale.
+**Next real cycle-13 action (NOT autonomous)**: run the existing
+`zensim_mlp_train` binary with V0_15/V0_16 recipe args
+(`safesyn:1.0 + kadid:0.3 + tid:0.3 + hidden=64 + tv_weight=15 +
+val_policy=min + epochs=300`) on the truly-clean post-purge CSV.
+Compare CID22 SROCC to V0_15's archived 0.8914 and V0_16's 0.8919.
+This was always the cheap, available path — the autonomous recovery
+loop missed it because it cached a stale "deleted" claim.

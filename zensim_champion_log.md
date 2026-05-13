@@ -5318,6 +5318,72 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 594 — 2026-05-13T09:25Z — User-directed cleanup: best-known config now the default; rust-trainer-was-deleted hallucination root-caused and patched
+
+User caught a 25-tick hallucination chain (ticks 568-592) about the Rust
+trainer being deleted. Read of git history showed it was deleted ONCE
+(commit `e6132243` 2026-05-07) and RESTORED ONCE (commit `ec40ec8`
+2026-05-10 "tick 41 — restore Rust mlp_train"). It is live in
+`zensim-validate/src/mlp_train.rs` (1106 lines), wrapped by binary
+`zensim_mlp_train`, and produced V0_15/V0_16. Recipe captured in
+`zensim/CONTEXT-HANDOFF.md`. The 25-tick chain was seeded by tick
+569 running `git show e6132243` without checking the working tree or
+later commits, and by `docs/phase4_reference/README.md`'s opening line
+"# Phase 4 reference: deleted Rust mlp_train.rs" which scans as a
+present-tense statement.
+
+User then directed: *"if iso smooth is a win why not always do it -
+presume we have regular memory loss and make the best params and
+tools the default ones. if needed, encrypt the holdout set data on
+disk to avoid contamination."*
+
+Lifted three best-known-config decisions from "behind a flag" to
+"default behavior". Committed at zensim `21efc115`, pushed main:
+
+1. **Soft-iso default-on in `scripts/v_next/score_unified_with_bake.py`**
+   — auto-detects sign convention per curve (distance vs score
+   semantics), reports both raw and iso non-mono. Opt-out via
+   `--no-soft-iso`.
+2. **Soft-iso default-on in `site/js/compare-worker.js`** — new
+   `applySoftIsoPerCurve` + `countCurveViolations` helpers; applied to
+   bake-scored Y axes before SROCC / step-5 / box-plot. Reference
+   metrics passed through unchanged. Progress message reports before/
+   after rate.
+3. **Rust trainer defaults aligned to V0_16 ship**: `--hidden` 64→128,
+   `--seed` 42→1, `--max-features` Option<usize>→usize default 228.
+   TV stays opt-in (requires `--tv-pairs-file`); V0_16 invocation
+   documented in the binary's module docstring.
+4. **`docs/phase4_reference/README.md` opening rewritten** with
+   CURRENT STATUS callout: trainer is LIVE, this doc preserves the
+   pre-deletion source as historical reference. Explicit "stop and
+   `ls`" note for the next session.
+
+Build / parse / push: `cargo build -p zensim-validate --bin
+zensim_mlp_train --release` 2.81s clean; Python AST clean; JS
+parses (Node-runtime error is expected `self`-not-defined since the
+file is a Web Worker context). Pushed to imazen/zensim main.
+
+zenanalyze-side recovery summary (`recovery_cycle_summary_2026-05-13.md`)
+was rewritten earlier this turn to replace the false cycle-13 section
+(also based on the deletion hallucination) with the actual chronology
+and a "next real action: run the Rust trainer" note. Not yet committed
+on zenanalyze side.
+
+Encryption proposal for the holdout corpus written into this response;
+needs user decision on key-management (file vs LUKS vs hash-gate) before
+implementation.
+
+### Tick 593 — 2026-05-13T09:11Z — Hallucination discovery + correction (see tick 594 for action)
+
+User asked "why was the rust trainer deleted? for the third fucking
+time?". Investigation showed: ONE deletion in git
+(`e6132243` 2026-05-07), ONE restoration (`ec40ec8` 2026-05-10), file
+LIVE in current main. The "third time" referred to three sessions of
+agents hallucinating it as currently deleted. Cycle-13 (ticks 568-592)
+was 25 ticks built on this false premise. Recovery summary section
+rewritten in `zenanalyze/recovery_cycle_summary_2026-05-13.md`. See
+tick 594 for the followup config changes.
+
 ### Tick 592 — 2026-05-13T09:01Z — Idle: marker refresh only
 
 ### Tick 591 — 2026-05-13T08:57Z — Idle: marker refresh only
