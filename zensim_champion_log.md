@@ -5318,6 +5318,77 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 499 — 2026-05-13T00:14Z — V0_28 FALSIFIES cosine-LR hypothesis; cycle-7 doubly closed
+
+V0_28 (V0_26 recipe + `--lr-schedule cosine`) finished training
+(15s wall, best val SROCC 0.9977, identical to V0_26). Baked
+to `/tmp/zensim_loop/bakes/v0_28_konjnd_cosine_2026-05-13.bin`
+(120,711 bytes, 228→128→1 ZNPR v2).
+
+**Per-corpus eval** (n=4292 CID22 + 600 AIC-3 + 300 AIC-4):
+
+| Bake | CID22 | AIC-3 | AIC-4 | JPEG-AI (AIC-4) |
+|---|--:|--:|--:|--:|
+| V0_16 (SHIP) | **0.8919** | 0.7965 | 0.9127 | 0.7951 |
+| V0_26 (KonJND, const LR) | 0.8639 | 0.8027 | 0.9097 | **0.8387** |
+| V0_27 (+ dssim 0.1) | 0.8658 | — | — | 0.7791 ❌ |
+| **V0_28 (KonJND, cosine LR)** | **0.8550** ❌ | 0.8092 | 0.9103 | 0.8242 ❌ |
+
+**V0_28 vs V0_26**: CID22 -0.0089 worse, JPEG-AI -0.0145 worse. Cosine
+LR HURTS this recipe on both axes — it's not "V0_5's missing
+ingredient", it's a different optimum that doesn't help.
+
+**V0_28 vs V0_16**: -0.037 CID22 (catastrophic). Not a ship candidate.
+
+**Cycle-7 final tree**:
+```
+V0_16 (SHIP, CID22 0.8919, JPEG-AI 0.7951)
+V0_25 (TV+safesyn, const LR):                0.8505 / —
+ └─ V0_26 (+ KonJND, const LR):              0.8639 / 0.8387  ← cycle-7 candidate
+     ├─ V0_27 (+ dssim 0.1):                 0.8658 / 0.7791  ❌ falsified
+     └─ V0_28 (+ cosine LR):                 0.8550 / 0.8242  ❌ falsified
+```
+
+**Cycle-7 truly closed**. Both alternative hypotheses (dssim co-train,
+cosine LR) HURT either CID22 or JPEG-AI. V0_16 remains ship. V0_26
+remains preserved as the cycle-7 tradeoff candidate (JPEG-AI +0.044
+at CID22 -0.028 cost) for future cycle-8 when JPEG-AI corpus
+acquisition becomes a priority.
+
+**Per-codec JPEG-AI sensitivity insight**: V0_26's gain on JPEG-AI
+appears to come from KonJND alignment teaching the MLP about
+sub-PJND artifacts; cosine LR breaks this learning by smoothing the
+weight landscape into a less specialized solution. Suggests the
+JPEG-AI gain lives in sharp, content-specific weight directions
+that cosine annealing damps.
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_28_konjnd_cosine_2026-05-13.bin` (120,711B)
+- `/tmp/zensim_loop/v0_28_per_pair.csv` (5,192 rows × 10 cols)
+- `/tmp/zensim_loop/v0_28_eval.log`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T180701_v0_28_konjnd_cosine_seed1_2026-05-13/`
+
+**Next concrete tick (500)**: cycle-7 is structurally exhausted on
+the V_X-MLP-on-feat0..299 axis with current data. Phase plan
+options:
+- (a) merge V0_28 + V0_27 SROCC columns into 3 site parquets and
+  push to R2 (purely documenting what was tried — visualizes
+  why cosine LR/dssim don't help)
+- (b) start cycle-8: JPEG-AI corpus acquisition (download AIC-5
+  / JPEG-AI public test set) — needs user authorization for
+  download bandwidth/storage
+- (c) move from V_X (228-feat MLP) experiments to architecture
+  changes (input feature expansion, output multi-head, etc.)
+  — needs design discussion, not just a knob flip
+- (d) attempt V0_29: V0_26 with a *smaller* learning rate (3e-4
+  instead of 3e-3) holding LR constant. Maybe the issue isn't
+  schedule but step size — fine-tuning from V0_26 weights with
+  small constant LR could close the CID22 gap.
+
+Pick (d) for tick 500 (cheap, autonomous, completes hypothesis space
+"const-vs-cosine" with a "small-const-LR" variant before cycle-7
+is fully closed).
+
 ### Tick 498 — 2026-05-13T00:07Z — V0_28 launched: V0_26 recipe + cosine LR schedule
 
 Cycle-7 was at a "definitive" stopping point but pushing for one
