@@ -5318,6 +5318,75 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 530 — 2026-05-13T03:38Z — `--ranknet-group dataset` test FALSIFIED (last recipe knob exhausted)
+
+Tested V0_kadid_tid seed=3 with `--ranknet-group dataset` (vs
+default `image`). Per zensim CLAUDE.md, this matches "the Rust
+trainer's per-dataset pair sampling — pairs span all rows within
+a dataset, allowing cross-image absolute-quality ranking."
+
+**Result**: WORSE than default.
+
+| Metric | default (image) | dataset | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8817 | 0.8746 | -0.0071 |
+| AIC-4 | 0.9027 | 0.8964 | -0.0063 |
+
+**Cycle-10/11 cheap-knob exhaustion complete**. Every documented
+V0_4-recipe variant has been tested:
+
+| Knob | Test | Verdict |
+|---|---|---|
+| `--init kaiming` vs `--init glorot` | 3 seeds each | kaiming better by 0.006 |
+| `--ranknet-group image` vs `dataset` | seed=3 | image better by 0.007 |
+| `--val-policy mean` vs `min` | seed=3 | mean better by 0.004 |
+| `--konjnd-aligned` vs `konjnd_full` | seed=3 | aligned better by 0.029 (CATASTROPHIC) |
+| KonJND w=0.5 vs 0.3 | seed=1 | 0.5 better by 0.011 |
+| `--low-q-boost` 1.0 vs 1.5 | 5 seeds | no effect (within σ) |
+| `--low-q-pair-boost` 1.0 vs 2.0 | 6 seeds | -0.0043 AIC-4 (sig negative) |
+| External TV pairs file | mixed+synth-only | UNUSABLE (split mismatch) |
+
+**Every cheap recipe knob has been falsified.** V0_kadid_tid at
+default values (KonJND w=0.5, KADID w=0.3, TID w=0.3,
+ranknet-group=image, init=kaiming, val_policy=mean, hidden=128,
+TV=20, LR=3e-3 const, 300 epochs, mse_rank rank_weight=0.5,
+seed=3) at CID22 0.8817 is the apex of autonomous-mode
+exploration.
+
+The remaining V0_16 +0.010 gap (0.8919 - 0.8817) is genuinely
+locked behind:
+- V0_16's specific train/val split seed (unknown)
+- V0_16's specific batch sampling order (unknown)
+- Possibly an undocumented preprocessing step
+
+**REQUEST USER DIRECTION for cycle-11**. The autonomous cycle
+has fully exhausted its scope. Possible cycle-11 strategic
+directions documented in `recovery_cycle_summary_2026-05-13.md`:
+1. Data acquisition (JPEG-AI public corpus, more recent AIC datasets)
+2. Architecture changes (300-feat input, deeper MLP)
+3. Different training objective (contrastive losses, learn-to-rank)
+4. Per-band selective ensemble with feature-driven gating
+
+All four require user input on which axis to pursue and any
+authorization for new data/infra costs.
+
+Artifacts produced this tick:
+- 1 new bake: `v0_kadid_tid_rankdataset_seed3_2026-05-13.bin`
+- 1 per-pair CSV, 1 eval log
+
+**Cycle status TRULY final**:
+- V0_16 SHIP retained
+- V0_26 + V0_31 + V0_38 on comparison site as alternatives
+- 5 cycle outcomes docs in zensim/benchmarks/
+- 1 recovery summary doc in zenanalyze/
+- 3 trainer flags as future-experiment infrastructure
+- Recovery cycle catalogued 47+ ticks documenting every lever tried
+
+**Next tick (531)**: Cron will keep firing. Recommended action
+is refresh markers only and append a one-line "no new work this
+firing" tick if the user hasn't replied with direction. Don't
+keep fishing for marginal results that aren't there.
+
 ### Tick 529 — 2026-05-13T03:34Z — Cycle-11 runtime-ensemble experiment FALSIFIED
 
 Per tick 528 cycle-11 strategic option 4 ("Ensemble at runtime —
