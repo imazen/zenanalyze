@@ -5318,6 +5318,103 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 605 — 2026-05-13T10:11Z — V0_16 RERUN COMPLETE — CID22 = 0.8761, BELOW V0_16's 0.8919 by -0.0158 (recipe is NOT bit-reproducible); + Rust trainer gains --low-q-boost / --mid-q-boost flags
+
+**Three deliverables this tick**:
+
+### 1. V0_16 recipe rerun on truly-clean data — INCOMPLETE REPRODUCTION
+
+Background task `b1c625gug` finished. Early-stopped at epoch 140 (val
+patience 50). Best val_mean **0.9475** (higher than V0_16 ship's 0.9403,
+suggesting our run found a "different" optimum — likely overfit).
+
+| Metric | V0_X rerun | V0_16 SHIP | fast-ssim2 | Δ rerun vs ssim2 |
+|---|---:|---:|---:|---:|
+| **CID22 SROCC** (n=4292) | **0.8761** | **0.8919** | 0.8895 | **-0.0134 (FAILS goal #1)** |
+| val_mean (training) | 0.9475 | 0.9403 | — | higher val + worse CID22 = overfit signal |
+| Raw bake md5 | 0913344c… | b3f5fc59… | — | byte-different |
+| Calibrated md5 | ca47703b… | baf3fdcb… | — | byte-different |
+| B0 (<50, n=324) | 0.3924 | ~0.45 | 0.4418 | rerun -0.05 |
+| B1 [50,65) (n=1010) | 0.3902 | 0.4559 | 0.4694 | rerun -0.08 |
+| B2 [65,90) (n=2915) | 0.7662 | (best B2 per cycle-11) | 0.7722 | rerun -0.006 |
+| B3 (≥90, n=43) | 0.1385 | — | 0.1121 | rerun BEATS ssim2 +0.026 |
+| Near-PJND [58,68] (n=787) | 0.3284 | — | 0.3908 | rerun -0.06 |
+
+**The discrepancy is larger than the documented seed σ (~0.007)**. V0_16
+SHIP was the +1.4σ tail of a 4-seed sweep at seed=1; the rerun is
+roughly the -1.5σ outcome at seed=1. This means:
+
+- Same seed produced systematically different result → **recipe has
+  uncontrolled state** (not just RNG-seed-derived). Likely candidates:
+  - File ordering of safesyn CSV (if regenerated since)
+  - TV pairs file filter behavior (130,558 loaded of 205,654 — same
+    "Loaded N TV pairs" count would help confirm bit-for-bit input
+    parity but not yet checked)
+  - Bit-level differences in mlp_train.rs between V0_16 train date
+    (2026-05-12) and now (no edits to that file in between per git log)
+  - Some build-environment dependency (BLAS variant, CPU ISA selection)
+- Per-band profile is DIFFERENT from V0_16's: rerun has worst B0/B1,
+  V0_16 had worst B1/B3. Bimodal-vs-low-quality-weak split is
+  recipe-state-dependent, not stable.
+
+**Artifacts**:
+- `benchmarks/rust_v0_X_2026-05-13_rerun_clean_0946.raw.bin`
+  (119,812 bytes, md5 0913344c…)
+- `benchmarks/rust_v0_X_2026-05-13_rerun_clean_0946.bin`
+  (119,812 bytes, md5 ca47703b…, calibrated)
+- `benchmarks/rust_v0_X_2026-05-13_rerun_clean_0946.train.log`
+- `/tmp/v0_X_rerun_clean_eval_full.log` (4292-pair eval, 86s wall)
+
+### 2. `--low-q-boost` and `--mid-q-boost` ported to Rust trainer (zensim `dacd425f`)
+
+While training ran, ported the cycle-9 + cycle-12 row-weight boost
+flags from Python to the canonical Rust trainer per user direction
+"modify and improve the rust trainer rather than use python".
+
+`MlpHyperparams` gained `low_q_boost` + `mid_q_boost` fields (default
+1.0 = no-op). `train_mlp_with_tv` pre-computes a per-row sampling CDF
+for each training group when either boost is non-trivial; the
+within-group pair sampler uses the CDF for weighted sampling, falls
+back to uniform when both boosts are 1.0 (bit-identical to V0_5/V0_15/
+V0_16 trainer behavior at defaults).
+
+Band cuts anchored to CID22 Table 5 (human_score 0-100):
+- B0 (<50): full low_q_boost
+- B1 [50,65): sqrt(low_q_boost) AND full mid_q_boost
+- B2 [65,90): full mid_q_boost
+- B3 (≥90): no boost
+
+CLI: `--low-q-boost <f64> --mid-q-boost <f64>` both default 1.0.
+
+Build clean 2.95s. Existing 2 trainer tests still pass.
+
+### 3. Recovery summary updated with post-correction work (tick 602)
+
+Earlier this turn, extended `recovery_cycle_summary_2026-05-13.md`
+with full ticks 593-601 work captured in a durable cross-session
+reference. Committed at zenanalyze `987ca4ee`.
+
+### Decisions needed from user
+
+Given the recipe doesn't bit-reproduce V0_16:
+
+1. **Investigate non-determinism source** (multi-tick: byte-compare TV
+   pair load count, hash the input files vs whatever V0_15 archive
+   was trained on, try forcing single-threaded BLAS, etc.)
+2. **Multi-seed sweep** (5-10 seeds via the new Rust trainer + the
+   existing recipe script with --suffix per seed) to characterize the
+   actual seed σ on this clean-CSV input — V0_16's 4-seed sweep was
+   on different inputs
+3. **Cycle-14 candidate now** — run V0_16 recipe +
+   `--tv-band-weights 10,30,10,30` at seed=1 on the rerun bake. The
+   bimodal B1+B3 finding (tick 600) might still apply, and per-band
+   TV may close the gap.
+4. **Accept rerun as-is + ship** — CID22 0.8761 trails ssim2 by 0.013,
+   FAILING goal #1. Not shippable.
+5. **Keep V0_16 ship** — don't re-train; the existing ship still wins
+   ssim2 by +0.0024. The rerun is just a measurement that V0_16's
+   exact number isn't trivially reproducible.
+
 ### Tick 604 — 2026-05-13T09:55Z — Fixed recipe-runner eval-flag bug + training healthy at epoch 90 (val_mean 0.9475 new best)
 
 **Bug fix**: `benchmarks/recipe_v0_16.sh` had `--cid22-only` flag for the
