@@ -136,6 +136,7 @@ mod metadata;
 mod model;
 pub mod output_spec;
 mod predictor;
+pub mod wire;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]

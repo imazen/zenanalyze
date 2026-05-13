@@ -108,21 +108,38 @@ use crate::output_spec::{OutputSpec, SparseOverride};
 pub const FORMAT_VERSION: u16 = 3;
 pub const LEAKY_RELU_ALPHA: f32 = 0.01;
 const MAGIC: [u8; 4] = *b"ZNPR";
-const HEADER_SIZE: usize = 128;
-const LAYER_ENTRY_SIZE: usize = 48;
+use crate::wire::{HEADER_SIZE, LAYER_ENTRY_SIZE};
 
 /// `(offset, len)` pair addressing a byte range in the file. `len = 0`
 /// is reserved for "section absent".
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Pod, Zeroable)]
 pub struct Section {
-    pub offset: u32,
-    pub len: u32,
+    pub(crate) offset: u32,
+    pub(crate) len: u32,
 }
 
 impl Section {
     pub const fn empty() -> Self {
         Self { offset: 0, len: 0 }
+    }
+
+    /// Construct from raw `(offset, len)` — the inverse of
+    /// [`Self::offset`] / [`Self::len`]. Used by the composer in the
+    /// sibling `zenpredict-bake` crate; runtime consumers shouldn't
+    /// need to mint Sections directly.
+    pub const fn new(offset: u32, len: u32) -> Self {
+        Self { offset, len }
+    }
+
+    /// Absolute byte offset into the bake file.
+    pub const fn offset(self) -> u32 {
+        self.offset
+    }
+
+    /// Section byte length. Zero means "section absent."
+    pub const fn len_bytes(self) -> u32 {
+        self.len
     }
 
     pub const fn is_empty(self) -> bool {

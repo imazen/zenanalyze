@@ -320,16 +320,11 @@ impl<'a> BakeRequestBuilder<'a> {
     }
 }
 
-const HEADER_SIZE: usize = 128;
-const LAYER_ENTRY_SIZE: usize = 48;
-const SECTION_OFF_SCALER_MEAN: usize = 32;
-const SECTION_OFF_SCALER_SCALE: usize = 40;
-const SECTION_OFF_LAYER_TABLE: usize = 48;
-const SECTION_OFF_FEATURE_BOUNDS: usize = 56;
-const SECTION_OFF_METADATA: usize = 64;
-const SECTION_OFF_OUTPUT_SPECS: usize = 72;
-const SECTION_OFF_DISCRETE_SETS: usize = 80;
-const SECTION_OFF_SPARSE_OVERRIDES: usize = 88;
+use zenpredict::wire::{
+    HEADER_SIZE, LAYER_ENTRY_SIZE, SECTION_OFF_DISCRETE_SETS, SECTION_OFF_FEATURE_BOUNDS,
+    SECTION_OFF_LAYER_TABLE, SECTION_OFF_METADATA, SECTION_OFF_OUTPUT_SPECS,
+    SECTION_OFF_SCALER_MEAN, SECTION_OFF_SCALER_SCALE, SECTION_OFF_SPARSE_OVERRIDES,
+};
 
 /// Compose a v3 ZNPR byte stream. Output round-trips through
 /// [`Model::from_bytes`](zenpredict::Model::from_bytes).
@@ -473,10 +468,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     write_section(
         &mut buf,
         SECTION_OFF_LAYER_TABLE,
-        Section {
-            offset: HEADER_SIZE as u32,
-            len: (n_layers * LAYER_ENTRY_SIZE) as u32,
-        },
+        Section::new(HEADER_SIZE as u32, (n_layers * LAYER_ENTRY_SIZE) as u32),
     );
 
     // Scaler sections.
@@ -504,10 +496,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                     let bits = f32_to_f16_bits(w);
                     buf.extend_from_slice(&bits.to_le_bytes());
                 }
-                Section {
-                    offset: start,
-                    len: (layer.weights.len() * 2) as u32,
-                }
+                Section::new(start, (layer.weights.len() * 2) as u32)
             }
             WeightDtype::I8 => {
                 let start = buf.len() as u32;
@@ -521,10 +510,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                     };
                     buf.push(q as u8);
                 }
-                Section {
-                    offset: start,
-                    len: layer.weights.len() as u32,
-                }
+                Section::new(start, layer.weights.len() as u32)
             }
         };
 
@@ -562,10 +548,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
             buf.extend_from_slice(&fb.low.to_le_bytes());
             buf.extend_from_slice(&fb.high.to_le_bytes());
         }
-        Section {
-            offset: start,
-            len: (req.feature_bounds.len() * 8) as u32,
-        }
+        Section::new(start, (req.feature_bounds.len() * 8) as u32)
     };
     write_section(&mut buf, SECTION_OFF_FEATURE_BOUNDS, feature_bounds_section);
 
@@ -592,10 +575,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
             // [...] value
             buf.extend_from_slice(entry.value);
         }
-        Section {
-            offset: start,
-            len: (buf.len() as u32) - start,
-        }
+        Section::new(start, (buf.len() as u32) - start)
     };
     write_section(&mut buf, SECTION_OFF_METADATA, metadata_section);
 
@@ -608,10 +588,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         let start = buf.len() as u32;
         let bytes: &[u8] = bytemuck::cast_slice(req.output_specs);
         buf.extend_from_slice(bytes);
-        Section {
-            offset: start,
-            len: bytes.len() as u32,
-        }
+        Section::new(start, bytes.len() as u32)
     };
     write_section(&mut buf, SECTION_OFF_OUTPUT_SPECS, output_specs_section);
 
@@ -632,10 +609,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         let start = buf.len() as u32;
         let bytes: &[u8] = bytemuck::cast_slice(req.sparse_overrides);
         buf.extend_from_slice(bytes);
-        Section {
-            offset: start,
-            len: bytes.len() as u32,
-        }
+        Section::new(start, bytes.len() as u32)
     };
     write_section(
         &mut buf,
@@ -661,20 +635,17 @@ fn append_f32(buf: &mut alloc::vec::Vec<u8>, values: &[f32]) -> Section {
     for &v in values {
         buf.extend_from_slice(&v.to_le_bytes());
     }
-    Section {
-        offset: start,
-        len: (values.len() * 4) as u32,
-    }
+    Section::new(start, (values.len() * 4) as u32)
 }
 
 fn write_section(buf: &mut [u8], at: usize, s: Section) {
-    buf[at..at + 4].copy_from_slice(&s.offset.to_le_bytes());
-    buf[at + 4..at + 8].copy_from_slice(&s.len.to_le_bytes());
+    buf[at..at + 4].copy_from_slice(&s.offset().to_le_bytes());
+    buf[at + 4..at + 8].copy_from_slice(&s.len_bytes().to_le_bytes());
 }
 
 fn write_section_inline(entry: &mut [u8], at: usize, s: Section) {
-    entry[at..at + 4].copy_from_slice(&s.offset.to_le_bytes());
-    entry[at + 4..at + 8].copy_from_slice(&s.len.to_le_bytes());
+    entry[at..at + 4].copy_from_slice(&s.offset().to_le_bytes());
+    entry[at + 4..at + 8].copy_from_slice(&s.len_bytes().to_le_bytes());
 }
 
 /// Per-output max-abs scale: `scales[o] = max_i |W[i, o]| / 127.0`.
