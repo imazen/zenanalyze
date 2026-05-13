@@ -5318,6 +5318,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 560 — 2026-05-13T06:46Z — Mid-q boost 1.5 5-seed verification: CID22 mean +0.003 (n.s.) but σ-TIGHTENS 4×
+
+Added 2 more seeds (2, 7) to reach 5-seed sample at mid-q-boost=1.5.
+
+**5-seed mid-q-boost 1.5 results**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8758 | 0.8982 |
+| 2 | 0.8743 | 0.9105 |
+| 3 | 0.8756 | 0.9060 |
+| 7 | 0.8718 | 0.8981 |
+| 42 | 0.8740 | 0.9054 |
+| **Mean (n=5)** | **0.8743** | **0.9036** |
+| Std (n=5) | **0.0016** | 0.0055 |
+
+**Welch's t-test vs V_kadid_tid baseline (n=8, σ=0.0068)**:
+- Δ CID22 = +0.0031
+- SE = 0.0025
+- t = 1.24, p ≈ 0.24 → **NOT statistically significant**
+- AIC-4: -0.0010 (n.s., tied)
+
+**Cycle-9 trap caveat applied**: the borderline +0.0039 at n=3
+dropped to +0.0031 at n=5 — direction held but magnitude shrank.
+This is mild evidence of a real effect, but at p=0.24 we cannot
+reject the null.
+
+**Notable secondary finding — σ TIGHTENS 4×**:
+
+V_kadid_tid baseline σ = 0.0068 (n=8) → mid-q-1.5 σ = 0.0016 (n=5)
+
+The boost reduces CID22 SROCC seed-variance by ~4×. Even if the
+mean gain is marginal, the TIGHTNESS is dramatic. mid-q-boost may
+act as a recipe stabilizer — pushing all seeds toward a similar
+optimum (lower variance, similar mean).
+
+**Decision**: not committing the `--mid-q-boost` flag yet. The
+positive CID22 mean is borderline (p=0.24). The σ-tightening is
+interesting but unclear if it translates to user-facing value.
+
+V0_16 ceiling at 0.8919 remains uncracked. Even mid-q-boost
+max-seed (1, at 0.8758) is -0.016 below V0_16.
+
+Artifacts produced this tick:
+- 2 more bakes: `v0_kadid_tid_midq15_seed{2,7}_2026-05-13.bin`
+- Trainer change still UNCOMMITTED (waiting for stronger signal)
+
+**Updated state**: 5-seed mid-q-1.5 shows mild positive CID22
+direction with strong σ-stabilization. Could try mid-q-boost=2.0
+or 3.0 at single seed to see if stronger boost amplifies the
+effect. But cycle-9 lesson: don't chase single-seed results.
+
+**Next tick (561)**: try `--mid-q-boost 2.0` at 3 seeds to see if
+stronger boost gives stronger effect. ~50s wall. If 2.0 gives
++0.006 CID22 at 3 seeds vs 1.5's +0.003, the boost is doing
+something monotonic worth exploring. If 2.0 underperforms 1.5,
+mid-q is a near-zero lever.
+
 ### Tick 559 — 2026-05-13T06:40Z — Mid-q boost 1.5 shows TIGHT positive signal (3-seed mean +0.004 CID22)
 
 Per tick 558's strategic insight (V0_16 wins B1+B2), implemented
