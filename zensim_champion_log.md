@@ -5318,6 +5318,48 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 546 — 2026-05-13T05:34Z — Fixed bug in committed soft_iso_smooth.py — TypeError on pyarrow dtype kwarg
+
+Ran the committed `soft_iso_smooth.py` (cycle-11 deliverable, commit
+`e232cefe`) as a post-commit sanity check. Found a real bug:
+
+```
+TypeError: to_numpy() got an unexpected keyword argument 'dtype'
+```
+
+The line `t[c].to_numpy(dtype=np.float32)` doesn't work on
+pyarrow `ChunkedArray` (only on `Array`). My in-line analysis at
+tick 537 used `t[c].to_numpy(dtype=np.float32)` differently or via
+a different table structure — the script was untested as written.
+
+**Fix** (zensim commit `355afb52`):
+```python
+- X = np.stack([t[c].to_numpy(dtype=np.float32) for c in feat_cols], axis=1)
++ X = np.stack([np.asarray(t[c].to_numpy(), dtype=np.float32) for c in feat_cols], axis=1)
+```
+
+**Verified post-fix**: V0_38 output matches tick 537's analysis
+exactly:
+- Non-mono 6.26% → 0.00% ✓
+- Corrections: 138,443 (7.8% of scores) ✓
+- SROCC 0.9328 → 0.9325 (Δ -0.0004) ✓
+
+Script is now functional from any cold install. Future agents
+running `python3 soft_iso_smooth.py --bake <path> --parquet <path>
+--flip-output` will get the documented behavior.
+
+**Lesson**: cycle-11 commit `e232cefe` shipped untested. Should
+have run end-to-end before committing. Now `355afb52` is the real
+working version.
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/scripts/v_next/soft_iso_smooth.py`
+  (1-line fix, zensim commit `355afb52`)
+- Verified script works on V0_38 + unified parquet
+
+**Next tick (547)**: All bug fixes complete. Recovery cycle is
+truly truly finished. Refresh markers only.
+
 ### Tick 545 — 2026-05-13T05:30Z — Soft-iso is a no-op on AIC-3/AIC-4 (already monotonic); applicability further narrowed
 
 Per tick 539's finding (CID22 soft-iso doesn't help, too sparse),
