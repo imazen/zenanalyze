@@ -5318,6 +5318,32 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 653 — 2026-05-13T13:43Z — Idle: cycle-14 trainer-flag testing genuinely complete
+
+Markers refreshed. No productive autonomous next step:
+
+- All 3 cycle-14-era trainer flags (per-band TV, mid-q-boost,
+  low-q-boost) have multi-corpus CID22 data points
+- V0_17 ship candidate built, verified across 5 corpora + non-mono +
+  PJND + test suite, added to comparison site, documented in 7
+  surfaces (outcomes doc, recovery summary, CHANGELOG,
+  CONTEXT-HANDOFF, 3 site parquets, tick log)
+- Recipe runner committed (`benchmarks/recipe_v0_16.sh`)
+- 14 V_X-family bakes preserved in git
+- val≠CID22 lesson recorded for cycle-15+
+
+**The recovery cycle is structurally complete**. Further progress
+requires user-directed strategic axis:
+1. **Ship V0_17** — 7-step procedure documented in CHANGELOG +
+   CONTEXT-HANDOFF
+2. **Cycle-15 direction** — new data acquisition (JPEG-AI corpus),
+   architecture pivot (300-feat input MLP, FiLM/MoE), or different
+   training objective
+3. **Stop the cron loop** — recovery cycle delivered, no further
+   autonomous work produces meaningful Pareto improvement
+
+Loop continues at zero net structural progress. Markers refreshed.
+
 ### Tick 652 — 2026-05-13T13:39Z — Cycle-14 outcomes doc updated with low-q-boost falsification + val≠CID22 lesson
 
 Added low-q-boost falsification finding to `cycle_14_per_band_tv_outcomes_2026-05-13.md`:
