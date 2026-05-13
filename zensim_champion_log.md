@@ -5318,6 +5318,67 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 521 — 2026-05-13T02:31Z — V0_38 cycle-10a B0/B3 specialist merged into 3 site parquets
+
+zensim commit `4edc426c`. V0_38 = V0_kadid_tid seed=3 best single
+bake added to the live comparison site:
+
+- CID22: merged 4292/4341 (verified |SROCC|=0.8817 vs `human_mos`)
+- AIC-3: merged 600/600 (verified |SROCC|=0.7969 vs `human_jnd`)
+- AIC-4: merged 300/300 (verified |SROCC|=0.9027 vs `human_jnd`)
+
+Ran AIC-3 eval first (V0_kadid_tid seed=3 didn't have AIC-3 from
+prior runs), then 3-corpus merge via the same script pattern as
+V0_31 (tick 506) and V0_26 (tick 497).
+
+Updated `compare.js` dropdown (line 60):
+```js
+{ id: "score_zensim_v0_38", label: "zensim V0_38 cycle-10a B0/B3 specialist (synth+KonJND+KADID+TID, seed=3)" },
+```
+
+Naming convention: `score_zensim_v0_38` continues the sequential
+V0_X numbering (V0_31 was last on the site; V0_38 is the next
+shippable cycle-10a candidate). The recipe descriptor in the label
+makes the variant family clear without needing to dig into commits.
+
+**Site state now (cycle-7/8/10a candidates ALL live)**:
+
+| Site option | Recipe | CID22 | AIC-3 | AIC-4 |
+|---|---|--:|--:|--:|
+| V0_16 SHIP | unknown extras | **0.8919** | 0.7965 | 0.9127 |
+| V0_26 cycle-7 | + KonJND w=1.0 | 0.8639 | 0.8027 | 0.9097 |
+| V0_31 cycle-8 | + KonJND w=0.5 | 0.8628 | 0.8031 | 0.9176 |
+| **V0_38 cycle-10a** | + KonJND w=0.5 + KADID + TID | **0.8817** | 0.7969 | 0.9027 |
+
+Users can now toggle between V0_16 SHIP / V0_26 / V0_31 / V0_38
+on the live comparison-site to see per-corpus and per-codec
+tradeoffs.
+
+Artifacts produced:
+- 3 modified parquets at `/home/lilith/work/zen/zensim/site/data/parquet/`
+- `compare.js` updated with V0_38 entry
+- 1 new AIC-3 per-pair CSV (`v0_kadid_tid_seed3_aic3.csv`)
+- Committed at zensim `4edc426c` (push deploys via GH Pages)
+
+**Cycle-10a SHIPPED to live site.** V0_38 is the strongest
+single-bake B0/B3 specialist — beats ssim2 on B0 (+0.008) and B3
+(+0.006), loses on B1/B2/Near-PJND. V0_16 SHIP unchanged for
+goal-#1 balanced-band requirement.
+
+**Next tick (522)**: cycle-10a is at a natural pause. Options:
+- (a) Document cycle-10 outcomes in
+  `zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md` —
+  matches the cycle-7/8/9/9b doc pattern. Closes cycle-10a with
+  permanent record.
+- (b) Try cycle-10b: V0_kadid_tid recipe + hidden=192 capacity
+  bump (one CLI flag). Cheap test of whether more MLP capacity
+  closes the V0_16 gap.
+- (c) Try V0_kadid_tid + concordance filter via unified parquet
+  path. More invasive but uses the (cycle-10c blocked) lever.
+
+Pick (a) for tick 522 — closes cycle-10a permanently before
+exploring cycle-10b/c.
+
 ### Tick 520 — 2026-05-13T02:25Z — V0_kadid_tid ensemble (5 seeds avg) gains +0.003 over mean but loses to best single seed
 
 Per tick 519 plan: averaged `v04_distance` per pair across all 5
