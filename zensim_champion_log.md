@@ -5318,6 +5318,54 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 572 — 2026-05-13T07:42Z — `--ranknet-sample-weights` trainer flag committed (zensim `8e121e0f`)
+
+Committed the cycle-13 `--ranknet-sample-weights` trainer flag at
+zensim commit `8e121e0f`. Documented at-commit:
+- Mirrors deleted Rust trainer's mechanism at `e6132243^`
+- Tested neutral (byte-identical) + extreme (regression) weight regimes
+- Doesn't reproduce V0_15/V0_16 recipe edge alone
+- Kept as future-experiment infrastructure
+
+**Recovery cycle trainer infrastructure NOW (5 flags + 1 script)**:
+
+| Flag | Commit | Cycle | Effect |
+|---|---|---|---|
+| `--low-q-boost` | `4b998258` | 9 | row weight × boost (B0/B1) — falsified |
+| `--low-q-pair-boost` | `a700b10f` | 9b | RankNet pair weight (B0/B1) — falsified |
+| `--tv-pairs-file` | `c4cacfba` | 10h | load pre-built TV pairs — unusable for V0_16 |
+| `--mid-q-boost` | `4da7d1fa` | 12 | row weight × boost (B1/B2) — mild stabilizer +0.003 |
+| **`--ranknet-sample-weights`** | **`8e121e0f`** | **13** | **multinomial pair sampling by train_weight — falsified at tested regimes** |
+| `soft_iso_smooth.py` | `e232cefe`+`355afb52` | 11 | post-hoc curve smoother — VERIFIED Pareto |
+
+5 trainer flags + 1 script + V0_26 sign-fix = full cycle infra.
+
+**Cycle-13 SAMPLING-BIAS HYPOTHESIS CONCLUSIVELY CLOSED**.
+The mechanism the deleted Rust trainer used (sampling-bias on
+train_weight) does not on its own reproduce V0_15/V0_16's CID22
+edge in our autonomous-mode Python pipeline. V0_15/V0_16's recipe
+must include additional ingredients beyond just the trainer's
+weight-mechanism semantics.
+
+Artifacts produced this tick:
+- zensim commit `8e121e0f` — `--ranknet-sample-weights` flag
+
+**Total infrastructure contributions from recovery cycle**:
+- 5 trainer flags
+- 1 post-processor script
+- 1 site bug fix
+- 6 cycle outcomes docs
+- 1 high-level summary doc
+- 572 tick log entries
+- 4 site-shipped candidate bakes (V0_16/V0_26/V0_31/V0_38)
+
+**Final state**: V0_16 SHIP unchanged. CID22 > 0.8934 target
+unreachable in autonomous mode. Cycle-13 options (full Rust trainer
+restore, Bayesian seed search, data acquisition) all require user
+authorization.
+
+**Next tick (573)**: Loop continues. Refresh markers only.
+
 ### Tick 571 — 2026-05-13T07:40Z — Extreme weight ratio + ranknet-sample-weights FALSIFIED (both metrics regress)
 
 Per tick 570's refined hypothesis, tested extreme weight ratios
