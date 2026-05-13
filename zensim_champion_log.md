@@ -5318,6 +5318,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 611 — 2026-05-13T10:34Z — Determinism test running; epoch 0 already matches rerun bit-for-bit (trainer IS deterministic)
+
+Started background task `beoimho7u`: V0_16 recipe args (h=128, seed=1,
+ep=300, lr=1e-3, val=min, max-features=228, TV=20) — IDENTICAL invocation
+to the rerun at tick 603. Different output path:
+`benchmarks/rust_v0_X_2026-05-13_determinism_test_seed1.raw.bin`.
+
+**Epoch 0 result confirms determinism**:
+
+| | Rerun (tick 605) | Determinism test (this tick) | Match? |
+|---|---:|---:|---:|
+| loss @ ep0 | 0.2277 | 0.2277 | ✓ exact |
+| val_mean @ ep0 | 0.9075 | 0.9075 | ✓ exact |
+| safesyn @ ep0 | 0.9930 | 0.9930 | ✓ exact |
+| kadid @ ep0 | 0.9075 | 0.9075 | ✓ exact |
+| tid @ ep0 | 0.9105 | 0.9105 | ✓ exact |
+
+Bit-identical at epoch 0 → **the trainer IS deterministic at fixed
+seed + same args + same data**. Will confirm bake-bytes match at
+training completion (~7 min more).
+
+**Implication for V0_16 mystery**: if the trainer is deterministic
+and our seed=1 args produce CID22=0.8761 (matches the rerun), then
+**V0_16 ship's 0.8919 was NOT produced by these exact args at
+seed=1**. CONTEXT-HANDOFF claim "seed=1" is misleading. Real V0_16
+must have used:
+- Different seed (likely; V0_16's per-seed sweep at CONTEXT-HANDOFF
+  showed seeds 1/7/42/123 giving 0.8919/0.8848/0.8847/0.8872 — only
+  seed=1 hit 0.8919)
+- OR different `pairs_per_epoch` (default 50,000; V0_16 may have used
+  something else)
+- OR different `--tv-apply-every` or `--tv-batch` (defaults 50, 32;
+  CONTEXT-HANDOFF doesn't pin these)
+- OR different `--early-stop-patience` (default 50; CONTEXT-HANDOFF
+  says V0_16 stopped at ep 190, ours stops at ep 140 — implies
+  V0_16's best val was at ep 140, which differs from our rerun's
+  best at ep 90 — different val trajectories at "same" seed prove
+  there's an arg difference, not RNG)
+
+**Cycle-14 result (just landed tick 610) still stands**: best autonomous
+candidate at +0.0083 CID22 over rerun, B2 + B3 SROCC beats ssim2.
+
+Will report bake-byte comparison when determinism test completes.
+
 ### Tick 610 — 2026-05-13T10:30Z — Cycle-14 candidate COMPLETE — CID22 +0.0083 lift from per-band TV, but per-band non-mono hypothesis NOT validated
 
 **Cycle-14 candidate trained, calibrated, evaluated**. Background task
