@@ -5318,6 +5318,78 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 527 — 2026-05-13T03:22Z — Cycle-10i `--init glorot` FALSIFIED (last cheap lever exhausted)
+
+3 seeds of V0_kadid_tid recipe with `--init glorot` (vs default
+`kaiming`). 1 seed slightly better, 2 seeds clearly worse.
+
+**Glorot vs kaiming, 3 same-seed pairs**:
+
+| Seed | Glorot CID22 | Kaiming CID22 | Δ |
+|--:|--:|--:|--:|
+| 1 | 0.8802 | 0.8789 | +0.0013 |
+| 3 | 0.8732 | 0.8817 | -0.0085 |
+| 42 | 0.8631 | 0.8741 | -0.0110 |
+| **Mean** | **0.8722** | **0.8782** | **-0.0060** |
+
+Glorot mean is 0.006 below kaiming mean. **Cycle-10i FALSIFIED.**
+`--init glorot` is NOT the missing V0_16 ingredient.
+
+**AIC-4 glorot vs kaiming** (3 seeds):
+- seed=1: 0.9022 vs 0.9029 (-0.0007, tied)
+- seed=3: 0.8883 vs 0.9027 (-0.0144 worse)
+- seed=42: 0.9115 vs 0.9074 (+0.0041 better)
+- Mean: 0.9007 vs 0.9043 (-0.0036)
+
+Same pattern — glorot slightly worse on AIC-4 too. Within seed
+noise but trending negative.
+
+**CYCLE-10 FULLY EXHAUSTED.** Last documented cheap lever (init)
+falsified. The remaining V0_16 +3.0σ CID22 gap is structurally
+unrecoverable in autonomous mode.
+
+Artifacts produced:
+- 3 new bakes: `/tmp/zensim_loop/bakes/v0_kadid_tid_glorot_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+- 3 run dirs in `/mnt/v/zen/zensim-training/2026-05-07/runs/`
+
+**RECOVERY CYCLE FINAL FINAL STATE** (cycle-7 through cycle-10i):
+
+```
+V0_16 SHIP                  CID22 0.8919  AIC-4 0.9127  (gold standard, unreproduced)
+V0_26 cycle-7 candidate     CID22 0.8639  AIC-4 0.9097  on site
+V0_31 cycle-8 candidate     CID22 0.8628  AIC-4 0.9176  on site
+V0_38 cycle-10a candidate   CID22 0.8817  AIC-4 0.9027  on site (B0/B3 specialist)
+```
+
+V0_38 is the cleanest cycle-10 win: +0.013 CID22 mean over V0_31
+(p=0.033), B0+B3 beating ssim2. Closes ~62% of the V0_31→V0_16
+CID22 gap. Live on comparison site.
+
+**Trainer infrastructure delivered** (3 new flags, dormant by default):
+- `--low-q-boost` (cycle-9)
+- `--low-q-pair-boost` (cycle-9b)
+- `--tv-pairs-file` (cycle-10h)
+
+**Lessons recorded** for future cycles:
+1. Single-seed comparisons mislead when Δ < 1σ — always run ≥3 seeds + Welch's t-test
+2. The V_X 228-feat MLP recipe seed std is σ≈0.004-0.008 CID22 / σ≈0.003 AIC-4
+3. Data axis dwarfs recipe axis — KADID+TID added 10x more CID22 SROCC than any recipe knob
+4. V0_16's exact recipe contains unrecoverable per-run state (split seed, etc); cannot reproduce in autonomous mode
+
+**Next tick (528)**: Recovery cycle complete. Options:
+- (a) High-level cycle summary in `zenanalyze/recovery_cycle_summary_2026-05-13.md`
+  pointing to all 5 zensim cycle docs. Useful for future agents.
+- (b) Bench docs cross-reference: link cycle docs from
+  `~/work/zen/RECOVERY_HANDOFF_2026-05-08.md` if it still exists.
+- (c) Pause and wait for user direction on cycle-11 (which would
+  need user input on a new strategic axis — data acquisition, ML
+  architecture pivot, etc).
+
+Pick (a) for tick 528 — closes the recovery cycle with a
+permanent zenanalyze-side index. Future agents can resume from
+this summary.
+
 ### Tick 526 — 2026-05-13T03:18Z — Trainer infra committed + cycle-10 doc closure section
 
 Two zensim commits this tick:
