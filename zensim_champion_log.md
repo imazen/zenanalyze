@@ -5318,6 +5318,92 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 511 — 2026-05-13T01:22Z — Cycle-9 FALSIFIED: 5-seed sweep at boost 1.5 shows NO mean improvement
+
+Trained + baked + evaluated 3 more seeds (2, 3, 7) at boost=1.5 to
+combine with existing 2 seeds (1, 42) for a 5-seed sample. Total
+new artifacts: 3 bakes, 3 per-pair CSVs, ~50s wall.
+
+**5-seed distribution at boost 1.5**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 (V0_34) | 0.8635 | **0.9252** ← outlier |
+| 2 (new) | 0.8573 | 0.9050 |
+| 3 (new) | 0.8585 | 0.9076 |
+| 7 (new) | 0.8555 | 0.9107 |
+| 42 (V0_36) | 0.8639 | 0.9124 |
+| **Mean** | **0.8597** | **0.9122** |
+| Std (n=5) | 0.0038 | 0.0078 |
+
+**Vs boost 1.0 baseline** (V0_31 + V0_32, n=2):
+
+| Metric | boost 1.0 mean | boost 1.5 mean (n=5) | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8603 | 0.8597 | **-0.0006** |
+| AIC-4 | 0.9180 | 0.9122 | **-0.0058** |
+
+**Cycle-9 verdict: FALSIFIED**. Low-q boost at 1.5× provides NO
+mean improvement on either CID22 or AIC-4 vs no-boost baseline.
+V0_34 and V0_36 (the previously-celebrated "boost 1.5 wins") were
+both UPPER-TAIL outliers in the seed distribution. Seed variance
+~0.0038 CID22 and ~0.0078 AIC-4 dominates the boost signal.
+
+The earlier "boost 1.5 dominates" finding from tick 509 was a
+statistical artifact of cherry-picked single-seed runs. When
+sampled across 5 seeds, the boost-1.5 distribution is slightly
+LOWER than boost-1.0 baseline.
+
+**Cycle-9 closure: no useful lever found from low-q row-weight
+boosting in current MLP+data regime.** The structural B0/B1
+ceiling remains unsolved; this axis doesn't crack it.
+
+**Honest cycle-7/8/9 final state** (V0_16 SHIP unchanged):
+
+| Bake | CID22 (1-2 seeds) | AIC-3 | AIC-4 | Notes |
+|---|--:|--:|--:|---|
+| V0_16 SHIP | 0.8919 | 0.7965 | 0.9127 | gold standard |
+| V0_26 | 0.8639 | 0.8027 | 0.9097 | cycle-7 |
+| V0_31 | 0.8628 | 0.8031 | 0.9176 | cycle-8 |
+| boost 1.5 mean (n=5) | 0.8597 | — | 0.9122 | cycle-9 falsified |
+
+NONE of cycle-7/8/9 beat V0_16 on CID22 (the shipping bar). V0_31
+remains as the best cross-corpus alternative if user wants AIC-3
++ AIC-4 emphasis. Cycle-9 contributes seed-variance estimates
+useful for future statistical rigor.
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_{2,3,7}_boost15_2026-05-13.bin` (3 bakes)
+- `/tmp/zensim_loop/v0_{2,3,7}_boost15_2026-05-13_per_pair.csv` (3 CSVs)
+- `/tmp/zensim_loop/v0_{2,3,7}_boost15_2026-05-13_eval.log` (3 logs)
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/*v0_{2,3,7}*` (3 run dirs)
+
+**Lessons learned**:
+1. **Single-seed comparisons mislead** — always need ≥3-5 seeds
+   when the effect is < 1× std. This trap caught us at ticks 509-510.
+2. **The V0_X 228-feat MLP recipe has ~0.004 CID22 seed std and
+   ~0.008 AIC-4 seed std** at this dataset size. Future tick
+   comparisons should report these as baseline noise.
+3. **All of cycle-7/8/9's recipe variations sit within 0.01 of
+   each other on CID22** — the entire experimental space might
+   be a single noisy plateau with V0_16's recipe being a lucky
+   outlier (V0_16 0.8919 is 6σ above the V0_31 family mean).
+   This suggests V0_16 either had a different training recipe
+   that we haven't reproduced OR is itself a lucky outlier of
+   its own training distribution.
+
+**Next tick (512)**: cycle-9 is closed. Useful focused work:
+- (a) Run V0_16 seed-sweep — apply V0_16's exact recipe at 3-5
+  different seeds. If V0_16 0.8919 is N seeds out, the variance
+  estimate tells us how often we'd hit it.
+- (b) Document cycle-9 closure in
+  `zensim/benchmarks/cycle_9_lowq_boost_outcomes_2026-05-13.md`
+  with the seed-variance findings.
+
+Pick (b) for tick 512 — closes cycle-9 with permanent record;
+(a) requires reconstructing V0_16's exact recipe which depends
+on a `--konjnd-anchor-csv` flag we haven't traced through.
+
 ### Tick 510 — 2026-05-13T01:15Z — V0_35/V0_36 reveal V0_34's AIC-4 win was SEED-LUCKY; cycle-9 small CID22 gain real but tiny
 
 Two new bakes for cycle-9 sweep + reproducibility:
