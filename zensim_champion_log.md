@@ -5318,6 +5318,83 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 514 — 2026-05-13T01:37Z — Cycle-9b FALSIFIED by 6-seed sweep — same trap as cycle-9
+
+5 more seeds (2, 3, 7, 42, 100) at pair-boost 2.0 trained + baked +
+evaluated. Combined with original seed=1 from tick 513 → 6-seed
+distribution.
+
+**Pair-boost 2.0 6-seed results**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | **0.8687** | 0.9119 |
+| 2 | 0.8665 | 0.9184 |
+| 3 | 0.8646 | 0.9117 |
+| 7 | 0.8567 | 0.9099 |
+| 42 | 0.8556 | 0.9138 |
+| 100 | 0.8654 | 0.9166 |
+| **Mean** | **0.8629** | **0.9137** |
+| Std (n=6) | 0.0054 | 0.0032 |
+
+**Statistical comparison vs no-boost baseline (V0_31+V0_32, n=2)**:
+
+| Metric | Baseline | Pair-boost 2.0 | Δ | Welch's t | p-value |
+|---|--:|--:|--:|--:|--:|
+| CID22 | 0.8603 (n=2) | 0.8629 (n=6) | +0.0026 | 0.79 | 0.47 |
+| AIC-4 | 0.9180 (n=2) | 0.9137 (n=6) | **-0.0043** | -3.12 | **0.02** |
+
+**Cycle-9b verdict: FALSIFIED**. The CID22 mean gain is +0.0026
+(not statistically significant, p=0.47). The AIC-4 loss is -0.0043
+(p=0.02, statistically significant NEGATIVE — pair-boost 2.0
+actually HURTS AIC-4).
+
+Same trap as cycle-9: seed=1 was +1.1σ above the pair-boost 2.0
+multi-seed mean — an upper-tail outlier. V0_34 was +1.0σ on the
+row-boost 1.5 distribution. **Seed=1 isn't systematically lucky;
+it's just that we keep starting with seed=1 and getting
+attention-grabbing single-seed numbers that don't survive
+replication.**
+
+**Combined cycle-9 + cycle-9b summary**:
+
+| Lever | Mean Δ CID22 | Mean Δ AIC-4 | Verdict |
+|---|--:|--:|---|
+| Row-weight boost 1.5 (cycle-9) | -0.0006 | -0.0058 | falsified |
+| Pair-resampling boost 2.0 (cycle-9b) | +0.0026 (n.s.) | -0.0043 (sig) | falsified |
+
+**Neither boost approach closes the V0_16 SHIP gap.** The 0.028
+CID22 difference (V0_16 0.8919 vs cycle-7/8/9/9b mean ~0.86)
+remains structural.
+
+Artifacts produced:
+- 5 new bakes: `/tmp/zensim_loop/bakes/v0_pairboost2p0_seed{2,3,7,42,100}_2026-05-13.bin`
+- 5 per-pair CSVs
+- 5 eval logs
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/*v0_pairboost2p0*`
+
+**Trainer change disposition**: The `--low-q-pair-boost` flag is
+a useful piece of infrastructure (uncovers the cycle-9b mechanism
+of pair-resampling vs row-weighting) even if it doesn't ship a
+champion. **Commit it to main** — future experimenters can use it
+for different data regimes where the mechanism might help.
+
+**Cycle-10 needed** (multi-tick, requires direction):
+1. **Data axis**: acquire JPEG-AI public test set; train directly
+   on it. Cycle-7-9b all suggest synth+KonJND is exhausted for
+   CID22 ceiling.
+2. **Architecture axis**: 300-feat input (synth CSV has feat_0..299
+   today); needs trainer + bake-format + runtime profile changes.
+3. **Concordance-filtering experiments**: synth has `--concordance-
+   filter ssim2_butter` option (line 705 of trainer); never
+   ablation-tested in this cycle. Could be a small variant worth
+   running.
+
+**Next tick (515)**: commit the trainer change (`--low-q-pair-boost`
+flag) so future agents can build on it. Then write a brief cycle-9b
+outcomes doc and put the trio cycle-9 / cycle-9b / cycle-10
+options in front of user-style strategy review.
+
 ### Tick 513 — 2026-05-13T01:30Z — Cycle-9b RankNet-pair-boost LEVER (seed=1 only)
 
 Added `--low-q-pair-boost` flag to `train_v_next_mlp.py`. Mechanic:
