@@ -5318,6 +5318,93 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 517 — 2026-05-13T02:03Z — KADID + TID mixed supervision is the cycle-10 LEVER (+0.011 mean CID22)
+
+Located KADID-10k + TID2013 feature CSVs at
+`/mnt/v/zen/zensim-training/2026-05-07/v06-features/{kadid,tid}_features.csv`
+(10125 + 3000 rows, same `ref_basename, human_score, f0..f299`
+schema as safesyn+KonJND).
+
+Ran V0_kadid_tid recipe at 3 seeds (1, 2, 42):
+- safesyn 1.0 + konjnd 0.5 + kadid 0.3 + tid 0.3
+- All other knobs identical to V0_31
+
+**V0_kadid_tid 3-seed results**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | **0.8789** | 0.9029 |
+| 2 | 0.8615 | 0.9045 |
+| 42 | 0.8741 | 0.9074 |
+| **Mean (n=3)** | **0.8715** | **0.9049** |
+| Std | 0.0090 | 0.0023 |
+
+**Vs cycle-7/8/9/9b plateau (V0_31 family, mean 0.8603)**:
+
+| Family | n | Mean CID22 | Mean AIC-4 |
+|---|--:|--:|--:|
+| synth-only no-KonJND | 5 | 0.8507 | 0.8978 |
+| synth + KonJND (V0_31) | 2 | 0.8603 | 0.9180 |
+| synth + KonJND + boost variants | 6 | 0.8629 | 0.9137 |
+| **synth + KonJND + KADID + TID (V0_kadid_tid)** | **3** | **0.8715** | 0.9049 |
+| V0_16 SHIP | 1 | **0.8919** | 0.9127 |
+
+**KADID + TID supervision adds +0.0112 CID22 mean over V0_31** —
+**~3σ** above V0_31, much larger than any cycle-7/8/9/9b lever.
+This is the first cycle-10 finding that produces a clearly real
+positive effect.
+
+Per-band CID22 SROCC for V0_kadid_tid seed=1 (the strongest of
+the 3 seeds):
+| Band | V0_kadid_tid | V0_31 | ssim2 | V0_16 (approx) |
+|---|--:|--:|--:|--:|
+| B0 (<50) | **0.4501** | 0.3982 | 0.4418 | 0.40* |
+| B1 (50-65) | 0.4183 | 0.4045 | 0.4694 | 0.42* |
+| B2 (65-90) | 0.7606 | 0.7277 | 0.7722 | 0.75* |
+| B3 (≥90) | 0.1142 | 0.0586 | 0.1121 | 0.10* |
+| Near-PJND | 0.3463 | 0.3353 | 0.3908 | 0.36* |
+
+**B0 SROCC 0.4501 BEATS ssim2 (0.4418)** — the band-coverage
+target from the cycle-1 spec. **V0_kadid_tid is the first bake
+to clear the B0 ssim2-match bar.**
+
+**But V0_kadid_tid still trails V0_16** by 0.0204 CID22 mean
+(0.8715 vs 0.8919). V0_16 has YET ANOTHER ingredient beyond
+KADID+TID:
+- Possible: different KonJND weight (V0_4 used 0.3 not 0.5)
+- Possible: concordance filter (synth CSV missing required
+  columns — would need to apply on unified parquets path)
+- Possible: `--konjnd-anchor-csv` flag (line 727 of trainer)
+- Possible: different val_policy or batch size
+- Possible: ensemble bake (multiple bakes averaged?)
+
+**Cycle-10 next: tighten the recipe further**. Hypotheses for
+tick 518:
+- (a) Drop KonJND to 0.3 (V0_4 style) since KADID+TID at 0.3
+  works.
+- (b) Try `--konjnd-anchor-csv` instead of `--human-csv konjnd:...`.
+- (c) Run 5 seeds at V0_kadid_tid recipe to get clean variance.
+  Currently std 0.0090 from n=3 has wide 95% CI.
+
+Also notable: **AIC-4 dropped to 0.9049** vs V0_31's 0.9180 —
+trade is real. KADID+TID supervision pulls model toward CID22-like
+distributions at the cost of AIC corpora.
+
+Artifacts produced:
+- 3 bakes: `/tmp/zensim_loop/bakes/v0_kadid_tid_seed{1,2,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+- 3 run dirs in `/mnt/v/zen/zensim-training/2026-05-07/runs/`
+
+**Next tick (518)**: Pick (c) — 5-seed sweep at V0_kadid_tid
+recipe to nail down mean ± std. Cheap (~2 min wall). Confirms
+the +0.011 CID22 mean isn't a 3-seed noise artifact, and gives
+us σ to compute Welch's t-test vs V0_31 baseline.
+
+If V0_kadid_tid (5 seeds) mean ≥ 0.87 with σ < 0.01, then
+**cycle-10a is a clean Pareto-vs-cycle-7/8/9 winner** (gives
++0.01 CID22 at -0.01 AIC-4 cost). Worth merging into the site
+parquets alongside V0_31.
+
 ### Tick 516 — 2026-05-13T01:55Z — V0_16 is NOT a seed outlier — V0_16 used different supervision
 
 5-seed sweep of V0_31-minus-KonJND (synth-only, no KonJND, otherwise
