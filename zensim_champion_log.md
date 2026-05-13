@@ -5318,6 +5318,67 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 534 — 2026-05-13T04:03Z — TV=40 doesn't help (3-seed mean ties V0_38); 9th recipe knob FALSIFIED
+
+Tested V0_kadid_tid + TV=40 (vs TV=20 default) at 3 seeds.
+Hypothesis from tick 533's analysis: V0_38 family is rougher than
+V0_31/V0_26 because KADID+TID adds noisy human-MOS rows that
+auto-build TV pairs can't smooth — maybe stronger TV regularizer
+helps.
+
+**V0_kadid_tid + TV=40 (3 seeds vs TV=20 8-seed family)**:
+
+| Variant | n | CID22 | AIC-4 | Non-mono |
+|---|--:|--:|--:|--:|
+| V0_38 (TV=20) | 8 | 0.8712 | 0.9046 | ~6.0% |
+| **V0_kadid_tid TV=40** | 3 | **0.8701** | **0.8984** | **5.91%** |
+| V0_39 (TV=20, KonJND=1.0) | 5 | 0.8701 | 0.9077 | 5.94% |
+
+TV=40 deltas vs V0_38 family:
+- CID22: -0.0011 (essentially tied)
+- AIC-4: -0.0062 (worse, but small)
+- Non-mono: -0.06% (essentially tied, within seed-noise of 0.27%)
+
+**TV=40 doesn't deliver meaningful improvement.** 9th cheap recipe
+knob ruled out.
+
+Per-seed results:
+- seed=1 TV=40: CID22 0.8739, AIC-4 0.8926, non-mono 6.03%
+- seed=3 TV=40: CID22 0.8690, AIC-4 0.8967, non-mono 5.73%
+- seed=42 TV=40: CID22 0.8675, AIC-4 0.9060, non-mono 5.97%
+
+**Final 10-knob exhaustion table** (all V_X 228-feat MLP recipe knobs tested):
+
+| Knob | Test | Verdict |
+|---|---|---|
+| Init kaiming vs glorot | 3 seeds | kaiming +0.006 |
+| Ranknet group image vs dataset | seed=3 | image +0.007 |
+| Val policy mean vs min | seed=3 | mean +0.004 |
+| Konjnd aligned vs full | seed=3 | aligned +0.029 |
+| KonJND weight 0.5 vs 0.3 | 1 seed | 0.5 +0.011 |
+| KonJND weight 0.5 vs 1.0 in V0_kadid_tid | 5 seeds | 0.5 ≈ 1.0 (within σ) |
+| Low-q row boost | 5 seeds | no effect |
+| Low-q pair boost | 6 seeds | -0.0043 AIC-4 sig negative |
+| External TV pairs file | 2 splits | unusable |
+| **TV-weight 20 vs 40** | **3 seeds** | **20 +0.006 AIC-4** |
+
+EVERY knob falsified. The plateau is structurally locked at
+V0_kadid_tid family (CID22 ~0.87, AIC-4 ~0.90, non-mono ~6%).
+
+Artifacts produced this tick:
+- 3 new bakes: `v0_kadid_tid_tv40_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+- 3 non-mono q-step computations
+
+**Cycle absolutely truly final**. The autonomous loop has now
+falsified 10 separate recipe knobs at multi-seed scale. Every
+documented V0_4-style variant fails to close the V0_16 +0.020
+CID22 gap.
+
+**Next tick (535)**: Refresh markers only. No new productive
+autonomous work remaining at this MLP+data scale. User direction
+needed for cycle-11 strategic pivot.
+
 ### Tick 533 — 2026-05-13T03:55Z — V0_39 5-seed sweep REVERSES seed=3 (same cycle-9 trap)
 
 Ran 4 more seeds (1, 2, 7, 42) of V0_kadid_tid + KonJND w=1.0 →
