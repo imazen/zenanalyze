@@ -5318,6 +5318,64 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 528 — 2026-05-13T03:30Z — Recovery cycle summary doc committed; future-agent index complete
+
+Wrote `~/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
+(~180 lines, ~9 KB) — zenanalyze-side high-level index for the
+recovery cycle. Committed at zenanalyze `18249bdf`.
+
+Doc contents:
+- Goal restatement (match-or-exceed ssim2 across all bands)
+- Final state table (4 site-shipped bakes: V0_16/V0_26/V0_31/V0_38)
+- 5-cycle outcomes table with verdicts + doc filenames
+- Tick log range (482-527 spans cycle-7 through cycle-10i)
+- 3 trainer flags delivered (low-q-boost, low-q-pair-boost, tv-pairs-file)
+- 4 key lessons (single-seed traps, seed-variance estimates, data
+  dwarfs recipe, V0_16 unrecoverable per-run state)
+- Cycle-11 strategic options (data acquisition, architecture
+  changes, training objective, runtime ensemble)
+- "How to resume" instructions for future agents
+- Full artifact inventory (bakes, runs, per-pair CSVs, site commits)
+
+**Recovery cycle CLOSED with permanent zenanalyze-side index.**
+Future agents can pick up from this summary without having to
+trace through 30 ticks of the log.
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zenanalyze/recovery_cycle_summary_2026-05-13.md`
+  (zenanalyze commit `18249bdf`)
+
+**Cross-reference for the summary**:
+
+zensim benchmarks/ docs (5 cycle outcomes):
+- `cycle_7_dssim_outcomes_2026-05-12.md`
+- `cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+- `cycle_9_lowq_boost_outcomes_2026-05-13.md`
+- `cycle_9b_pair_boost_outcomes_2026-05-13.md`
+- `cycle_10_kadid_tid_outcomes_2026-05-13.md`
+
+zensim site commits (4 cycle bake merges):
+- `ab7d6fd8` V0_26, `115b1020` V0_31, `4edc426c` V0_38
+
+zensim trainer infra commits (3 flags):
+- `4b998258` low-q-boost, `a700b10f` low-q-pair-boost, `c4cacfba` tv-pairs-file
+
+zenanalyze: `recovery_cycle_summary_2026-05-13.md` + `zensim_champion_log.md`
+
+**Next tick (529)**: Recovery cycle truly closed. The autonomous
+loop has exhausted its work scope. Options:
+- (a) Continue probing tier-2 cycles (data-acquisition,
+  architecture pivots) — but these require user authorization
+  for new data sources / runtime profile changes.
+- (b) Park the loop until user returns from vacation; just
+  refresh markers per cron firing.
+- (c) Pivot to a different productive autonomous task — there's
+  always the zensim site polishing, AIC-3 dssim backfill (the
+  stale task notification mentioned this was running), etc.
+
+Pick (b) for tick 529 if cron fires without user input.
+Otherwise wait for user direction.
+
 ### Tick 527 — 2026-05-13T03:22Z — Cycle-10i `--init glorot` FALSIFIED (last cheap lever exhausted)
 
 3 seeds of V0_kadid_tid recipe with `--init glorot` (vs default
