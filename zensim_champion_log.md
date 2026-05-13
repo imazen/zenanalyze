@@ -5318,6 +5318,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 536 — 2026-05-13T04:15Z — Post-hoc isotonic projection FAILS — degrades SROCC by 0.53
+
+Per tick 535's plan, tested cycle-11 option-c: apply isotonic
+regression per (image, codec, knob) curve on V0_38's raw scores
+from the unified parquet. Goal: drop non-mono q-step rate to 0%
+while preserving SROCC.
+
+**Mechanic**: For each curve, sort by q, fit isotonic regression
+y(q) increasing. Replace raw scores with fitted values. Result:
+non-mono rate provably ≤ adjacent-equal-pair-rate; should be 0%
+with strict increasing.
+
+**Result**:
+
+| Metric | BEFORE isotonic | AFTER isotonic |
+|---|--:|--:|
+| Non-mono q-step rate | 87.25%* | **0.00%** ✓ |
+| SROCC vs ssim2 | **0.9328** | **0.4050** ✗✗ |
+
+*= raw output was "distance" (higher=worse); my naive check counted
+all adjacent-q pairs as reversed in distance space. The actual
+score-space non-mono is 6.20% (per tick 534's `score_unified_with_bake.py`).
+
+**SROCC vs ssim2 DROPS from 0.93 to 0.40** — catastrophic
+degradation. Isotonic regression pools adjacent-violator
+scores into ties; with many small within-curve fluctuations
+(numerical noise of the MLP), the projection collapses entire
+curve segments to single tied scores. This destroys cross-curve
+rank resolution.
+
+**Cycle-11 option-c FALSIFIED**: post-hoc isotonic is NOT a free
+smoother. The SROCC cost is far too high. To smooth without
+losing rank info, would need a softer projection (e.g.,
+penalized least-squares, monotone-spline fit, or a small
+moving-average smoother that preserves strict inequality at
+non-violating points).
+
+**Cycle-11 strategic option-c (isotonic) is therefore CLOSED.**
+
+A softer approach (option-d): apply isotonic ONLY to the violated
+adjacent-q pairs (project the lower one up, OR the higher one down,
+to the average), leaving non-violated curve segments untouched.
+This preserves more rank info but still drops non-mono substantially.
+Could be a future cycle exploration.
+
+Artifacts produced this tick:
+- Pure analysis script; no new bakes
+
+**Cycle-11 status update**:
+
+| Option | Cost | Status |
+|---|---|---|
+| (a) Data acquisition (JPEG-AI corpus) | $$$ + bandwidth | needs user authorization |
+| (b) Architecture changes (300-feat, deeper) | multi-tick infra | needs user authorization |
+| (c) Post-hoc isotonic projection | this tick | **FALSIFIED** (-0.53 SROCC) |
+| (d) Per-band selective ensemble | multi-tick infra | needs design |
+| (e) Soft-isotonic / penalized smoother | 1 tick implementation | UNTESTED |
+
+**Next tick (537)**: Test option (e) — soft isotonic that only
+projects at adjacent-q reversal sites. Pulls reversed pairs to
+their min(prev, next) score, leaves rest alone. Should keep most
+SROCC while dropping non-mono substantially.
+
 ### Tick 535 — 2026-05-13T04:12Z — Baseline non-mono audit of metric columns in unified parquet
 
 Pure analysis tick — extracted adjacent-q reversal rates for all
