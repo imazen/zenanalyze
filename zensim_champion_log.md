@@ -5318,6 +5318,25 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 648 — 2026-05-13T13:22Z — low-q-boost at ep70, best val_mean 0.9387 still trails V0_16's 0.9403
+
+low-q-boost 1.5 training at epoch 70 (383s wall). Best val_mean
+**0.9387** at ep40 — already past first cosine minimum, value held
+through cosine restart. Patience 50 from ep40 = early-stop ~ep90.
+
+Comparison to V0_16 best (0.9403):
+- low-q-boost ep40 best 0.9387 = V0_16 -0.0016
+- Even if final best lifts by +0.001 by ep90, still -0.0006 below V0_16
+
+Likely outcome: CID22 around 0.886-0.892 (below V0_16's 0.8919).
+**Not a ship candidate**.
+
+Will eval anyway when training finishes for completeness — the
+trained bake might still be useful as a band-specialist component
+in a future concat composition.
+
+ETA ~8 more min.
+
 ### Tick 647 — 2026-05-13T13:19Z — low-q-boost training trailing V0_16 at every checkpoint
 
 low-q-boost 1.5 training (`bt1z6utlv`) at epoch 30 (168s wall):
