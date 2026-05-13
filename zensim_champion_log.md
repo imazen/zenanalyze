@@ -5318,6 +5318,57 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 607 — 2026-05-13T10:17Z — Rerun's per-band non-mono profile is ALSO different from V0_16's; cycle-14 training at epoch 30
+
+**Per-band non-mono measurement on the rerun bake** vs V0_16 ship on
+the canonical `unified_v15r_zenjpeg.parquet`:
+
+| Bake | aggr % | B0 % | B1 % | B2 % | B3 % | B0 n | B1 n | B2 n | B3 n |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| V0_16 SHIP | 5.83 | 5.64 | 7.55 | **3.76 ✓** | 8.10 | 624k | 536k | 463k | 68k |
+| V0_X rerun | **6.31** | 5.76 | 7.91 | **6.16 ✗** | **4.24** | 628k | 471k | 426k | **166k** |
+
+**Two structural differences (new findings)**:
+
+1. **B2 win is gone**: V0_16's best band (3.76% non-mono, only band
+   meeting 4.86% target raw) becomes 6.16% on rerun, FAILING the
+   target. The bimodal-tradeoff that made V0_16 distinctive is
+   absent in the rerun.
+2. **B3 score-distribution shift**: rerun has 166k pairs in B3
+   (≥90 score), V0_16 has only 68k — 2.4× more pairs at the
+   visually-lossless boundary. This means rerun's raw output range
+   is WIDER and V0_16's calibration α=28.0366 β=-5.0738 distributes
+   more pairs above 90. The bake-aware calibration would refit α/β
+   on rerun's actual outputs — using V0_16's coefficients is
+   misleading at the absolute-score level (though SROCC is
+   rank-invariant and not affected).
+
+**Implication for the user-decision space**: the rerun differs from
+V0_16 along TWO independent axes (CID22 SROCC -0.0158; per-band
+non-mono profile B2-loses-its-win). Combined evidence strongly
+suggests V0_16's training state had something we don't currently
+have. Specific candidates:
+- A different `pairs_per_epoch` value (defaults to 50,000)
+- A different `--tv-apply-every` (defaults to 50) or `--tv-batch`
+  (defaults to 32)
+- A different binary state (mlp_train.rs hasn't changed since
+  6f2487f but the CLI source has; maybe an earlier compilation
+  cached different sampler seeding behavior)
+
+**Cycle-14 training progress** (background `bz3xzw8wl`):
+
+| Epoch | Wall | val_mean | best |
+|---:|---:|---:|---:|
+| 0 | 5s | 0.9202 | -inf |
+| 10 | 52s | 0.9211 | 0.9202 |
+| 20 | 98s | 0.9336 | 0.9211 |
+| 30 | 145s | 0.9421 | 0.9336 |
+
+Tracking similar trajectory to rerun, ~5-7 min remaining to early-stop.
+
+Artifacts:
+- `/tmp/v0_X_rerun_per_band_v15r.log` — rerun per-band non-mono full output
+
 ### Tick 606 — 2026-05-13T10:14Z — Cycle-14 candidate kicked off (V0_16 recipe + --tv-band-weights 10,30,10,30)
 
 Started background task `bz3xzw8wl` with V0_16 recipe args (h=128,
