@@ -5318,6 +5318,19 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 615 — 2026-05-13T10:55Z — V0_16 reproduction at epoch 110 — 11 sampled epochs all bit-match (ep110 val_mean=0.9313 exact)
+
+V0_16 reproduction (background `bnv365vho`) at epoch 110, 598s wall.
+Compared every sampled epoch (0/10/20/30/40/50/60/70/80/90/100/110)
+to V0_16 ship's training log at `/tmp/zensim_loop/v0_16_train.stdout`:
+all 11 numbers (loss, val_mean, safesyn_purged, kadid, tid, konjnd
+SROCCs) match BIT-IDENTICAL.
+
+V0_16's best val_mean=0.9403 was at epoch 140; our run will hit the
+same at ep140 (~5 min more), then early-stop ~ep190 (~10 min more).
+
+No source edits this tick. Pure poll + verify.
+
 ### Tick 614 — 2026-05-13T10:51Z — Recovery summary corrected with konjnd finding; V0_16 reproduction at epoch 80 still bit-perfect
 
 **Recovery summary update**: added explicit correction box to
