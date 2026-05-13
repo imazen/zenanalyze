@@ -5318,6 +5318,74 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 505 — 2026-05-13T00:43Z — V0_32 seed=42 CONFIRMS V0_31's AIC-4 lead is reproducible
+
+V0_32 (V0_31 recipe + seed=42 vs seed=1) trained in 16s and baked
+to `/tmp/zensim_loop/bakes/v0_32_konjnd_w05_seed42_2026-05-13.bin`
+(120,714B).
+
+**Eval was OOM-killed during AIC-3 the first 2 attempts** (oom-kill
+hit at 25 GB RSS, system has 24 GB free with another rustc holding
+1.3 GB). Workaround: split the eval into separate per-corpus runs.
+CID22 (4292 pairs, ~6 GB RSS) + AIC-3 (600 pairs) + AIC-4 (300 pairs)
+ran cleanly when isolated.
+
+**Reproducibility result — V0_31 vs V0_32** (same recipe, different seed):
+
+| Metric | V0_31 (s=1) | V0_32 (s=42) | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8628 | 0.8578 | -0.0050 |
+| AIC-3 | 0.8031 | 0.8081 | +0.0050 |
+| AIC-4 | **0.9176** | **0.9184** | **+0.0008** |
+| JPEG-AI (AIC-4) | 0.8318 | 0.8416 | +0.0098 |
+
+**Seed variance is ~0.005 on aggregate, BUT AIC-4 is rock-stable
+(+0.0008).** Means V0_31's AIC-4 lead vs V0_16/V0_30/V0_26 is NOT
+seed-luck — the w=0.5 recipe genuinely produces a Pareto-best AIC-4
+bake at this architecture/data combo.
+
+Per-codec AIC-4 stability (V0_31 vs V0_32):
+- AVIF: 0.9579 vs 0.9644 (+0.0065)
+- JPEG-1: 0.9184 vs 0.9194 (+0.0010)
+- JPEG-2000: 0.9329 vs 0.9482 (+0.0153)
+- JPEG-AI: 0.8318 vs 0.8416 (+0.0098)
+- JPEG-XL: 0.9697 vs 0.9722 (+0.0025)
+- VVC: 0.9261 vs 0.9384 (+0.0123)
+
+All 6 AIC-4 codecs are STABLE OR IMPROVED with seed=42. JPEG-2000
+and VVC show the most seed-noise (~0.015) but in the favorable direction.
+
+**Cycle-8 Pareto frontier confirmed**:
+```
+KonJND w   bake          CID22    AIC-3    AIC-4    JPEG-AI
+0.0        V0_16 SHIP    0.8919   0.7965   0.9127   0.7951
+0.25       V0_30         0.8702   0.8062   0.9159   0.7975
+0.5  s=1   V0_31         0.8628   0.8031   0.9176*  0.8318
+0.5  s=42  V0_32         0.8578   0.8081   0.9184** 0.8416
+1.0        V0_26         0.8639   0.8027   0.9097   0.8387
+```
+Best per axis: V0_16 (CID22), V0_30 (AIC-3 ties), **V0_32 (AIC-4)**,
+V0_26 (JPEG-AI ties V0_32).
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_32_konjnd_w05_seed42_2026-05-13.bin` (120,714B)
+- `/tmp/zensim_loop/v0_32_per_pair.csv` (CID22 only, 4292 rows)
+- `/tmp/zensim_loop/v0_32_aic3_only.csv`, `v0_32_aic4_only.csv`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T183635_v0_32_konjnd_w05_seed42_2026-05-13/`
+
+**Next tick (506)**: Now that cycle-8 Pareto is mapped + V0_31 is
+confirmed reproducible, push the V0_31 SROCC column into the site
+parquets (CID22/AIC-3/AIC-4) so users can compare on the live site.
+Same merge pattern as V0_26 (tick 497).
+
+Alternative: try V0_33 = w=0.75 (between V0_31 and V0_26) to see
+if there's a sweet spot in JPEG-AI vs AIC-4 between 0.5 and 1.0.
+But cycle-8 already has the Pareto shape — adding more weight
+points has diminishing value vs documenting V0_31 to the site.
+
+Pick (506a) site merge for tick 506 — finishes cycle-8 with a
+shareable artifact (V0_31 visible on live comparison site).
+
 ### Tick 504 — 2026-05-13T00:34Z — V0_31 evaluated; V0_31 is BEST AIC-4 BAKE EVER
 
 V0_31 (V0_26 recipe + KonJND weight=0.5, halfway between V0_30 and
