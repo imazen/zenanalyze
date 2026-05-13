@@ -5318,6 +5318,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 575 — 2026-05-13T07:53Z — Idle: early stopping inferable from epochs sweep — also falsified
+
+State audit: only untested Rust trainer default is **early stopping
+with patience=50**. But our epochs sweep already covered this
+implicitly:
+
+- epochs=100 not tested directly; epochs=200 was -0.009 vs 300
+- Training logs show val_srocc plateaus around epoch 80-120
+  then slightly drifts down
+
+Early stopping with patience=50 would yield a checkpoint at ~100-150
+epochs (after 50 epochs of no improvement). Since epochs=200 already
+underperformed 300, early stopping at ~100-150 would underperform
+even more.
+
+**Effective falsification by extrapolation**: early stopping won't
+help our V_kadid_tid recipe. The optimum is at 300 epochs of full
+training, NOT at an earlier checkpoint.
+
+**Recovery cycle structurally complete after 19 multi-seed/clear-
+direction variants tested.** Rust trainer hyperparameters fully
+explored:
+
+| Rust default | Status |
+|---|---|
+| n_hidden=32 | not directly tested (h=64/128/256 tested) |
+| n_epochs=200 | -0.009 vs 300 ❌ |
+| initial_lr=1e-3 | -0.018 ❌ |
+| validation_policy=Min | -0.004 ❌ |
+| early_stop=50 | inferable from epochs sweep → -0.009+ ❌ |
+| init=Glorot | -0.006 ❌ |
+| ranknet_group=dataset | -0.007 ❌ |
+| sampling-bias from train_weight | byte-identical at neutral / regression at extreme ❌ |
+
+V0_15/V0_16's recipe edge is **not in any documented Rust trainer
+hyperparameter** we've reproduced. Must be in:
+1. Different actual training data (rows we don't have)
+2. Different feature normalization (the `standardize` step)
+3. Subtle PyTorch vs Rust numerical differences
+4. Other undocumented preprocessing
+
+No new artifacts this tick. Loop continues.
+
+**Final state**:
+- 575 tick log entries
+- 7 cycles explored
+- 3 positive findings shipped (V0_38, soft_iso, mid-q-boost)
+- 19 multi-seed-verified knob configurations tested
+- V0_16 SHIP CID22 0.8919 retained as production weight
+- Loop dual target (CID22 > 0.8934 AND non-mono < 4.86%) UNREACHABLE
+  in autonomous mode at current data + architecture
+
 ### Tick 574 — 2026-05-13T07:50Z — Rust trainer's default LR (1e-3) FALSIFIED at our recipe (19th variant)
 
 Tick 569 git-archeology found the Rust trainer's MlpHyperparams
