@@ -5318,6 +5318,117 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 610 — 2026-05-13T10:30Z — Cycle-14 candidate COMPLETE — CID22 +0.0083 lift from per-band TV, but per-band non-mono hypothesis NOT validated
+
+**Cycle-14 candidate trained, calibrated, evaluated**. Background task
+`bz3xzw8wl` finished epoch 140 early-stop. Raw bake md5 9ee011ee,
+calibrated md5 a579bea0 (using V0_16's α=28.0366 β=-5.0738).
+
+**CID22 SROCC results (n=4292, full)**:
+
+| Bake | CID22 | vs ssim2 0.8895 | vs V0_16 ship | vs rerun |
+|---|---:|---:|---:|---:|
+| V0_16 SHIP | 0.8919 | +0.0024 | — | +0.0158 |
+| V0_X rerun | 0.8761 | -0.0134 | -0.0158 | — |
+| **Cycle-14** | **0.8844** | **-0.0051** | -0.0075 | **+0.0083** |
+| fast-ssim2 (ref) | 0.8895 | 0 | — | — |
+
+**Cycle-14 closed 52% of the rerun-vs-V0_16 gap** via per-band TV
+alone, holding everything else equal.
+
+**Per-band SROCC vs human MOS (CID22)** — cycle-14 beats ssim2 at
+B2+B3:
+
+| Band | n | Cycle-14 | ssim2 | Δ |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 324 | 0.4127 | 0.4418 | -0.029 |
+| B1 [50,65) | 1010 | 0.4060 | 0.4694 | -0.063 |
+| **B2 [65,90)** | 2915 | **0.7838** | 0.7722 | **+0.012 ✓** |
+| **B3 (≥90)** | 43 | **0.1584** | 0.1121 | **+0.046 ✓** |
+| Near-PJND | 787 | 0.3594 | 0.3908 | -0.031 |
+
+**Per-band non-mono on v15r_zenjpeg** — hypothesis NOT validated:
+
+| Bake | aggr | B0 | B1 | B2 | B3 |
+|---|---:|---:|---:|---:|---:|
+| V0_16 SHIP | 5.83 | 5.64 | 7.55 | **3.76 ✓** | 8.10 |
+| Rerun | 6.31 | 5.76 | 7.91 | 6.16 ✗ | 4.24 |
+| **Cycle-14** | 6.06 | 5.18 | **8.52** ❌ | 5.34 ✗ | **4.24** |
+
+The cycle-14 hypothesis was: "per-band TV pushing B1+B3 3× harder
+should reduce B1+B3 non-mono". RESULT: B1 went WORSE (+0.61), B3
+stayed the same (4.24). B0 and B2 slightly improved.
+
+**Mechanism interpretation**: per-band TV weighting boosts the
+RankNet-signal contribution of B1+B3 TV pairs, which improves the
+MODEL's SROCC ranking ability in those bands (per-band SROCC win at
+B2+B3 above ssim2). But the within-curve monotonicity (which depends
+on the model's outputs being monotonic-in-q for each image) is NOT
+directly improved by TV-band weighting — it's a different mechanism.
+Soft-iso post-processor remains the right tool for per-band non-mono.
+
+**What this means for cycle-14 path**:
+- ✓ Per-band TV DOES lift CID22 SROCC (+0.0083) → real Pareto move
+- ✓ Per-band TV gives best B2+B3 SROCC vs ssim2 across all bakes
+- ✗ Per-band TV does NOT directly reduce per-band non-mono
+- ✗ Cycle-14 alone is still below V0_16 ship (-0.0075 CID22)
+
+**Combined path forward** (would close more of the V0_16 gap):
+- Cycle-14's per-band TV (gives +0.0083)
+- Plus whatever V0_16 had that gives the rerun-to-V0_16 +0.0158
+  (still unknown; the diagnostic V0_15 bit-comparison test could
+  localize whether it's deterministic-state or recipe-tweak)
+
+**Artifacts**:
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.raw.bin`
+  (119,812 bytes, md5 9ee011ee…)
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.bin`
+  (119,812 bytes, md5 a579bea0…, calibrated)
+- `benchmarks/rust_v0_X_2026-05-13_cycle14_tvband_10_30_10_30.train.log`
+- `/tmp/cycle14_eval.log` (CID22 4292-pair eval)
+- `/tmp/cycle14_per_band_v15r.log` (per-band non-mono on v15r)
+
+**User decisions still pending** (now informed by cycle-14 result):
+- Investigate V0_16 recipe non-determinism (V0_15 bit-comparison
+  diagnostic, ~7 min)
+- Multi-seed sweep of cycle-14 (3-5 seeds via the new flag-rich
+  trainer)
+- Try other tv-band weight combinations (e.g. [5,30,5,30] or
+  [10,10,30,30] — focus B2/B3 only)
+- Accept cycle-14 + V0_16 hybrid: keep V0_16 ship, add cycle-14 as
+  a comparison-site bake (it has objectively better B2/B3 SROCC
+  vs MOS — different Pareto point)
+
+### Tick 609 — 2026-05-13T10:25Z — Unit test added for --low-q-boost wiring; cycle-14 at epoch 130 (early-stop imminent)
+
+**Test added** (zensim `dec7e22f`):
+`train_mlp_low_q_boost_changes_outputs` in `mlp_train.rs::tests`. Two
+invariants protected:
+
+1. **CDF wiring works**: `low_q_boost=10.0` produces a bake distinct
+   from no-boost (otherwise per-row CDF code path is dead).
+2. **Default-1.0 no-op guarantee**: explicit `low_q_boost=1.0`
+   produces byte-identical bake to default. Critical because
+   V0_16's ship was trained at default boosts; any regression here
+   would silently break V0_16 reproducibility (when we figure out
+   what state V0_16 actually had).
+
+All 3 trainer tests pass, 86ms total wall.
+
+**Cycle-14 training** (`bz3xzw8wl`): epoch 130/300, 604s wall.
+val_mean best 0.9485 at epoch 90 (stable for 4 cosine cycles).
+Patience 50 since last best → early-stop expected ~ep140.
+
+| Bake | val_mean at best epoch | best ep |
+|---|---:|---:|
+| Rerun (V0_16-recipe baseline) | 0.9475 | 90 |
+| Cycle-14 (V0_16 + tv-bands 10,30,10,30) | **0.9485** | 90 |
+
+Cycle-14's val_mean is slightly higher (+0.0010) at the same best
+epoch — TV-band penalty doesn't hurt KADID/TID val SROCC noticeably.
+Real test is the CID22 SROCC + per-band non-mono after training
+completes.
+
 ### Tick 608 — 2026-05-13T10:21Z — Cycle-14 at epoch 70 (val_mean 0.9460 best); non-determinism investigation came up empty
 
 **Cycle-14 training** (background `bz3xzw8wl`): epoch 70/300, val_mean
