@@ -5318,6 +5318,30 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 642 — 2026-05-13T13:00Z — Recovery summary index extended with cycle-14 section
+
+Added "Cycle-14 deliverables" section to `recovery_cycle_summary_2026-05-13.md`:
+
+1. V0_16 recipe bit-identical reproduction (resolves the konjnd-missing
+   hallucination)
+2. Multi-seed per-band TV falsification (5th single-seed trap)
+3. V0_17 concat MLP candidate (228→384→1, 11 of 13 metrics beat V0_16)
+4. Trainer infrastructure shipped (--low-q-boost, --mid-q-boost in Rust)
+5. Pointer to cycle_14_per_band_tv_outcomes_2026-05-13.md
+
+Also updated the "Total recovery cycle deliverables" table:
+- Site-shipped bakes: 4 → 5 (added V0_17)
+- Cycle outcomes docs: 6 → 7 (added cycle 14)
+- Trainer infrastructure flags: 5 → 7 (added Rust low-q and mid-q boosts)
+- New rows for hallucination-trigger fixes (4), default-on
+  configuration (3), recipe runner (1), V0_17 ship candidate (1)
+
+The recovery summary is now the durable cross-session index for the
+ENTIRE 641-tick recovery cycle. Any future agent reading it gets a
+complete picture without scrolling the tick log.
+
+Pure doc tick. No source / bake / runtime changes.
+
 ### Tick 641 — 2026-05-13T12:55Z — Cycle-14 permanent outcomes doc committed
 
 Wrote `zensim/benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`
