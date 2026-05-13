@@ -5318,6 +5318,41 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 597 — 2026-05-13T09:28Z — Per-codec soft-iso default-on matrix: V0_16's non-mono is JPEG-specific
+
+Ran the soft-iso default-on script on the remaining unified parquets to
+get a complete per-codec picture. Per-codec matrix (V0_16 SHIP bake):
+
+| Parquet | n rows | n curves | Raw non-mono | After-iso | Wall | Insight |
+|---|--:|--:|--:|--:|--:|---|
+| unified_v12_zenavif | 4,000 | 800 | **0.00%** | 0.00% | <1s | already monotonic |
+| unified_v12_zenjxl | 32,000 | 6,400 | **0.00%** | 0.00% | 3s | already monotonic |
+| unified_v12_zenwebp | 1,000 | 200 | 0.50% | 0.00% | <1s | near-monotonic |
+| unified_v13_zenjpeg | 36,000 | 7,200 | **2.30%** | 0.00% | 3s | matches CONTEXT-HANDOFF "V0_16 Non-mono 2.30%" |
+| unified_v14_zenpng | 2,400 | **0** | n/a | n/a | <1s | lossless: no q-curves |
+| unified_v15r_zenjpeg | 1,785,696 | 93,984 | **5.83%** | 0.00% | 43s | matches cycle-11 tick 538 canonical |
+
+**Per-codec finding (new)**: V0_16's monotonicity issues are
+**JPEG-specific**. On JXL / WebP / AVIF the bake is already monotonic
+(0–0.5% raw violations); soft-iso is a near-noop there. The 5.83%
+headline that drove cycle-11's smoothness work is JPEG's q-grid + V0_16's
+feature-extraction artifacts interacting at the small-step boundaries.
+Cycle-11 soft-iso is a **JPEG-targeted smoother** in practice, even
+though it's expressed as codec-agnostic infrastructure.
+
+**Implication for shipping**: soft-iso default-on is the right move
+because it pays zero cost when codecs are already monotonic and brings
+JPEG to 0% non-mono "for free". The default doesn't penalize the
+already-good codecs.
+
+Artifacts:
+- `/tmp/v0_16_softiso_matrix.log` — full run output for the 3 remaining parquets
+- Earlier `/tmp/v0_16_softiso_smoke.log` (zenavif) and `/tmp/v0_16_softiso_v15r.log` (v15r) — referenced
+
+No source edits this tick — purely measurement. Loop continues at zero
+net structural progress; user decisions still pending for the
+encryption + rust-trainer-run options.
+
 ### Tick 596 — 2026-05-13T09:27Z — Scale validation on v15r_zenjpeg (1.79M pairs) + CHANGELOG entry
 
 Ran the soft-iso default-on script on
