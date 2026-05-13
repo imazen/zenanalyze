@@ -5318,6 +5318,43 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 562 — 2026-05-13T06:58Z — `--mid-q-boost` trainer flag committed (zensim `4da7d1fa`)
+
+Committed the cycle-12 `--mid-q-boost` trainer flag at zensim
+commit `4da7d1fa`. Documented at-commit:
+- Targets B1+B2 rows (50 ≤ score < 90) per tick 558's per-band
+  finding that V0_16 wins B1/B2 specifically
+- 5-seed sweep at boost=1.5: CID22 mean +0.0031 (n.s., p=0.24)
+- σ TIGHTENS 4× from baseline 0.0068 → 0.0016 — recipe stabilizer
+- boost=2.0 plateaus (same mean, looser σ — not monotonic)
+- Useful as future-experiment infrastructure even though SROCC
+  effect is mild
+
+**Recovery cycle trainer infrastructure (4 flags + 1 script)**:
+
+| Flag | Commit | Cycle | Effect | Status |
+|---|---|---|---|---|
+| `--low-q-boost` | `4b998258` | 9 | row weight × boost for B0/B1 | falsified |
+| `--low-q-pair-boost` | `a700b10f` | 9b | RankNet pair weight for B0/B1 | falsified |
+| `--tv-pairs-file` | `c4cacfba` | 10h | load pre-built TV pairs from TSV | unusable for V0_16 |
+| **`--mid-q-boost`** | **`4da7d1fa`** | **12** | **row weight × boost for B1+B2** | **mild stabilizer (+0.003)** |
+| `soft_iso_smooth.py` | `e232cefe`+`355afb52` | 11 | post-hoc curve smoother | VERIFIED (free 0% non-mono) |
+
+**Cycle-12 first verified-direction (if not significant) finding**:
+`--mid-q-boost 1.5` is a recipe stabilizer for V_X 228-feat MLPs
+on the V_kadid_tid recipe. Real direction (+0.003 CID22 mean),
+tight σ (0.0016 vs 0.0068 baseline), AIC-4 essentially tied.
+
+V0_16 ceiling 0.8919 still uncracked (mid-q-1.5 5-seed mean
+0.8743 = -0.018 below).
+
+Artifacts produced this tick:
+- zensim commit `4da7d1fa` — `--mid-q-boost` flag
+
+**Next tick (563)**: All cheap multi-seed-verified knobs explored.
+Loop continues; refresh markers only without user direction for
+cycle-12 strategic axis.
+
 ### Tick 561 — 2026-05-13T06:51Z — Mid-q boost 2.0 NOT monotonic — boost-1.5 is the sweet spot
 
 Per tick 560's plan, tested `--mid-q-boost 2.0` at 3 seeds.
