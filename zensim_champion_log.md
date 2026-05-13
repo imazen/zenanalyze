@@ -5318,6 +5318,51 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 573 — 2026-05-13T07:46Z — Cosine LR + sampling-bias FALSIFIED (18th cheap variant ruled out)
+
+Tested final cycle-13 combination: V_kadid_tid + `--lr-schedule
+cosine` + `--ranknet-sample-weights` at seed=3.
+
+Hypothesis: cosine LR (cycle-7 individually failed) + sampling-bias
+(cycle-13 individually failed at neutral weights) combined might
+match the Rust trainer's "Adam with cosine annealing" recipe more
+closely.
+
+**Result FALSIFIED**:
+
+| Variant | CID22 (seed=3) | AIC-4 (seed=3) |
+|---|--:|--:|
+| V_kadid_tid baseline | 0.8817 | 0.9027 |
+| + cosine LR + sampling-bias | 0.8707 | 0.8967 |
+| Δ | **-0.0110** ❌ | **-0.0060** ❌ |
+
+Both axes regress. The two falsified ingredients compound
+ADDITIVELY-NEGATIVE rather than reproducing V0_16. 18th variant
+ruled out.
+
+**Recovery cycle truly final**: 18 multi-seed-verified or
+single-seed-clear-direction knob configurations tested, all
+either falsified, no-effect, or mild-stabilizer.
+
+Artifacts produced:
+- 1 new bake: `v0_kadid_tid_cosine_rnsw_seed3_2026-05-13.bin`
+
+V0_16 SHIP CID22 0.8919 remains unreachable in autonomous mode.
+The deleted Rust trainer's mechanism alone (sampling-bias) +
+documented LR schedule (cosine) does not reproduce V0_15/V0_16's
+recipe. There must be additional unknown ingredients.
+
+**Genuinely no remaining cheap autonomous probes.** Cycle-13
+options requiring user authorization:
+- Full Rust trainer restore + run (multi-tick infra)
+- Bayesian seed-sweep over V_kadid_tid recipe at 50+ seeds
+- Data acquisition (JPEG-AI corpus, etc)
+- Restore + run with EXACT Rust trainer hyperparameters
+  (we have the code at e6132243^, can extract default args)
+
+Loop continues from cron; refresh markers without further productive
+autonomous work.
+
 ### Tick 572 — 2026-05-13T07:42Z — `--ranknet-sample-weights` trainer flag committed (zensim `8e121e0f`)
 
 Committed the cycle-13 `--ranknet-sample-weights` trainer flag at
