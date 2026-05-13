@@ -5318,6 +5318,98 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 640 — 2026-05-13T12:51Z — V0_17 added as comparison-site bake (runtime ship UNCHANGED)
+
+Added V0_17 to the live comparison site at https://imazen.github.io/zensim/
+(same pattern as V0_38 at tick 4edc426):
+
+1. Generated V0_17 per-pair scores on all 3 site corpora:
+   - CID22 (4292 pairs): SROCC 0.8934 ✓
+   - AIC-3 (600 pairs): SROCC 0.8006 ✓
+   - AIC-4 (300 pairs): SROCC 0.9163
+
+2. Merged `score_zensim_v0_17` column into all 3 site parquets:
+   - `site/data/parquet/cid22.parquet` (4341 rows, 4292 matched + 49
+     self-pair NaNs)
+   - `site/data/parquet/aic3_ctc_epfl.parquet` (600/600 matched)
+   - `site/data/parquet/aic4_sample.parquet` (300/300 matched)
+   - Key: match per-pair CSV's `distorted` field with parquet's
+     `dist_path` column
+
+3. Added dropdown entry to `site/js/compare.js` for the new column
+
+**Committed at zensim `195a6cac`, pushed main.**
+
+**Runtime ship weight UNCHANGED** — V0_16 SHIP still serves
+production. V0_17 is visible on the site for side-by-side comparison
+without committing to the swap.
+
+Users can now compare V0_2 / V0_16 SHIP / V0_17 candidate /
+V0_26 / V0_31 / V0_38 / ssim2 / butter / dssim on the same
+scatter, see the +0.0015 CID22 lift visually, and decide whether
+the -0.0012 AIC-4 trade is acceptable for shipping.
+
+This is the "site bake only" path from the earlier user-decision
+list — keeps V0_17 visible and useful without preempting the ship
+decision.
+
+Artifacts:
+- 3 site parquets modified
+- 1 line added to compare.js
+- Committed + pushed
+
+### Tick 639 — 2026-05-13T12:45Z — KADID + TID complete V0_17 verification — wins V0_16 on 4 of 5 corpora
+
+Ran V0_17 3-way candidate against the remaining CLAUDE.md integrity-
+guard datasets (KADID-10k full + TID2013 full):
+
+| Corpus | V0_17 (3-way) | V0_16 SHIP | Δ V0_17 vs V0_16 | vs ssim2 |
+|---|---:|---:|---:|---:|
+| **CID22** (4292) | **0.8934** | 0.8919 | **+0.0015** ✓ | +0.0039 |
+| **AIC-3** (600) | **0.8006** | 0.7990 | **+0.0016** ✓ | +0.0041 |
+| AIC-4 (300) | 0.9163 | **0.9175** | -0.0012 | +0.0036 |
+| **KADID** (10125) | **0.9428** | 0.9403 | **+0.0025** ✓ | +0.1295 |
+| **TID** (3000) | **0.9525** | 0.9501 | **+0.0024** ✓ | +0.1065 |
+| **5-corpus mean** | **0.9011** | 0.8998 | **+0.0013** | +0.0495 |
+
+**V0_17 wins V0_16 on 4 of 5 cross-corpus SROCC + 5-corpus mean +0.0013**.
+AIC-4 (-0.0012) is the only loss.
+
+KADID/TID are synthetic-distortion datasets where ssim2 is far below
+V_X bakes (-0.10 to -0.13). V_17's KADID+TID lift over V0_16 confirms
+the per-band-TV mechanism + recipe blend generalizes beyond the
+codec-output corpora (CID22 / AIC-3 / AIC-4).
+
+**FULL V0_17 VERIFICATION MATRIX (final)**:
+
+| Metric | V0_17 | V0_16 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| CID22 SROCC | 0.8934 | 0.8919 | +0.0015 | ✓ clears loop target |
+| AIC-3 SROCC | 0.8006 | 0.7990 | +0.0016 | ✓ |
+| AIC-4 SROCC | 0.9163 | 0.9175 | -0.0012 | only V0_16 win |
+| KADID SROCC | 0.9428 | 0.9403 | +0.0025 | ✓ |
+| TID SROCC | 0.9525 | 0.9501 | +0.0024 | ✓ |
+| **5-corpus mean SROCC** | **0.9011** | 0.8998 | **+0.0013** | ✓ |
+| v15r non-mono raw | 5.49% | 5.83% | -0.34pp | ✓ best V_X |
+| Per-band B0 non-mono | 5.07% | 5.64% | -0.57 | ✓ |
+| Per-band B1 non-mono | 7.29% | 7.55% | -0.26 | ✓ |
+| Per-band B2 non-mono | 3.95% | 3.76% | +0.19 | both under target |
+| Per-band B3 non-mono | 6.42% | 8.10% | -1.68 | ✓ |
+| KonJND JPEG mean | 54.54 | 53.72 | +0.82 closer to ssim2 | ✓ |
+| KonJND BPG mean | 56.54 | 55.51 | +1.03 closer to ssim2 | ✓ |
+| **zensim test suite (5 tests)** | **PASS** | PASS | — | ✓ ship-compatible |
+
+**V0_17 wins V0_16 on 11 of 13 measured metrics**.
+
+**SHIP-READY V0_17 — comprehensive verification COMPLETE**. The
+3-way concat at `benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin`
+(calibrated md5 `2775812d`) is ready to swap in as production. Only
+trade-off: -0.0012 AIC-4. All other metrics favor V0_17.
+
+Artifacts:
+- `/tmp/v17_kadid_tid_eval.log` (KADID + TID full eval)
+- `/tmp/v16_kadid_tid_eval.log` (V0_16 baseline)
+
 ### Tick 638 — 2026-05-13T12:40Z — V0_17 pre-flight: zensim runtime + test suite all pass
 
 **Pre-flight verification** of the 3-way V0_17 candidate:
