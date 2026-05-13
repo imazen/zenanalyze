@@ -5318,6 +5318,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 600 — 2026-05-13T09:38Z — Per-band non-mono Pareto matrix across all 4 site bakes; V0_16 is bimodal (worst B1+B3, best B2)
+
+Ran the new per-band table from tick 599 on the 3 remaining site bakes
+(`v0_26_konjnd_dssim0`, `v0_31_konjnd_w05`, `v0_kadid_tid_seed3` = V0_38)
+against the canonical `unified_v15r_zenjpeg.parquet` (1.79M pairs each,
+~44s wall, total ~2.2 min).
+
+**Per-band non-mono matrix (raw %, on v15r_zenjpeg):**
+
+| Bake | aggr | B0 % (n) | B1 % (n) | B2 % (n) | B3 % (n) |
+|---|---:|---:|---:|---:|---:|
+| **V0_16** SHIP | 5.83% | 5.64% (624k) | **7.55%** (536k) | **3.76%** (463k) | **8.10%** (68k) |
+| V0_26 (konjnd) | 5.48% | 5.71% (1256k) | 5.33% (211k) | 4.59% (176k) | 3.53% (48k) |
+| V0_31 (konjnd w=0.5) | 5.64% | 5.94% (1242k) | 5.32% (214k) | 4.57% (186k) | 3.63% (50k) |
+| V0_38 (V_kadid_tid s=3) | 6.20% | **6.43%** (1307k) | 6.17% (198k) | 4.91% (154k) | 3.43% (32k) |
+
+**Structural findings (new, multi-bake Pareto)**:
+
+1. **V0_16's per-band profile is BIMODAL** — best B2 (3.76%, only bake
+   meeting target there) AND worst B1 (7.55%) + worst B3 (8.10%).
+   V0_16 wins the smoothness contest at high quality (B2) at the cost
+   of medium + visually-lossless smoothness.
+2. **V0_26/V0_31 are FLATTER** — B1 5.3%, B3 3.5%, but worse B2
+   (4.6%). KonJND-aligned recipes trade B2 smoothness for B1/B3.
+3. **V0_38 is uniformly rougher** — every band slightly worse than
+   V0_26/V0_31, consistent with its higher aggregate (6.20%) but
+   compensated by its CID22 SROCC win.
+4. **Score-distribution shape is bake-specific** — V0_16 spreads scores
+   wider (B0/B1/B2/B3 = 37/32/27/4%) while V0_26/V0_38 concentrate
+   scores in B0 (74-77%). The affine calibration (V0_16's α=28.0366
+   β=-5.0738) is doing real work here; un-calibrated V_kadid_tid
+   variants look very different in score-space even when raw bake
+   outputs are nearby.
+
+**Cycle-14 implications** (still requires user authorization):
+- **V0_16 + per-band TV** targeting B1+B3 would close the bimodal gap.
+  The `--tv-band-weights B0,B1,B2,B3` flag (shipped at zensim `6f2487f`)
+  lets us push e.g. `--tv-band-weights 10,30,10,30` to weight B1+B3 3×
+  higher than B0/B2 in the TV penalty.
+- Expected outcome: V0_16-recipe + per-band TV should reduce B1/B3 raw
+  non-mono from 7.55%/8.10% toward V0_26's 5.3%/3.5% while preserving
+  V0_16's CID22 SROCC lead and B2 smoothness.
+- Compute cost: ~30 min wall to train + 1 min to eval. Single seed
+  initially; multi-seed verification if results look promising.
+
+Artifacts:
+- `/tmp/per_band_matrix_v15r.log` — full 3-bake run output
+- Combined with tick 599's V0_16 → 4-bake Pareto picture above
+
+**Status**: matrix captured, structural finding recorded, cycle-14
+plan articulated. Not executed (training requires authorization).
+
 ### Tick 599 — 2026-05-13T09:34Z — Per-band non-mono reporting wired into `score_unified_with_bake.py`; new structural finding: V0_16's non-mono lives in B1+B3
 
 Closed the per-band non-mono reporting gap mandated by zensim/CLAUDE.md
