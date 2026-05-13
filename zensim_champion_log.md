@@ -5318,6 +5318,70 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 532 — 2026-05-13T03:48Z — V0_39 candidate: V0_kadid_tid + KonJND w=1.0 is BALANCED tradeoff
+
+Tick 531's smoothness audit showed V0_26 (KonJND w=1.0, no
+KADID/TID) is the smoothness champion (5.48%). Hypothesis:
+**bumping KonJND weight to 1.0 in V0_kadid_tid might recover
+smoothness AND keep some CID22 gain from KADID/TID**.
+
+V0_kadid_tid + KonJND w=1.0 (vs w=0.5), seed=3 — call this V0_39:
+
+**V0_39 vs V0_38 (cycle-10a) seed=3** (same recipe except KonJND weight):
+
+| Metric | V0_38 (KonJND 0.5) | V0_39 (KonJND 1.0) | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8817 | 0.8783 | -0.0034 |
+| AIC-3 | 0.7969 | (not run yet) | — |
+| **AIC-4** | 0.9027 | **0.9133** | **+0.0106** |
+| **Non-mono** | 6.20% | **5.96%** | **-0.24%** |
+
+**V0_39 hits a balanced Pareto sweet spot**:
+- CID22: small drop -0.0034 (within 1σ noise)
+- AIC-4: big recovery +0.0106 (close to V0_31's 0.9176 AIC-4 winner)
+- Non-mono: -0.24% (now MEETS revised 6.0% gate, V0_38 fails it)
+
+**V0_39 per-band CID22**:
+
+| Band | V0_39 | V0_38 | ssim2 | V0_39 vs ssim2 |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 0.4375 | 0.4497 | 0.4418 | -0.0043 |
+| B1 (50-65) | 0.4286 | 0.4258 | 0.4694 | -0.0408 |
+| B2 (65-90) | 0.7544 | 0.7661 | 0.7722 | -0.0178 |
+| B3 (≥90) | 0.0933 | 0.1182 | 0.1121 | -0.0188 |
+| Near-PJND | 0.3538 | 0.3493 | 0.3908 | -0.0370 |
+
+V0_39 loses V0_38's B0/B3 ssim2-beating profile (B0 0.4375 < ssim2
+0.4418; B3 0.0933 < 0.1121). The cycle-10a B0/B3 specialism was
+KonJND-w=0.5 specific.
+
+**Cycle-7-through-11 ship-decision matrix (updated)**:
+
+```
+Bake              CID22    AIC-3   AIC-4    non-mono   Best at…
+V0_16 SHIP        0.8919   0.799   0.918    5.83%      balanced CID22
+V0_26 c7          0.8639   0.803   0.910    5.48% ★    smoothness
+V0_31 c8          0.8628   0.803   0.918    5.64%      cross-codec AIC-4
+V0_38 c10a        0.8817   0.797   0.903    6.20% ✗   B0/B3 (rough)
+V0_39 c10a' NEW   0.8783   ?       0.913    5.96%      balanced (no ssim2-beat)
+```
+
+V0_39 is essentially a smoother-CID22 V0_31 with a tiny CID22
+boost from KADID/TID. Not a clear replacement for V0_16 (loses
+on CID22 -0.014) but a credible alternative for users wanting
+"good across all metrics" without specializing.
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_kadid_tid_konjnd10_seed3_2026-05-13.bin` (120,802B)
+- Per-pair CSV + eval log
+- Run dir under `/mnt/v/zen/zensim-training/2026-05-07/runs/`
+
+**Next tick (533)**: V0_39 looks like a real new Pareto point. To
+verify, run multi-seed at this recipe (KonJND w=1.0, KADID/TID
+w=0.3) to confirm AIC-4 +0.0106 holds across seeds. If it does,
+V0_39 is a 5th candidate worth merging to the site as the
+"balanced moderate-smoothness" option.
+
 ### Tick 531 — 2026-05-13T03:42Z — Smoothness audit of 4 site bakes — none hit 4.86% target
 
 Per the dual loop target ("CID22 SROCC > 0.8934 AND non-monotonic
