@@ -5318,6 +5318,32 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 595 — 2026-05-13T09:24Z — soft-iso default-on smoke test on V0_16 confirms behavior matches canonical numbers
+
+Ran `python3 scripts/v_next/score_unified_with_bake.py` (post-edit at
+commit zensim `21efc115`) against `zensim/weights/v0_16_2026-05-12.bin`
+on two unified parquets to validate the default-on change end-to-end:
+
+| Parquet | n rows | n curves | Raw non-mono | After-iso non-mono | Wall |
+|---|--:|--:|--:|--:|--:|
+| unified_v12_zenavif | 4,000 | 800 | 0.00% | 0.00% | <1s |
+| unified_v13_zenjpeg | 36,000 | 7,200 | **2.30%** | 0.00% | 3s |
+
+**Sanity-check pass**: V0_16's 2.30% raw non-mono on zenjpeg matches the
+canonical number in `zensim/CONTEXT-HANDOFF.md` row "V0_16 (clean TV=20)
+Non-mono % **2.30 %** (best ever)". After-iso projection brings it to
+0% as documented in the cycle-11 outcomes. zenavif sweep is already
+perfectly monotonic at the small q-grid sample size — no work to do
+there. The bidirectional sign-auto-detect correctly identifies V0_16's
+score-semantics on both parquets (higher = better).
+
+Artifacts:
+- `/tmp/v0_16_softiso_smoke.log` — zenavif run output
+- `/tmp/v0_16_softiso_v13.log` — zenjpeg run output
+
+No source edits this tick. The soft-iso default landed at tick 594.
+This tick is the end-to-end validation.
+
 ### Tick 594 — 2026-05-13T09:25Z — User-directed cleanup: best-known config now the default; rust-trainer-was-deleted hallucination root-caused and patched
 
 User caught a 25-tick hallucination chain (ticks 568-592) about the Rust
