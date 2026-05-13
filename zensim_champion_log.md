@@ -5318,6 +5318,70 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 526 — 2026-05-13T03:18Z — Trainer infra committed + cycle-10 doc closure section
+
+Two zensim commits this tick:
+- `c4cacfba` — `--tv-pairs-file` flag (cycle-10h infrastructure;
+  unusable for V0_16's specific file due to split mismatch but
+  useful for future split-aware TV experiments)
+- `f791a778` — closure section appended to cycle-10 outcomes doc;
+  tabulates all cycle-10b-h exploration with status; notes the
+  3 trainer flags added during cycle as future-experiment infra
+
+**Trainer infrastructure added during recovery cycle**:
+
+| Flag | Commit | Purpose | Net effect |
+|---|---|---|---|
+| `--low-q-boost` | `4b998258` | Row-weight MSE boost for B0/B1 | Negative (cycle-9) |
+| `--low-q-pair-boost` | `a700b10f` | RankNet pair-loss boost for B0/B1 | Negative (cycle-9b) |
+| `--tv-pairs-file` | `c4cacfba` | Load pre-built TV pairs from TSV | Unusable for V0_16 file |
+
+All three flags are dormant by default (no behavior change unless
+explicitly invoked). They're invariant-preserving infrastructure
+that future autonomous sessions can build on.
+
+**Cycle-10 fully closed.** All ticks (517-526) committed; live
+site has V0_38 (B0/B3 specialist) alongside V0_16/V0_26/V0_31;
+permanent benchmark records exist for cycles 7/8/9/9b/10.
+
+Artifacts produced this tick:
+- `/home/lilith/work/zen/zensim/scripts/v_next/train_v_next_mlp.py`
+  (trainer flag commit `c4cacfba`)
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_10_kadid_tid_outcomes_2026-05-13.md`
+  (closure section commit `f791a778`)
+
+**Recovery cycle FINAL summary** (8+ ticks per cycle, ~10 cycles):
+
+| Cycle | Trigger hypothesis | Verdict | Ship update |
+|---|---|---|---|
+| 7 | dssim/cosine/small LR break V0_16 CID22 plateau | All FALSIFIED | V0_26 preserved |
+| 8 | KonJND-weight Pareto sweep | PARTIAL (V0_31 wins AIC-4) | V0_31 to site |
+| 9 | Low-q row-weight boost | FALSIFIED | — |
+| 9b | Low-q pair-resampling boost | FALSIFIED | — |
+| 10a | KADID+TID mixed supervision | VERIFIED Pareto (p=0.033) | V0_38 to site |
+| 10b-i | Subleverage exploration | All falsified or blocked | — |
+
+**V0_16 SHIP retained throughout.** Recovery cycle delivered:
+- 3 cycle-N candidate bakes shipped to comparison site (V0_26, V0_31, V0_38)
+- 5 cycle outcomes docs in `zensim/benchmarks/`
+- 3 trainer flags committed as future-experiment infrastructure
+- Tightened seed-variance estimates (σ≈0.004-0.008 CID22, σ≈0.003 AIC-4)
+- Documented the "data axis dwarfs recipe axis" lesson
+
+**Next tick (527)**: Recovery cycle is genuinely COMPLETE. Useful
+focused work options:
+- (a) Run cycle-10i `--init glorot` (last untested cheap lever).
+  ~17s training + eval. Closes the lever-exhaustion list.
+- (b) Update zensim CLAUDE.md to reflect the cycle-7/8/9/9b/10
+  outcomes and remove now-stale guidance about V0_8 inflation
+  (V0_16 SHIP supersedes).
+- (c) Write a high-level recovery-cycle summary doc in zenanalyze
+  pointing to the 5 cycle docs in zensim. Useful for future
+  agents resuming this work.
+
+Pick (a) for tick 527 — single-CLI-flag test, final exhaustion
+of the lever space.
+
 ### Tick 525 — 2026-05-13T03:14Z — External TV pairs flag added but V0_16 file is unusable (split mismatch)
 
 Added `--tv-pairs-file` flag to `train_v_next_mlp.py` (line 699;
