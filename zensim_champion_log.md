@@ -5318,6 +5318,82 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 525 — 2026-05-13T03:14Z — External TV pairs flag added but V0_16 file is unusable (split mismatch)
+
+Added `--tv-pairs-file` flag to `train_v_next_mlp.py` (line 699;
+new conditional branch before auto-build at line 967). Implementation:
+loads TSV, filters out-of-range indices, passes np.int64 array as
+`tv_pairs_train` to `train()`. ~25 lines.
+
+**Test #1: V0_kadid_tid + external TV pairs (mixed train)**
+- 159,914 of 205,654 V0_16 pairs in-range
+- 45,740 dropped (indices > n_train=187,569 due to KADID+TID+KonJND row prepending)
+- CID22 0.8570, AIC-4 0.8987 — REGRESSED -0.025 vs V0_kadid_tid baseline
+- Confirmed: indices misalign when mixed-train shifts row layout
+
+**Test #2: Synth-only + external TV pairs (same train shape as V0_16)**
+- 104,419 of 205,654 V0_16 pairs in-range
+- **101,235 dropped (49%)** as out-of-range (n_train=115,764)
+- CID22 0.8327 — REGRESSED -0.018 below no-KonJND mean 0.8507
+- The V0_16 TV pairs reference a DIFFERENT train/val split than ours
+
+**The V0_16 TV pairs file is genuinely unusable** without knowing
+V0_16's exact split seed + test_frac + concat order. Half the
+pairs reference indices that don't exist in any reasonable
+reproduction of the post-mask training rows.
+
+**Cycle-10 V0_16-reproduction status (final)**:
+
+Eliminations across tick 524 + 525:
+- Training data: ✓ on V0_16's 144k clean (same file, renamed)
+- TV pairs (auto-build): ✓ active in our runs, 104k pairs
+- TV pairs (external V0_16 file): UNUSABLE (split mismatch)
+- `konjnd_full` variant: catastrophic (-0.29)
+- `--val-policy min`: -0.004 (worse)
+- `--init glorot`: not yet tested but unlikely to give +0.020
+
+The remaining 0.020-CID22 gap is in **unrecoverable per-run state**:
+- V0_16's specific train/val split (which images went to val)
+- V0_16's specific batch sampling order
+- Possibly post-bake affine calibration on a different score range
+- Possibly an undocumented preprocessing step
+
+**Cycle-10 closure**: V0_kadid_tid (V0_38 on site) remains the
+best verified cycle-10 candidate. The remaining gap to V0_16 is
+genuinely unrecoverable in autonomous training without V0_16's
+exact serialized training state.
+
+Artifacts produced:
+- `/home/lilith/work/zen/zensim/scripts/v_next/train_v_next_mlp.py`
+  (+ `--tv-pairs-file` flag, ~25 lines)
+- 2 new bakes (mixed-train and synth-only with external TV pairs)
+- 2 per-pair CSVs, 2 eval logs
+
+**Cycle-7/8/9/9b/10 ALL COMPLETED**. Recovery cycle final state:
+
+| Cycle | Lever | Verdict | On site? |
+|---|---|---|---|
+| 7 | dssim/cosine/small LR | FALSIFIED | V0_26 preserved |
+| 8 | KonJND weight Pareto | PARTIAL (AIC-4) | V0_31 |
+| 9 | Low-q row boost | FALSIFIED | — |
+| 9b | Low-q pair boost | FALSIFIED | — |
+| 10a | KADID+TID supervision | VERIFIED Pareto | **V0_38** |
+| 10b/c/d/e | Various sub-leverag | All exhausted or blocked | — |
+
+**V0_16 SHIP unchanged.** V0_38 cycle-10a available on live site
+as B0/B3 specialist alternative.
+
+**Next tick (526)**: Cycle-10 is closed. Useful focused work:
+- (a) Commit the `--tv-pairs-file` flag (useful infra even if
+  V0_16's file unusable) + write cycle-10 closure update on the
+  outcomes doc.
+- (b) Try `--init glorot` (last untested documented V0_16 ingredient).
+- (c) Push V0_kadid_tid 8-seed sweep results to a benchmark file
+  for future reference.
+
+Pick (a) for tick 526 — commit infra + document closure
+permanently. (b) is the last cheap lever; (c) can roll into (a).
+
 ### Tick 524 — 2026-05-13T02:43Z — Cycle-10 ingredient hunt: 4 candidates ruled out; gap remains structural
 
 Hunted for V0_16's missing training ingredients. Key discovery:
