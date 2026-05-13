@@ -5318,6 +5318,73 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 533 — 2026-05-13T03:55Z — V0_39 5-seed sweep REVERSES seed=3 (same cycle-9 trap)
+
+Ran 4 more seeds (1, 2, 7, 42) of V0_kadid_tid + KonJND w=1.0 →
+5-seed sample with seed=3 from tick 532.
+
+**V0_39 5-seed distribution**:
+
+| Seed | CID22 | AIC-4 | Non-mono |
+|--:|--:|--:|--:|
+| 1 | 0.8739 | 0.9039 | 5.75% |
+| 2 | 0.8672 | 0.9015 | 5.69% |
+| **3** | **0.8783** ★ | **0.9133** ★ | 5.96% |
+| 7 | 0.8661 | 0.9075 | 5.93% |
+| 42 | 0.8651 | 0.9124 | 6.37% |
+| **Mean (n=5)** | **0.8701** | **0.9077** | **5.94%** |
+| Std (n=5) | 0.0054 | 0.0050 | 0.27% |
+
+**Welch's t-test vs V0_kadid_tid (KonJND w=0.5, n=8 from tick 523)**:
+
+| Metric | V0_38 family (KonJND 0.5, n=8) | V0_39 (KonJND 1.0, n=5) | Δ | sig? |
+|---|--:|--:|--:|---|
+| CID22 | 0.8712 (σ 0.0068) | 0.8701 (σ 0.0054) | -0.0011 | n.s. |
+| AIC-4 | 0.9046 (σ 0.0027) | 0.9077 (σ 0.0050) | +0.0031 | n.s. (p~0.25) |
+
+**Cycle-9 lesson trap repeats**: V0_39 seed=3 was an upper-tail
+outlier on BOTH CID22 (+0.008 above mean) AND AIC-4 (+0.006 above
+mean). Multi-seed mean is essentially within noise of V0_38 family.
+
+**V0_39 vs V0_16 SHIP** (V0_39 5-seed mean):
+- CID22: -0.0218 below V0_16 (no improvement)
+- AIC-4: -0.0050 below V0_16
+- Non-mono: 5.94% vs 5.83% (V0_16 slightly smoother)
+
+**V0_39 is NOT a verified new Pareto candidate.** Mean position
+in cycle space:
+
+```
+                       CID22    AIC-4    non-mono
+V0_16 SHIP            0.8919   0.9127   5.83%
+V0_31 c8 (n=2)        0.8603   0.9180   5.64%
+V0_38 c10a (n=8)      0.8712   0.9046   ~6.0%
+V0_39 c10a' (n=5)     0.8701   0.9077   5.94%
+```
+
+V0_39 is essentially V0_38-family with slight AIC-4 nudge (within
+σ). NOT meaningfully different.
+
+**Cycle-10 truly final**: V0_38 stays as the only multi-seed-
+verified cycle-10 finding. V0_39 is rejected as a separate
+candidate.
+
+Artifacts produced this tick:
+- 4 new bakes: `v0_kadid_tid_konjnd10_seed{1,2,7,42}_2026-05-13.bin`
+- 4 per-pair CSVs, 4 eval logs
+- 4 non-mono q-step computations
+
+**Lesson re-recorded** (3rd time in recovery cycle):
+
+Single-seed comparisons mislead when Δ < 1σ. This is now a
+consistent pattern across cycle-9 (V0_34), cycle-9b
+(V0_pairboost-2.0), and cycle-10a' (V0_39). Future ticks should
+ALWAYS run ≥3 seeds before claiming a new finding.
+
+**Next tick (534)**: cycle truly exhausted on all documented
+knobs at this MLP+data scale. Refresh markers and append a
+"no-new-progress" tick if cron fires without user input.
+
 ### Tick 532 — 2026-05-13T03:48Z — V0_39 candidate: V0_kadid_tid + KonJND w=1.0 is BALANCED tradeoff
 
 Tick 531's smoothness audit showed V0_26 (KonJND w=1.0, no
