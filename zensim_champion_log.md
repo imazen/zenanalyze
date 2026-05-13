@@ -5318,6 +5318,71 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 513 — 2026-05-13T01:30Z — Cycle-9b RankNet-pair-boost LEVER (seed=1 only)
+
+Added `--low-q-pair-boost` flag to `train_v_next_mlp.py`. Mechanic:
+in `ranknet_loss()`, weight each pair's softplus loss by
+`max(boost_i, boost_j)` where boost = `low_q_pair_boost` if
+endpoint.target<50 (B0), `sqrt(boost)` if 50..65 (B1), else 1.0.
+Targets the rank-correlation signal at the RankNet loss term
+itself rather than at the MSE row weights (cycle-9 approach,
+which didn't affect RankNet's pair sampling at all — the cycle-9
+falsification's conjectured mechanism).
+
+**Two seed=1 probes**:
+
+| Config | CID22 | AIC-4 |
+|---|--:|--:|
+| baseline (V0_31, no boost, seed=1) | 0.8628 | **0.9176** |
+| pair-boost 2.0 seed=1 | **0.8687** | 0.9119 |
+| pair-boost 5.0 seed=1 | 0.8640 | 0.9113 |
+
+**Headline (seed=1)**: pair-boost 2.0 CID22 = 0.8687 is the BEST
+CID22 SROCC of any cycle-7/8/9/9b bake we've trained, excluding
+V0_16 SHIP. Compare:
+- V0_16 SHIP: 0.8919 (still ahead by 0.0232)
+- pair-boost 2.0 (NEW): 0.8687
+- V0_26 cycle-7: 0.8639
+- V0_36 cycle-9: 0.8639
+- V0_34 cycle-9: 0.8635
+- V0_31 cycle-8: 0.8628
+
+**+0.0059 CID22 vs V0_31 baseline (-0.0057 AIC-4 cost)**.
+
+**Caveat learned from cycle-9**: this is a SINGLE-SEED number.
+With seed std ~0.004, +0.0059 is ~1.5σ — within noise range. Need
+multi-seed sweep to claim a real effect.
+
+**Why pair-boost might genuinely work where row-weight didn't**:
+- Cycle-9 (row-weight boost) only affected MSE loss term
+- RankNet pair sampling was unweighted; rank-correlation signal
+  came from uniform pairs across bands
+- Cycle-9b (pair-boost) directly weights pair contributions to
+  the rank loss, where the rank-correlation signal lives
+- Pair-boost 2.0 in current safesyn+KonJND: pairs with either
+  endpoint < score 65 get up to 2× weight in RankNet — pushes
+  model to be more discriminating in B0/B1 ranking
+
+Cost: 7 lines of torch code in `ranknet_loss()` + 1 cfg field.
+
+Artifacts produced:
+- Trainer change in zensim (committed next tick if results hold up)
+- `/tmp/zensim_loop/bakes/v0_pairboost2p0_seed1_2026-05-13.bin` (120,743B)
+- `/tmp/zensim_loop/bakes/v0_pairboost5p0_seed1_2026-05-13.bin` (120,742B)
+- `/tmp/zensim_loop/v0_pairboost*_per_pair.csv`, `*_eval.log`
+
+**Next tick (514)**: 5-seed sweep at pair-boost 2.0 — seeds {2, 3,
+7, 42, 100} — to test reproducibility before claiming a real
+result. If mean(5 seeds) CID22 > V0_31 mean by >1σ_combined,
+cycle-9b has a genuine effect and we have a new ship candidate.
+
+**Decision criteria**:
+- If pair-boost 2.0 mean CID22 ≥ 0.866 (5-seed): real Pareto
+  improvement; commit trainer change + sweep more boost levels.
+- If pair-boost 2.0 mean CID22 ≈ 0.860 (within 1σ of V0_31):
+  cycle-9b joins cycle-9 in falsification; the RankNet path
+  also doesn't crack the CID22 ceiling.
+
 ### Tick 512 — 2026-05-13T01:27Z — Cycle-9 outcomes doc committed; cycle-7/8/9 trio CLOSED
 
 zensim commit `0adaacdc`. Created
