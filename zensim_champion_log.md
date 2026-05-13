@@ -5318,6 +5318,52 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 613 — 2026-05-13T10:46Z — V0_16 reproduction tracking bit-perfect at epoch 30; verified V0_15/V0_18/V0_19/V0_20 all used the same 4-group recipe
+
+**Reproduction progress** (background `bnv365vho`):
+
+| Epoch | Wall | val_mean | Bit-match V0_16 train.stdout? |
+|---:|---:|---:|:---:|
+| 0 | 6.2s | 0.9002 | ✓ |
+| 10 | 60.0s | 0.9183 | ✓ |
+| 20 | 114.0s | 0.9257 | ✓ |
+| 30 | 168.0s | 0.9345 | ✓ |
+
+All numbers (loss, val_mean, safesyn_purged/kadid/tid/konjnd SROCCs)
+match V0_16's original training log byte-for-byte across all 4 epoch
+checkpoints. Reproduction is on track. ETA: V0_16 took 1071s wall;
+ours at 168s for epoch 30 — extrapolating ~15 more min to early-stop
+~epoch 190.
+
+**Seed-sweep characterization verified valid** — checked training logs
+for the other 3 seed-sweep bakes from CONTEXT-HANDOFF:
+
+| Bake | Seed | Recipe | Training log |
+|---|---:|---|---|
+| V0_15 | 1 | 4 groups (safesyn + kadid + tid + konjnd@0.5) | `v0_15_train.stdout` ✓ |
+| V0_16 | 1 | 4 groups (same) | `v0_16_train.stdout` ✓ |
+| V0_18 | 42 | 4 groups (same) | `v0_18_train.stdout` ✓ |
+| V0_19 | 7 | 4 groups (same) | `v0_19_train.stdout` ✓ |
+| V0_20 | 123 | 4 groups (same) | `v0_20_train.stdout` ✓ |
+
+So the σ=0.007 seed-variance number is on the TRUE recipe and is
+trustworthy. V0_16's 0.8919 IS the +1.4σ tail (true result), not an
+artifact of mismatched recipes.
+
+**Cycle-14 must be re-run with the full 4-group recipe**. Tick 610's
+cycle-14 candidate (CID22 0.8844) was trained with 3 groups. With
+the full recipe + per-band TV [10,30,10,30], we should see:
+- Base V0_16 recipe → ~0.8919 (V0_16's number)
+- Plus per-band TV gain (was +0.0083 on incomplete recipe; may be
+  different on full recipe but expected positive)
+- Projected: ~0.895-0.905 CID22 SROCC, potentially clearing the
+  0.8934 loop target
+
+**Plan**: queue cycle-14-on-full-recipe immediately after V0_16
+reproduction completes (~15 min from now). Then eval CID22 + per-band
+non-mono. ETA for results: ~30 min wall (V0_16 reproduction + cycle-14
+recipe + 2 evals).
+
 ### Tick 612 — 2026-05-13T10:42Z — **V0_16 RECIPE MYSTERY SOLVED — missing konjnd group; reproducing now bit-for-bit**
 
 **Root cause found**: V0_16 was trained with **4 training groups, not
