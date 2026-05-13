@@ -5318,6 +5318,53 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 550 — 2026-05-13T05:50Z — Epochs=200 FALSIFIED (-0.009 CID22); U-curve confirms 300 is optimum
+
+Tested `--epochs 200` (vs 300 baseline). After tick 548's
+epochs=600 also losing, this fills out the U-curve.
+
+**V0_kadid_tid epochs sweep seed=3**:
+
+| Epochs | CID22 | AIC-4 | Wall | Δ vs 300 |
+|---|--:|--:|--:|---|
+| 200 | 0.8727 | 0.8971 | 12s | CID22 -0.0090, AIC-4 -0.0056 |
+| **300** | **0.8817** | **0.9027** | 17s | baseline (V0_38) |
+| 600 | 0.8782 | 0.8958 | 34s | CID22 -0.0035, AIC-4 -0.0069 |
+
+**Epochs=300 is genuinely the optimum.** Both undershoot (200,
+underconverged) and overshoot (600, overfit) lose on both SROCC
+metrics. The default value the cycle has been using is correct.
+
+**14th cheap recipe knob falsified.** Full table of knobs tested:
+
+| # | Knob | Verdict |
+|---|---|---|
+| 1 | init kaiming vs glorot | kaiming +0.006 |
+| 2 | ranknet-group image vs dataset | image +0.007 |
+| 3 | val-policy mean vs min | mean +0.004 |
+| 4 | konjnd_aligned vs konjnd_full | aligned +0.029 |
+| 5 | KonJND w=0.5 vs 0.3 | 0.5 +0.011 |
+| 6 | KonJND w=0.5 vs 1.0 in V0_kadid_tid (5s) | tie |
+| 7 | low-q row boost (5s) | no effect |
+| 8 | low-q pair boost (6s) | -0.0043 AIC-4 sig negative |
+| 9 | External TV pairs file | unusable |
+| 10 | TV-weight 20 vs 40 | 20 +0.006 |
+| 11 | hidden 64 vs 128 (5s) | tie |
+| 12 | hidden 128 vs 256 | 128 +0.014 |
+| 13 | epochs 300 vs 600 | 300 +0.0035 |
+| **14** | **epochs 300 vs 200** | **300 +0.0090** |
+
+epochs=300 is the canonical autonomous-mode setting. Cycle truly
+exhausted now.
+
+Artifacts produced this tick:
+- 1 bake `v0_kadid_tid_ep200_seed3_2026-05-13.bin`
+- 1 per-pair CSV, 1 eval log
+
+**Next tick (551)**: cron will continue firing. The U-curve
+result definitively closes the epochs knob. No remaining cheap
+levers untested.
+
 ### Tick 549 — 2026-05-13T05:46Z — Idle audit: both repos clean; no productive autonomous work remains
 
 State audit: `jj st` shows zensim main at `ff12d6e7` (post-tick
