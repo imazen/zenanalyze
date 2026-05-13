@@ -5318,6 +5318,11 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Ticks 685-693 — 2026-05-13T15:51Z–T16:23Z — Idle (new rolling block, no commit)
+
+Fourth fresh rolling block. V0_17 candidate continues to await user
+direction.
+
 ### Ticks 675-684 — 2026-05-13T15:11Z–T15:47Z — Idle rollup (10 consecutive idle ticks, third block)
 
 Third consecutive idle rollup (36-min span). V0_17 candidate still
