@@ -5318,6 +5318,80 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 519 — 2026-05-13T02:18Z — V0_4-exact recipe attempts FAILED; V0_kadid_tid w=0.5 is the optimum
+
+Tested two cycle-10 V0_4-exact hypotheses, both motivated by the
+stale-task notification surfacing `konjnd_anchor_features_2026-05-10.csv`:
+
+**Variant 1: V0_kadid_tid + konjnd_anchor at weight 1.0 (seed=1)**
+- CID22: 0.8709 (V0_kadid_tid seed=1 baseline: 0.8789) → **-0.008**
+- AIC-4: 0.8867 (baseline: 0.9029) → -0.016
+- All bands regressed (B0 0.4250 vs 0.4501; B2 0.7493 vs 0.7606)
+
+The anchor CSV has 1008 rows all at fixed `human_score=0.63` (the
+CID22 paper Table 4 PJND mean of ssim2 ≈ 63). Adding them at weight
+1.0 creates a strong "pull everything to 0.63" bias that destabilizes
+training. The validation collapsed (best_val_srocc=-1.0 reported).
+
+**Variant 2: V0_kadid_tid + konjnd_anchor at weight 0.1 (seed=1)**
+- CID22: 0.8688 → -0.010 vs baseline (anchor at 0.1 also hurts)
+
+**Variant 3: V0_kadid_tid + KonJND weight 0.3 (V0_4 spec)**
+- Recipe: drop KonJND weight from 0.5 to 0.3
+- CID22: 0.8675 → -0.011 vs baseline (KonJND 0.5 is better than 0.3)
+- AIC-4: 0.9043 (essentially tied)
+
+**All three V0_4-exact attempts FAILED.** V0_kadid_tid at the
+original V0_31-style weights (KonJND 0.5, KADID 0.3, TID 0.3) is
+the cycle-10 optimum we've found.
+
+**Final remaining gap to V0_16 SHIP (~0.019 CID22 mean)**:
+
+V0_kadid_tid 5-seed mean is 0.8731. V0_16 is 0.8919. Difference
+0.0188. Possible explanations beyond mixed supervision:
+
+1. **Affine calibration**: V0_16 may have been calibrated post-bake
+   via `scripts/v_next/affine_calibrate_znpr_v2.py`. Affine
+   calibration preserves rank correlation (SROCC unchanged) but
+   adjusts MAE/calibration scatter. Not the answer for SROCC gap.
+2. **Different training data**: V0_16's safesyn might be the 144k
+   purged CSV (per CLAUDE.md), not our 156k variant.
+3. **Different concordance/filter on training rows**: V0_16 might
+   have applied `--concordance-filter ssim2_butter` over a unified
+   parquet path; we can't replicate without rebuilding.
+4. **Different KonJND data source**: V0_16's "KonJND-aligned" may
+   refer to the `score_jnd → human_score = (score_jnd+3)/3` mapping
+   in `dataset_metric_baseline`'s --konjnd flag rather than our
+   `konjnd_aligned_features.csv`. Different rows.
+5. **Single-seed luck at V0_16**: With V0_kadid_tid σ=0.0081 and
+   the 0.019 gap = +2.3σ, V0_16 could be an upper-tail outlier of
+   a similar-recipe distribution (probability ~1%). Cannot exclude
+   without rerunning V0_16's exact recipe.
+
+**V0_kadid_tid is the practical cycle-10a ship candidate** — has
+5-seed verified +0.0128 CID22 over V0_31 (p=0.033) and CLEAR
+B0/B3 ssim2-beating signal at seed=3. The remaining V0_16 gap
+might require unrecoverable recipe details.
+
+Artifacts produced this tick:
+- 3 bakes: anchor at w=1.0, anchor at w=0.1, konjnd03
+- 3 per-pair CSVs, 3 eval logs
+
+**Next tick (520)**: Cycle-10a is at a natural pause. Options:
+- (a) **Merge V0_kadid_tid seed=3 (best, CID22 0.8817) into site
+  parquets** — same pattern as V0_31 merge (tick 506). Makes the
+  cycle-10a candidate live and comparable on the site.
+- (b) **Run V0_kadid_tid at higher hidden** (256 instead of 128).
+  V0_16's architecture per CLAUDE.md was h=128, but worth
+  ablation-testing in case more capacity helps.
+- (c) **Try ensemble of 5 V0_kadid_tid bakes** — average the
+  outputs. Simple averaging often closes 0.005-0.01 SROCC vs
+  single-best. Cheap (just averages numbers in eval).
+
+Pick (c) for tick 520 — closest to a "free" win. If ensemble of
+5 seeds gives mean CID22 close to 0.88+, we've found the V0_16
+gap closure mechanism.
+
 ### Tick 518 — 2026-05-13T02:13Z — V0_kadid_tid 5-seed sweep CONFIRMS the cycle-10a lever (p=0.033 sig)
 
 Added 2 more seeds (3, 7) at V0_kadid_tid recipe → 5-seed sample.
