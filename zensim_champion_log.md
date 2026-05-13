@@ -5318,6 +5318,58 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 563 — 2026-05-13T07:02Z — low-q + mid-q boost combo FALSIFIED (AIC-4 regression)
+
+Tested combination of cycle-9 low-q-boost 1.5 + cycle-12 mid-q-boost
+1.5 at 3 seeds. Hypothesis: both row-weight mechanisms might
+combine for stronger CID22 effect.
+
+**3-seed combo results (low-q-1.5 + mid-q-1.5)**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8769 | 0.8909 |
+| 3 | 0.8732 | 0.9006 |
+| 42 | 0.8732 | 0.8945 |
+| **Mean (n=3)** | **0.8744** | **0.8953** |
+
+**Comparison table**:
+
+| Variant | n | CID22 | AIC-4 | Verdict |
+|---|--:|--:|--:|---|
+| baseline (no boost) | 8 | 0.8712 | **0.9046** | reference |
+| low-q-1.5 only (cycle-9) | 5 | 0.8597 | 0.8978 | falsified (-0.011 CID22) |
+| **mid-q-1.5 only (cycle-12)** | **5** | **0.8743** | 0.9036 | mild stabilizer (+0.003) |
+| low-q-1.5 + mid-q-1.5 (this tick) | 3 | 0.8744 | **0.8953** ❌ | AIC-4 regresses |
+
+**Findings**:
+1. **CID22 doesn't compound**: combined 0.8744 ≈ mid-q-only 0.8743.
+   The two row-weight boosts OVERLAP on B1 (both target it), so
+   the combined effect = max effect, not sum.
+2. **AIC-4 regresses**: combined 0.8953 vs baseline 0.9046 →
+   -0.0093. The low-q-boost's known cycle-9 AIC-4 penalty
+   compounds when stacked with mid-q.
+3. **Combination is NOT Pareto-better than mid-q alone**. Mid-q
+   wins (CID22 same, AIC-4 better).
+
+**16th cheap variant FALSIFIED.**
+
+V0_16 ceiling 0.8919 still uncracked. Even the best single-seed
+in this combo (seed=1 at 0.8769) is -0.015 below V0_16.
+
+**Cycle-12 lesson**: row-weight boost mechanisms can't compound
+linearly because they target overlapping bands. Mid-q-boost is the
+"superset" — it includes the B1 region that low-q-boost also
+targets. So combining low-q + mid-q is mostly redundant CID22-wise
+but additively-bad for AIC-4.
+
+Artifacts produced this tick:
+- 3 new bakes: `v0_kadid_tid_lowmidq15_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+
+**Next tick (564)**: Genuinely nothing left in cheap autonomous
+scope. Cron continues; refresh markers only.
+
 ### Tick 562 — 2026-05-13T06:58Z — `--mid-q-boost` trainer flag committed (zensim `4da7d1fa`)
 
 Committed the cycle-12 `--mid-q-boost` trainer flag at zensim
