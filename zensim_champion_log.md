@@ -5318,6 +5318,87 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 516 — 2026-05-13T01:55Z — V0_16 is NOT a seed outlier — V0_16 used different supervision
+
+5-seed sweep of V0_31-minus-KonJND (synth-only, no KonJND, otherwise
+V0_31's recipe). Tests whether V0_16's 0.8919 CID22 could be a
+seed-lucky outlier of the same recipe family.
+
+**5-seed no-KonJND distribution**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8505 | 0.9001 |
+| 2 | 0.8552 | 0.8972 |
+| 3 | 0.8520 | 0.8992 |
+| 7 | 0.8477 | 0.9026 |
+| 42 | 0.8479 | 0.8899 |
+| **Mean** | **0.8507** | **0.8978** |
+| Std | 0.0031 | 0.0048 |
+
+**V0_16 distance from no-KonJND distribution**:
+
+- CID22: V0_16 0.8919 → (0.8919 - 0.8507) / 0.0031 = **+13.3σ**
+- AIC-4: V0_16 0.9127 → (0.9127 - 0.8978) / 0.0048 = +3.1σ
+
+**CONCLUSION: V0_16's 0.8919 is NOT a seed outlier**. 13σ is
+astronomically far above the no-KonJND synth-only distribution.
+V0_16 used materially different training supervision than the
+cycle-7/8/9/9b family.
+
+**KonJND alone explains ~0.010**: V0_31 mean (with KonJND, n=2) =
+0.8603 vs no-KonJND mean 0.8507 → KonJND adds +0.0096 CID22.
+
+**Remaining gap (~0.032)**: V0_16 is 0.0316 above V0_31 (with
+KonJND). Per CLAUDE.md and cycle-7 doc, candidate explanations
+for the missing 0.032:
+
+1. **KADID-10k + TID2013 mixed supervision** — V0_4 recipe per
+   CLAUDE.md. The trainer's `load_human_csv` supports this; we
+   just haven't been using it.
+2. **Different KonJND anchor data** (the `--konjnd-anchor-csv`
+   flag at line 727-741 of train_v_next_mlp.py — not the
+   `--human-csv konjnd:...` we've been using).
+3. **`--concordance-filter ssim2_butter`** — synth CSV doesn't
+   have the columns, but the unified parquet sweep path does.
+4. **Different bake/calibration path** — V0_16 was post-purge
+   V0_15 recipe; might have used `affine_calibrate_znpr_v2.py`
+   from `scripts/v_next/`.
+
+**Cycle-10 strategy now CLEAR**: add KADID-10k + TID2013 mixed
+supervision to the V0_31 recipe and re-train. If that closes
+0.020+ of the remaining 0.032 CID22 gap, we've found V0_16's
+secret ingredient.
+
+Artifacts produced:
+- 5 bakes: `/tmp/zensim_loop/bakes/v0_nokonjnd_seed{1,2,3,7,42}_2026-05-13.bin`
+- 5 per-pair CSVs, 5 eval logs
+- 5 run dirs under `/mnt/v/zen/zensim-training/2026-05-07/runs/*v0_nokonjnd*`
+
+**Cycle-10 family summary (synth-only/synth+KonJND lineage)**:
+
+| Recipe | n | Mean CID22 | Mean AIC-4 |
+|---|--:|--:|--:|
+| synth-only (no KonJND) | 5 | 0.8507 | 0.8978 |
+| synth + KonJND w=0.5 (V0_31 family) | 2 | 0.8603 | 0.9180 |
+| synth + KonJND w=0.5 + boost 1.5 (cycle-9) | 5 | 0.8597 | 0.9122 |
+| synth + KonJND w=0.5 + pairboost 2.0 (cycle-9b) | 6 | 0.8629 | 0.9137 |
+| **V0_16 SHIP (unknown extra supervision)** | 1 | **0.8919** | 0.9127 |
+
+V0_16 still 4σ above the BEST 6-seed plateau mean (cycle-9b
+0.8629). Adding KADID + TID + maybe konjnd-anchor would test if
+those close the remaining gap.
+
+**Next tick (517)**: Test KADID/TID mixed supervision. Need:
+1. Find KADID-10k features CSV (or build it). Per CLAUDE.md it
+   should exist at `/mnt/v/dataset/kadid10k` or similar.
+2. Same for TID2013 at `/mnt/v/dataset/tid2013`.
+3. Add `--human-csv kadid:...:1.0:0.0` + `--human-csv tid:...:1.0:0.0`
+   to V0_31 recipe, train 1 seed, eval CID22.
+
+If KADID/TID CSVs don't exist, building them takes feature
+extraction over the corpora — multi-tick.
+
 ### Tick 515 — 2026-05-13T01:48Z — Cycle-9b infrastructure committed + outcomes doc; cycle-10c blocked
 
 Two zensim commits:
