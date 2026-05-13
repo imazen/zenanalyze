@@ -5318,6 +5318,85 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 545 — 2026-05-13T05:30Z — Soft-iso is a no-op on AIC-3/AIC-4 (already monotonic); applicability further narrowed
+
+Per tick 539's finding (CID22 soft-iso doesn't help, too sparse),
+tested soft-iso on AIC-3 + AIC-4 corpora. These are JND
+(just-noticeable-difference) corpora with curve structure
+(image × codec × quality_level).
+
+**Soft-iso AIC-3/AIC-4 results** (4 zensim cols each):
+
+| Corpus | Curves | Pts/curve | Corrections per bake | Δ SROCC |
+|---|--:|--:|--:|--:|
+| AIC-3 | 60 | 10.0 | 0-1 (essentially 0) | +0.0000 across all 4 bakes |
+| AIC-4 | 30 | 10.0 | 0 (zero) | +0.0000 across all 4 bakes |
+
+**AIC corpora are already curve-monotonic** — the human JND
+evaluations are at quality levels where scores naturally rank
+correctly. Zero within-curve reversals to fix.
+
+**Soft-iso applicability now fully mapped**:
+
+| Dataset | Curve density | Violations | Soft-iso impact |
+|---|--:|--:|---|
+| Unified parquet (zenjpeg sweep) | ~18 pts/curve | 5-6% | **EFFECTIVE** (drops to 0%) |
+| CID22 | ~10 pts/curve | sparse | minimal (~20 corrections) |
+| AIC-3 | 10.0 pts/curve | none | no-op |
+| AIC-4 | 10.0 pts/curve | none | no-op |
+
+**Soft-iso's use case is now precisely defined**: dense codec-sweep
+evaluation (e.g., zen-metrics batch over a full q-curve per image).
+Doesn't help on human-rated evaluation corpora where curves are
+sparser and naturally cleaner.
+
+**This is the final structural finding of the recovery cycle.**
+Cycle-11's soft-iso post-processor is verified as a real but
+narrow Pareto improvement (codec sweep smoothness; not human-eval
+SROCC).
+
+Artifacts produced this tick:
+- Pure analysis; no new bakes
+
+**Full recovery cycle (cycle-7-through-12) artifact inventory**:
+
+Bakes (in `/tmp/zensim_loop/bakes/`, ~40 total):
+- cycle-7: V0_24/25/26/27/28/29
+- cycle-8: V0_30/31/32
+- cycle-9: V0_33/34/35/36 + 5-seed sweep at h=128 boost 1.5
+- cycle-9b: V0_pairboost2.0 (6 seeds), pairboost5.0
+- cycle-10a: V0_kadid_tid (8 seeds), V0_kadid_tid_anchor variants
+- cycle-10: V0_kadid_tid_konjnd03/extTV/valpolicymin/glorot/rankdataset/tv40
+- cycle-10a' (V0_39): KonJND-w=1.0 + KADID/TID (5 seeds)
+- cycle-10b/c (hidden=64/256): both falsified
+
+Site parquets (committed, 4 columns each):
+- V0_16 SHIP, V0_26 cycle-7, V0_31 cycle-8, V0_38 cycle-10a
+
+Docs (committed):
+- 5 cycle outcomes docs in `zensim/benchmarks/`
+- 1 recovery summary in `zenanalyze/`
+- This log: 545 ticks
+
+Trainer infrastructure (4 flags):
+- `--low-q-boost` (cycle-9, falsified but kept)
+- `--low-q-pair-boost` (cycle-9b, falsified but kept)
+- `--tv-pairs-file` (cycle-10h, unusable for V0_16 file)
+- `--low-q-boost` already in trainer
+
+Scripts:
+- `soft_iso_smooth.py` (cycle-11, verified Pareto improvement)
+
+Site fixes:
+- V0_26 sign-flip bug at `0da64555` (tick 540)
+
+**The autonomous recovery cycle has truly truly genuinely
+completed.** Cron will keep firing. Without user direction on
+cycle-12 strategic axis, no productive autonomous work remains.
+
+**Next tick (546)**: Refresh markers only. The loop has
+exhaustively explored its scope.
+
 ### Tick 544 — 2026-05-13T05:22Z — Hidden=64 5-seed sweep REVERSES seed=3 AIC-4 win (cycle-9 trap, 5th repeat)
 
 Trained + evaluated 4 more h=64 seeds (1, 2, 7, 42) to verify
