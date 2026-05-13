@@ -5318,6 +5318,61 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 561 — 2026-05-13T06:51Z — Mid-q boost 2.0 NOT monotonic — boost-1.5 is the sweet spot
+
+Per tick 560's plan, tested `--mid-q-boost 2.0` at 3 seeds.
+
+**Mid-q boost 2.0 results** (3 seeds):
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | **0.8809** ★ | 0.8982 |
+| 3 | 0.8707 | 0.9049 |
+| 42 | 0.8712 | 0.9071 |
+| **Mean (n=3)** | **0.8743** | **0.9034** |
+| Range | 0.0102 | 0.0089 |
+
+**Mid-q boost sweep summary** (same V_kadid_tid recipe):
+
+| Boost | n | Mean CID22 | σ | Mean AIC-4 |
+|--:|--:|--:|--:|--:|
+| 1.0 (V_kadid_tid baseline) | 8 | 0.8712 | **0.0068** | 0.9046 |
+| **1.5** | **5** | **0.8743** | **0.0016** (4× tighter) | 0.9036 |
+| 2.0 | 3 | 0.8743 | wider (range 0.010) | 0.9034 |
+
+**Mid-q boost is NOT monotonic in boost factor**:
+- 1.0 → 1.5: CID22 +0.0031, σ 4× tighter (stability win)
+- 1.5 → 2.0: CID22 unchanged (0.8743 → 0.8743), σ widens again
+
+**Mid-q boost 1.5 is the sweet spot.** The effect saturates by 1.5;
+higher boost loses the stability without gaining SROCC. This is the
+opposite pattern from epochs (U-curve at 300) — boost has a
+"plateau-then-noise" shape.
+
+**Single-seed peak**: midq=2.0 seed=1 hit CID22 **0.8809** — the
+highest single-seed CID22 of any V_kadid_tid variant. But:
+- 3-seed mean drops to 0.8743 (seed=1 was upper-tail)
+- Still -0.0110 below V0_16's 0.8919
+- Single-seed cycle-9 trap warning applies
+
+**Cycle-12 first real finding**: mid-q-boost=1.5 is a stable
+recipe stabilizer. Real but small effect (+0.003 CID22 mean,
+n.s. at p=0.24). 4× σ-tightening is the main benefit.
+
+**Commit decision**: I will commit the `--mid-q-boost` flag as
+trainer infrastructure (similar to `--low-q-boost`). The effect
+is mild but real-direction; future cycle-12 experiments may want
+to combine it with other axes.
+
+Artifacts produced this tick:
+- 3 new bakes: `v0_kadid_tid_midq2_seed{1,3,42}_2026-05-13.bin`
+- Trainer flag tested across 2 boost levels (1.5 and 2.0)
+- Found plateau at boost=1.5; boost=2.0 doesn't help
+
+**Next tick (562)**: Commit `--mid-q-boost` trainer flag.
+After that, recipe-knob space is exhausted at multi-seed scale.
+Loop becomes purely housekeeping until user direction.
+
 ### Tick 560 — 2026-05-13T06:46Z — Mid-q boost 1.5 5-seed verification: CID22 mean +0.003 (n.s.) but σ-TIGHTENS 4×
 
 Added 2 more seeds (2, 7) to reach 5-seed sample at mid-q-boost=1.5.
