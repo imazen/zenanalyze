@@ -5318,6 +5318,41 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 596 — 2026-05-13T09:27Z — Scale validation on v15r_zenjpeg (1.79M pairs) + CHANGELOG entry
+
+Ran the soft-iso default-on script on
+`/mnt/v/zen/zensim-training/2026-05-07/unified/unified_v15r_zenjpeg.parquet`
+(496 MB, 1,785,696 pairs, 93,984 curves) to validate at the scale where
+the original cycle-11 non-mono measurements were taken:
+
+| Metric | Value | Source-of-truth check |
+|---|--:|---|
+| Curves | 93,984 | — |
+| Curves with ≥1 raw violation | 56,056 (59.64%) | — |
+| Adjacent-q pairs | 1,691,712 | — |
+| Raw reversed pairs | **98,623 (5.83%)** | **MATCHES tick 538 "5.83%→0%"** |
+| After-iso reversed pairs | **0 (0.00%)** | matches tick 538 doc |
+| Wall time | 43.0s | — |
+
+**Exact reproduction** of the cycle-11 V0_16 non-mono number documented
+in `zensim_champion_log.md` tick 538 "V0_16 actually IMPROVES SROCC by
++0.0008" (raw 5.83%, after-iso 0.00%). The soft-iso default-on change
+landed at zensim `21efc115` is functionally identical to the standalone
+`soft_iso_smooth.py` it inlines — same projection logic, same direction
+auto-detection, same outcome on the canonical measurement parquet.
+
+**CHANGELOG entry added** to `zensim/CHANGELOG.md` under `[Unreleased]`
+documenting tick 594's three default-on changes + the tick 595/596
+validations. Not yet committed.
+
+Artifacts:
+- `/tmp/v0_16_softiso_v15r.log` — full run output
+
+**Loop status**: pending user decisions on (1) holdout encryption option
+A/B/C + key location, (2) running the Rust trainer with V0_16 recipe
+on the truly-clean post-purge CSV. Continuing autonomous work that
+doesn't preempt those decisions.
+
 ### Tick 595 — 2026-05-13T09:24Z — soft-iso default-on smoke test on V0_16 confirms behavior matches canonical numbers
 
 Ran `python3 scripts/v_next/score_unified_with_bake.py` (post-edit at
