@@ -5318,6 +5318,50 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 564 — 2026-05-13T07:09Z — rank-weight=1.0 + mid-q-1.5 also a no-op (17th variant)
+
+Tested rank-weight=1.0 (vs default 0.5) combined with mid-q-1.5
+stabilizer, 3 seeds.
+
+**Results vs mid-q-1.5-only baseline**:
+
+| Variant | n | CID22 | AIC-4 |
+|---|--:|--:|--:|
+| mid-q-1.5 only | 5 | 0.8743 | 0.9036 |
+| mid-q-1.5 + rank-weight=1.0 | 3 | **0.8745** | **0.9023** |
+
+Δ CID22 = +0.0002 (within noise), Δ AIC-4 = -0.0013 (slight
+regression). **rank-weight has no meaningful effect**.
+
+**17th cheap variant FALSIFIED**.
+
+Per-seed: seed=1 0.8736 / 0.8980, seed=3 0.8728 / 0.9054,
+seed=42 0.8770 / 0.9034. Range 0.0042 — wider than mid-q-1.5-only
+σ=0.0016 — so rank-weight increase actually LOOSES the σ-stability
+that was mid-q-1.5's main benefit.
+
+**Updated full exhaustion table** (17 variants):
+
+| # | Knob | Verdict |
+|---|---|---|
+| 1-13 | (earlier ticks) | all falsified except mid-q-boost |
+| 14 | mid-q-boost 1.5 | mild stabilizer +0.003 n.s. |
+| 15 | mid-q-boost 2.0 | plateau, looser σ |
+| 16 | low-q-1.5 + mid-q-1.5 | AIC-4 regression |
+| **17** | **rank-weight 1.0 + mid-q-1.5** | **no effect** |
+
+Artifacts produced this tick:
+- 3 new bakes: `v0_kadid_tid_midq15_rank1_seed{1,3,42}_2026-05-13.bin`
+- 3 per-pair CSVs, 3 eval logs
+
+**Final state**: 17 multi-seed knob combinations tested. ONE
+positive-direction finding (mid-q-boost 1.5 = mild stabilizer).
+All others falsified or zero-effect. The autonomous V_X 228-feat
+MLP ceiling is 0.871-0.874 CID22 across all variants.
+
+**V0_16 SHIP 0.8919 is genuinely beyond autonomous reach.** Loop
+truly truly done. No further productive autonomous knobs remain.
+
 ### Tick 563 — 2026-05-13T07:02Z — low-q + mid-q boost combo FALSIFIED (AIC-4 regression)
 
 Tested combination of cycle-9 low-q-boost 1.5 + cycle-12 mid-q-boost
