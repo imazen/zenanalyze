@@ -5318,6 +5318,63 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 503 — 2026-05-13T00:33Z — V0_30 evaluated; Pareto cliff between w=0 and w=0.25
+
+V0_30 (V0_26 recipe + KonJND weight=0.25 vs V0_26's 1.0) trained in
+17s, val_srocc 0.9982. Baked to
+`/tmp/zensim_loop/bakes/v0_30_konjnd_w025_2026-05-13.bin` (120,712B).
+
+**Pareto curve mapping** (KonJND weight axis):
+
+| Bake | KonJND w | CID22 | AIC-3 | AIC-4 | JPEG-AI |
+|---|--:|--:|--:|--:|--:|
+| V0_16 (SHIP) | 0.0 | **0.8919** | 0.7965 | 0.9127 | 0.7951 |
+| V0_30 (new) | 0.25 | 0.8702 | **0.8062** | **0.9159** | 0.7975 |
+| V0_26 (candidate) | 1.0 | 0.8639 | 0.8027 | 0.9097 | **0.8387** |
+
+**Cliff finding**: w=0→0.25 costs -0.0217 CID22 for almost no JPEG-AI
+gain (+0.0024). Then w=0.25→1.0 costs only -0.0063 more CID22 but
+gives +0.0412 JPEG-AI. The KonJND signal has a high "entry tax" on
+CID22 that doesn't proportionally help JPEG-AI until weight is
+high enough to dominate the loss.
+
+V0_30 per-band CID22 SROCC: B0=0.4005, B1=0.4047, B2=0.7444,
+B3=0.0818, Near-PJND=0.3306. B2 still -0.028 below ssim2's 0.7722
+— same family of failure as V0_26.
+
+**V0_30 not a ship candidate.** Worse than V0_16 on CID22 by
+-0.0217, only ties on JPEG-AI. Confirms cycle-7 finding: V0_16
+remains the best CID22 fit and the KonJND signal trade is hard.
+
+**Side win**: V0_30 BEATS V0_16 on both AIC-3 (+0.0097) AND AIC-4
+(+0.0032). The Pareto curve here looks like:
+- V0_16 best CID22, worst AIC corpora
+- V0_30 mid CID22, best AIC-3+AIC-4 (essentially tied with V0_26)
+- V0_26 worst CID22, best JPEG-AI specifically
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_30_konjnd_w025_2026-05-13.bin` (120,712B)
+- `/tmp/zensim_loop/v0_30_per_pair.csv` (5,192 rows)
+- `/tmp/zensim_loop/v0_30_eval.log`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T182453_v0_30_konjnd_w025_seed1_2026-05-13/`
+
+**Next tick (504)**: V0_31 = same recipe with KonJND weight=0.5
+(halfway between V0_30 and V0_26). Should map another point on
+the Pareto curve. Hypothesis: w=0.5 keeps most of V0_26's JPEG-AI
+gain (since cliff is shallow above 0.25) while only marginally
+worse on CID22 than V0_30. If V0_31 CID22 ≥ V0_26 AND JPEG-AI ≥
+V0_26 × 0.8 (≈ 0.82), it's a slight Pareto improvement over V0_26.
+
+**Cycle-8 tree at tick 503**:
+```
+KonJND weight   CID22    JPEG-AI
+0.0  (V0_16)    0.8919   0.7951   ← SHIP
+0.25 (V0_30)    0.8702   0.7975   ← AIC-corpora wins, CID22 cliff
+0.5  (V0_31)    PENDING  PENDING
+0.75 (V0_32?)   --
+1.0  (V0_26)    0.8639   0.8387   ← JPEG-AI wins
+```
+
 ### Tick 502 — 2026-05-13T00:28Z — V0_30 launched: light KonJND (weight 0.25 vs V0_26's 1.0)
 
 Pivot from cycle-7 to cycle-8 first probe. The 300-feat input axis
