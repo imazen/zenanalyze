@@ -5318,6 +5318,39 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 498 — 2026-05-13T00:07Z — V0_28 launched: V0_26 recipe + cosine LR schedule
+
+Cycle-7 was at a "definitive" stopping point but pushing for one
+more variant. V0_28 = V0_26 (KonJND-aligned, no dssim) + cosine
+LR schedule (V0_26 used constant LR; V0_X recipes per CLAUDE.md
+have hypothesized that cosine annealing was an ingredient in V0_5's
+CID22 0.8893 SROCC).
+
+V0_28 launched (PID 3690855):
+- `--lr-schedule cosine` (NEW)
+- All other knobs identical to V0_26
+- Log: `/tmp/zensim_loop/v0_28_train.log`
+- ETA ~12 min wall
+
+Hypothesis: if cosine annealing matters, V0_28 might close part of
+the V0_26 → V0_16 CID22 gap (0.028) — possibly by escaping a
+sharper local minimum that constant LR is stuck in. If V0_28
+matches or beats V0_16 on CID22 while preserving V0_26's JPEG-AI
+gain, that's a real cycle-7 win.
+
+**Cycle-7 experimental tree update**:
+```
+V0_16 (ship, CID22 0.8919, JPEG-AI 0.7951)
+V0_25 (TV+safesyn, const LR):                0.8505 / —
+ └─ V0_26 (+ KonJND, const LR):              0.8639 / 0.8387
+     ├─ V0_27 (+ dssim 0.1):                 0.8658 / 0.7791 (dssim falsifies)
+     └─ V0_28 PENDING (+ cosine LR):         ? / ?
+```
+
+**Next concrete tick (499)**: poll V0_28 → bake → eval. If V0_28
+clears CID22 ≥ V0_16's 0.8919 AND keeps JPEG-AI > 0.83, V0_28
+becomes a ship candidate.
+
 ### Tick 497 — 2026-05-13T00:02Z — V0_26 candidate merged into 3 site parquets
 
 zensim commit `ab7d6fd8`. V0_26 evaluation expanded to all 3 corpora
