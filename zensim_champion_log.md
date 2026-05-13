@@ -5318,6 +5318,62 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 508 — 2026-05-13T01:00Z — Cycle-9 first probe: low-q boost LEVER WORKS for B0 (+0.0104) but 3× too aggressive
+
+Added `--low-q-boost` CLI flag to `train_v_next_mlp.py` (~20-line
+diff). Mechanics: bin training rows by `target_col` value; multiply
+`train_weight` by `boost` for B0 (score<50) and `sqrt(boost)` for
+B1 (50..65). Plumbed through existing `wt` tensor in train() loop.
+
+V0_33 launched + evaluated as cycle-9 first probe:
+- Recipe: V0_31 (KonJND w=0.5) + `--low-q-boost 3.0`
+- Effective: B0 n=62,794 × 3.0; B1 n=36,638 × 1.732; others × 1.0
+- B0+B1 = 99k of 225k synth+KonJND rows (44%) → 67% of weighted loss
+- 17s training, val_srocc=0.9974 (slightly lower than V0_31's 0.9982)
+- Bake: `/tmp/zensim_loop/bakes/v0_33_konjnd_w05_lowqboost3_2026-05-13.bin` (120,710B)
+
+**V0_33 vs V0_31 per-band CID22 SROCC**:
+
+| Band | V0_31 | V0_33 | Δ | ssim2 |
+|---|--:|--:|--:|--:|
+| B0 (<50) | 0.3982 | **0.4086** | **+0.0104** ✓ | 0.4418 |
+| B1 (50-65) | 0.4045 | 0.3934 | -0.0111 ✗ | 0.4694 |
+| B2 (65-90) | 0.7277 | 0.7179 | -0.0098 ✗ | 0.7722 |
+| B3 (≥90) | 0.0586 | 0.0781 | +0.0195 ✓ | 0.1121 |
+| Near-PJND | 0.3353 | 0.3351 | -0.0002 | 0.3908 |
+| **CID22 agg** | **0.8628** | **0.8552** | **-0.0076** | 0.8895 |
+
+**V0_33 cross-corpus** (essentially identical to V0_31):
+- AIC-3: 0.8043 vs V0_31's 0.8031 (+0.0012)
+- AIC-4: 0.9176 vs V0_31's 0.9176 (tied exactly)
+
+**Cycle-9 finding**: low-q boost lever **works** for B0 (+0.0104,
+~25% of the ssim2 gap closed) but 3× is too aggressive. The B0
+weight pull causes B1/B2 collateral regression (each -0.01) which
+costs more aggregate CID22 than the B0 gain saves.
+
+**Next tick (509)**: V0_34 = V0_31 + `--low-q-boost 1.5`. Halved
+boost should:
+- Reduce B0 gain to ~+0.005 (probable)
+- Eliminate B1/B2 collateral regression
+- Net CID22 closer to V0_31 baseline (0.86), maybe slight gain
+
+If V0_34 retains B0 gain WITHOUT B1/B2 cost, the lever is
+controllable and worth a binary search (V0_35 at 2.0×) for the
+sweet spot. If even 1.5× costs B1/B2, the boost mechanism is
+fundamentally pulling weight from B2 (which has more training
+samples and is more rank-informative for synth pairs) — need a
+different approach (per-band loss weighting after pred, not
+training-time row weighting).
+
+Artifacts produced:
+- `/home/lilith/work/zen/zensim/scripts/v_next/train_v_next_mlp.py`
+  (+ `--low-q-boost` flag)
+- `/tmp/zensim_loop/bakes/v0_33_konjnd_w05_lowqboost3_2026-05-13.bin` (120,710B)
+- `/tmp/zensim_loop/v0_33_per_pair.csv` (CID22 4292 rows)
+- `/tmp/zensim_loop/v0_33_aic3.csv`, `v0_33_aic4.csv`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T185840_v0_33_konjnd_w05_lowqboost3_seed1_2026-05-13/`
+
 ### Tick 507 — 2026-05-13T00:55Z — Cycle-8 outcomes doc committed; cycle-9 problem statement = B0/B1 ceiling
 
 zensim commit `27c86ee1`. Created
