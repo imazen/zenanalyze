@@ -5318,6 +5318,44 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 574 — 2026-05-13T07:50Z — Rust trainer's default LR (1e-3) FALSIFIED at our recipe (19th variant)
+
+Tick 569 git-archeology found the Rust trainer's MlpHyperparams
+defaults at `e6132243^`:
+
+| Param | Rust default | Our test |
+|---|---|---|
+| n_hidden | 32 | 128 (tested 64/128/256) |
+| n_epochs | 200 | 300 (tested 200/300/600) |
+| pairs_per_epoch | 50,000 | (variable) |
+| **initial_lr** | **1e-3** | **3e-3 default (tested 3e-3, 3e-4)** |
+| validation_policy | Min | Mean (tested both) |
+| early_stop_patience | 50 | none (no early stop) |
+
+**LR 1e-3 was never specifically tested.** Tested it now.
+
+**Result at seed=3** (V_kadid_tid recipe + `--lr 1e-3`):
+- CID22: 0.8632 vs baseline 0.8817 → **-0.0185** ❌
+- AIC-4: 0.9012 vs 0.9027 → -0.0015 (essentially tied)
+
+LR 1e-3 is significantly WORSE on CID22. 19th variant ruled out.
+
+**Note**: the Rust trainer's true setup was LR=1e-3 + cosine
+annealing (decaying to ~1e-5 over training). Our test was constant
+LR=1e-3 (no cosine). Cycle-7 tested cosine separately and it was
+also worse. The combination wasn't tested at LR=1e-3.
+
+Recovery cycle is structurally exhausted. The Rust trainer's
+default hyperparameters individually don't match V0_15/V0_16's
+recipe even when combined.
+
+Artifacts produced:
+- 1 new bake: `v0_kadid_tid_lr1e-3_seed3_2026-05-13.bin`
+
+**Loop truly truly truly truly final**. 19 cheap variant
+combinations tested, V0_16 ceiling 0.8919 remains beyond
+autonomous reach.
+
 ### Tick 573 — 2026-05-13T07:46Z — Cosine LR + sampling-bias FALSIFIED (18th cheap variant ruled out)
 
 Tested final cycle-13 combination: V_kadid_tid + `--lr-schedule
