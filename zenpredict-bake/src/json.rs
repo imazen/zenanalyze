@@ -1,10 +1,10 @@
-//! JSON input schema for [`bake_v2`].
+//! JSON input schema for [`bake`].
 //!
 //! Lets language-agnostic toolchains (the Python training pipeline at
 //! `zenanalyze/zenpicker/tools/`, ad-hoc baking scripts, etc.) drive
-//! a v2 bake without re-implementing the byte-level format. The
+//! a v3 bake without re-implementing the byte-level format. The
 //! Python side dumps a `BakeRequestJson`, then shells out to the
-//! `zenpredict-bake` binary which calls [`bake_v2`] on the
+//! `zenpredict-bake` binary which calls [`bake`] on the
 //! deserialized request.
 //!
 //! ## Schema (top level)
@@ -68,7 +68,7 @@ use alloc::vec::Vec;
 
 use serde::Deserialize;
 
-use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zenpredict::{
     Activation, FeatureBound, MetadataType, OutputSpec, OutputTransform, SparseOverride,
     WeightDtype,
@@ -335,7 +335,7 @@ impl From<MetadataKindJson> for MetadataType {
     }
 }
 
-/// Decode a metadata entry into the byte payload that the v2 baker
+/// Decode a metadata entry into the byte payload that the baker
 /// writes verbatim into the metadata blob's value field.
 fn decode_metadata_value(entry: &MetadataEntryJson) -> Result<Vec<u8>, BakeJsonError> {
     let wire = MetadataType::from(entry.kind);
@@ -411,8 +411,8 @@ fn hex_nibble(b: u8) -> Option<u8> {
     }
 }
 
-/// Bake a `BakeRequestJson` into ZNPR v2 bytes. Performs all input
-/// validation that [`bake_v2`] does plus the JSON-side type-vs-repr
+/// Bake a `BakeRequestJson` into ZNPR v3 bytes. Performs all input
+/// validation that [`bake`] does plus the JSON-side type-vs-repr
 /// checks for metadata entries.
 pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
     // Decode metadata values up front so the byte buffers outlive
@@ -494,7 +494,7 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         })
         .collect();
 
-    let bake = BakeRequest {
+    let request = BakeRequest {
         schema_hash: req.schema_hash,
         flags: req.flags,
         scaler_mean: &req.scaler_mean,
@@ -506,7 +506,7 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         discrete_sets: &discrete_sets_pool,
         sparse_overrides: &sparse_overrides,
     };
-    Ok(bake_v2(&bake)?)
+    Ok(bake(&request)?)
 }
 
 /// Convenience: parse a JSON string and bake.

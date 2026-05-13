@@ -45,15 +45,15 @@
 //! 96..128 reserved: [u32; 8]
 //! ```
 //!
-//! ### v3 vs v2
+//! ### Older formats
 //!
-//! v3 adds three optional sections (`output_specs`,
-//! `discrete_sets`, `sparse_overrides`) that drive
-//! [`crate::Predictor::predict_with_specs`]. The v2 header layout
-//! is preserved through the first 72 bytes; v3 packs the new
-//! sections into bytes that v2 had reserved. **v2 bins do not load**
-//! — they fail with [`crate::PredictError::UnsupportedVersion`].
-//! See [`crate::output_spec`] for the wire shape of the new POD types.
+//! v1 and v2 bakes are not loaded by this crate — they fail with
+//! [`crate::PredictError::UnsupportedVersion`]. Migrate them via
+//! `zentrain/tools/migrate_znpr_v2_to_v3.py`, which rewrites the
+//! header to v3 (the v3 layout is byte-identical to v2 through the
+//! first 72 bytes; the three new sections live in space that v2
+//! reserved). Layer payloads do not change. See [`crate::output_spec`]
+//! for the wire shape of the new POD types.
 //!
 //! ### LayerEntry (48 bytes)
 //!
@@ -271,7 +271,7 @@ pub enum WeightStorage<'a> {
     },
 }
 
-/// Parsed view over a ZNPR v2 model. All slices borrow from the
+/// Parsed view over a ZNPR v3 model. All slices borrow from the
 /// caller's `&[u8]`. No ownership transfer, no copies of the weight
 /// data — the model lives as long as the bytes do.
 #[derive(Debug)]
@@ -295,7 +295,7 @@ pub struct Model<'a> {
 }
 
 impl<'a> Model<'a> {
-    /// Parse a v2 model from raw bytes. The returned `Model` borrows
+    /// Parse a v3 model from raw bytes. The returned `Model` borrows
     /// from `bytes` for `'a`.
     ///
     /// Reserved fields in [`Header`] (`_pad0`, `reserved`, `flags`)

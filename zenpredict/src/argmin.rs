@@ -17,9 +17,9 @@ use crate::error::PredictError;
 /// All argmin entry points require `mask.len() >= predictions.len()`
 /// (or `>= n` for the `_with_scorer` family). Mismatched lengths
 /// **panic** in debug AND release — short masks used to silently
-/// deny high-index cells, which masked real bugs. Use
-/// [`AllowedMask::all_allowed`] when you want to admit every cell
-/// of a known length.
+/// deny high-index cells, which masked real bugs. Build an
+/// all-allowed mask via [`AllowedMask::new`] with a `&[true; N]`
+/// slice when you want to admit every cell of a known length.
 #[derive(Clone, Copy, Debug)]
 pub struct AllowedMask<'a> {
     pub allowed: &'a [bool],

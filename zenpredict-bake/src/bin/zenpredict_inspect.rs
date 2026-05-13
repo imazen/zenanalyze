@@ -1,4 +1,4 @@
-//! `zenpredict-inspect` — load a ZNPR v2 `.bin` and dump everything
+//! `zenpredict-inspect` — load a ZNPR v3 `.bin` and dump everything
 //! the loader sees as a single JSON document on stdout. Used by
 //! `zentrain/tools/inspect_picker.py` for tree-approximation,
 //! pick-distribution, pathology / boundary-stress, and confidence

@@ -60,7 +60,8 @@ pub struct SafetyCompact {
     pub corpus_hash: u32,
 
     /// Bake-time held-out mean overhead, in percent. Surfaced in
-    /// [`crate::EncodeMetrics`]-style logging. NaN if not measured.
+    /// downstream encode-metrics logging by codec orchestrators.
+    /// NaN if not measured.
     pub mean_overhead_pct: f32,
     /// Held-out p99 zensim shortfall vs target_zq, in points.
     /// Drives the `zensim_strict` advertise contract.

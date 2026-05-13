@@ -20,7 +20,7 @@ mod feature_transform_tests {
     //!   `predict()` matches `predict_transformed()` byte-for-byte.
     //!   This is the small synthetic train/serve parity check the
     //!   #52 plan asks for.
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
     use zenpredict::MetadataType;
     use zenpredict::*;
 
@@ -47,7 +47,7 @@ mod feature_transform_tests {
             weights: &w0,
             biases: &b0,
         }];
-        bake_v2(&BakeRequest {
+        bake(&BakeRequest {
             schema_hash: 0xfeed_face_dead_beef,
             flags: 0,
             scaler_mean: &scaler_mean,

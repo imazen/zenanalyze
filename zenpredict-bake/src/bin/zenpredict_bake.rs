@@ -1,5 +1,5 @@
 //! `zenpredict-bake` — CLI that consumes a `BakeRequestJson`
-//! description on disk and writes a ZNPR v2 `.bin`.
+//! description on disk and writes a ZNPR v3 `.bin`.
 //!
 //! Used by the Python training pipeline at
 //! `zenanalyze/zenpicker/tools/` so the byte-level format stays

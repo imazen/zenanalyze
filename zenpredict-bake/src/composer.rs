@@ -1,9 +1,9 @@
 //! ZNPR v3 byte-stream composer.
 //!
-//! Despite the function name [`bake_v2`] — kept for source
-//! compatibility with the few internal callers — this module emits
-//! the v3 wire format described in [`zenpredict::model`]. v2 outputs are
-//! no longer producible from this crate; v2 bins do not load.
+//! Emits the v3 wire format described in zenpredict's `model` module
+//! (see [`zenpredict::Model`] and [`zenpredict::Header`]). Earlier
+//! formats (v1, v2) are not producible from this crate; older bakes
+//! must be migrated via `zentrain/tools/migrate_znpr_v2_to_v3.py`.
 
 use core::fmt;
 
@@ -11,7 +11,7 @@ use zenpredict::{
     Activation, MetadataType, OutputSpec, OutputTransform, Section, SparseOverride, WeightDtype,
 };
 
-/// Errors raised by [`bake_v2`]. Distinct from `PredictError` —
+/// Errors raised by [`bake`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
 /// issues.
 #[non_exhaustive]
@@ -244,7 +244,7 @@ impl<'a> BakeRequest<'a> {
     /// `.output_specs(...)`, `.discrete_sets(...)`,
     /// `.sparse_overrides(...)` to populate optional sections, then
     /// `.build()` to return the `BakeRequest` (or pass the builder
-    /// directly to [`bake_v2`] via `.bake()`).
+    /// directly to [`bake`] via `.bake()`).
     ///
     /// ```ignore
     /// let bytes = BakeRequest::builder(0, 0, &mean, &scale, &layers)
@@ -314,9 +314,9 @@ impl<'a> BakeRequestBuilder<'a> {
     }
 
     /// Convenience: finalize and bake in one call. Equivalent to
-    /// `bake_v2(&builder.build())`.
+    /// `bake(&builder.build())`.
     pub fn bake(self) -> Result<alloc::vec::Vec<u8>, BakeError> {
-        bake_v2(&self.inner)
+        bake(&self.inner)
     }
 }
 
@@ -331,9 +331,9 @@ const SECTION_OFF_OUTPUT_SPECS: usize = 72;
 const SECTION_OFF_DISCRETE_SETS: usize = 80;
 const SECTION_OFF_SPARSE_OVERRIDES: usize = 88;
 
-/// Compose a v2 ZNPR byte stream. Output round-trips through
+/// Compose a v3 ZNPR byte stream. Output round-trips through
 /// [`Model::from_bytes`](zenpredict::Model::from_bytes).
-pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
+pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     if req.layers.is_empty() {
         return Err(BakeError::EmptyLayers);
     }

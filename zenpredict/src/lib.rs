@@ -43,7 +43,7 @@
 //!
 //! ```rust,ignore
 //! // requires zenpredict-bake = "0.1"
-//! use zenpredict_bake::{BakeLayer, BakeRequest, bake_v2};
+//! use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 //! use zenpredict::{Activation, Model, Predictor, WeightDtype};
 //!
 //! // Bake a 2-input → 3-output identity-ish model.
@@ -68,7 +68,7 @@
 //!
 //! // Load and predict. Real consumers wrap the bytes in
 //! // `#[repr(C, align(16))]` to guarantee zero-copy alignment;
-//! // the `bake_v2` output is 16-aligned by virtue of being a
+//! // the `bake` output is 16-aligned by virtue of being a
 //! // freshly-allocated `Vec` (heap allocations are at least
 //! // 8-aligned on every supported target — usually 16).
 //! let model = Model::from_bytes(&bytes).unwrap();
@@ -119,7 +119,7 @@
 //! `zenpredict` is the Rust runtime. The training pipeline lives at
 //! `zenanalyze/zenpicker/` (Python) — pareto sweep, teacher fit,
 //! distill, ablation, holdout probes. The two are versioned and
-//! released independently; the format (`ZNPR v2`) is the contract
+//! released independently; the format (`ZNPR v3`) is the contract
 //! between them.
 
 #![cfg_attr(not(feature = "std"), no_std)]

@@ -38,7 +38,7 @@ pub mod composer;
 pub mod json;
 
 pub use composer::{
-    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake_v2,
+    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,

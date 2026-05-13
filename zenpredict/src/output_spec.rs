@@ -54,8 +54,7 @@ use crate::bounds::FeatureBound;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
 pub enum OutputTransform {
-    /// Pass through unchanged. The default; matches the v2 behaviour
-    /// where outputs were raw.
+    /// Pass through unchanged. The default; outputs are returned raw.
     #[default]
     Identity = 0,
     /// `1 / (1 + exp(-x))`. Maps `(-∞, ∞) → (0, 1)`.

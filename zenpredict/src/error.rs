@@ -7,8 +7,9 @@ use core::fmt;
 pub enum PredictError {
     /// Header magic bytes don't match `ZNPR`.
     BadMagic { found: [u8; 4] },
-    /// Format version not supported by this build. v2 is the only
-    /// version this crate parses; v1 bakes need to be rebaked.
+    /// Format version not supported by this build. v3 is the only
+    /// version this crate parses; older bakes must be migrated via
+    /// `zentrain/tools/migrate_znpr_v2_to_v3.py`.
     UnsupportedVersion { version: u16, expected: u16 },
     /// Bytes ran out before a section completed parsing.
     Truncated {

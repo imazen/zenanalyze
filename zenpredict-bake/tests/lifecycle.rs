@@ -9,7 +9,7 @@ use zenpredict::{
     RescueDecision, RescuePolicy, RescueStrategy, ScoreTransform, WeightDtype,
     first_out_of_distribution, should_rescue, threshold_mask,
 };
-use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
 /// Aligns an in-memory blob to 16 bytes — what `include_bytes!`
 /// consumers do via `#[repr(C, align(16))]` wrapping.
@@ -112,7 +112,7 @@ fn bake_codec_picker() -> Vec<u8> {
     let mut req = BakeRequest::new(0xfeedf00d_deadbeef, 0, &scaler_mean, &scaler_scale, &layers);
     req.feature_bounds = &feature_bounds;
     req.metadata = &metadata;
-    bake_v2(&req).unwrap()
+    bake(&req).unwrap()
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn end_to_end_perceptual_scorer_lifecycle() {
             biases: &b1,
         },
     ];
-    let bytes = bake_v2(&BakeRequest::new(
+    let bytes = bake(&BakeRequest::new(
         0,
         0,
         &scaler_mean,
@@ -334,7 +334,7 @@ fn metadata_namespace_convention_works() {
     ];
     let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
     req.metadata = &entries;
-    let bytes = bake_v2(&req).unwrap();
+    let bytes = bake(&req).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     let md = model.metadata();
@@ -360,7 +360,7 @@ fn empty_metadata_does_not_break_load() {
         weights: &w,
         biases: &b,
     }];
-    let bytes = bake_v2(&BakeRequest::new(
+    let bytes = bake(&BakeRequest::new(
         0,
         0,
         &scaler_mean,
@@ -405,7 +405,7 @@ fn metadata_iteration_returns_all_entries() {
     ];
     let mut req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
     req.metadata = &entries;
-    let bytes = bake_v2(&req).unwrap();
+    let bytes = bake(&req).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     let md: &Metadata<'_> = model.metadata();

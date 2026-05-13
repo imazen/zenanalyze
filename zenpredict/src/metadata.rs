@@ -1,4 +1,4 @@
-//! ZNPR v2 metadata blob — typed, length-prefixed key/value entries.
+//! ZNPR v3 metadata blob — typed, length-prefixed key/value entries.
 //!
 //! Read once at load, kept on the [`crate::Model`] as a borrowed
 //! `Vec<MetadataEntry>` over the original bytes. Per-entry value

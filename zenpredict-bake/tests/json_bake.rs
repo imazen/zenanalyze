@@ -1,4 +1,4 @@
-//! JSON → bake_v2 round-trip tests. Exercises the public
+//! JSON → bake round-trip tests. Exercises the public
 //! `BakeRequestJson` schema that `zenpicker/tools/bake_picker.py`
 //! emits, then loads the resulting bytes through the runtime to
 //! confirm round-trip equivalence.

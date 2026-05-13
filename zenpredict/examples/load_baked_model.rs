@@ -1,4 +1,4 @@
-//! Loads a ZNPR v2 `.bin` from argv[1], runs inference against a
+//! Loads a ZNPR v3 `.bin` from argv[1], runs inference against a
 //! deterministic input vector, and writes the output values to
 //! stdout (one f32 per line, full precision). Used by the companion
 //! `tools/bake_roundtrip_check.py` to compare Rust forward pass

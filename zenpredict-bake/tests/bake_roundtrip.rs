@@ -2,7 +2,7 @@ use zenpredict::*;
 use zenpredict_bake::*;
 
 mod bake_roundtrip {
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
     use zenpredict::MetadataType;
     use zenpredict::*;
 
@@ -57,7 +57,7 @@ mod bake_roundtrip {
             discrete_sets: &[],
             sparse_overrides: &[],
         };
-        bake_v2(&req).unwrap()
+        bake(&req).unwrap()
     }
 
     #[test]
@@ -124,7 +124,7 @@ mod bake_roundtrip {
             discrete_sets: &[],
             sparse_overrides: &[],
         };
-        let bytes = bake_v2(&req).unwrap();
+        let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         let md = model.metadata();
@@ -169,7 +169,7 @@ mod bake_roundtrip {
             discrete_sets: &[],
             sparse_overrides: &[],
         };
-        let bytes = bake_v2(&req).unwrap();
+        let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         let mut predictor = Predictor::new(model);
@@ -208,7 +208,7 @@ mod bake_roundtrip {
             discrete_sets: &[],
             sparse_overrides: &[],
         };
-        let bytes = bake_v2(&req).unwrap();
+        let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         let mut predictor = Predictor::new(model);
@@ -249,7 +249,7 @@ mod bake_roundtrip {
             discrete_sets: &[],
             sparse_overrides: &[],
         };
-        let bytes = bake_v2(&req).unwrap();
+        let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         let fb = model.feature_bounds();
@@ -351,7 +351,7 @@ mod bake_roundtrip {
                 biases: &b1,
             },
         ];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -448,7 +448,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -493,7 +493,7 @@ mod bake_roundtrip {
                 biases: &b,
             })
             .collect();
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -530,7 +530,7 @@ mod bake_roundtrip {
             build_layer(64, 4, Activation::Identity, WeightDtype::F32, &w1, &b1),
             build_layer(4, 2, Activation::Identity, WeightDtype::F32, &w2, &b2),
         ];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -580,7 +580,7 @@ mod bake_roundtrip {
             build_layer(3, 3, Activation::Identity, WeightDtype::F16, &w1, &b1),
             build_layer(3, 3, Activation::Identity, WeightDtype::F32, &w2, &b2),
         ];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -624,7 +624,7 @@ mod bake_roundtrip {
                 build_layer(1, 4, act, WeightDtype::F32, &w0, &b0),
                 build_layer(4, 1, Activation::Identity, WeightDtype::F32, &w1, &b1),
             ];
-            let bytes = bake_v2(&BakeRequest {
+            let bytes = bake(&BakeRequest {
                 schema_hash: 0,
                 flags: 0,
                 scaler_mean: &scaler_mean,
@@ -667,7 +667,7 @@ mod bake_roundtrip {
             build_layer(8, 1024, Activation::Relu, WeightDtype::F16, &w0, &b0),
             build_layer(1024, 1, Activation::Identity, WeightDtype::F32, &w1, &b1),
         ];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -809,7 +809,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -857,7 +857,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -978,7 +978,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1015,7 +1015,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1113,7 +1113,7 @@ mod bake_roundtrip {
                 value: &[42],
             },
         ];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1163,7 +1163,7 @@ mod bake_roundtrip {
                 biases: &b1,
             },
         ];
-        let err = bake_v2(&BakeRequest {
+        let err = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1196,7 +1196,7 @@ mod bake_roundtrip {
             weights: &w,
             biases: &b,
         }];
-        let err = bake_v2(&BakeRequest {
+        let err = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1231,7 +1231,7 @@ mod bake_roundtrip {
             biases: &b,
         }];
         let long_key: String = "a".repeat(300);
-        let err = bake_v2(&BakeRequest {
+        let err = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -1256,7 +1256,7 @@ mod bake_roundtrip {
 
     #[test]
     fn bake_rejects_empty_layers() {
-        let err = bake_v2(&BakeRequest {
+        let err = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &[],

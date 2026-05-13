@@ -78,7 +78,10 @@ impl FeatureTransform {
     /// change to a recently-published 0.1.x crate; the caller path
     /// from [`crate::Model`] already routes parse failures through
     /// the same generic-metadata error class.
-    pub(crate) fn from_token(s: &str) -> Result<Self, PredictError> {
+    /// Parse a wire-format token (e.g. `"log1p"`) into a variant. Round-trips
+    /// with [`Self::as_token`]. Unknown tokens return
+    /// [`PredictError::UnknownFeatureTransform`].
+    pub fn from_token(s: &str) -> Result<Self, PredictError> {
         match s {
             "identity" => Ok(Self::Identity),
             "log" => Ok(Self::Log),

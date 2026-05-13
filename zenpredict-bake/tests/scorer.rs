@@ -86,7 +86,7 @@ mod scorer_tests {
         // Identity weights so the model passes its inputs straight
         // through to outputs (lets the test put exact known values
         // in the output without needing real training).
-        use zenpredict_bake::{BakeLayer, BakeRequest, bake_v2};
+        use zenpredict_bake::{BakeLayer, BakeRequest, bake};
         let scaler_mean = [0.0_f32; 6];
         let scaler_scale = [1.0_f32; 6];
         let mut w = vec![0.0_f32; 6 * 6];
@@ -102,7 +102,7 @@ mod scorer_tests {
             weights: &w,
             biases: &b,
         }];
-        bake_v2(&BakeRequest {
+        bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,

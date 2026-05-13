@@ -3,7 +3,7 @@ use zenpredict_bake::*;
 
 #[cfg(test)]
 mod safety_summary_tests {
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
     use zenpredict::MetadataType;
     use zenpredict::{
         Activation, CellHint, FallbackEntry, Model, OutputBound, RescuePolicy, SafetyCompact,
@@ -81,7 +81,7 @@ mod safety_summary_tests {
             weights: &w,
             biases: &b,
         }];
-        bake_v2(&BakeRequest {
+        bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -219,7 +219,7 @@ mod safety_summary_tests {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
@@ -256,7 +256,7 @@ mod safety_summary_tests {
             weights: &w,
             biases: &b,
         }];
-        let bytes = bake_v2(&BakeRequest {
+        let bytes = bake(&BakeRequest {
             schema_hash: 0,
             flags: 0,
             scaler_mean: &scaler_mean,
