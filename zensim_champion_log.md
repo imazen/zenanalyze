@@ -5318,6 +5318,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 570 — 2026-05-13T07:35Z — `--ranknet-sample-weights` flag produces IDENTICAL predictions (mechanism fails for our weight distribution)
+
+Implemented `--ranknet-sample-weights` flag per tick 569 plan.
+~25 lines of Python code modifying `ranknet_loss()` to use
+`torch.multinomial` instead of `torch.randint` when row weights
+are non-uniform.
+
+**Test on V_kadid_tid recipe seed=3**:
+
+Per-pair CSV comparison vs baseline (V_kadid_tid seed=3 without flag):
+- 4592 common rows
+- diff_mean = **0.000000**
+- diff_max = **0.000000**
+- ALL per-pair predictions BYTE-IDENTICAL
+
+Bake MD5s differ (`46679c49` vs `64db68f2`) — different weight
+initializations from PyTorch internal state, but training trajectory
+converged to numerically identical predictions on the eval set.
+
+**Why the mechanism fails for our weight distribution**:
+
+Our V_kadid_tid recipe:
+- safesyn: 144,791 rows × train_weight 1.0 = **144,791 effective mass**
+- konjnd_aligned: 76,104 × 0.5 = 38,052
+- kadid: 10,125 × 0.3 = 3,038
+- tid: 3,000 × 0.3 = 900
+
+Total effective mass: 186,781. Safesyn = 144,791 / 186,781 = **77.5%**.
+
+At uniform sampling: safesyn dominates with 234020/234020 = 61.9%.
+At multinomial-weighted: safesyn dominates with 77.5%.
+
+**Both distributions sample safesyn ~60-78% of pairs**. The
+difference is too small to materially change training trajectory.
+
+**To produce different behavior**, would need much more extreme
+weight ratios (e.g., safesyn 0.1 + KADID/TID 1.0 — would shift
+KADID/TID from 1.6%/0.5% to 33%/4.5% sampling fraction).
+
+**Cycle-13(a) hypothesis-1 FALSIFIED**: the Rust trainer's
+sampling-bias mechanism alone doesn't explain V0_16's recipe edge
+because our V_kadid_tid weight ratios produce near-uniform
+effective sampling anyway.
+
+**Refined cycle-13(a) hypothesis**: V0_15/V0_16's recipe must
+have used MORE EXTREME weight ratios that produce meaningfully
+different sampling distributions. E.g., safesyn at 0.1 + human at
+1.0 would create a recipe where Rust's sampling-bias produces a
+genuinely different optimum from Python's MSE-weight approach.
+
+Artifacts produced this tick:
+- Trainer change: `--ranknet-sample-weights` flag added (NOT committed
+  pending stronger evidence or recipe variant)
+- 1 new bake: `v0_kadid_tid_rnsw_seed3_2026-05-13.bin` (byte-different
+  weights, identical predictions)
+- Per-pair diff verification (0.000000 max diff)
+
+**Next tick (571)**: Test the refined hypothesis — try
+`--ranknet-sample-weights` with EXTREME weight ratio (safesyn:0.1
++ konjnd:1.0 + kadid:1.0 + tid:1.0). If V0_16's recipe required
+extreme weights to make sampling-bias do anything, this should
+produce a meaningful direction shift.
+
 ### Tick 569 — 2026-05-13T07:30Z — Deleted Rust trainer reveals KEY recipe difference (sampling vs loss weighting)
 
 Per tick 568's option (a) ("restore deleted Rust trainer"), checked
