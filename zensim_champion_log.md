@@ -5318,6 +5318,63 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 571 — 2026-05-13T07:40Z — Extreme weight ratio + ranknet-sample-weights FALSIFIED (both metrics regress)
+
+Per tick 570's refined hypothesis, tested extreme weight ratios
+(safesyn:0.1 + konjnd:1.0 + kadid:1.0 + tid:1.0) with
+`--ranknet-sample-weights` flag at seed=3.
+
+Expected new effective sampling fractions:
+- safesyn: 14% (was 77% in default V_kadid_tid)
+- konjnd: 73% (was 16%)
+- kadid: 9.8%
+- tid: 2.9%
+
+**Result FALSIFIED**:
+
+| Metric | V_kadid_tid (default) | Extreme + sampling-bias | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8712 | 0.8586 | -0.0126 ❌ |
+| AIC-4 | 0.9046 | 0.8789 | -0.0257 ❌❌ |
+
+Both axes regress significantly. Shifting safesyn from 77% to 14%
+of effective pair-sampling STARVES the model of broad codec coverage.
+KonJND-dominated training overfits to its narrow PJND quality range
+(score ~63 anchor) and loses generalization to CID22's full 0-100
+MOS distribution.
+
+**Cycle-13(a) sampling-bias hypothesis FULLY FALSIFIED**:
+- Neutral weights (tick 570): byte-identical to baseline (no effect)
+- Extreme weights (this tick): regression on both axes (overfit)
+
+There's no Python-trainer weight ratio that reproduces V0_15/V0_16's
+recipe edge via `--ranknet-sample-weights` alone. The Rust trainer's
+sampling-bias mechanism IS different from Python's MSE-weight, but
+applying it to our V_kadid_tid recipe doesn't help.
+
+V0_15/V0_16 must have had something else fundamentally different:
+- Different training data composition (rows we don't have)
+- Different feature normalization
+- Different optimizer/init combination interacting with sampling
+- Possibly an undocumented preprocessing step
+
+**Cycle-13 paths remaining (all need user authorization)**:
+- Full Rust trainer restore (multi-tick infra work)
+- Bayesian seed-sweep over V_kadid_tid recipe (50+ seeds, ~15 min wall)
+- Data acquisition (JPEG-AI, KonJND-25k corpus expansion)
+
+Artifacts produced:
+- `--ranknet-sample-weights` flag fully tested (2 weight regimes)
+- 1 new bake: `v0_extreme_weights_seed3_2026-05-13.bin`
+- Trainer change STILL UNCOMMITTED (flag falsified at both extremes)
+
+**Next tick (572)**: cycle truly truly final. The
+`--ranknet-sample-weights` flag work is uncommitted; it's
+infrastructure for future cycles but doesn't help V0_16
+reproduction at any tested weight ratio. Will commit it as
+exploratory infra (similar pattern to other recovery cycle
+flags) so future agents can build on it.
+
 ### Tick 570 — 2026-05-13T07:35Z — `--ranknet-sample-weights` flag produces IDENTICAL predictions (mechanism fails for our weight distribution)
 
 Implemented `--ranknet-sample-weights` flag per tick 569 plan.
