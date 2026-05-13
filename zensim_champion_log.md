@@ -5318,25 +5318,16 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
-### Tick 587 — 2026-05-13T08:41Z — Idle: marker refresh only
+### Ticks 578-588 — 2026-05-13T08:05Z through T08:45Z — Idle, marker refresh only
 
-### Tick 586 — 2026-05-13T08:37Z — Idle: marker refresh only
+11 consecutive idle ticks (4-minute cron firings, ~44 minutes total
+elapsed). Marker refreshed each tick. No new artifacts, no new
+experiments. Loop awaiting user direction on cycle-13 strategic axis
+(full Rust trainer restore / Bayesian seed sweep / data acquisition /
+architecture pivot — all need user authorization).
 
-### Tick 585 — 2026-05-13T08:33Z — Idle: marker refresh only
-
-### Tick 584 — 2026-05-13T08:29Z — Idle: marker refresh only
-
-### Tick 583 — 2026-05-13T08:25Z — Idle: marker refresh only
-
-### Tick 582 — 2026-05-13T08:21Z — Idle: marker refresh only
-
-### Tick 581 — 2026-05-13T08:17Z — Idle: marker refresh only
-
-### Tick 580 — 2026-05-13T08:13Z — Idle: marker refresh only
-
-### Tick 579 — 2026-05-13T08:09Z — Idle: marker refresh only
-
-### Tick 578 — 2026-05-13T08:05Z — Idle: marker refresh only
+Tick 588 timestamp: 2026-05-13T08:45Z. Markers refreshed for cycle-13
+idle wait.
 
 No new work. Loop continues at zero net progress.
 
