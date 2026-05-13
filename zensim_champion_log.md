@@ -5318,6 +5318,76 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 544 — 2026-05-13T05:22Z — Hidden=64 5-seed sweep REVERSES seed=3 AIC-4 win (cycle-9 trap, 5th repeat)
+
+Trained + evaluated 4 more h=64 seeds (1, 2, 7, 42) to verify
+tick 543's apparent AIC-4 specialism at seed=3.
+
+**Hidden=64 5-seed distribution (V0_kadid_tid + h=64)**:
+
+| Seed | CID22 | AIC-4 |
+|--:|--:|--:|
+| 1 | 0.8680 | 0.9072 |
+| 2 | 0.8697 | 0.8997 |
+| **3** | **0.8710** | **0.9122** ★ |
+| 7 | 0.8621 | 0.9073 |
+| 42 | 0.8594 | 0.9030 |
+| **Mean (n=5)** | **0.8660** | **0.9059** |
+| Std (n=5) | 0.0049 | 0.0046 |
+
+**Welch's t-test vs V0_kadid_tid h=128 family (n=8)**:
+
+| Metric | h=128 mean | h=64 mean | Δ | t | p |
+|---|--:|--:|--:|--:|--:|
+| CID22 | 0.8712 | 0.8660 | -0.0052 | -1.58 | ~0.14 (borderline n.s.) |
+| AIC-4 | 0.9046 | 0.9059 | +0.0013 | 0.56 | ~0.6 (n.s.) |
+
+**Cycle-9 trap repeats — 5th time**:
+- V0_34 (cycle-9, row-boost 1.5 seed=1) — upper-tail outlier
+- V0_pairboost-2.0 seed=1 (cycle-9b) — upper-tail outlier
+- V0_39 (cycle-10a' KonJND w=1.0 seed=3) — upper-tail outlier
+- V0_kadid_tid h=64 seed=3 — upper-tail outlier (this tick)
+- Pattern: seed=1 and seed=3 are SYSTEMATICALLY upper-tail on
+  this distribution shape
+
+**h=64 is NOT an AIC-4 specialist**. Multi-seed mean is essentially
+within noise of h=128 family. Smaller bake (62KB vs 121KB) but no
+SROCC gain.
+
+**13th cheap knob falsified**. All architecture (h=64, 128, 256)
+and recipe knobs (~11 others) converge to the same plateau on
+multi-seed scale:
+- CID22 ≈ 0.87 (range ±0.005 across all variants)
+- AIC-4 ≈ 0.905 (range ±0.005)
+
+**V0_16 SHIP's 0.892 CID22 is genuinely OUTSIDE this autonomous-mode
+plateau by ~3.5σ.** The structural CID22 ceiling for the V_X
+228-feat MLP family at our data scale appears to be ~0.872.
+
+Artifacts produced this tick:
+- 4 new bakes: `v0_kadid_tid_h64_seed{1,2,7,42}_2026-05-13.bin` (62KB each)
+- 4 per-pair CSVs, 4 eval logs
+
+**Pattern of all-cycle-7-through-12 results**:
+
+| Recipe | n | CID22 | AIC-4 | Notable |
+|---|--:|--:|--:|---|
+| synth-only (no human) | 5 | 0.8507 | 0.8978 | floor |
+| + KonJND (V0_31 family) | 2 | 0.8603 | 0.9180 | cycle-8 |
+| + KonJND boost variants | 6 | 0.8629 | 0.9137 | cycle-9b |
+| + KADID+TID (V0_38, h=128) | 8 | **0.8712** | 0.9046 | cycle-10a |
+| h=64 of V0_kadid_tid | 5 | 0.8660 | 0.9059 | this tick |
+| V0_16 SHIP | 1 | **0.8919** ★ | 0.9127 | unreproduced |
+| ssim2 truth | — | **0.8895** | 0.9165 | target floor |
+
+**Conclusion**: V0_16 sits between fast-ssim2 (0.8895) and is
+clearly outside the V_X MLP plateau ceiling (~0.872). Cannot be
+reproduced in autonomous mode without unknown V0_16 ingredients.
+
+**Next tick (545)**: All cheap architecture+recipe knobs at multi-
+seed scale exhausted. Recovery cycle structurally complete. Refresh
+markers only.
+
 ### Tick 543 — 2026-05-13T05:18Z — Hidden=64 single-seed: sweet spot for AIC-4 (+0.010) but CID22 -0.011
 
 Tested `--hidden 64` (vs h=128 default and h=256 from tick 542)
