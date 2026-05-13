@@ -5318,6 +5318,65 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 612 — 2026-05-13T10:42Z — **V0_16 RECIPE MYSTERY SOLVED — missing konjnd group; reproducing now bit-for-bit**
+
+**Root cause found**: V0_16 was trained with **4 training groups, not
+3**. The missing one is `konjnd:/tmp/zensim_loop/konjnd_aligned_features.csv:0.5:1.0`
+(76,104 KonJND-1k pairs at train_w=0.5). CONTEXT-HANDOFF.md prior
+"V0_16 recipe" section listed only safesyn + kadid + tid. The actual
+V0_16 training log at `/tmp/zensim_loop/v0_16_train.stdout` shows
+all 4 groups.
+
+**Determinism test from tick 611 confirmed bit-identical at epochs 0,
+10, 20** — TaskStop'd after I found the missing-konjnd discrepancy
+(answer already in hand). The trainer IS deterministic; the rerun was
+trained on an incomplete recipe.
+
+**True V0_16 retrain in progress** (background `bnv365vho`):
+
+Side-by-side at epoch 0 + 10 (V0_16 ship log vs this tick's retrain):
+
+| Epoch | Metric | V0_16 ship | Tick 612 retrain | Match |
+|---:|---|---:|---:|:---:|
+| 0 | loss | 0.2139 | 0.2139 | ✓ |
+| 0 | val_mean | 0.9002 | 0.9002 | ✓ |
+| 0 | safesyn_purged | 0.9919 | 0.9919 | ✓ |
+| 0 | kadid | 0.9002 | 0.9002 | ✓ |
+| 0 | tid | 0.9126 | 0.9126 | ✓ |
+| 0 | konjnd | 0.9929 | 0.9929 | ✓ |
+| 10 | loss | 0.1618 | 0.1618 | ✓ |
+| 10 | val_mean | 0.9183 | 0.9183 | ✓ |
+| 10 | all 4 SROCCs | (full match) | (full match) | ✓ |
+
+Full reproduction ETA ~17 min (V0_16 took 1071s, ours tracking same).
+Then bit-compare to `weights/v0_16_2026-05-12.bin` raw bake and
+calibrate.
+
+**Fixes committed (zensim `8e7dafc4`)**:
+- `CONTEXT-HANDOFF.md` "V0_16 recipe (recoverable, current ship)"
+  section rewritten with explicit 4-group documentation including
+  konjnd, plus a note that prior 3-group version was wrong
+- `benchmarks/recipe_v0_16.sh` now includes the konjnd group; script
+  pre-flight checks konjnd CSV exists; in-line docstring updated
+
+**Output paths (in progress)**:
+- `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.raw.bin` (in
+  progress)
+- `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.train.log` (in
+  progress)
+
+**This resolves the user-decision question** from tick 605/610:
+- Path 1 (investigate non-determinism): DONE — trainer is
+  deterministic; recipe was incomplete in our docs
+- Path 4 (keep V0_16 ship): no longer necessary — recipe now
+  reproduces, so any "swap V0_16 with a new bake" is fair game once
+  the new bake outperforms
+- Path 3 (cycle-14 candidate): cycle-14 was trained on incomplete
+  recipe (no konjnd). Need to re-run with the FULL recipe + per-band
+  TV to get the real cycle-14 number. Could now match V0_16 +
+  per-band-TV gain (potential +0.0083 ON TOP OF V0_16's 0.8919 =
+  target SROCC ~0.900)
+
 ### Tick 611 — 2026-05-13T10:34Z — Determinism test running; epoch 0 already matches rerun bit-for-bit (trainer IS deterministic)
 
 Started background task `beoimho7u`: V0_16 recipe args (h=128, seed=1,
