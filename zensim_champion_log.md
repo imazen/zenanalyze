@@ -5318,6 +5318,15 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Ticks 664-674 — 2026-05-13T14:27Z–T15:07Z — Idle rollup (11 consecutive idle ticks, second block)
+
+Second consecutive idle rollup (40-min span). No autonomous work
+remains. V0_17 candidate still awaits user direction. Loop continues
+at zero net structural progress.
+
+Total idle since recovery cycle completed: 21 ticks across two
+rollup blocks (654-663 + 664-674).
+
 ### Ticks 654-663 — 2026-05-13T13:47Z–T14:23Z — Idle rollup (10 consecutive idle ticks)
 
 10 consecutive idle ticks (4-min cron firings, ~36 min total). Markers
