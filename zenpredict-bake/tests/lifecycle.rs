@@ -3,15 +3,13 @@
 //! public crate API; fails to compile if a public item gets renamed
 //! or hidden behind a feature flag without a migration plan.
 
-#![cfg(feature = "bake")]
-
-use zenpredict::bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
 use zenpredict::keys;
 use zenpredict::{
     Activation, AllowedMask, ArgminOffsets, FeatureBound, Metadata, MetadataType, Model, Predictor,
     RescueDecision, RescuePolicy, RescueStrategy, ScoreTransform, WeightDtype,
     first_out_of_distribution, should_rescue, threshold_mask,
 };
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
 
 /// Aligns an in-memory blob to 16 bytes — what `include_bytes!`
 /// consumers do via `#[repr(C, align(16))]` wrapping.

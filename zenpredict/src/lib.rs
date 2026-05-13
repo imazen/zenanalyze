@@ -38,10 +38,12 @@
 //! )?;
 //! ```
 //!
-//! Self-contained working example using the [`bake`] module:
+//! Self-contained working example using the sibling `zenpredict-bake`
+//! crate to mint a bake in-memory:
 //!
-//! ```rust
-//! use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
+//! ```rust,ignore
+//! // requires zenpredict-bake = "0.1"
+//! use zenpredict_bake::{BakeLayer, BakeRequest, bake_v2};
 //! use zenpredict::{Activation, Model, Predictor, WeightDtype};
 //!
 //! // Bake a 2-input → 3-output identity-ish model.
@@ -136,9 +138,6 @@ pub mod output_spec;
 mod predictor;
 pub mod rescue;
 mod safety;
-
-#[cfg(feature = "bake")]
-pub mod bake;
 
 pub use argmin::{
     AllowedMask, ArgminOffsets, ScoreTransform, argmin_masked, argmin_masked_in_range,

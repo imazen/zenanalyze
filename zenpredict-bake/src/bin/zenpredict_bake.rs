@@ -23,7 +23,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use zenpredict::bake::{BakeJsonError, BakeRequestJson, bake_from_json};
+use zenpredict_bake::{BakeJsonError, BakeRequestJson, bake_from_json};
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);

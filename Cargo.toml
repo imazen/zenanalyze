@@ -109,5 +109,5 @@ opt-level = 2
 debug = true
 
 [workspace]
-members = ["zenpicker", "zenpredict"]
+members = ["zenpicker", "zenpredict", "zenpredict-bake"]
 resolver = "3"

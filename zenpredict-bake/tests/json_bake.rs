@@ -3,11 +3,9 @@
 //! emits, then loads the resulting bytes through the runtime to
 //! confirm round-trip equivalence.
 
-#![cfg(feature = "bake")]
-
-use zenpredict::bake::{BakeJsonError, BakeRequestJson, bake_from_json, bake_from_json_str};
 use zenpredict::keys;
 use zenpredict::{MetadataType, Model, OutputValue, Predictor};
+use zenpredict_bake::{BakeJsonError, BakeRequestJson, bake_from_json, bake_from_json_str};
 
 #[repr(C, align(16))]
 struct Aligned(Vec<u8>);

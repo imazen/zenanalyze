@@ -1,10 +1,10 @@
 [package]
 name = "zenpredict"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/imazen/zenanalyze"
-description = "Zero-copy MLP runtime: parse a packed binary model (ZNPR v2), run scaler + forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg/zenwebp/zenavif/zenjxl picker selection and zensim V0.4 perceptual distance."
+description = "Zero-copy MLP runtime: parse a packed binary model (ZNPR v3), run scaler + forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg/zenwebp/zenavif/zenjxl picker selection and zensim perceptual distance. Bake-side composer lives in the sibling `zenpredict-bake` crate."
 keywords = ["mlp", "inference", "zero-copy", "no-std"]
 categories = ["multimedia::images", "no-std"]
 authors = ["Lilith River <lilith@imazen.io>"]
@@ -15,40 +15,30 @@ readme = "README.md"
 name = "zenpredict"
 
 [features]
-default = ["std", "bake"]
+default = ["std"]
 # `std::error::Error` impls and `f32::exp` for the linear-domain
 # argmin transform. `no_std + alloc` builds drop these — score
 # transforms beyond `Identity` will currently silently degrade (see
 # `argmin::ScoreTransform::Exp` docs).
 std = []
-# Rust-side ZNPR v2 composer + JSON-input baker for round-trip
-# tests and placeholder weights. Gated only because consumers
-# loading pre-baked `.bin` blobs from `include_bytes!` don't need
-# the writer code in their binary.
-bake = ["std", "dep:serde", "dep:serde_json"]
-
-[[bin]]
-name = "zenpredict-bake"
-path = "src/bin/zenpredict_bake.rs"
-required-features = ["bake"]
-
-[[bin]]
-name = "zenpredict-inspect"
-path = "src/bin/zenpredict_inspect.rs"
-required-features = ["bake"]    # serde_json comes from the bake feature
+# Advanced runtime extras for picker pipelines: typed multi-output
+# API (`output_spec::*`, `predict_with_specs*`), bake-time safety
+# metadata reader (`safety::*`), two-shot rescue framework
+# (`rescue::*`), and cached top-K argmin / scorer hybrids
+# (`argmin_masked_top_k*`, `pick_with_confidence*`,
+# `*_with_scorer*`). The wire format parses these sections
+# unconditionally — gating only controls the typed Rust API. Codec
+# runtimes that only call `predict` / `argmin_masked` stay lean by
+# default; per-codec pickers that need the extras opt in.
+advanced = []
 
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
-serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"], optional = true }
-serde_json = { version = "1.0.149", default-features = false, features = ["alloc"], optional = true }
 # `f32::ln` / `f32::ln_1p` are not in `core`. Use `libm` on
-# `no_std` builds for `feature_transform::FeatureTransform::apply`;
-# `std` builds use the (faster) intrinsic-backed `f32` methods. The
-# dep is unconditional because pulling it only via cfg-gated
-# features would require an extra feature flag for downstream
-# consumers.
+# `no_std` builds only; `std` builds use the (faster) intrinsic-
+# backed `f32` methods.
 libm = { version = "0.2.16", default-features = false }
 
 [dev-dependencies]

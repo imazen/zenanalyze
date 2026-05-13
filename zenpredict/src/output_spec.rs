@@ -78,8 +78,8 @@ impl OutputTransform {
     /// [`OutputTransform::Identity`] so a trainer that emits a
     /// future variant doesn't break old runtimes outright; the
     /// parser logs but doesn't fail. We rejected this in the bake
-    /// validator instead — see [`crate::bake::BakeError::UnknownOutputTransform`].
-    pub(crate) fn from_byte(b: u8) -> Option<Self> {
+    /// validator instead — see `zenpredict_bake::BakeError::UnknownOutputTransform`.
+    pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0 => Some(Self::Identity),
             1 => Some(Self::Sigmoid),

@@ -1,10 +1,10 @@
 //! Integration tests for ZNPR v3 output specs + sparse overrides.
 
-use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
 use zenpredict::{
     Activation, FORMAT_VERSION, FeatureBound, Model, OutputSpec, OutputTransform, OutputValue,
     Predictor, SparseOverride, WeightDtype,
 };
+use zenpredict_bake::{BakeLayer, BakeRequest, bake_v2};
 
 #[repr(C, align(16))]
 struct Aligned(Vec<u8>);
@@ -290,7 +290,7 @@ fn unknown_output_transform_byte_rejected_at_bake() {
     let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
-        zenpredict::bake::BakeError::UnknownOutputTransform { .. }
+        zenpredict_bake::BakeError::UnknownOutputTransform { .. }
     ));
 }
 
@@ -315,7 +315,7 @@ fn output_specs_length_mismatch_rejected_at_bake() {
     let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
-        zenpredict::bake::BakeError::OutputSpecsLengthMismatch {
+        zenpredict_bake::BakeError::OutputSpecsLengthMismatch {
             expected: 4,
             got: 2
         }
@@ -357,7 +357,7 @@ fn discrete_set_out_of_range_rejected_at_bake() {
     let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
-        zenpredict::bake::BakeError::OutputSpecDiscreteOutOfRange { .. }
+        zenpredict_bake::BakeError::OutputSpecDiscreteOutOfRange { .. }
     ));
 }
 
@@ -381,7 +381,7 @@ fn sparse_override_index_out_of_range_rejected_at_bake() {
     let err = bake_v2(&req).unwrap_err();
     assert!(matches!(
         err,
-        zenpredict::bake::BakeError::SparseOverrideIndexOutOfRange { idx: 99, .. }
+        zenpredict_bake::BakeError::SparseOverrideIndexOutOfRange { idx: 99, .. }
     ));
 }
 

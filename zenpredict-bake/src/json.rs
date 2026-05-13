@@ -68,11 +68,11 @@ use alloc::vec::Vec;
 
 use serde::Deserialize;
 
-use super::v2::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
-use crate::bounds::FeatureBound;
-use crate::metadata::MetadataType;
-use crate::model::{Activation, WeightDtype};
-use crate::output_spec::{OutputSpec, OutputTransform, SparseOverride};
+use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+use zenpredict::{
+    Activation, FeatureBound, MetadataType, OutputSpec, OutputTransform, SparseOverride,
+    WeightDtype,
+};
 
 /// Errors specific to JSON-driven baking. Thin wrapper over
 /// [`BakeError`] adding the JSON-side validation cases.
@@ -244,7 +244,7 @@ pub struct OutputSpecJson {
     #[serde(default)]
     pub discrete_set: Option<Vec<f32>>,
     /// Output value that should surface as
-    /// [`crate::OutputValue::Default`]. `null` = no sentinel.
+    /// [`OutputValue::Default`](zenpredict::OutputValue::Default). `null` = no sentinel.
     #[serde(default)]
     pub sentinel: Option<f32>,
 }
@@ -280,7 +280,7 @@ impl From<OutputTransformJson> for OutputTransform {
 
 /// Sparse hand-tune override, JSON-side. `value: null` (or omitted)
 /// emits `f32::NAN`, which surfaces as
-/// [`crate::OutputValue::Default`] at runtime.
+/// [`OutputValue::Default`](zenpredict::OutputValue::Default) at runtime.
 #[derive(Deserialize, Debug, Clone, Copy)]
 pub struct SparseOverrideJson {
     pub idx: u32,

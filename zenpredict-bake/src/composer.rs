@@ -2,14 +2,14 @@
 //!
 //! Despite the function name [`bake_v2`] — kept for source
 //! compatibility with the few internal callers — this module emits
-//! the v3 wire format described in [`crate::model`]. v2 outputs are
+//! the v3 wire format described in [`zenpredict::model`]. v2 outputs are
 //! no longer producible from this crate; v2 bins do not load.
 
 use core::fmt;
 
-use crate::metadata::MetadataType;
-use crate::model::{Activation, Section, WeightDtype};
-use crate::output_spec::{OutputSpec, OutputTransform, SparseOverride};
+use zenpredict::{
+    Activation, MetadataType, OutputSpec, OutputTransform, Section, SparseOverride, WeightDtype,
+};
 
 /// Errors raised by [`bake_v2`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
@@ -174,12 +174,14 @@ pub struct BakeMetadataEntry<'a> {
     pub value: &'a [u8],
 }
 
-/// All inputs to a v3 bake. Construct via field-by-field assignment
-/// on a [`BakeRequest::default`]-style helper if downstream needs
-/// forward compatibility — the struct is `#[non_exhaustive]` so
-/// future v3.x bakes can add optional sections without breaking
-/// callers.
-#[non_exhaustive]
+/// All inputs to a v3 bake. Construct directly via struct literal,
+/// or use [`BakeRequest::new`] / [`BakeRequest::builder`] for the
+/// common case of "required fields plus empty optional sections."
+///
+/// Future v3.x section additions will require either a minor version
+/// bump on this crate (since this struct is not `#[non_exhaustive]`)
+/// or a separate `BakeRequestV2`-style sibling — we accept the
+/// breaking-change cost in exchange for the construction ergonomics.
 pub struct BakeRequest<'a> {
     pub schema_hash: u64,
     pub flags: u16,
@@ -188,7 +190,7 @@ pub struct BakeRequest<'a> {
     pub layers: &'a [BakeLayer<'a>],
     /// Length must equal `n_inputs` (one [low, high] pair per
     /// input). Pass an empty slice to omit the section.
-    pub feature_bounds: &'a [crate::bounds::FeatureBound],
+    pub feature_bounds: &'a [zenpredict::FeatureBound],
     pub metadata: &'a [BakeMetadataEntry<'a>],
     /// Per-output specs. Length must equal `n_outputs`. Pass an
     /// empty slice to omit the section (raw passthrough on decode).
@@ -199,7 +201,7 @@ pub struct BakeRequest<'a> {
     pub discrete_sets: &'a [f32],
     /// Sparse hand-tune overrides applied AFTER the per-output spec
     /// pipeline. Each entry's `idx` must be `< n_outputs`. Use
-    /// `value = f32::NAN` to force [`crate::OutputValue::Default`]
+    /// `value = f32::NAN` to force [`OutputValue::Default`](zenpredict::OutputValue::Default)
     /// for that output.
     pub sparse_overrides: &'a [SparseOverride],
 }
@@ -274,7 +276,7 @@ pub struct BakeRequestBuilder<'a> {
 impl<'a> BakeRequestBuilder<'a> {
     /// Per-input `[low, high]` pairs. Pass an empty slice (the
     /// default) to omit the section.
-    pub fn feature_bounds(mut self, bounds: &'a [crate::bounds::FeatureBound]) -> Self {
+    pub fn feature_bounds(mut self, bounds: &'a [zenpredict::FeatureBound]) -> Self {
         self.inner.feature_bounds = bounds;
         self
     }
@@ -330,7 +332,7 @@ const SECTION_OFF_DISCRETE_SETS: usize = 80;
 const SECTION_OFF_SPARSE_OVERRIDES: usize = 88;
 
 /// Compose a v2 ZNPR byte stream. Output round-trips through
-/// [`crate::Model::from_bytes`].
+/// [`Model::from_bytes`](zenpredict::Model::from_bytes).
 pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     if req.layers.is_empty() {
         return Err(BakeError::EmptyLayers);
@@ -458,7 +460,7 @@ pub fn bake_v2(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> 
 
     // Magic + version + flags + dims + schema_hash.
     buf[0..4].copy_from_slice(b"ZNPR");
-    buf[4..6].copy_from_slice(&crate::model::FORMAT_VERSION.to_le_bytes());
+    buf[4..6].copy_from_slice(&zenpredict::FORMAT_VERSION.to_le_bytes());
     buf[6..8].copy_from_slice(&req.flags.to_le_bytes());
     buf[8..12].copy_from_slice(&(n_inputs as u32).to_le_bytes());
     buf[12..16].copy_from_slice(&(n_outputs as u32).to_le_bytes());
@@ -698,7 +700,7 @@ fn compute_i8_scales_per_output(layer: &BakeLayer<'_>) -> alloc::vec::Vec<f32> {
 /// IEEE-754 binary32 → binary16 bit conversion (round-to-nearest-even,
 /// flush-to-zero subnormals on f32 side first via standard rules).
 /// Pure integer bit math; mirrors what F16C / VCVTPS2PH does in
-/// hardware. Matches `crate::inference::f16_bits_to_f32` round-trip
+/// hardware. Matches `zenpredict::f16_bits_to_f32` round-trip
 /// for representable values.
 pub fn f32_to_f16_bits(f: f32) -> u16 {
     let bits = f.to_bits();
