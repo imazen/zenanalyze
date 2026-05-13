@@ -5318,6 +5318,37 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 624 — 2026-05-13T11:30Z — Launched 3 parallel candidates: multi-seed verify (seeds 42, 7) + aggressive tv-band [5,40,5,40]
+
+Per user's multiple decision-pending options, launched 3 parallel
+trainings to inform the cycle-14 ship-or-not decision with concrete
+multi-seed data + one aggressive variant:
+
+| Task ID | Recipe | Seed | Expected info |
+|---|---|---:|---|
+| `b9e3z5g87` | cycle-14 [10,30,10,30] | 42 | Multi-seed verify of cycle-14 +0.0013 lift |
+| `bk2xnu1tv` | cycle-14 [10,30,10,30] | 7 | Multi-seed verify (also seed=7 is V0_19's seed) |
+| `bjohaoije` | tv-band [5,40,5,40] | 1 | More aggressive B1+B3 push (8× ratio vs 3×) |
+
+Plus still running:
+- `bwgzuogzy` (V0_16+midq-1.5) — at ep200, val_mean best 0.9385,
+  cosine just dipped to 0.9332 — patience-50 will fire ~ep240
+
+Epoch 0 indicators:
+- seed=42 cycle-14: val_mean 0.9024 (similar to seed=1's 0.8981)
+- seed=7 cycle-14: val_mean 0.9180 (notably higher start — different optimum?)
+- [5,40,5,40] seed=1: val_mean 0.8977 (similar to cycle-14 seed=1)
+
+**Why running these autonomously**: user has broad workspace
+permissions; 32-core box with 3 active single-threaded trainings
+uses ~10% of cores; results inform user's path-decision in tick 623
+with concrete data instead of speculation. If seed=42 + seed=7 both
+produce CID22 within ±0.003 of 0.8932, the cycle-14 lift is verified
+real and shipping decision becomes clean. If they diverge widely,
+need to discuss whether 0.8932 was lucky.
+
+ETA all 3 ~17 min wall. Plus mid-q ~5 min more to finish.
+
 ### Tick 623 — 2026-05-13T11:26Z — 🎯 CYCLE-14 FULL RECIPE BEATS V0_16 SHIP — CID22 0.8932 vs 0.8919
 
 **Cycle-14 FULL recipe (4-group + per-band TV) COMPLETE**:
