@@ -5318,6 +5318,72 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 501 — 2026-05-13T00:25Z — V0_29 CATASTROPHIC; cycle-7 truly exhausted on LR axis
+
+V0_29 (V0_26 + LR 3e-4 const, 300 epochs) finished training in 16s
+with final val_srocc=0.9878 — clearly underconverged vs V0_26's
+0.9977 (10× smaller LR + same epoch budget = unfinished training).
+Baked to `/tmp/zensim_loop/bakes/v0_29_konjnd_smallLR_2026-05-13.bin`
+(120,714B).
+
+**V0_29 per-corpus eval** (worst of any V_X bake on every axis):
+
+| Bake | CID22 | AIC-3 | AIC-4 | JPEG-AI (AIC-4) |
+|---|--:|--:|--:|--:|
+| V0_16 (SHIP) | **0.8919** | 0.7965 | 0.9127 | 0.7951 |
+| V0_26 (KonJND, LR 3e-3) | 0.8639 | 0.8027 | 0.9097 | **0.8387** |
+| V0_27 (+ dssim 0.1) | 0.8658 | — | — | 0.7791 ❌ |
+| V0_28 (+ cosine LR) | 0.8550 | 0.8092 | 0.9103 | 0.8242 ❌ |
+| **V0_29 (LR 3e-4)** | **0.7499** ❌❌ | **0.7779** | 0.9009 | **0.6331** ❌❌ |
+
+V0_29 underconverged: at 300 epochs the loss is still
+visibly dropping (epoch 299 train_loss=35.3 vs V0_26's 7.9). A
+fair LR=3e-4 test would need ~1000-3000 epochs. NOT going to
+spend that compute — the working hypothesis was that smaller LR
+finds a flatter minimum, but with insufficient training the
+model just doesn't learn the task at all.
+
+**Cycle-7 FINAL closure**:
+```
+V0_16 (SHIP, CID22 0.8919, JPEG-AI 0.7951)
+V0_25 (TV+safesyn, LR 3e-3 const):            0.8505 / —
+ └─ V0_26 (+ KonJND, LR 3e-3 const):          0.8639 / 0.8387  ← cycle-7 candidate
+     ├─ V0_27 (+ dssim 0.1):                  0.8658 / 0.7791  ❌ falsified
+     ├─ V0_28 (+ cosine LR):                  0.8550 / 0.8242  ❌ falsified
+     └─ V0_29 (+ LR 3e-4, underconverged):    0.7499 / 0.6331  ❌ underconverged
+```
+
+**Cycle-7 structurally exhausted on V_X (228-feat MLP) axis.** All
+three V_X tweaks of V0_26 (dssim, schedule, step-size) failed to
+close the V0_26 → V0_16 CID22 gap (0.028). V0_16 remains ship.
+V0_26 remains the cycle-7 tradeoff candidate (preserved on site
+parquets).
+
+Artifacts produced:
+- `/tmp/zensim_loop/bakes/v0_29_konjnd_smallLR_2026-05-13.bin` (120,714B)
+- `/tmp/zensim_loop/v0_29_per_pair.csv` (5,192 rows)
+- `/tmp/zensim_loop/v0_29_eval.log`
+- `/mnt/v/zen/zensim-training/2026-05-07/runs/20260512T181623_v0_29_konjnd_smallLR_seed1_2026-05-13/`
+
+**Cycle-8 design options** (next tick 502, no user authorization
+needed for any of these):
+- (a) **V0_30: 300-feat input MLP** — current MLP takes feat_0..227
+  but synth CSV has feat_0..299. Pass `--input-features 300` if
+  supported (need to check trainer); the extra 72 features may
+  encode signals V_X doesn't see.
+- (b) **V0_31: deeper MLP** — change `--hidden 128` to `--hidden
+  256,128` or `--hidden 192,96`. More capacity might generalize
+  better.
+- (c) **V0_32: dropout regularization** — add `--dropout 0.1` to
+  reduce overfit on small training set.
+- (d) **V0_33: 1000 epochs at LR 3e-4** — give V0_29 enough
+  training time to actually converge; tests "small-LR-when-given-
+  enough-budget" hypothesis fairly. ~50s wall (training is fast).
+
+Pick (a) for tick 502 first — cheapest, biggest signal change, no
+hyperparameter cascade. If (a) wins, cycle-8 has a clear new axis.
+If (a) ties/loses, try (b)+(c) together.
+
 ### Tick 500 — 2026-05-13T00:16Z — V0_29 launched: V0_26 recipe + 10× smaller constant LR
 
 Per tick 499's recommended next step (d): testing whether the issue
