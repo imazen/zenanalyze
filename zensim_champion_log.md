@@ -5318,6 +5318,69 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 552 — 2026-05-13T05:57Z — V0_15 archive bake CID22 0.8914 — V0_15/V0_16 are a self-consistent recipe family
+
+Git/file archeology of `zensim/weights/archive/`:
+
+| Bake | Arch | CID22 SROCC | Bake size | Notes |
+|---|---|--:|--:|---|
+| V0_4 (2026-04-30) | 228→64→1 | (untested in this audit) | 60,932 B | half-size MLP |
+| V0_5 (2026-05-11) | 228→128→1 | 0.8919* | 119,812 B | early h=128 |
+| V0_7 seed0/seed1 (2026-05-11) | 228→128→1 | (in archive) | — | mid-cycle |
+| V0_8 tainted (2026-05-11) | 228→128→1 | 0.8948 (INFLATED) | 119,812 B | pre-purge |
+| **V0_15 (2026-05-12)** | 228→128→1 | **0.8914** | 119,812 B | post-purge swap source |
+| V0_16 SHIP (2026-05-12) | 228→128→1 | **0.8919** | 119,812 B | current ship |
+
+*V0_5 number from prior tick logs.
+
+**Key finding**: V0_15 and V0_16 are TWO bakes in the same recipe
+family, both hitting CID22 ~0.891 (Δ = +0.0005 between them).
+**This recipe family's mean is ~0.891 — NOT 0.872 like the V_X
+autonomous family.** The V0_15/V0_16 recipe is genuinely reproducible
+within itself.
+
+ZNPR metadata sections are empty in both — no recipe hints in
+the bakes themselves. The recipe difference is purely in
+training-time pipeline state (split seed, batch order, data
+preprocessing, etc).
+
+**V0_4 architecture difference noted**: V0_4 is `228→64→1`
+(h=64), while V0_5+ are `228→128→1` (h=128). The recovery cycle
+has been on h=128 throughout, matching V0_5/V0_15/V0_16's
+architecture. So architecture isn't the difference either.
+
+**What's likely different about V0_15/V0_16's recipe** (informed
+guess based on `cycle_7_dssim_outcomes_2026-05-12.md` analysis +
+14 falsifications):
+
+The V0_15/V0_16 family used the Rust trainer (deleted in PR #29
+e613224 per cycle-7 doc), not the Python trainer. The Rust
+trainer differed in:
+- Adam vs AdamW (tested, AdamW current)
+- Glorot vs Kaiming init (tested, neither helps)
+- Per-dataset vs per-image ranknet pair sampling (tested, image
+  better)
+- min vs mean val policy (tested, mean better)
+
+All four Python-trainer settings that match the Rust trainer
+(adam, glorot, dataset, min) are individually FALSIFIED. But
+they might COMBINE differently — none tested jointly.
+
+**Cycle-12 reproduction candidate**: try the joint setting:
+```
+--optimizer adam --init glorot --ranknet-group dataset --val-policy min
+```
+across multiple seeds at V0_kadid_tid recipe. ~3 min wall.
+
+Artifacts produced this tick:
+- V0_15 archive CID22 SROCC measurement (0.8914, confirming
+  V0_15/V0_16 are recipe-family siblings)
+- Architecture audit of 6 archive bakes
+
+**Next tick (553)**: Try the joint-Rust-trainer-settings variant.
+If it improves, we've found V0_16's recipe. If not, definitively
+closes the recipe-axis exploration in autonomous mode.
+
 ### Tick 551 — 2026-05-13T05:54Z — Statistical summary: V0_16 is +3σ to +13σ above all V_X family means
 
 Pure analysis tick — computed the σ-distance from V0_16 SHIP
