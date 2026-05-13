@@ -5318,6 +5318,57 @@ test vs `zensim-validate`'s trainer. The other session may have
 already started this — first action on next firing is to compare
 state before duplicating work.
 
+### Tick 507 — 2026-05-13T00:55Z — Cycle-8 outcomes doc committed; cycle-9 problem statement = B0/B1 ceiling
+
+zensim commit `27c86ee1`. Created
+`zensim/benchmarks/cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+(~170 lines, ~7.5 KB) closing cycle-8 with permanent record:
+
+- 5-bake Pareto curve table (V0_16, V0_30, V0_31, V0_32, V0_26)
+- Per-codec AIC-4 breakdown showing V0_31 wins or ties V0_16 on
+  5/6 codecs (only JPEG-XL slightly weaker)
+- CID22 per-band breakdown showing all KonJND-trained bakes share
+  the same B0/B1 ceiling (~0.40 SROCC vs ssim2's 0.44/0.47)
+- Cycle-7 falsifications recorded (V0_27 dssim, V0_28 cosine LR,
+  V0_29 small LR)
+- Cycle-9 problem statement: B0/B1 CID22 SROCC ceiling
+- Full reproducibility recipe
+
+**Cycle-8 is CLOSED**. Goal: provide users with a tradeoff matrix
+they can explore on the live site. V0_16 stays ship; V0_26 + V0_31
+visible as alternatives for AIC-corpora-focused use cases.
+
+**Cycle-9 problem identified**: B0/B1 SROCC ceiling. All cycle-7
++ cycle-8 bakes plus V0_16 score B0 ≈ 0.40, B1 ≈ 0.40 vs ssim2's
+0.44/0.47. The ~0.05 gap is *structural* — none of the trained
+variants closed it. Possible levers (need user authorization):
+
+1. **More B0/B1 training data**: KADID-10k has analytic-distortion
+   labels in the low-quality range. Mixed-supervision with KADID.
+2. **300-feat input representation**: synth CSV already has
+   feat_0..299; current MLP only sees feat_0..227. Requires
+   trainer + bake-format + runtime profile changes (not trivial).
+3. **B0/B1 loss weighting**: bin safesyn by ssim2 q-bin, upweight
+   low-q. Should be cheap (trainer-only change).
+
+Artifacts produced:
+- `/home/lilith/work/zen/zensim/benchmarks/cycle_8_konjnd_pareto_outcomes_2026-05-13.md`
+  (committed in zensim `27c86ee1`)
+
+**Next tick (508)**: cycle-8 is done; cycle-9 needs user input on
+which lever to pull. In the meantime, useful focused work:
+- (a) Document the cycle-9 cycle-plan in `zensim/docs/cycle_9_plan_2026-05-13.md`
+  with the 3 levers + cost estimates, ready for user review.
+- (b) Re-run V0_16 with seed=2/3/4 to map V0_16's SEED variance —
+  the current B0/B1 ceiling might be 0.40 ± 0.03; without knowing
+  the variance we can't tell if cycle-9 has signal to detect.
+- (c) Test if loss-weighting low-q pairs (cycle-9 option 3) is
+  cheap to wire into `train_v_next_mlp.py` — preview the diff
+  without running it, then ask user for permission to launch.
+
+Pick (c) — cheapest exploration, lowest risk of wasted compute,
+and produces a concrete proposal for the next user touchpoint.
+
 ### Tick 506 — 2026-05-13T00:51Z — V0_31 merged into 3 site parquets + compare.js dropdown
 
 zensim commit `115b1020`. V0_31 (cycle-8 AIC-4 winner) added to the
