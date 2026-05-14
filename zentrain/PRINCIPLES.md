@@ -17,7 +17,7 @@ protocol is in [`SAFETY_PLANE.md`](SAFETY_PLANE.md). This doc is the
 | **zenpicker** | Codec-family meta-picker. Given features + target quality + allowed-family mask, picks `{jpeg,webp,jxl,avif,png,gif}`. Wraps `zenpredict::Predictor`. | [`/zenpicker/`](../zenpicker/) |
 | **zentrain** | Python training pipeline. Pareto sweep harness, teacher fit, distill, ablation, holdout probes, safety reports, `.bin` bake (this directory). | [`/zentrain/`](.) |
 | **Per-codec picker** | Lives in each codec crate (zenjpeg, zenwebp, zenavif, zenjxl). Depends on `zenpredict`. Trained via `zentrain` with a codec-config module. | each codec repo |
-| **zensim V0_4** | Perceptual scorer. Same ZNPR v2 format, but `n_outputs = 1` and the output is a perceptual distance, not log-bytes. | `zen/zensim/` |
+| **zensim V0_18 / V0_19** | Perceptual scorer. ZNPR v3 format (HU reorder + LZ4 always-on), `n_outputs = 1`, output is a perceptual distance / score. Trained on the 2026-05-14-clean corpus (KADID/TID perceptual purge). | `zen/zensim/` |
 
 The contract between training and runtime is **ZNPR v2**. The
 contract between feature extraction and runtime is **the codec's
@@ -375,13 +375,15 @@ Two distinct pickers — lossy and lossless are different shapes:
 - **Scalar heads**: none (purely categorical)
 - **Bake metadata**: MUST include `zenpicker.family_order = "jpeg,webp,jxl,avif,png,gif"`. Validated at load via `MetaPicker::validate_family_order`.
 
-### zensim V0_4
+### zensim V0_18 / V0_19
 
-- **Different shape from pickers** — not a config selector. Inputs are pixel-pair features; output is one perceptual distance scalar.
+- **Different shape from pickers** — not a config selector. Inputs are pixel-pair features; output is one perceptual distance scalar in MCOS units (0..100 range, calibrated to ssim2 distribution).
 - **n_outputs = 1**. No categorical cells, no hybrid heads.
-- **Format is the same** (ZNPR v2, loaded via `zenpredict::Model::from_bytes`).
-- **Training**: separate corpus (CID22 perceptual quality benchmark), separate trainer (lives in `zen/zensim/zensim-validate/src/mlp_train.rs`), separate audience (called by the codec's verify step, not picker step).
-- **Re-bake triggers**: zenanalyze feature drift, V0_2 regression on the held-out CID22-val set.
+- **Format**: ZNPR v3 (HU reorder + whole-bake LZ4, always-on). Loaded via `zenpredict::Model::from_bytes`.
+- **Architecture**: 228 → 128 → 1 LeakyReLU MLP, ensemble-concat (3-way 0.65/0.30/0.05 mix of base + cycle-14 TV-regularized variants), affine-calibrated (α=28.04, β=−5.07).
+- **Training**: held-out evaluation against CID22 (49 refs), KADID-10k, TID2013, AIC-3, AIC-4, KonJND-1k. Trainer at `zen/zensim/zensim-validate/src/bin/zensim_mlp_train.rs`. Canonical corpus at `/mnt/v/zen/zensim-training/2026-05-14-clean/` (KADID/TID perceptual-overlap purge applied).
+- **Re-bake triggers**: zenanalyze feature drift, V0_2 regression on the held-out CID22-val set, or a held-out 10-band SROCC regression at 5+ % vs the current bake.
+- **Contamination guard**: trainer rejects CSVs in `benchmarks/contamination_blocklist_2026-05-14.txt` (149 entries) and any path with the `CONTAMINATED_` suffix unless `ZENSIM_BYPASS_CONTAMINATION_GUARD_FOR_AUDIT_I_REALLY_MEAN_IT=1`.
 
 ---
 

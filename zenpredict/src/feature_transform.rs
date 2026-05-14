@@ -50,6 +50,19 @@ pub enum FeatureTransform {
     /// `ln(1 + x)`. Valid for `x ≥ 0`. The standard choice for
     /// counts and any feature that can be exactly zero.
     Log1p,
+    /// `sign(x) · ln(1 + |x|)` — bidirectional log. Useful for
+    /// centered-zero features (sign-balance metrics, residuals)
+    /// that can be either positive or negative and need
+    /// tail-compression in both directions. Added 2026-05-14 for
+    /// V0_20 input-shaping research.
+    SignedLog1p,
+    /// `sign(x) · sqrt(|x|)` — variance-stabilizing, milder than
+    /// log. Good for moderately-skewed features that don't quite
+    /// warrant log. Added 2026-05-14.
+    SignedSqrt,
+    /// `sign(x) · cbrt(|x|)` — even milder than sqrt. Preserves
+    /// direction with reduced tail compression. Added 2026-05-14.
+    SignedCbrt,
 }
 
 impl FeatureTransform {
@@ -69,6 +82,36 @@ impl FeatureTransform {
             Self::Log => libm::logf(x),
             #[cfg(not(feature = "std"))]
             Self::Log1p => libm::log1pf(x),
+            #[cfg(feature = "std")]
+            Self::SignedLog1p => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().ln_1p()
+            }
+            #[cfg(feature = "std")]
+            Self::SignedSqrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().sqrt()
+            }
+            #[cfg(feature = "std")]
+            Self::SignedCbrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().cbrt()
+            }
+            #[cfg(not(feature = "std"))]
+            Self::SignedLog1p => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * libm::log1pf(libm::fabsf(x))
+            }
+            #[cfg(not(feature = "std"))]
+            Self::SignedSqrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * libm::sqrtf(libm::fabsf(x))
+            }
+            #[cfg(not(feature = "std"))]
+            Self::SignedCbrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * libm::cbrtf(libm::fabsf(x))
+            }
         }
     }
 
@@ -86,6 +129,9 @@ impl FeatureTransform {
             "identity" => Ok(Self::Identity),
             "log" => Ok(Self::Log),
             "log1p" => Ok(Self::Log1p),
+            "signed_log1p" => Ok(Self::SignedLog1p),
+            "signed_sqrt" => Ok(Self::SignedSqrt),
+            "signed_cbrt" => Ok(Self::SignedCbrt),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -96,6 +142,9 @@ impl FeatureTransform {
             Self::Identity => "identity",
             Self::Log => "log",
             Self::Log1p => "log1p",
+            Self::SignedLog1p => "signed_log1p",
+            Self::SignedSqrt => "signed_sqrt",
+            Self::SignedCbrt => "signed_cbrt",
         }
     }
 }
