@@ -36,10 +36,12 @@ extern crate alloc;
 
 pub mod composer;
 pub mod json;
+pub mod zero_bias;
 
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
+pub use zero_bias::{apply_zero_bias, apply_zero_bias_in_place};
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,
     MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson, bake_from_json,
