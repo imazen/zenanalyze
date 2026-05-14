@@ -24,6 +24,7 @@ pub fn forward(
     features: &[f32],
     scratch_a: &mut [f32],
     scratch_b: &mut [f32],
+    #[cfg(feature = "compressed-weights")] lz4_scratch: &mut [i8],
     output: &mut [f32],
 ) -> Result<(), PredictError> {
     let n_inputs = model.n_inputs();
@@ -84,7 +85,13 @@ pub fn forward(
             &mut output_buf[..out_dim]
         };
         let src = &input_buf[..in_dim];
-        layer_forward(layer, src, dst);
+        layer_forward(
+            layer,
+            src,
+            dst,
+            #[cfg(feature = "compressed-weights")]
+            lz4_scratch,
+        )?;
         if idx != last_idx {
             core::mem::swap(&mut input_buf, &mut output_buf);
         }
@@ -92,7 +99,12 @@ pub fn forward(
     Ok(())
 }
 
-fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) {
+fn layer_forward(
+    layer: &LayerView<'_>,
+    src: &[f32],
+    dst: &mut [f32],
+    #[cfg(feature = "compressed-weights")] lz4_scratch: &mut [i8],
+) -> Result<(), PredictError> {
     let out_dim = layer.out_dim;
     let in_dim = layer.in_dim;
     debug_assert_eq!(src.len(), in_dim);
@@ -121,9 +133,52 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) {
                 dst[o] = layer.biases[o] + scales[o] * dst[o];
             }
         }
+        #[cfg(feature = "compressed-weights")]
+        WeightStorage::I8Lz4 {
+            compressed,
+            scales,
+            decompressed_len,
+        } => {
+            // Decompress fresh into the per-Predictor scratch buffer
+            // ("very fast uncached expansion" per 2026-05-13 design).
+            // Single-alloc contract: lz4_scratch was sized at
+            // Predictor::new to max(decompressed_len); slice it down
+            // and re-fill from the compressed payload every call.
+            if lz4_scratch.len() < *decompressed_len {
+                return Err(PredictError::FeatureLenMismatch {
+                    expected: *decompressed_len,
+                    got: lz4_scratch.len(),
+                });
+            }
+            let scratch = &mut lz4_scratch[..*decompressed_len];
+            // SAFETY: bytemuck transmute from &mut [i8] to &mut [u8].
+            // Both are POD with identical layout; the lz4 decoder works
+            // on bytes. The transmute is via bytemuck::cast_slice_mut
+            // which does the safety check at compile time.
+            let scratch_u8: &mut [u8] = bytemuck::cast_slice_mut(scratch);
+            crate::lz4_block::decompress_into(compressed, scratch_u8).map_err(|_| {
+                PredictError::SectionOutOfRange {
+                    what: "layer.weights[i8_lz4] (lz4 decode failed)",
+                    offset: 0,
+                    len: compressed.len() as u32,
+                    file_len: 0,
+                }
+            })?;
+            // Now scratch holds the decompressed i8 weights. Same
+            // matmul kernel as plain I8, same per-output scale apply.
+            for v in dst.iter_mut() {
+                *v = 0.0;
+            }
+            saxpy_matmul_i8(src, scratch, dst, in_dim, out_dim);
+            debug_assert_eq!(scales.len(), out_dim);
+            for o in 0..out_dim {
+                dst[o] = layer.biases[o] + scales[o] * dst[o];
+            }
+        }
     }
 
     apply_activation(dst, layer.activation);
+    Ok(())
 }
 
 fn saxpy_matmul_f32(src: &[f32], w: &[f32], dst: &mut [f32], in_dim: usize, out_dim: usize) {

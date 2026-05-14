@@ -247,6 +247,20 @@ pub enum WeightDtype {
     F32 = 0,
     F16 = 1,
     I8 = 2,
+    /// I8 weights with LZ4-block-compressed byte stream. Gated behind
+    /// the `compressed-weights` cargo feature; without that feature
+    /// active, encountering byte 3 returns
+    /// [`PredictError::UnknownWeightDtype`].
+    ///
+    /// Wire layout for this variant's weights section:
+    /// ```text
+    /// [u32 decompressed_len_bytes][lz4_block_payload (varlen)]
+    /// ```
+    /// `decompressed_len_bytes` must equal `in_dim * out_dim` (one i8
+    /// per weight). The scales section that follows is the same
+    /// per-output f32 scales used by [`Self::I8`].
+    #[cfg(feature = "compressed-weights")]
+    I8Lz4 = 3,
 }
 
 impl WeightDtype {
@@ -255,6 +269,8 @@ impl WeightDtype {
             0 => Ok(Self::F32),
             1 => Ok(Self::F16),
             2 => Ok(Self::I8),
+            #[cfg(feature = "compressed-weights")]
+            3 => Ok(Self::I8Lz4),
             other => Err(PredictError::UnknownWeightDtype { byte: other }),
         }
     }
@@ -264,6 +280,11 @@ impl WeightDtype {
             Self::F32 => 4,
             Self::F16 => 2,
             Self::I8 => 1,
+            // I8Lz4's compressed byte size varies per-bake; consumers
+            // wanting an upper bound use `decompressed_len_bytes` from
+            // the wire payload header.
+            #[cfg(feature = "compressed-weights")]
+            Self::I8Lz4 => 1,
         }
     }
 }
@@ -285,6 +306,22 @@ pub enum WeightStorage<'a> {
     I8 {
         weights: &'a [i8],
         scales: &'a [f32],
+    },
+    /// LZ4-block-compressed i8 weights. The raw compressed payload is
+    /// borrowed from the file bytes; decompression into a per-layer
+    /// scratch buffer happens at inference time via
+    /// [`crate::lz4_block::decompress_into`].
+    ///
+    /// `decompressed_len` is the byte count after decode (always equal
+    /// to `in_dim * out_dim` per the bake-side contract). The runtime
+    /// keeps a single scratch buffer of `max(decompressed_len)` across
+    /// all layers in this Predictor and re-uses it every `predict()`
+    /// call ("very fast uncached expansion" per the 2026-05-13 design).
+    #[cfg(feature = "compressed-weights")]
+    I8Lz4 {
+        compressed: &'a [u8],
+        scales: &'a [f32],
+        decompressed_len: usize,
     },
 }
 
@@ -337,6 +374,21 @@ impl<'a> Model<'a> {
         bytes: &'a [u8],
         expected_schema: Option<u64>,
     ) -> Result<Self, PredictError> {
+        // Resource limits — fail early on adversarial input before any
+        // section parsing or scratch allocation. These bounds are
+        // generous enough to cover every realistic V_X / picker bake
+        // (V0_18 is 93 KB; the largest shipped picker is the zenavif
+        // rav1e v0.1.1 at 217 KB). 64 MB ceiling protects fuzz / web
+        // consumers from gigabyte bakes that would slow load to a
+        // crawl. See `crate::limits` for the exact constants and the
+        // policy rationale.
+        if bytes.len() > crate::limits::MAX_BAKE_BYTES {
+            return Err(PredictError::Truncated {
+                offset: 0,
+                want: crate::limits::MAX_BAKE_BYTES,
+                have: bytes.len(),
+            });
+        }
         if bytes.len() < HEADER_SIZE {
             return Err(PredictError::Truncated {
                 offset: 0,
@@ -380,6 +432,18 @@ impl<'a> Model<'a> {
         }
         if n_layers == 0 {
             return Err(PredictError::ZeroDimension { what: "n_layers" });
+        }
+        // Per-dimension upper bounds. Adversarial bakes with
+        // `n_inputs = 0xFFFF_FFFF` would otherwise multiply to a usize
+        // overflow inside the matmul allocations.
+        if n_inputs > crate::limits::MAX_DIM {
+            return Err(PredictError::DimensionOverflow { what: "n_inputs" });
+        }
+        if n_outputs > crate::limits::MAX_DIM {
+            return Err(PredictError::DimensionOverflow { what: "n_outputs" });
+        }
+        if n_layers > crate::limits::MAX_LAYERS {
+            return Err(PredictError::DimensionOverflow { what: "n_layers" });
         }
 
         // Scaler.
@@ -463,9 +527,43 @@ impl<'a> Model<'a> {
                         scales: s,
                     }
                 }
+                #[cfg(feature = "compressed-weights")]
+                WeightDtype::I8Lz4 => {
+                    // Layout: [u32 decompressed_len_bytes][lz4 payload].
+                    // The decompressed payload feeds the same per-output
+                    // i8 dequant as WeightDtype::I8.
+                    let raw = entry.weights.slice("layer.weights[i8_lz4]", bytes)?;
+                    if raw.len() < 4 {
+                        return Err(PredictError::SectionOutOfRange {
+                            what: "layer.weights[i8_lz4] (missing length prefix)",
+                            offset: entry.weights.offset,
+                            len: entry.weights.len,
+                            file_len: bytes.len(),
+                        });
+                    }
+                    let dlen = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+                    if dlen != n_weights {
+                        return Err(PredictError::SectionOutOfRange {
+                            what: "layer.weights[i8_lz4] (decompressed_len != in_dim*out_dim)",
+                            offset: entry.weights.offset,
+                            len: entry.weights.len,
+                            file_len: bytes.len(),
+                        });
+                    }
+                    let s = cast_f32_section("layer.scales", entry.scales, bytes, out_dim)?;
+                    WeightStorage::I8Lz4 {
+                        compressed: &raw[4..],
+                        scales: s,
+                        decompressed_len: dlen,
+                    }
+                }
             };
             // For non-I8 layers the scales section must be empty.
-            if !matches!(weight_dtype, WeightDtype::I8) && !entry.scales.is_empty() {
+            // (Both I8 and I8Lz4 carry scales.)
+            let has_scales = matches!(weight_dtype, WeightDtype::I8);
+            #[cfg(feature = "compressed-weights")]
+            let has_scales = has_scales || matches!(weight_dtype, WeightDtype::I8Lz4);
+            if !has_scales && !entry.scales.is_empty() {
                 return Err(PredictError::SectionOutOfRange {
                     what: "layer.scales (must be empty for non-I8 layer)",
                     offset: entry.scales.offset,

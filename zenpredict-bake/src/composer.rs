@@ -512,10 +512,39 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 }
                 Section::new(start, layer.weights.len() as u32)
             }
+            #[cfg(feature = "lz4")]
+            WeightDtype::I8Lz4 => {
+                // Same i8 quantization as `WeightDtype::I8`, then LZ4-
+                // block-compress the i8 byte stream. Layout per the
+                // runtime parser:
+                //   [u32 decompressed_len_bytes][lz4 block payload]
+                let scales = compute_i8_scales_per_output(layer);
+                let mut i8_bytes = alloc::vec::Vec::with_capacity(layer.weights.len());
+                for (idx, &w) in layer.weights.iter().enumerate() {
+                    let o = idx % layer.out_dim;
+                    let q = if scales[o] == 0.0 {
+                        0
+                    } else {
+                        (w / scales[o]).round().clamp(-128.0, 127.0) as i8
+                    };
+                    i8_bytes.push(q as u8);
+                }
+                let compressed = lz4_flex::block::compress(&i8_bytes);
+                pad_to(&mut buf, 4);
+                let start = buf.len() as u32;
+                buf.extend_from_slice(&(i8_bytes.len() as u32).to_le_bytes());
+                buf.extend_from_slice(&compressed);
+                Section::new(start, (4 + compressed.len()) as u32)
+            }
         };
 
         let scales_section = match layer.dtype {
             WeightDtype::I8 => {
+                pad_to(&mut buf, 4);
+                append_f32(&mut buf, &compute_i8_scales_per_output(layer))
+            }
+            #[cfg(feature = "lz4")]
+            WeightDtype::I8Lz4 => {
                 pad_to(&mut buf, 4);
                 append_f32(&mut buf, &compute_i8_scales_per_output(layer))
             }

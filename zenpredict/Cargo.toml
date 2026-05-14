@@ -31,6 +31,19 @@ std = []
 # runtimes that only call `predict` / `argmin_masked` stay lean by
 # default; per-codec pickers that need the extras opt in.
 advanced = []
+# Enable loading bakes whose i8 weight bytes are LZ4-block compressed
+# (`WeightDtype::I8Lz4`, wire byte 3). Adds ~1 KB compiled cost
+# (the in-tree decoder at `src/lz4_block.rs` is pure-safe-Rust
+# single-alloc). Without this feature, encountering byte 3 in a
+# layer's `weight_dtype` field returns
+# `PredictError::UnknownWeightDtype { byte: 3 }`.
+#
+# Pair with `zenpredict-bake = "0.x"` and pass `WeightDtype::I8Lz4`
+# to `BakeLayer { dtype, ... }` to emit a compressed bake from
+# pre-zerobiased weights. The compressed-weights path only delivers
+# the headline 75% shrink AFTER a per-layer zerobias rebake — raw
+# i8 weights are near-incompressible.
+compressed-weights = []
 
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our

@@ -28,6 +28,14 @@ pub struct Predictor<'a> {
     /// to zero otherwise (the no-transform path forwards the input
     /// slice without copying). Reused across calls.
     feat_scratch: alloc::vec::Vec<f32>,
+    /// Scratch i8 buffer for LZ4-decoded weights. Sized at
+    /// `Predictor::new` to the max `decompressed_len` across all
+    /// `WeightDtype::I8Lz4` layers (zero if no such layer exists, so
+    /// non-compressed bakes pay no memory cost). Decompressed fresh
+    /// every `predict()` call — "very fast uncached expansion" per
+    /// the design contract.
+    #[cfg(feature = "compressed-weights")]
+    lz4_scratch: alloc::vec::Vec<i8>,
 }
 
 impl<'a> Predictor<'a> {
@@ -44,6 +52,18 @@ impl<'a> Predictor<'a> {
         } else {
             0
         };
+        #[cfg(feature = "compressed-weights")]
+        let lz4_scratch_len = model
+            .layers()
+            .iter()
+            .map(|l| match &l.weights {
+                crate::WeightStorage::I8Lz4 {
+                    decompressed_len, ..
+                } => *decompressed_len,
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0);
         Self {
             model,
             scratch_a: alloc::vec![0.0; need],
@@ -51,6 +71,8 @@ impl<'a> Predictor<'a> {
             output: alloc::vec![0.0; n_out],
             spec_output: alloc::vec![OutputValue::Default; n_out],
             feat_scratch: alloc::vec![0.0; feat_scratch_len],
+            #[cfg(feature = "compressed-weights")]
+            lz4_scratch: alloc::vec![0i8; lz4_scratch_len],
         }
     }
 
@@ -85,6 +107,8 @@ impl<'a> Predictor<'a> {
             features,
             &mut self.scratch_a,
             &mut self.scratch_b,
+            #[cfg(feature = "compressed-weights")]
+            &mut self.lz4_scratch,
             &mut self.output,
         )?;
         Ok(&self.output)
@@ -123,6 +147,8 @@ impl<'a> Predictor<'a> {
             features,
             &mut self.scratch_a,
             &mut self.scratch_b,
+            #[cfg(feature = "compressed-weights")]
+            &mut self.lz4_scratch,
             &mut self.output,
         )?;
         let specs = self.model.output_specs();
@@ -190,6 +216,8 @@ impl<'a> Predictor<'a> {
                 dst,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
+                #[cfg(feature = "compressed-weights")]
+                &mut self.lz4_scratch,
                 &mut self.output,
             )?;
         } else {
@@ -198,6 +226,8 @@ impl<'a> Predictor<'a> {
                 features,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
+                #[cfg(feature = "compressed-weights")]
+                &mut self.lz4_scratch,
                 &mut self.output,
             )?;
         }
@@ -231,6 +261,8 @@ impl<'a> Predictor<'a> {
                 dst,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
+                #[cfg(feature = "compressed-weights")]
+                &mut self.lz4_scratch,
                 &mut self.output,
             )?;
         } else {
@@ -239,6 +271,8 @@ impl<'a> Predictor<'a> {
                 features,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
+                #[cfg(feature = "compressed-weights")]
+                &mut self.lz4_scratch,
                 &mut self.output,
             )?;
         }
