@@ -251,6 +251,18 @@ pub struct BakeRequest<'a> {
     /// + `decompressed_payload_len` header fields. Loader transparently
     /// decompresses at load time. Default false.
     pub compressed: bool,
+    /// Optional caller-supplied hidden-unit permutations, one entry
+    /// per interior dimension (length = `layers.len() - 1`). Each
+    /// entry is a permutation of `0..interior_dim`. When `None`,
+    /// the composer applies the default L2-norm-ascending HU
+    /// reorder per the `hu_reorder` module. When `Some`, the
+    /// composer uses these permutations verbatim — useful for the
+    /// auto-optimizer (`bake_optimized`) which tries several
+    /// candidate HU layouts. Since HU labels are arbitrary internal
+    /// nodes, no metadata is emitted to the wire format; the
+    /// resulting bake is byte-shape-identical to a default-HU one
+    /// modulo the weight content.
+    pub hu_permutations: Option<&'a [&'a [u32]]>,
 }
 
 impl<'a> BakeRequest<'a> {
@@ -286,6 +298,7 @@ impl<'a> BakeRequest<'a> {
             feature_order: None,
             output_order: None,
             compressed: false,
+            hu_permutations: None,
         }
     }
 
@@ -513,7 +526,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     // No-op on fully-live matrices; never regresses size.
     //
     // See `hu_reorder` module for measured numbers and references.
-    let permuted_owned = crate::hu_reorder::apply_hu_reorder(req.layers);
+    let permuted_owned = crate::hu_reorder::apply_hu_reorder(req.layers, req.hu_permutations);
     let permuted_layers: alloc::vec::Vec<BakeLayer<'_>> = permuted_owned
         .iter()
         .map(crate::hu_reorder::OwnedBakeLayer::as_borrowed)

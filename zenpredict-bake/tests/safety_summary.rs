@@ -95,6 +95,7 @@ mod safety_summary_tests {
         feature_order: None,
         output_order: None,
         compressed: false,
+        hu_permutations: None,
         })
         .unwrap()
     }
@@ -236,6 +237,7 @@ mod safety_summary_tests {
         feature_order: None,
         output_order: None,
         compressed: false,
+        hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -276,6 +278,7 @@ mod safety_summary_tests {
         feature_order: None,
         output_order: None,
         compressed: false,
+        hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);

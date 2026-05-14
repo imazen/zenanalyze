@@ -69,81 +69,233 @@ impl OwnedBakeLayer {
     }
 }
 
-/// Reorder hidden units in every interior dimension by L2 norm
-/// ascending. See module docs for rationale.
+/// Reorder hidden units in every interior dimension. When `perms` is
+/// `None`, applies the default L2-norm-ascending heuristic computed
+/// per interior dim. When `Some(perms)`, uses the caller-supplied
+/// permutations — one entry per interior dim, each entry a valid
+/// permutation of `0..interior_dim`.
 ///
 /// Returns owned copies of every layer with permutations applied.
 /// The first layer's inputs and the last layer's outputs are NOT
-/// reordered — only interior (hidden) dimensions, since reordering
-/// the user-facing input or output dims would break caller
-/// expectations.
+/// reordered — only interior (hidden) dimensions.
 ///
 /// Single-layer bakes (`layers.len() == 1`) have no interior dims;
-/// returns owned copies with the original ordering preserved (still
-/// allocates — caller paid for the bake step regardless).
-pub(crate) fn apply_hu_reorder(layers: &[BakeLayer<'_>]) -> Vec<OwnedBakeLayer> {
+/// returns owned copies with the original ordering preserved.
+pub(crate) fn apply_hu_reorder(
+    layers: &[BakeLayer<'_>],
+    perms: Option<&[&[u32]]>,
+) -> Vec<OwnedBakeLayer> {
     let mut owned: Vec<OwnedBakeLayer> =
         layers.iter().map(OwnedBakeLayer::from_borrowed).collect();
 
-    // Interior dim between layer i and layer i+1 has size
-    // = layers[i].out_dim = layers[i+1].in_dim. Permute layer i's
-    // output cols + biases AND layer i+1's input rows in lockstep.
-    for i in 0..owned.len().saturating_sub(1) {
+    let n_interior = owned.len().saturating_sub(1);
+    if let Some(p) = perms {
+        debug_assert_eq!(p.len(), n_interior);
+    }
+
+    for i in 0..n_interior {
         let interior_dim = owned[i].out_dim;
         debug_assert_eq!(owned[i].out_dim, owned[i + 1].in_dim);
 
-        // Compute L2-norm-squared per output column of layer i.
-        // sqrt skipped — relative order is preserved by the square.
-        let mut norms_sq: Vec<f32> = alloc::vec![0.0f32; interior_dim];
-        let in_dim_i = owned[i].in_dim;
-        for r in 0..in_dim_i {
-            let row_start = r * interior_dim;
-            for c in 0..interior_dim {
-                let w = owned[i].weights[row_start + c];
-                norms_sq[c] += w * w;
-            }
-        }
+        let perm: Vec<u32> = match perms {
+            Some(p) => p[i].to_vec(),
+            None => compute_hu_perm_l2_asc(&owned[i].weights, owned[i].in_dim, interior_dim),
+        };
+        debug_assert_eq!(perm.len(), interior_dim);
 
-        // Permutation π[new] = old. Sort indices by norm ascending.
-        // For ties (e.g., entirely dead cols), break by old index to
-        // keep the sort deterministic across runs.
-        let mut perm: Vec<u32> = (0..interior_dim as u32).collect();
-        perm.sort_by(|&a, &b| {
-            let na = norms_sq[a as usize];
-            let nb = norms_sq[b as usize];
-            na.partial_cmp(&nb).unwrap_or(core::cmp::Ordering::Equal).then(a.cmp(&b))
-        });
-
-        // Apply permutation to layer i: out cols + biases.
-        // new[r, c_new] = old[r, perm[c_new]]
-        let old_weights_i = owned[i].weights.clone();
-        let old_biases_i = owned[i].biases.clone();
-        for r in 0..in_dim_i {
-            let row_start = r * interior_dim;
-            for (c_new, &c_old) in perm.iter().enumerate() {
-                owned[i].weights[row_start + c_new] =
-                    old_weights_i[row_start + c_old as usize];
-            }
-        }
-        for (c_new, &c_old) in perm.iter().enumerate() {
-            owned[i].biases[c_new] = old_biases_i[c_old as usize];
-        }
-
-        // Apply permutation to layer i+1: input rows.
-        // new[r_new, o] = old[perm[r_new], o]
-        let out_dim_ip1 = owned[i + 1].out_dim;
-        let old_weights_ip1 = owned[i + 1].weights.clone();
-        for (r_new, &r_old) in perm.iter().enumerate() {
-            let new_row_start = r_new * out_dim_ip1;
-            let old_row_start = (r_old as usize) * out_dim_ip1;
-            for o in 0..out_dim_ip1 {
-                owned[i + 1].weights[new_row_start + o] =
-                    old_weights_ip1[old_row_start + o];
-            }
-        }
+        apply_hu_permutation(&mut owned, i, &perm);
     }
 
     owned
+}
+
+/// Apply a single interior-dim permutation in-place to the two
+/// adjacent layers in `owned`. Internal helper for `apply_hu_reorder`
+/// and for the optimizer (which composes multiple permutations).
+pub(crate) fn apply_hu_permutation(
+    owned: &mut [OwnedBakeLayer],
+    interior_idx: usize,
+    perm: &[u32],
+) {
+    let i = interior_idx;
+    let interior_dim = owned[i].out_dim;
+    let in_dim_i = owned[i].in_dim;
+
+    let old_weights_i = owned[i].weights.clone();
+    let old_biases_i = owned[i].biases.clone();
+    for r in 0..in_dim_i {
+        let row_start = r * interior_dim;
+        for (c_new, &c_old) in perm.iter().enumerate() {
+            owned[i].weights[row_start + c_new] =
+                old_weights_i[row_start + c_old as usize];
+        }
+    }
+    for (c_new, &c_old) in perm.iter().enumerate() {
+        owned[i].biases[c_new] = old_biases_i[c_old as usize];
+    }
+
+    let out_dim_ip1 = owned[i + 1].out_dim;
+    let old_weights_ip1 = owned[i + 1].weights.clone();
+    for (r_new, &r_old) in perm.iter().enumerate() {
+        let new_row_start = r_new * out_dim_ip1;
+        let old_row_start = (r_old as usize) * out_dim_ip1;
+        for o in 0..out_dim_ip1 {
+            owned[i + 1].weights[new_row_start + o] =
+                old_weights_ip1[old_row_start + o];
+        }
+    }
+}
+
+// ── HU permutation heuristics ─────────────────────────────────────
+//
+// Each heuristic takes the upstream layer's weights (row-major
+// `in_dim × interior_dim`) and returns a permutation of
+// `0..interior_dim` to use for the HU reorder. The downstream
+// layer's data is unused by the heuristic (the upstream column
+// embeds the HU's "role" most directly).
+
+pub(crate) fn compute_hu_perm_l2_asc(
+    weights: &[f32],
+    in_dim: usize,
+    interior_dim: usize,
+) -> Vec<u32> {
+    let mut norms_sq: Vec<f32> = alloc::vec![0.0f32; interior_dim];
+    for r in 0..in_dim {
+        let row_start = r * interior_dim;
+        for c in 0..interior_dim {
+            let w = weights[row_start + c];
+            norms_sq[c] += w * w;
+        }
+    }
+    let mut perm: Vec<u32> = (0..interior_dim as u32).collect();
+    perm.sort_by(|&a, &b| {
+        norms_sq[a as usize]
+            .partial_cmp(&norms_sq[b as usize])
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then(a.cmp(&b))
+    });
+    perm
+}
+
+pub(crate) fn compute_hu_perm_l2_desc(
+    weights: &[f32],
+    in_dim: usize,
+    interior_dim: usize,
+) -> Vec<u32> {
+    let mut perm = compute_hu_perm_l2_asc(weights, in_dim, interior_dim);
+    perm.reverse();
+    perm
+}
+
+pub(crate) fn compute_hu_perm_zero_count(
+    weights: &[f32],
+    in_dim: usize,
+    interior_dim: usize,
+    cut: f32,
+    ascending: bool,
+) -> Vec<u32> {
+    let mut zero_count: Vec<(u32, u32)> = (0..interior_dim as u32)
+        .map(|c| {
+            let mut zc: u32 = 0;
+            for r in 0..in_dim {
+                let w = weights[r * interior_dim + c as usize];
+                if w.abs() < cut {
+                    zc += 1;
+                }
+            }
+            (c, zc)
+        })
+        .collect();
+    if ascending {
+        zero_count.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    } else {
+        zero_count.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    }
+    zero_count.iter().map(|p| p.0).collect()
+}
+
+pub(crate) fn compute_hu_perm_sign_balance(
+    weights: &[f32],
+    in_dim: usize,
+    interior_dim: usize,
+) -> Vec<u32> {
+    let mut bal: Vec<(u32, i32)> = (0..interior_dim as u32)
+        .map(|c| {
+            let mut s: i32 = 0;
+            for r in 0..in_dim {
+                let w = weights[r * interior_dim + c as usize];
+                if w > 0.0 {
+                    s += 1;
+                } else if w < 0.0 {
+                    s -= 1;
+                }
+            }
+            (c, s)
+        })
+        .collect();
+    bal.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    bal.iter().map(|p| p.0).collect()
+}
+
+/// Greedy nearest-neighbour chain on Hamming distance of the i8
+/// sign+zero pattern of each HU's upstream column. Capped at
+/// `interior_dim <= 1024` to bound worst-case quadratic cost.
+pub(crate) fn compute_hu_perm_nn_chain(
+    weights: &[f32],
+    in_dim: usize,
+    interior_dim: usize,
+    cut: f32,
+) -> Vec<u32> {
+    if interior_dim > 1024 {
+        // Fall back to L2-asc for very wide layers.
+        return compute_hu_perm_l2_asc(weights, in_dim, interior_dim);
+    }
+    let words_per_col = in_dim.div_ceil(64);
+    let mut bitmap: Vec<u64> = alloc::vec![0u64; interior_dim * words_per_col];
+    for r in 0..in_dim {
+        for c in 0..interior_dim {
+            let w = weights[r * interior_dim + c];
+            if w.abs() < cut {
+                bitmap[c * words_per_col + r / 64] |= 1u64 << (r % 64);
+            }
+        }
+    }
+    let pop = |col: usize| -> u32 {
+        let s = col * words_per_col;
+        bitmap[s..s + words_per_col]
+            .iter()
+            .map(|w| w.count_ones())
+            .sum()
+    };
+    let mut visited = alloc::vec![false; interior_dim];
+    let mut chain: Vec<u32> = Vec::with_capacity(interior_dim);
+    let start = (0..interior_dim).max_by_key(|&c| pop(c)).unwrap_or(0);
+    chain.push(start as u32);
+    visited[start] = true;
+    let mut cur = start;
+    for _ in 1..interior_dim {
+        let cur_start = cur * words_per_col;
+        let mut best: usize = 0;
+        let mut best_dist: u32 = u32::MAX;
+        for c in 0..interior_dim {
+            if visited[c] {
+                continue;
+            }
+            let c_start = c * words_per_col;
+            let mut d: u32 = 0;
+            for w in 0..words_per_col {
+                d += (bitmap[cur_start + w] ^ bitmap[c_start + w]).count_ones();
+            }
+            if d < best_dist {
+                best_dist = d;
+                best = c;
+            }
+        }
+        chain.push(best as u32);
+        visited[best] = true;
+        cur = best;
+    }
+    chain
 }
 
 #[cfg(test)]
@@ -166,7 +318,7 @@ mod tests {
             weights: &weights,
             biases: &biases,
         }];
-        let permuted = apply_hu_reorder(&layers);
+        let permuted = apply_hu_reorder(&layers, None);
         assert_eq!(permuted.len(), 1);
         assert_eq!(permuted[0].weights, weights);
         assert_eq!(permuted[0].biases, biases);
@@ -204,7 +356,7 @@ mod tests {
                 biases: &b1,
             },
         ];
-        let permuted = apply_hu_reorder(&layers);
+        let permuted = apply_hu_reorder(&layers, None);
 
         // Dead HU (originally col 1) should now be at position 0
         // (L2 = 0, smallest).
@@ -252,7 +404,7 @@ mod tests {
             },
         ];
 
-        let permuted = apply_hu_reorder(&layers);
+        let permuted = apply_hu_reorder(&layers, None);
 
         // Manual forward pass for both versions; results must be
         // bit-equal.
@@ -309,7 +461,7 @@ mod tests {
             },
         ];
 
-        let permuted = apply_hu_reorder(&layers);
+        let permuted = apply_hu_reorder(&layers, None);
         let permuted_borrowed: Vec<BakeLayer<'_>> =
             permuted.iter().map(OwnedBakeLayer::as_borrowed).collect();
 

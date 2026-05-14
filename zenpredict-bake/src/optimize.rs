@@ -56,6 +56,15 @@ use crate::composer::{BakeError, BakeRequest, bake};
 /// Tunable knobs for [`bake_optimized_with`].
 #[derive(Clone, Copy, Debug)]
 pub struct OptimizeConfig {
+    /// Whether to evaluate hidden-unit (interior dim) reorder
+    /// candidates. HU reorder is the highest-leverage optimization
+    /// (57 % shrink on V0_18 layer-0 with L2-asc), so the optimizer
+    /// also tries L2-desc, zero-count, sign-balance, and a greedy
+    /// nearest-neighbour chain plus pairwise-swap local search.
+    /// Default true. Skipped automatically for single-layer bakes
+    /// (no interior dim exists). HU labels are arbitrary — no
+    /// wire-format metadata is emitted regardless of choice.
+    pub explore_hu_order: bool,
     /// Whether to evaluate input-feature reorder candidates.
     /// Default true. Set false if you know the bake's inputs are
     /// already in a meaningful caller-natural order and shouldn't
@@ -64,9 +73,9 @@ pub struct OptimizeConfig {
     /// Whether to evaluate output reorder candidates.
     /// Default true. Skipped automatically when `n_outputs == 1`.
     pub explore_output_order: bool,
-    /// Maximum number of pairwise-swap iterations after the best
-    /// heuristic is selected. Each iteration evaluates a small batch
-    /// of random swap proposals. Set to 0 to disable local search.
+    /// Maximum number of pairwise-swap iterations per axis after
+    /// the best heuristic is selected. Each iteration evaluates a
+    /// random swap proposal. Set to 0 to disable local search.
     /// Default 600 — enough to comfortably fill a 1 s budget on
     /// V_X-shape models (~1 ms per bake), giving the swap optimizer
     /// real coverage of the n=228 search space.
@@ -87,12 +96,14 @@ pub struct OptimizeConfig {
 impl Default for OptimizeConfig {
     fn default() -> Self {
         Self {
+            explore_hu_order: true,
             explore_input_order: true,
             explore_output_order: true,
-            // ~600 swap evals = ~600 ms; combined with ~10-30
-            // heuristic evals the optimizer pushes about 1 s total
-            // on V_X-shape bakes. Matches the user-stated bake-time
-            // budget rule: "at least a full second to optimize".
+            // ~600 swap evals per axis; combined with heuristics
+            // and the HU axis the optimizer pushes ~1-2 s total on
+            // V_X-shape bakes. HU is the highest-leverage axis so
+            // it gets the same budget as input/output rather than
+            // being short-changed by being inside bake().
             local_search_iters: 600,
             local_search_seed: 0xDEAD_BEEF,
             max_evaluations: 2048,
@@ -116,6 +127,7 @@ pub fn bake_optimized_with(
 ) -> Result<Vec<u8>, BakeError> {
     let n_in = req.layers[0].in_dim;
     let n_out = req.layers.last().expect("nonempty layers").out_dim;
+    let n_interior = req.layers.len().saturating_sub(1);
 
     // ── Generate heuristic candidates. ──
     let input_candidates: Vec<Option<Vec<u32>>> = if cfg.explore_input_order {
@@ -128,6 +140,14 @@ pub fn bake_optimized_with(
     } else {
         alloc::vec![None]
     };
+    // HU candidates: per-interior-dim list of options. None means
+    // "use bake's default L2-asc". For each non-None candidate, the
+    // outer search supplies it as req.hu_permutations.
+    let hu_candidate_perms: Vec<HuCandidate> = if cfg.explore_hu_order && n_interior > 0 {
+        hu_heuristics(req)
+    } else {
+        alloc::vec![HuCandidate::Default]
+    };
 
     // ── Sweep the heuristic matrix × {compressed, uncompressed}. ──
     let mut evaluations: usize = 0;
@@ -135,29 +155,43 @@ pub fn bake_optimized_with(
     let mut best_score: Option<(usize, u8)> = None;
     let mut best_input: Option<Vec<u32>> = None;
     let mut best_output: Option<Vec<u32>> = None;
+    let mut best_hu: HuCandidate = HuCandidate::Default;
     let mut best_compressed: bool = false;
 
-    for f_perm in &input_candidates {
-        for o_perm in &output_candidates {
-            for compress in [true, false] {
-                if evaluations >= cfg.max_evaluations {
-                    break;
-                }
-                let mut local = clone_request(req);
-                local.feature_order = f_perm.as_deref();
-                local.output_order = o_perm.as_deref();
-                local.compressed = compress;
-                let bytes = bake(&local)?;
-                evaluations += 1;
-                let identity_pref =
-                    u8::from(f_perm.is_none()) + u8::from(o_perm.is_none());
-                let score = (bytes.len(), 255 - identity_pref * 64);
-                if best_score.map_or(true, |b| score < b) {
-                    best_score = Some(score);
-                    best_bytes = Some(bytes);
-                    best_input = f_perm.clone();
-                    best_output = o_perm.clone();
-                    best_compressed = compress;
+    for hu in &hu_candidate_perms {
+        // Build the HU permutations slice (Vec<Vec<u32>> → Vec<&[u32]>
+        // when not Default; None when Default).
+        let hu_slices: Option<Vec<&[u32]>> = match hu {
+            HuCandidate::Default => None,
+            HuCandidate::Explicit(perms) => {
+                Some(perms.iter().map(|v| v.as_slice()).collect())
+            }
+        };
+        for f_perm in &input_candidates {
+            for o_perm in &output_candidates {
+                for compress in [true, false] {
+                    if evaluations >= cfg.max_evaluations {
+                        break;
+                    }
+                    let mut local = clone_request(req);
+                    local.feature_order = f_perm.as_deref();
+                    local.output_order = o_perm.as_deref();
+                    local.compressed = compress;
+                    local.hu_permutations = hu_slices.as_deref();
+                    let bytes = bake(&local)?;
+                    evaluations += 1;
+                    let identity_pref = u8::from(f_perm.is_none())
+                        + u8::from(o_perm.is_none())
+                        + u8::from(matches!(hu, HuCandidate::Default));
+                    let score = (bytes.len(), 255 - identity_pref * 32);
+                    if best_score.map_or(true, |b| score < b) {
+                        best_score = Some(score);
+                        best_bytes = Some(bytes);
+                        best_input = f_perm.clone();
+                        best_output = o_perm.clone();
+                        best_hu = hu.clone();
+                        best_compressed = compress;
+                    }
                 }
             }
         }
@@ -166,6 +200,55 @@ pub fn bake_optimized_with(
     // ── Local search: pairwise swaps on the best heuristic. ──
     if cfg.local_search_iters > 0 && evaluations < cfg.max_evaluations {
         let mut rng = SmallRng::new(cfg.local_search_seed);
+
+        // Resolve the HU candidate to an explicit per-dim perm list,
+        // since local search needs mutable swap targets and all
+        // downstream searches must keep the best HU layout active.
+        let mut current_hu_vec: Vec<Vec<u32>> = resolve_hu_to_explicit(req, &best_hu);
+
+        fn make_hu_slices(v: &[Vec<u32>]) -> Vec<&[u32]> {
+            v.iter().map(|p| p.as_slice()).collect()
+        }
+
+        // Try improving the HU permutation for each interior dim.
+        if cfg.explore_hu_order && n_interior > 0 {
+            for dim_idx in 0..n_interior {
+                let interior_dim = req.layers[dim_idx].out_dim;
+                let mut current_size = best_bytes.as_ref().unwrap().len();
+                let iters = cfg
+                    .local_search_iters
+                    .min(cfg.max_evaluations.saturating_sub(evaluations));
+                for _ in 0..iters {
+                    if evaluations >= cfg.max_evaluations {
+                        break;
+                    }
+                    let i = (rng.next_u32() as usize) % interior_dim;
+                    let j = (rng.next_u32() as usize) % interior_dim;
+                    if i == j {
+                        continue;
+                    }
+                    current_hu_vec[dim_idx].swap(i, j);
+                    let hu_slices = make_hu_slices(&current_hu_vec);
+                    let mut local = clone_request(req);
+                    local.feature_order = best_input.as_deref();
+                    local.output_order = best_output.as_deref();
+                    local.compressed = best_compressed;
+                    local.hu_permutations = Some(&hu_slices);
+                    let bytes = bake(&local)?;
+                    evaluations += 1;
+                    if bytes.len() < current_size {
+                        current_size = bytes.len();
+                        best_bytes = Some(bytes);
+                    } else {
+                        current_hu_vec[dim_idx].swap(i, j); // revert
+                    }
+                }
+            }
+            // current_hu_vec carries the refined HU permutations
+            // through into the input + output local search and final
+            // compression toggle below — no need to update best_hu
+            // (which is no longer read).
+        }
 
         // Try improving the INPUT permutation (rows of layer 0).
         if cfg.explore_input_order && n_in > 1 {
@@ -184,10 +267,12 @@ pub fn bake_optimized_with(
                     continue;
                 }
                 perm.swap(i, j);
+                let hu_slices = make_hu_slices(&current_hu_vec);
                 let mut local = clone_request(req);
                 local.feature_order = Some(&perm);
                 local.output_order = best_output.as_deref();
                 local.compressed = best_compressed;
+                local.hu_permutations = Some(&hu_slices);
                 let bytes = bake(&local)?;
                 evaluations += 1;
                 if bytes.len() < current_size {
@@ -217,10 +302,12 @@ pub fn bake_optimized_with(
                     continue;
                 }
                 perm.swap(i, j);
+                let hu_slices = make_hu_slices(&current_hu_vec);
                 let mut local = clone_request(req);
                 local.feature_order = best_input.as_deref();
                 local.output_order = Some(&perm);
                 local.compressed = best_compressed;
+                local.hu_permutations = Some(&hu_slices);
                 let bytes = bake(&local)?;
                 evaluations += 1;
                 if bytes.len() < current_size {
@@ -234,20 +321,18 @@ pub fn bake_optimized_with(
         }
 
         // Final pass: try toggling compression with the best perms.
-        // The optimal compression flag can shift after local search
-        // when the post-permutation byte structure changes.
         if evaluations < cfg.max_evaluations {
             for compress in [true, false] {
                 if compress == best_compressed {
                     continue;
                 }
+                let hu_slices = make_hu_slices(&current_hu_vec);
                 let mut local = clone_request(req);
                 local.feature_order = best_input.as_deref();
                 local.output_order = best_output.as_deref();
                 local.compressed = compress;
+                local.hu_permutations = Some(&hu_slices);
                 let bytes = bake(&local)?;
-                // Final pass — no further evaluations after this
-                // block, so we don't increment the counter.
                 if bytes.len() < best_bytes.as_ref().unwrap().len() {
                     best_bytes = Some(bytes);
                     best_compressed = compress;
@@ -259,7 +344,124 @@ pub fn bake_optimized_with(
     Ok(best_bytes.expect("at least one candidate always succeeds"))
 }
 
-// ── Heuristic candidate generators. ───────────────────────────────
+// ── HU candidate types and generators. ────────────────────────────
+
+#[derive(Clone)]
+enum HuCandidate {
+    /// Use bake's default L2-asc HU reorder (computed internally).
+    Default,
+    /// Explicit per-interior-dim permutations.
+    Explicit(Vec<Vec<u32>>),
+}
+
+/// Resolve a candidate to its concrete per-interior-dim permutation
+/// list. `Default` gets materialized by computing L2-asc on the
+/// upstream weights for each interior dim — matching what `bake()`
+/// would do internally — so local search can swap-mutate it.
+fn resolve_hu_to_explicit(req: &BakeRequest<'_>, candidate: &HuCandidate) -> Vec<Vec<u32>> {
+    match candidate {
+        HuCandidate::Explicit(perms) => perms.clone(),
+        HuCandidate::Default => {
+            let n_interior = req.layers.len().saturating_sub(1);
+            (0..n_interior)
+                .map(|i| {
+                    let l = &req.layers[i];
+                    crate::hu_reorder::compute_hu_perm_l2_asc(
+                        l.weights, l.in_dim, l.out_dim,
+                    )
+                })
+                .collect()
+        }
+    }
+}
+
+/// Generate HU candidate permutations across all interior dims. Each
+/// candidate yields a complete `Vec<Vec<u32>>` (one entry per interior
+/// dim). All candidates use the SAME heuristic for every interior dim
+/// — we don't mix-and-match across dims (combinatorial blowup) and
+/// the local search later refines per-dim.
+fn hu_heuristics(req: &BakeRequest<'_>) -> Vec<HuCandidate> {
+    let n_interior = req.layers.len().saturating_sub(1);
+    if n_interior == 0 {
+        return alloc::vec![HuCandidate::Default];
+    }
+
+    let mut out: Vec<HuCandidate> = Vec::with_capacity(8);
+    out.push(HuCandidate::Default); // == L2-asc, kept for naming
+
+    // Identity (no reorder at all). Worth comparing against to catch
+    // shapes where L2-asc is worse than the original ordering.
+    let identity: Vec<Vec<u32>> = (0..n_interior)
+        .map(|i| (0..req.layers[i].out_dim as u32).collect())
+        .collect();
+    out.push(HuCandidate::Explicit(identity));
+
+    // L2-desc.
+    out.push(HuCandidate::Explicit(
+        (0..n_interior)
+            .map(|i| {
+                let l = &req.layers[i];
+                crate::hu_reorder::compute_hu_perm_l2_desc(l.weights, l.in_dim, l.out_dim)
+            })
+            .collect(),
+    ));
+
+    // Zero-count asc/desc (using a τ=0.005 layer-max threshold as
+    // an estimate of post-zerobias zero positions).
+    let zc_asc: Vec<Vec<u32>> = (0..n_interior)
+        .map(|i| {
+            let l = &req.layers[i];
+            let layer_max = l.weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
+            let cut = layer_max * 0.005;
+            crate::hu_reorder::compute_hu_perm_zero_count(
+                l.weights, l.in_dim, l.out_dim, cut, true,
+            )
+        })
+        .collect();
+    out.push(HuCandidate::Explicit(zc_asc));
+
+    let zc_desc: Vec<Vec<u32>> = (0..n_interior)
+        .map(|i| {
+            let l = &req.layers[i];
+            let layer_max = l.weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
+            let cut = layer_max * 0.005;
+            crate::hu_reorder::compute_hu_perm_zero_count(
+                l.weights, l.in_dim, l.out_dim, cut, false,
+            )
+        })
+        .collect();
+    out.push(HuCandidate::Explicit(zc_desc));
+
+    // Sign balance.
+    out.push(HuCandidate::Explicit(
+        (0..n_interior)
+            .map(|i| {
+                let l = &req.layers[i];
+                crate::hu_reorder::compute_hu_perm_sign_balance(
+                    l.weights, l.in_dim, l.out_dim,
+                )
+            })
+            .collect(),
+    ));
+
+    // Greedy NN chain (capped at interior_dim ≤ 1024 inside the helper).
+    out.push(HuCandidate::Explicit(
+        (0..n_interior)
+            .map(|i| {
+                let l = &req.layers[i];
+                let layer_max = l.weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
+                let cut = layer_max * 0.005;
+                crate::hu_reorder::compute_hu_perm_nn_chain(
+                    l.weights, l.in_dim, l.out_dim, cut,
+                )
+            })
+            .collect(),
+    ));
+
+    out
+}
+
+// ── Input/output heuristic candidate generators. ──────────────────
 
 fn input_heuristics(req: &BakeRequest<'_>) -> Vec<Option<Vec<u32>>> {
     let n_in = req.layers[0].in_dim;
@@ -515,6 +717,7 @@ fn clone_request<'a>(req: &BakeRequest<'a>) -> BakeRequest<'a> {
         feature_order: req.feature_order,
         output_order: req.output_order,
         compressed: req.compressed,
+        hu_permutations: req.hu_permutations,
     }
 }
 

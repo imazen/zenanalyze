@@ -508,6 +508,7 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         feature_order: None,
         output_order: None,
         compressed: false,
+        hu_permutations: None,
     };
     Ok(bake(&request)?)
 }
