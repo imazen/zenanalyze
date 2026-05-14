@@ -63,7 +63,7 @@ fn predict_with_specs_passthrough_when_no_specs() {
     // predict_with_specs return Override(raw[i]) for every output.
     let bytes = Aligned(build_identity_model());
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let raw = p.predict(&[3.0, 4.0]).unwrap().to_vec();
     assert_eq!(raw, vec![3.0, 4.0, 7.0, -1.0]);
     let with_specs = p.predict_with_specs(&[3.0, 4.0]).unwrap();
@@ -147,7 +147,7 @@ fn full_pipeline_round_trip() {
     assert!(model.has_output_specs());
     assert_eq!(model.output_specs().len(), 4);
     assert_eq!(model.discrete_sets(), &pool);
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
 
     // features = [3.0, 0.6]
     // raw = [3.0, 0.6, 3.6, 2.4]
@@ -188,7 +188,7 @@ fn sparse_overrides_apply_after_pipeline() {
     ];
     let bytes = Aligned(build_full_spec_model(&specs, &[], &overrides));
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let r = p.predict_with_specs(&[3.0, 4.0]).unwrap().to_vec();
     // out0: forward yields 3, override → 99
     assert_eq!(r[0], OutputValue::Override(99.0));
@@ -221,7 +221,7 @@ fn sparse_override_overrules_sentinel() {
     let overrides = [SparseOverride::new(0, 42.0)];
     let bytes = Aligned(build_full_spec_model(&specs, &[], &overrides));
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     // raw out0 = 3.0; sentinel matches → Default; override → 42.0
     let r = p.predict_with_specs(&[3.0, 0.0]).unwrap();
     assert_eq!(r[0], OutputValue::Override(42.0));
@@ -246,7 +246,7 @@ fn discrete_snap_at_midpoint() {
     let pool = [0.0f32, 50.0, 100.0];
     let bytes = Aligned(build_full_spec_model(&specs, &pool, &[]));
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     // raw out0 = 24, closer to 0 than 50
     let r = p.predict_with_specs(&[24.0, 0.0]).unwrap();
     assert_eq!(r[0], OutputValue::Override(0.0));
@@ -422,7 +422,7 @@ fn raw_predict_unchanged_by_specs() {
     ];
     let bytes = Aligned(build_full_spec_model(&specs, &[], &[]));
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let raw = p.predict(&[3.0, 4.0]).unwrap().to_vec();
     // raw forward should be untransformed; sigmoid would have squashed
     // the 3.0 to ~0.95.
@@ -436,7 +436,7 @@ fn nan_sparse_override_forces_default_even_when_no_specs() {
     let overrides = [SparseOverride::new(1, f32::NAN)];
     let bytes = Aligned(build_full_spec_model(&[], &[], &overrides));
     let model = Model::from_bytes(&bytes.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let r = p.predict_with_specs(&[3.0, 4.0]).unwrap();
     assert_eq!(r[0], OutputValue::Override(3.0));
     assert_eq!(r[1], OutputValue::Default);

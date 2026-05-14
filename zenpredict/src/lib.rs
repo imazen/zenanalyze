@@ -25,7 +25,7 @@
 //! ```ignore
 //! let bytes: &'static [u8] = include_bytes!("zenjpeg_picker_v2.2.bin");
 //! let model = zenpredict::Model::from_bytes(bytes)?;
-//! let mut predictor = zenpredict::Predictor::new(model);
+//! let mut predictor = zenpredict::Predictor::new(&model);
 //!
 //! let features = my_codec::extract_features(&analysis, target_zq);
 //! let mask_data = my_codec::allowed_configs(&caller_constraints);
@@ -72,7 +72,7 @@
 //! // freshly-allocated `Vec` (heap allocations are at least
 //! // 8-aligned on every supported target — usually 16).
 //! let model = Model::from_bytes(&bytes).unwrap();
-//! let mut p = Predictor::new(model);
+//! let mut p = Predictor::new(&model);
 //! let out = p.predict(&[3.0, 4.0]).unwrap();
 //! assert_eq!(out, &[3.0, 4.0, 5.0]);
 //! ```

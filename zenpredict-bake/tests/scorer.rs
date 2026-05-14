@@ -127,7 +127,7 @@ mod scorer_tests {
         let bytes = make_two_head_model();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
 
         // bytes_log = [10.0, 11.0, 12.0]    → bytes ≈ [22 026, 59 874, 162 754]
         // time      = [5.0, 8.0, 12.0]
@@ -176,7 +176,7 @@ mod scorer_tests {
         let bytes = make_two_head_model();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
 
         // bytes_log[0..3] = [10.0, 11.0, 12.0]
         // time[3..6]       = [100.0, 50.0, 1.0]

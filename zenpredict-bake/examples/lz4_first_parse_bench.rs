@@ -11,7 +11,7 @@
 //! For each variant, measure:
 //!
 //! - **Bake size**: bytes on disk.
-//! - **First parse**: `Model::from_bytes(bytes)` + `Predictor::new(model)`
+//! - **First parse**: `Model::from_bytes(bytes)` + `Predictor::new(&model)`
 //!   in a single tight loop. This is what a runtime pays on its
 //!   first `predict()` (the parser does zero-copy slicing for non-LZ4
 //!   dtypes; for LZ4 the per-Predictor scratch is allocated here).
@@ -176,6 +176,8 @@ fn main() {
     println!("Source: `{}` ({}→{}→1)", path.display(),
         src.layers[0].in_dim, src.layers[0].out_dim);
     println!();
+    println!("## Per-layer LZ4 compression (zenpredict's compressed-weights path)");
+    println!();
     println!("| variant | bake bytes | shrink vs I8 raw | first parse (µs, median) | per-predict (µs, median) |");
     println!("|---|--:|--:|--:|--:|");
 
@@ -187,13 +189,13 @@ fn main() {
         // across calls.
         let mk_predictor = || {
             let model = Model::from_bytes(&aligned.0).unwrap();
-            let _ = Predictor::new(model);
+            let _ = Predictor::new(&model);
         };
         let t_parse = median_us(mk_predictor, 200);
 
         // Per-predict: parse once, time the warm hot path.
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let t_predict = median_us(|| {
             let _ = predictor.predict(&features).unwrap();
         }, 1000);
@@ -207,5 +209,48 @@ fn main() {
             t_parse,
             t_predict,
         );
+    }
+
+    // -------- Full-bin compression (consumer-side decode) --------
+    //
+    // Compress the entire 93 KB .bin (including headers, scaler arrays,
+    // biases, scales) as one blob. Decompress at consumer load time,
+    // then parse normally. Per-predict cost is ZERO (decompression
+    // happened once at startup) — but the consumer pays the
+    // decompression once instead of zenpredict paying per-predict.
+    //
+    // Practical relevance: this is what you'd do if you wanted a
+    // smaller embed without zenpredict's compressed-weights feature
+    // active. The trade-off is decompression-on-load vs per-predict,
+    // not the size shrink itself.
+    #[cfg(feature = "lz4")]
+    {
+        use lz4_flex::block::compress as lz4_compress;
+        println!();
+        println!("## Full-bin LZ4 compression (consumer decompresses entire .bin once at load)");
+        println!();
+        println!("Decompression cost is paid ONCE at consumer load, NOT per-predict.");
+        println!("Per-predict latency is identical to the uncompressed `I8 raw` baseline.");
+        println!();
+        println!("| variant | full-bin bytes | shrink vs I8 raw | full-bin decode µs (median) |");
+        println!("|---|--:|--:|--:|");
+        for (label, bytes) in &variants {
+            let compressed = lz4_compress(bytes);
+            let shrink = 1.0 - (compressed.len() as f32 / baseline_bytes as f32);
+            let decompressed_len = bytes.len();
+            let t_decode = median_us(
+                || {
+                    let _ = lz4_flex::block::decompress(&compressed, decompressed_len).unwrap();
+                },
+                500,
+            );
+            println!(
+                "| {} | {:>8} | {:>+5.1} % | {:>10.1} |",
+                label.trim(),
+                compressed.len(),
+                shrink * 100.0,
+                t_decode,
+            );
+        }
     }
 }

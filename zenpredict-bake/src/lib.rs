@@ -35,6 +35,7 @@
 extern crate alloc;
 
 pub mod composer;
+pub(crate) mod hu_reorder;
 pub mod json;
 pub mod zero_bias;
 

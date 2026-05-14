@@ -31,7 +31,7 @@ fn json_round_trip_minimal() {
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     assert_eq!(model.schema_hash(), 12345);
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let out = p.predict(&[1.0, 1.0]).unwrap();
     assert_eq!(out, &[1.5, 2.0]);
 }
@@ -273,7 +273,7 @@ fn json_round_trip_with_output_specs() {
     assert!(model.has_output_specs());
     assert_eq!(model.output_specs().len(), 4);
     assert_eq!(model.discrete_sets().len(), 8);
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     // Use 0.4 so `f32::round` (round-half-away-from-zero in Rust)
     // floors it to 0 — proves the round → snap → sentinel chain.
     let r = p.predict_with_specs(&[3.0, 0.4]).unwrap();
@@ -317,7 +317,7 @@ fn json_round_trip_with_sparse_overrides() {
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     assert_eq!(model.sparse_overrides().len(), 2);
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let r = p.predict_with_specs(&[3.0, 4.0]).unwrap();
     assert_eq!(r[0], OutputValue::Override(99.0));
     assert_eq!(r[1], OutputValue::Override(4.0));
@@ -349,7 +349,7 @@ fn json_sigmoid_scaled_transform() {
     let bytes = bake_from_json_str(json).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     // raw 0 → sigmoid 0.5 → scaled to 50
     let r = p.predict_with_specs(&[0.0]).unwrap();
     if let OutputValue::Override(v) = r[0] {

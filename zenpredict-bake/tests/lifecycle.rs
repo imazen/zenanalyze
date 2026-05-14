@@ -156,7 +156,7 @@ fn end_to_end_codec_picker_lifecycle() {
     );
 
     // Build a Predictor and run a pick.
-    let mut predictor = Predictor::new(model);
+    let mut predictor = Predictor::new(&model);
     let features = [0.5f32, -0.3, 1.2, 0.8, -0.1];
     let mask_data = [true; 12];
     let mask = AllowedMask::new(&mask_data);
@@ -251,7 +251,7 @@ fn end_to_end_perceptual_scorer_lifecycle() {
     .unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let features: Vec<f32> = (0..n_in).map(|i| (i as f32 * 0.01).sin()).collect();
     let out = p.predict(&features).unwrap();
     assert_eq!(out.len(), 1);

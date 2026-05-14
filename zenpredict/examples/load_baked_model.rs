@@ -58,7 +58,7 @@ fn main() -> ExitCode {
     let n_in = model.n_inputs();
     let features: Vec<f32> = (0..n_in).map(|i| ((i as f32) * 0.1).sin()).collect();
 
-    let mut predictor = zenpredict::Predictor::new(model);
+    let mut predictor = zenpredict::Predictor::new(&model);
     let out = match predictor.predict(&features) {
         Ok(v) => v,
         Err(e) => {

@@ -69,7 +69,7 @@ mod bake_roundtrip {
         assert_eq!(model.n_outputs(), 2);
         assert_eq!(model.schema_hash(), 0xdeadbeef_cafebabe);
 
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let out = predictor.predict(&[1.0, 1.0, 1.0]).unwrap();
         // Layer 0 produces [1,1,1,0] (LeakyReLU on non-negatives is
         // identity). Layer 1 produces [w[0,0]*1 + b0=10, w[1,1]*1 + b1=20]
@@ -172,7 +172,7 @@ mod bake_roundtrip {
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let out = predictor.predict(&[1.0, 1.0]).unwrap();
         // f16 round-trip is exact for these values:
         //   y0 = 0.5*1 + 1.0*1 + 0.0 = 1.5
@@ -211,7 +211,7 @@ mod bake_roundtrip {
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let out = predictor.predict(&[1.0, 1.0]).unwrap();
         // Row-major weights [1.0, -0.5, 0.5, 1.0]:
         //   y0 = 1*1.0 + 1*0.5 = 1.5
@@ -366,7 +366,7 @@ mod bake_roundtrip {
         .unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[1.0, 5.0, 1.0]).unwrap();
         for v in out {
             assert!(v.is_finite(), "scaler /0 produced non-finite output: {v}");
@@ -464,7 +464,7 @@ mod bake_roundtrip {
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         assert_eq!(model.layers().len(), 1);
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[1.0, 1.0, 1.0, 1.0]).unwrap();
         assert_eq!(out, &[11.0, 21.0, 31.0]);
     }
@@ -509,7 +509,7 @@ mod bake_roundtrip {
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         assert_eq!(model.layers().len(), 10);
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[2.0, 3.0, 5.0, 7.0]).unwrap();
         assert_eq!(out, &[2.0, 3.0, 5.0, 7.0]);
     }
@@ -547,7 +547,7 @@ mod bake_roundtrip {
         let model = Model::from_bytes(&aligned.0).unwrap();
         // scratch_len must be at least 64 (widest layer) for forward to succeed.
         assert_eq!(model.scratch_len(), 64);
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[1.0, 1.0, 1.0, 1.0]).unwrap();
         // h0[i] = sum_j 1 * 1 = 4 (per chunk). 64 hidden units, all 4.
         // h1[i] = sum 1*4 = 256. 4 outputs, all 256.
@@ -595,7 +595,7 @@ mod bake_roundtrip {
         .unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[1.0, 2.0, 3.0]).unwrap();
         // i8 quantization is lossy; f16 and f32 paths are exact at these
         // magnitudes. Identity chain should round-trip within ~1%.
@@ -639,7 +639,7 @@ mod bake_roundtrip {
             .unwrap();
             let aligned = Aligned(bytes);
             let model = Model::from_bytes(&aligned.0).unwrap();
-            let mut p = Predictor::new(model);
+            let mut p = Predictor::new(&model);
             let out = p.predict(&[2.0]).unwrap();
             // Pre-activation hidden: [2, -2, 1, -1].
             //   Identity   → sum = 0
@@ -683,7 +683,7 @@ mod bake_roundtrip {
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         assert_eq!(model.scratch_len(), 1024);
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let out = p.predict(&[1.0; 8]).unwrap();
         // h[i] = ReLU(sum_j 1*1) = 8 (positive). All 1024 hidden = 8.
         // y = sum_i 1*8 = 8 * 1024 = 8192.
@@ -824,7 +824,7 @@ mod bake_roundtrip {
         .unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         // n_outputs = 2 but we pass per_output of length 5.
         let bad_offsets = ArgminOffsets {
             uniform: 0.0,
@@ -872,7 +872,7 @@ mod bake_roundtrip {
         .unwrap();
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut p = Predictor::new(model);
+        let mut p = Predictor::new(&model);
         let err = p.predict(&[1.0, 1.0]).unwrap_err(); // 2 vs expected 3
         assert!(matches!(
             err,

@@ -109,7 +109,7 @@ mod feature_transform_tests {
         let bytes = make_identity_passthrough(&metadata);
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let e = core::f32::consts::E;
         let raw = [1.0f32, e, 0.0, 7.0];
         let out = predictor.predict_transformed(&raw).unwrap().to_vec();
@@ -135,7 +135,7 @@ mod feature_transform_tests {
         let bytes = make_identity_passthrough(&metadata);
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let raw = [1.0f32, core::f32::consts::E, 0.0, 7.0];
         let out = predictor.predict(&raw).unwrap().to_vec();
         // Pass-through model + no transform → output equals input.
@@ -163,8 +163,8 @@ mod feature_transform_tests {
         let aligned = Aligned(bytes);
         let model_a = Model::from_bytes(&aligned.0).unwrap();
         let model_b = Model::from_bytes(&aligned.0).unwrap();
-        let mut p_auto = Predictor::new(model_a);
-        let mut p_manual = Predictor::new(model_b);
+        let mut p_auto = Predictor::new(&model_a);
+        let mut p_manual = Predictor::new(&model_b);
 
         let raw = [3.5f32, 12.0, -2.7, 0.5];
         // Auto path.
@@ -198,8 +198,8 @@ mod feature_transform_tests {
         let aligned = Aligned(bytes);
         let model_a = Model::from_bytes(&aligned.0).unwrap();
         let model_b = Model::from_bytes(&aligned.0).unwrap();
-        let mut p_a = Predictor::new(model_a);
-        let mut p_b = Predictor::new(model_b);
+        let mut p_a = Predictor::new(&model_a);
+        let mut p_b = Predictor::new(&model_b);
         let raw = [1.5f32, -3.2, 4.0, 0.25];
         let a = p_a.predict_transformed(&raw).unwrap().to_vec();
         let b = p_b.predict(&raw).unwrap().to_vec();
@@ -223,7 +223,7 @@ mod feature_transform_tests {
         let bytes = make_identity_passthrough(&metadata);
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
         let e = core::f32::consts::E;
         let raw = [1.0f32, e, 2.0, 3.0];
         let out = predictor.predict_with_specs_transformed(&raw).unwrap();

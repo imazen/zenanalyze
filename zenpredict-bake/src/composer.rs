@@ -429,6 +429,22 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     }
     let _ = n_outputs;
 
+    // Hidden-unit reorder: always-on, sorts each interior dim's
+    // hidden units by L2 norm ascending. Mathematically identical
+    // to the un-permuted bake (HU labels are arbitrary internal
+    // nodes) but row-major LZ4/zstd find longer zero runs when
+    // dead units cluster contiguously. Saves ~58 % on layer-0
+    // weights for V0_18-shape bakes (228 → 384 → 1, 74 % dead HUs).
+    // No-op on fully-live matrices; never regresses size.
+    //
+    // See `hu_reorder` module for measured numbers and references.
+    let permuted_owned = crate::hu_reorder::apply_hu_reorder(req.layers);
+    let permuted_layers: alloc::vec::Vec<BakeLayer<'_>> = permuted_owned
+        .iter()
+        .map(crate::hu_reorder::OwnedBakeLayer::as_borrowed)
+        .collect();
+    let layers: &[BakeLayer<'_>] = &permuted_layers;
+
     // Validate metadata keys up front.
     for entry in req.metadata {
         if entry.key.is_empty() {
@@ -480,8 +496,10 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     let scaler_scale_section = append_f32(&mut buf, req.scaler_scale);
     write_section(&mut buf, SECTION_OFF_SCALER_SCALE, scaler_scale_section);
 
-    // Per-layer payloads.
-    for (i, layer) in req.layers.iter().enumerate() {
+    // Per-layer payloads — iterate the post-HU-reorder permuted
+    // layers, NOT `req.layers` (the latter holds caller-order input;
+    // the bake's on-disk layout is the L2-asc-sorted permutation).
+    for (i, layer) in layers.iter().enumerate() {
         let layer_entry_off = HEADER_SIZE + i * LAYER_ENTRY_SIZE;
 
         let weights_section = match layer.dtype {

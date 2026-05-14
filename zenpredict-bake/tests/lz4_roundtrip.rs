@@ -95,8 +95,8 @@ fn lz4_roundtrips_for_random_weights() {
 
     let model_i8 = Model::from_bytes(&bake_i8.0).expect("parse i8");
     let model_lz4 = Model::from_bytes(&bake_lz4.0).expect("parse i8_lz4");
-    let mut p_i8 = Predictor::new(model_i8);
-    let mut p_lz4 = Predictor::new(model_lz4);
+    let mut p_i8 = Predictor::new(&model_i8);
+    let mut p_lz4 = Predictor::new(&model_lz4);
 
     // Predict on 8 random feature vectors — outputs MUST be
     // bit-identical between I8 and I8Lz4 (same quantized weights,
