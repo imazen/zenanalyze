@@ -408,7 +408,7 @@ fn metadata_iteration_returns_all_entries() {
     let bytes = bake(&req).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let md: &Metadata<'_> = model.metadata();
+    let md: Metadata<'_> = model.metadata();
     let collected: Vec<(&str, MetadataType)> = md.iter().map(|e| (e.key, e.kind)).collect();
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0].0, "a");

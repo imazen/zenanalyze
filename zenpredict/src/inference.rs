@@ -20,12 +20,10 @@ use crate::model::{Activation, LEAKY_RELU_ALPHA, LayerView, Model, WeightStorage
 /// each be at least [`Model::scratch_len`](crate::Model::scratch_len)
 /// long. `output` must be exactly `n_outputs` long.
 pub fn forward(
-    model: &Model<'_>,
+    model: &Model,
     features: &[f32],
     scratch_a: &mut [f32],
     scratch_b: &mut [f32],
-    #[cfg(feature = "compressed-weights")] lz4_scratch: &mut [i8],
-    #[cfg(feature = "compressed-weights")] lz4_cache: Option<&[alloc::vec::Vec<i8>]>,
     output: &mut [f32],
 ) -> Result<(), PredictError> {
     let n_inputs = model.n_inputs();
@@ -52,17 +50,9 @@ pub fn forward(
 
     // Scale inputs: x' = (x - mean) / scale.
     //
-    // sklearn's `StandardScaler.scale_` IS the standard deviation
-    // (np.sqrt(var_)); transform divides by it. Mirror that here so
-    // the runtime feeds the network inputs scaled the same way the
-    // training-time eval did.
-    //
     // Zero-variance columns: sklearn's `_handle_zeros_in_scale`
     // replaces `scale=0` with `1.0` so the column passes through as
-    // `(x - mean)`. We mirror that defensively in case a baker forgot
-    // to sanitize. Cost: one branch per input dim per predict
-    // (~12-32 per call; negligible vs the matmul). NaN-`/`-NaN paths
-    // are unaffected; only exact-zero scale is rerouted.
+    // `(x - mean)`. Mirror that defensively.
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     for i in 0..n_inputs {
@@ -74,10 +64,10 @@ pub fn forward(
     let mut input_buf: &mut [f32] = scratch_a;
     let mut output_buf: &mut [f32] = scratch_b;
 
-    let layers = model.layers();
-    let last_idx = layers.len() - 1;
+    let n_layers = model.n_layers();
+    let last_idx = n_layers - 1;
 
-    for (idx, layer) in layers.iter().enumerate() {
+    for (idx, layer) in model.layers().enumerate() {
         let in_dim = layer.in_dim;
         let out_dim = layer.out_dim;
         let dst: &mut [f32] = if idx == last_idx {
@@ -86,19 +76,7 @@ pub fn forward(
             &mut output_buf[..out_dim]
         };
         let src = &input_buf[..in_dim];
-        #[cfg(feature = "compressed-weights")]
-        let cached_layer: Option<&[i8]> = lz4_cache
-            .and_then(|c| c.get(idx))
-            .and_then(|v| if v.is_empty() { None } else { Some(v.as_slice()) });
-        layer_forward(
-            layer,
-            src,
-            dst,
-            #[cfg(feature = "compressed-weights")]
-            lz4_scratch,
-            #[cfg(feature = "compressed-weights")]
-            cached_layer,
-        )?;
+        layer_forward(&layer, src, dst)?;
         if idx != last_idx {
             core::mem::swap(&mut input_buf, &mut output_buf);
         }
@@ -110,8 +88,6 @@ fn layer_forward(
     layer: &LayerView<'_>,
     src: &[f32],
     dst: &mut [f32],
-    #[cfg(feature = "compressed-weights")] lz4_scratch: &mut [i8],
-    #[cfg(feature = "compressed-weights")] cached: Option<&[i8]>,
 ) -> Result<(), PredictError> {
     let out_dim = layer.out_dim;
     let in_dim = layer.in_dim;
@@ -136,60 +112,6 @@ fn layer_forward(
                 *v = 0.0;
             }
             saxpy_matmul_i8(src, weights, dst, in_dim, out_dim);
-            debug_assert_eq!(scales.len(), out_dim);
-            for o in 0..out_dim {
-                dst[o] = layer.biases[o] + scales[o] * dst[o];
-            }
-        }
-        #[cfg(feature = "compressed-weights")]
-        WeightStorage::I8Lz4 {
-            compressed,
-            scales,
-            decompressed_len,
-        } => {
-            // Pick weight source: pre-decompressed cache when the
-            // caller opted into caching via
-            // `Predictor::with_decompression_cache(true)`, otherwise
-            // fresh expansion into `lz4_scratch` ("very fast uncached
-            // expansion" per 2026-05-13 design).
-            let weights_i8: &[i8] = if let Some(c) = cached {
-                // Validate the cached buffer covers the declared
-                // weight count; reject mismatched cache rather than
-                // silently miscomputing.
-                if c.len() < *decompressed_len {
-                    return Err(PredictError::FeatureLenMismatch {
-                        expected: *decompressed_len,
-                        got: c.len(),
-                    });
-                }
-                &c[..*decompressed_len]
-            } else {
-                // Single-alloc contract: lz4_scratch was sized at
-                // Predictor::new to max(decompressed_len); slice it
-                // down and re-fill from the compressed payload.
-                if lz4_scratch.len() < *decompressed_len {
-                    return Err(PredictError::FeatureLenMismatch {
-                        expected: *decompressed_len,
-                        got: lz4_scratch.len(),
-                    });
-                }
-                let scratch = &mut lz4_scratch[..*decompressed_len];
-                let scratch_u8: &mut [u8] = bytemuck::cast_slice_mut(scratch);
-                crate::lz4_block::decompress_into(compressed, scratch_u8).map_err(|_| {
-                    PredictError::SectionOutOfRange {
-                        what: "layer.weights[i8_lz4] (lz4 decode failed)",
-                        offset: 0,
-                        len: compressed.len() as u32,
-                        file_len: 0,
-                    }
-                })?;
-                &lz4_scratch[..*decompressed_len]
-            };
-            // Same matmul kernel as plain I8, same per-output scale apply.
-            for v in dst.iter_mut() {
-                *v = 0.0;
-            }
-            saxpy_matmul_i8(src, weights_i8, dst, in_dim, out_dim);
             debug_assert_eq!(scales.len(), out_dim);
             for o in 0..out_dim {
                 dst[o] = layer.biases[o] + scales[o] * dst[o];

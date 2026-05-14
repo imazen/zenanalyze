@@ -17,18 +17,15 @@ use crate::output_spec::{OutputValue, apply_spec};
 /// allocation-free hot paths.
 ///
 /// `Predictor` **borrows** the `Model` rather than owning it. This
-/// lets a single `Model` live in `static OnceLock<Model<'static>>`
-/// and be shared by per-thread `Predictor` instances without a
-/// `Mutex` — `Model` is `Sync + Send` (read-only views), while
+/// lets a single `Model` live in `static OnceLock<Model>` and be
+/// shared by per-thread `Predictor` instances without a `Mutex` —
+/// `Model` is `Sync + Send` (read-only owned bytes), while
 /// `Predictor` owns the mutable scratch buffers per-thread.
 ///
-/// Two lifetimes:
-/// - `'a` — lifetime of the bake bytes the model was parsed from
-///   (typically `'static` for `include_bytes!`-shipped bakes).
-/// - `'b` — lifetime of the model borrow held by this predictor.
-///   Equal to `'a` (== `'static`) for the singleton pattern.
-pub struct Predictor<'a, 'b> {
-    model: &'b Model<'a>,
+/// Single lifetime `'a`: the lifetime of the model borrow. For
+/// `static OnceLock<Model>` it's `'static`.
+pub struct Predictor<'a> {
+    model: &'a Model,
     scratch_a: alloc::vec::Vec<f32>,
     scratch_b: alloc::vec::Vec<f32>,
     output: alloc::vec::Vec<f32>,
@@ -40,33 +37,14 @@ pub struct Predictor<'a, 'b> {
     /// to zero otherwise (the no-transform path forwards the input
     /// slice without copying). Reused across calls.
     feat_scratch: alloc::vec::Vec<f32>,
-    /// Scratch i8 buffer for LZ4-decoded weights (uncached mode).
-    /// Sized at `Predictor::new` to the max `decompressed_len` across
-    /// all `WeightDtype::I8Lz4` layers (zero if no such layer exists,
-    /// so non-compressed bakes pay no memory cost). Decompressed fresh
-    /// every `predict()` call — "very fast uncached expansion" per
-    /// the design contract.
-    #[cfg(feature = "compressed-weights")]
-    lz4_scratch: alloc::vec::Vec<i8>,
-    /// Per-layer pre-decompressed weights (cached mode). Populated
-    /// when the caller opts in via
-    /// [`Predictor::with_decompression_cache`]. When `Some`, the
-    /// inference path uses these cached i8 vectors directly instead
-    /// of re-decompressing on every `predict()`. Trade: ~88 KB cached
-    /// memory (V_X shape) against ~40 µs/predict.
-    ///
-    /// One `Vec<i8>` per layer; entries for non-I8Lz4 layers are
-    /// empty (zero memory overhead for plain F32/F16/I8 layers).
-    #[cfg(feature = "compressed-weights")]
-    lz4_cache: Option<alloc::vec::Vec<alloc::vec::Vec<i8>>>,
 }
 
-impl<'a, 'b> Predictor<'a, 'b> {
+impl<'a> Predictor<'a> {
     /// Construct a predictor borrowing `model`. The model lives at
     /// the caller's choosing — typically inside a
-    /// `static OnceLock<Model<'static>>` so the same parsed bake is
-    /// shared across many `Predictor` instances (one per thread for
-    /// the lock-free path, or one per call site for ad-hoc use).
+    /// `static OnceLock<Model>` so the same parsed bake is shared
+    /// across many `Predictor` instances (one per thread for the
+    /// lock-free path, or one per call site for ad-hoc use).
     ///
     /// Example (static singleton, lock-free per-thread):
     /// ```ignore
@@ -75,40 +53,24 @@ impl<'a, 'b> Predictor<'a, 'b> {
     /// use zenpredict::{Model, Predictor};
     ///
     /// static BAKE: &[u8] = include_bytes!("picker.bin");
-    /// static MODEL: OnceLock<Model<'static>> = OnceLock::new();
+    /// static MODEL: OnceLock<Model> = OnceLock::new();
     ///
     /// thread_local! {
-    ///     static PREDICTOR: RefCell<Predictor<'static, 'static>> =
+    ///     static PREDICTOR: RefCell<Predictor<'static>> =
     ///         RefCell::new(Predictor::new(MODEL.get_or_init(
     ///             || Model::from_bytes(BAKE).unwrap()
     ///         )));
     /// }
     /// ```
-    pub fn new(model: &'b Model<'a>) -> Self {
+    pub fn new(model: &'a Model) -> Self {
         let need = model.scratch_len();
         let n_out = model.n_outputs();
         let n_in = model.n_inputs();
-        // Only allocate transform scratch when the bake actually
-        // ships transforms. Old (no-transforms) bins keep the same
-        // memory footprint they had in the 0.1.0 release — important
-        // for the path-pinned codecs that haven't rebaked yet.
         let feat_scratch_len = if model.feature_transforms().is_some() {
             n_in
         } else {
             0
         };
-        #[cfg(feature = "compressed-weights")]
-        let lz4_scratch_len = model
-            .layers()
-            .iter()
-            .map(|l| match &l.weights {
-                crate::WeightStorage::I8Lz4 {
-                    decompressed_len, ..
-                } => *decompressed_len,
-                _ => 0,
-            })
-            .max()
-            .unwrap_or(0);
         Self {
             model,
             scratch_a: alloc::vec![0.0; need],
@@ -116,86 +78,7 @@ impl<'a, 'b> Predictor<'a, 'b> {
             output: alloc::vec![0.0; n_out],
             spec_output: alloc::vec![OutputValue::Default; n_out],
             feat_scratch: alloc::vec![0.0; feat_scratch_len],
-            #[cfg(feature = "compressed-weights")]
-            lz4_scratch: alloc::vec![0i8; lz4_scratch_len],
-            #[cfg(feature = "compressed-weights")]
-            lz4_cache: None,
         }
-    }
-
-    /// Enable or disable per-layer decompression caching for
-    /// `WeightDtype::I8Lz4` layers. When `enabled = true`, each
-    /// compressed layer is decompressed once on this call and the
-    /// decoded i8 weights are kept in `self` for the lifetime of
-    /// the `Predictor`; subsequent `predict()` calls reuse the
-    /// cached bytes and skip LZ4 expansion entirely. Memory cost
-    /// for a V_X-shape (228→64→64→1) bake is ~88 KB.
-    ///
-    /// When `enabled = false` (the default), every `predict()`
-    /// re-expands compressed layers into `lz4_scratch` — "very
-    /// fast uncached expansion" per the design contract. Cost
-    /// is roughly +40 µs/predict on the V_X shape; pick this
-    /// mode when many short-lived `Predictor`s are constructed
-    /// or when memory pressure dominates.
-    ///
-    /// Builder-style: returns `self` so callers can write
-    /// `Predictor::new(model).with_decompression_cache(true)` in
-    /// one expression. Calling this method again with a different
-    /// value flips the cache on/off without rebuilding the
-    /// `Predictor`.
-    ///
-    /// No-op when the bake contains no `WeightDtype::I8Lz4`
-    /// layers — plain F32/F16/I8 bakes never touched the cache
-    /// path and don't allocate anything.
-    ///
-    /// # Errors
-    ///
-    /// Returns the original `Predictor` even if a layer's LZ4
-    /// payload would fail to decompress at runtime — the cache
-    /// builder ignores per-layer decompression errors and lets
-    /// `predict()` surface them on first call. This keeps the
-    /// builder infallible; pair with a single `predict()` smoke
-    /// call after `with_decompression_cache(true)` to surface
-    /// any corrupt layer eagerly.
-    #[cfg(feature = "compressed-weights")]
-    pub fn with_decompression_cache(mut self, enabled: bool) -> Self {
-        if !enabled {
-            self.lz4_cache = None;
-            return self;
-        }
-        let mut cache: alloc::vec::Vec<alloc::vec::Vec<i8>> =
-            alloc::vec::Vec::with_capacity(self.model.layers().len());
-        for layer in self.model.layers() {
-            match &layer.weights {
-                crate::WeightStorage::I8Lz4 {
-                    compressed,
-                    decompressed_len,
-                    ..
-                } => {
-                    let mut out = alloc::vec![0i8; *decompressed_len];
-                    // bytemuck cast from &mut [i8] to &mut [u8]:
-                    // both are POD with identical layout; the LZ4
-                    // decoder writes raw bytes. Matches the runtime
-                    // path in `inference::layer_forward`.
-                    let out_bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut out);
-                    if crate::lz4_block::decompress_into(compressed, out_bytes).is_ok() {
-                        cache.push(out);
-                    } else {
-                        // Leave this layer's cache slot empty;
-                        // `predict()` will re-attempt via scratch
-                        // and surface the error to the caller.
-                        cache.push(alloc::vec::Vec::new());
-                    }
-                }
-                _ => {
-                    // Non-compressed layers: empty Vec, zero
-                    // memory overhead.
-                    cache.push(alloc::vec::Vec::new());
-                }
-            }
-        }
-        self.lz4_cache = Some(cache);
-        self
     }
 
     pub fn n_inputs(&self) -> usize {
@@ -210,7 +93,7 @@ impl<'a, 'b> Predictor<'a, 'b> {
         self.model.schema_hash()
     }
 
-    pub fn model(&self) -> &Model<'a> {
+    pub fn model(&self) -> &Model {
         self.model
     }
 
@@ -229,10 +112,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
             features,
             &mut self.scratch_a,
             &mut self.scratch_b,
-            #[cfg(feature = "compressed-weights")]
-            &mut self.lz4_scratch,
-            #[cfg(feature = "compressed-weights")]
-            self.lz4_cache.as_deref(),
             &mut self.output,
         )?;
         Ok(&self.output)
@@ -271,10 +150,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
             features,
             &mut self.scratch_a,
             &mut self.scratch_b,
-            #[cfg(feature = "compressed-weights")]
-            &mut self.lz4_scratch,
-            #[cfg(feature = "compressed-weights")]
-            self.lz4_cache.as_deref(),
             &mut self.output,
         )?;
         let specs = self.model.output_specs();
@@ -342,10 +217,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
                 dst,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
-                #[cfg(feature = "compressed-weights")]
-                &mut self.lz4_scratch,
-                #[cfg(feature = "compressed-weights")]
-                self.lz4_cache.as_deref(),
                 &mut self.output,
             )?;
         } else {
@@ -354,10 +225,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
                 features,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
-                #[cfg(feature = "compressed-weights")]
-                &mut self.lz4_scratch,
-                #[cfg(feature = "compressed-weights")]
-                self.lz4_cache.as_deref(),
                 &mut self.output,
             )?;
         }
@@ -391,10 +258,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
                 dst,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
-                #[cfg(feature = "compressed-weights")]
-                &mut self.lz4_scratch,
-                #[cfg(feature = "compressed-weights")]
-                self.lz4_cache.as_deref(),
                 &mut self.output,
             )?;
         } else {
@@ -403,10 +266,6 @@ impl<'a, 'b> Predictor<'a, 'b> {
                 features,
                 &mut self.scratch_a,
                 &mut self.scratch_b,
-                #[cfg(feature = "compressed-weights")]
-                &mut self.lz4_scratch,
-                #[cfg(feature = "compressed-weights")]
-                self.lz4_cache.as_deref(),
                 &mut self.output,
             )?;
         }

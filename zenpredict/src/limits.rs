@@ -14,9 +14,8 @@
 //! itself before the header is read. `MAX_DIM` / `MAX_LAYERS` reject
 //! the parsed-but-untrusted header values before the scratch
 //! allocation in [`crate::Predictor::new`] tries to materialize them.
-//! `MAX_LZ4_DECOMPRESSED_BYTES` (when the `compressed-weights`
-//! feature is active) bounds the worst-case scratch buffer for an
-//! `I8Lz4` layer.
+//! Whole-bake LZ4 decompression at load time additionally bounds
+//! the decompressed payload to `MAX_BAKE_BYTES` minus header.
 //!
 //! ## Picking numbers
 //!
@@ -41,11 +40,3 @@ pub const MAX_DIM: usize = 65_536;
 /// the limit exists so that `layer_table` allocations are bounded.
 pub const MAX_LAYERS: usize = 256;
 
-/// Maximum decompressed weight bytes per layer (LZ4 path).
-/// `MAX_DIM * MAX_DIM` = 4 GiB. The actual limit consumers will
-/// hit is `MAX_BAKE_BYTES` first (a 4 GiB decompressed weight needs
-/// a non-trivially-sized compressed payload). Kept as a separate
-/// constant so future tightening doesn't touch the matmul-related
-/// `MAX_DIM`.
-#[cfg(feature = "compressed-weights")]
-pub const MAX_LZ4_DECOMPRESSED_BYTES: usize = MAX_BAKE_BYTES * 4;

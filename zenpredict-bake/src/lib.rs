@@ -42,7 +42,10 @@ pub mod zero_bias;
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
-pub use zero_bias::{apply_zero_bias, apply_zero_bias_in_place};
+pub use zero_bias::{
+    apply_zero_bias, apply_zero_bias_in_place, apply_zero_bias_per_layer,
+    apply_zero_bias_per_layer_in_place,
+};
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,
     MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson, bake_from_json,

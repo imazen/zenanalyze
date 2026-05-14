@@ -65,7 +65,7 @@ impl RescuePolicy {
     ///
     /// Returns the default policy when the bake has no
     /// `safety_compact` (older bakes).
-    pub fn from_bake(model: &crate::Model<'_>, profile_strict: bool) -> Self {
+    pub fn from_bake(model: &crate::Model, profile_strict: bool) -> Self {
         let mut policy = Self::default();
         let Some(safety) = model.safety_compact() else {
             return policy;

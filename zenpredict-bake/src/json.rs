@@ -505,6 +505,9 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         output_specs: &output_specs,
         discrete_sets: &discrete_sets_pool,
         sparse_overrides: &sparse_overrides,
+        feature_order: None,
+        output_order: None,
+        compressed: false,
     };
     Ok(bake(&request)?)
 }

@@ -56,6 +56,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         };
         bake(&req).unwrap()
     }
@@ -123,6 +126,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -168,6 +174,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -207,6 +216,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -248,6 +260,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -362,6 +377,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -459,6 +477,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -504,6 +525,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -541,6 +565,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -591,6 +618,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -635,6 +665,9 @@ mod bake_roundtrip {
                 output_specs: &[],
                 discrete_sets: &[],
                 sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
             })
             .unwrap();
             let aligned = Aligned(bytes);
@@ -678,6 +711,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -820,6 +856,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -868,6 +907,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -993,6 +1035,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1030,6 +1075,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1124,6 +1172,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1174,6 +1225,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap_err();
         assert!(matches!(
@@ -1211,6 +1265,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
         })
         .unwrap_err();
         assert!(matches!(err, zenpredict_bake::BakeError::MetadataKeyEmpty));
@@ -1246,6 +1303,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
         })
         .unwrap_err();
         assert!(matches!(
@@ -1267,6 +1327,9 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap_err();
         assert!(matches!(err, zenpredict_bake::BakeError::EmptyLayers));

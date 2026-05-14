@@ -85,7 +85,6 @@ fn main() -> ExitCode {
 
     let layers: Vec<Value> = model
         .layers()
-        .iter()
         .map(|layer| {
             let activation = match layer.activation {
                 Activation::Identity => "identity",
@@ -96,16 +95,6 @@ fn main() -> ExitCode {
                 WeightStorage::F32(w) => ("f32", w.len(), None),
                 WeightStorage::F16(w) => ("f16", w.len(), None),
                 WeightStorage::I8 { weights, scales } => ("i8", weights.len(), Some(scales)),
-                #[cfg(feature = "lz4")]
-                WeightStorage::I8Lz4 {
-                    compressed,
-                    scales,
-                    decompressed_len,
-                } => (
-                    "i8_lz4",
-                    *decompressed_len,
-                    Some(scales),
-                ),
             };
             let mut obj = json!({
                 "in_dim": layer.in_dim,
@@ -118,7 +107,7 @@ fn main() -> ExitCode {
             // Weight magnitude summary statistics. Cheap to compute,
             // catches dead-layer / saturated-layer bakes without
             // shipping the full weight array.
-            let mag = weight_magnitude_stats(layer);
+            let mag = weight_magnitude_stats(&layer);
             obj["weight_stats"] = mag;
             if let Some(s) = scales {
                 obj["i8_scales"] = json!(s);
@@ -137,22 +126,6 @@ fn main() -> ExitCode {
                         }
                         out
                     }
-                    #[cfg(feature = "lz4")]
-                    WeightStorage::I8Lz4 {
-                        compressed,
-                        scales,
-                        decompressed_len,
-                    } => {
-                        let i8_bytes =
-                            zenpredict::lz4_block::decompress(compressed, *decompressed_len)
-                                .expect("inspect: lz4 decode failed");
-                        let mut out = Vec::with_capacity(*decompressed_len);
-                        for (idx, b) in i8_bytes.iter().enumerate() {
-                            let o = idx % layer.out_dim;
-                            out.push((*b as i8) as f32 * scales[o]);
-                        }
-                        out
-                    }
                 };
                 obj["biases"] = json!(layer.biases);
                 obj["weights"] = json!(weights_arr);
@@ -162,7 +135,8 @@ fn main() -> ExitCode {
         .collect();
     out.insert("layers".into(), json!(layers));
 
-    out.insert("metadata".into(), metadata_to_json(model.metadata()));
+    let md = model.metadata();
+    out.insert("metadata".into(), metadata_to_json(&md));
 
     let serialized = serde_json::to_string_pretty(&Value::Object(out)).unwrap();
     println!("{serialized}");
@@ -178,20 +152,6 @@ fn weight_magnitude_stats(layer: &zenpredict::LayerView<'_>) -> Value {
             .enumerate()
             .map(|(idx, w)| (*w as f32) * scales[idx % layer.out_dim])
             .collect(),
-        #[cfg(feature = "lz4")]
-        WeightStorage::I8Lz4 {
-            compressed,
-            scales,
-            decompressed_len,
-        } => {
-            let i8_bytes = zenpredict::lz4_block::decompress(compressed, *decompressed_len)
-                .expect("inspect: lz4 decode failed");
-            i8_bytes
-                .iter()
-                .enumerate()
-                .map(|(idx, w)| (*w as i8 as f32) * scales[idx % layer.out_dim])
-                .collect()
-        }
     };
     if weights.is_empty() {
         return json!({});

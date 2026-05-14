@@ -133,8 +133,6 @@ mod error;
 mod feature_transform;
 mod inference;
 pub mod limits;
-#[cfg(feature = "compressed-weights")]
-pub mod lz4_block;
 mod metadata;
 mod model;
 pub mod output_spec;

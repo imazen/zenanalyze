@@ -93,6 +93,52 @@ pub fn apply_zero_bias(weights: &[f32], out_dim: usize, tau: f32) -> Vec<f32> {
     out
 }
 
+/// In-place **per-layer** zero-bias: zero out weights whose magnitude
+/// is below `tau * max|W|` (single layer-wide threshold, not
+/// per-output-column).
+///
+/// This is the convention used by the 2026-05-13 sparse-coding
+/// evaluation in
+/// [`zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`] —
+/// the 87.5 % i8 zero density at `τ = 0.005` comes from THIS
+/// variant, not [`apply_zero_bias_in_place`]. Use it when shipping
+/// the V_X compression bake (LZ4 captures only zeros, and per-layer
+/// thresholding zeros enough weights to make LZ4 pay).
+///
+/// Compared to per-column: per-layer zeros more aggressively because
+/// `max|W|` is the largest weight anywhere in the layer; columns
+/// whose own max is much smaller still get their weights cut against
+/// the same global threshold. That's the deliberate behaviour — it
+/// trades a tiny SROCC delta (within sampling noise on CID22) for a
+/// massive jump in compressibility.
+///
+/// `tau <= 0.0` is a no-op.
+pub fn apply_zero_bias_per_layer_in_place(weights: &mut [f32], tau: f32) {
+    if !(tau > 0.0) {
+        return;
+    }
+    let mut max_abs = 0.0f32;
+    for &w in weights.iter() {
+        let a = w.abs();
+        if a > max_abs {
+            max_abs = a;
+        }
+    }
+    let cut = tau * max_abs;
+    for w in weights.iter_mut() {
+        if w.abs() < cut {
+            *w = 0.0;
+        }
+    }
+}
+
+/// Allocating per-layer variant.
+pub fn apply_zero_bias_per_layer(weights: &[f32], tau: f32) -> Vec<f32> {
+    let mut out = weights.to_vec();
+    apply_zero_bias_per_layer_in_place(&mut out, tau);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

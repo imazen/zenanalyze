@@ -1,12 +1,11 @@
-//! Fuzz target: `Model::from_bytes` → `Predictor::new` → `predict`
-//! must never panic.
+//! Fuzz target: `Model::from_bytes` → `Predictor::new` → `predict`.
+//! Covers the parser, load-time mutations (decompression,
+//! feature_order / output_order permutation), and matmul kernels.
+//! Must never panic.
 //!
 //! Two-stage: parse the byte stream as a model (per `parser_from_bytes`),
 //! then if it parsed cleanly, construct a Predictor and call `predict`
-//! with a zeroed feature vector sized to `n_inputs`. Catches panics
-//! that only surface during the forward-pass kernel — particularly
-//! the I8Lz4 decompress-then-quantize path in this fuzz binary
-//! (built with `--features compressed-weights`).
+//! with a zeroed feature vector sized to `n_inputs`.
 
 #![no_main]
 

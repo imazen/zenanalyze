@@ -92,6 +92,9 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap()
     }
@@ -230,6 +233,9 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -267,6 +273,9 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap();
         let aligned = Aligned(bytes);

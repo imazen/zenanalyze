@@ -113,6 +113,9 @@ mod scorer_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
         })
         .unwrap()
     }

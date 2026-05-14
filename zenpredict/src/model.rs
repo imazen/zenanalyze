@@ -179,12 +179,28 @@ impl Section {
 /// it out — never borrows the in-file bytes for the header itself,
 /// so the `Header` value is owned and the loader can validate
 /// without holding a `&Header` into possibly-misaligned input.
+///
+/// The 0.2.0 wire-format extension uses the v3 reserved area at
+/// offset 96..128 for three new fields without changing the
+/// 128-byte total size:
+/// - `decompressed_payload_len` (u32 @ 96): set when `flags` bit 0
+///   indicates a compressed payload.
+/// - `feature_order` (Section @ 100..108): optional input-feature
+///   permutation index. Auto-sized u8/u16/u32 (inferred from
+///   `len / n_inputs`).
+/// - `output_order` (Section @ 108..116): optional output
+///   permutation index. Auto-sized analogous to feature_order.
+/// The remaining 12 bytes stay reserved for future use.
 #[repr(C)]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct Header {
     pub(crate) magic: [u8; 4],
     pub(crate) version: u16,
+    /// `flags & 1` set iff the payload (bytes 128..end) is compressed.
+    /// `(flags >> 1) & 7` is the compression-algo nibble:
+    /// `0 = None`, `1 = LZ4 (lz4_flex block format)`. Bits 4..15 are
+    /// reserved and must be zero.
     pub(crate) flags: u16,
     pub(crate) n_inputs: u32,
     pub(crate) n_outputs: u32,
@@ -199,7 +215,28 @@ pub struct Header {
     pub(crate) output_specs: Section,
     pub(crate) discrete_sets: Section,
     pub(crate) sparse_overrides: Section,
-    pub(crate) reserved: [u32; 8],
+    /// When `flags` bit 0 is set, the byte-length of the
+    /// post-decompression payload (bytes 128..end). Zero for
+    /// uncompressed bakes.
+    pub(crate) decompressed_payload_len: u32,
+    /// Input-feature permutation. When `len == 0`: bake's inputs are
+    /// in caller-natural order. When non-empty: contains `n_inputs`
+    /// indices addressing the caller-natural feature positions. The
+    /// index width is inferred from `len`:
+    /// - `len == n_inputs` → u8 (n_inputs ≤ 255)
+    /// - `len == 2 * n_inputs` → u16 (n_inputs ≤ 65535)
+    /// - `len == 4 * n_inputs` → u32
+    ///
+    /// At load time, the inverse permutation is applied in-place to
+    /// scaler_mean, scaler_scale, feature_bounds, and layer[0]
+    /// weight rows so that the in-memory bake is in caller order.
+    pub(crate) feature_order: Section,
+    /// Output permutation. Symmetric to `feature_order`. Affects
+    /// layer[last] weight cols + biases, output_specs,
+    /// sparse_overrides indices, and metadata-side output-indexed
+    /// arrays (cell_rescue_hints, output_bounds).
+    pub(crate) output_order: Section,
+    pub(crate) reserved: [u32; 3],
 }
 
 const _: () = assert!(core::mem::size_of::<Header>() == HEADER_SIZE);
@@ -247,20 +284,6 @@ pub enum WeightDtype {
     F32 = 0,
     F16 = 1,
     I8 = 2,
-    /// I8 weights with LZ4-block-compressed byte stream. Gated behind
-    /// the `compressed-weights` cargo feature; without that feature
-    /// active, encountering byte 3 returns
-    /// [`PredictError::UnknownWeightDtype`].
-    ///
-    /// Wire layout for this variant's weights section:
-    /// ```text
-    /// [u32 decompressed_len_bytes][lz4_block_payload (varlen)]
-    /// ```
-    /// `decompressed_len_bytes` must equal `in_dim * out_dim` (one i8
-    /// per weight). The scales section that follows is the same
-    /// per-output f32 scales used by [`Self::I8`].
-    #[cfg(feature = "compressed-weights")]
-    I8Lz4 = 3,
 }
 
 impl WeightDtype {
@@ -269,8 +292,6 @@ impl WeightDtype {
             0 => Ok(Self::F32),
             1 => Ok(Self::F16),
             2 => Ok(Self::I8),
-            #[cfg(feature = "compressed-weights")]
-            3 => Ok(Self::I8Lz4),
             other => Err(PredictError::UnknownWeightDtype { byte: other }),
         }
     }
@@ -280,11 +301,6 @@ impl WeightDtype {
             Self::F32 => 4,
             Self::F16 => 2,
             Self::I8 => 1,
-            // I8Lz4's compressed byte size varies per-bake; consumers
-            // wanting an upper bound use `decompressed_len_bytes` from
-            // the wire payload header.
-            #[cfg(feature = "compressed-weights")]
-            Self::I8Lz4 => 1,
         }
     }
 }
@@ -307,57 +323,74 @@ pub enum WeightStorage<'a> {
         weights: &'a [i8],
         scales: &'a [f32],
     },
-    /// LZ4-block-compressed i8 weights. The raw compressed payload is
-    /// borrowed from the file bytes; decompression into a per-layer
-    /// scratch buffer happens at inference time via
-    /// [`crate::lz4_block::decompress_into`].
-    ///
-    /// `decompressed_len` is the byte count after decode (always equal
-    /// to `in_dim * out_dim` per the bake-side contract). The runtime
-    /// keeps a single scratch buffer of `max(decompressed_len)` across
-    /// all layers in this Predictor and re-uses it every `predict()`
-    /// call ("very fast uncached expansion" per the 2026-05-13 design).
-    #[cfg(feature = "compressed-weights")]
-    I8Lz4 {
-        compressed: &'a [u8],
-        scales: &'a [f32],
-        decompressed_len: usize,
-    },
 }
 
-/// Parsed view over a ZNPR v3 model. All slices borrow from the
-/// caller's `&[u8]`. No ownership transfer, no copies of the weight
-/// data — the model lives as long as the bytes do.
+/// Per-layer offsets cached at parse time. Materialized into a
+/// [`LayerView`] on demand by [`Model::layer`] / [`Model::layers`].
+///
+/// All field validation (dimension checks, alignment, section
+/// bounds) happens once at parse time. Per-access materialization
+/// is a handful of `bytemuck::cast_slice` calls; in release builds
+/// the alignment check is one comparison and one transmute —
+/// ~10 ns total, no panic possible since alignment was validated.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LayerOffsets {
+    pub(crate) in_dim: u32,
+    pub(crate) out_dim: u32,
+    pub(crate) activation: Activation,
+    pub(crate) weight_dtype: WeightDtype,
+    pub(crate) weights: Section,
+    pub(crate) scales: Section,
+    pub(crate) biases: Section,
+}
+
+/// Parsed view over a ZNPR v3 model. The `Model` **owns** the bake
+/// bytes (always; whether the input was compressed or not).
+/// `Predictor` borrows `&Model` for inference — `Model` is `Sync`,
+/// so a single `static OnceLock<Model>` can back per-thread
+/// `Predictor` instances without a `Mutex`.
+///
+/// The bake bytes live in a heap-allocated `Box<[u8]>`. Views into
+/// the bake (layer weights, scaler, metadata, etc.) borrow from
+/// `&self.bytes` and are materialized on demand — no self-referential
+/// storage, no `'a` parameter on `Model` itself. Per-access cost is
+/// a handful of `bytemuck::cast_slice` operations (~10–50 ns total
+/// for a layer view, negligible vs the µs-scale matmul).
+///
+/// Load-time mutations (decompression, feature_order / output_order
+/// inverse permutations) happen once inside [`Self::from_bytes`] and
+/// produce a canonical-order `Model` — the predict hot path never
+/// sees the on-disk permutation or compression.
 #[derive(Debug)]
-pub struct Model<'a> {
-    bytes: &'a [u8],
+pub struct Model {
+    bytes: alloc::boxed::Box<[u8]>,
     header: Header,
-    scaler_mean: &'a [f32],
-    scaler_scale: &'a [f32],
-    layers: alloc::vec::Vec<LayerView<'a>>,
-    feature_bounds: &'a [crate::bounds::FeatureBound],
-    metadata: Metadata<'a>,
-    output_specs: &'a [OutputSpec],
-    discrete_sets: &'a [f32],
-    sparse_overrides: &'a [SparseOverride],
+    /// Per-layer offsets + dims, cached at parse time. The
+    /// [`LayerView`] materialized via [`Self::layer`] is constructed
+    /// from these offsets on demand.
+    layer_offsets: alloc::vec::Vec<LayerOffsets>,
     /// Owned cache of parsed `zentrain.feature_transforms`. `None`
     /// when the bake omitted the key (consumer treats every feature
     /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
-    /// Parse-time error (length mismatch / unknown token) bubbles up
-    /// from [`Self::from_bytes`].
     feature_transforms: Option<alloc::vec::Vec<FeatureTransform>>,
 }
 
-impl<'a> Model<'a> {
-    /// Parse a v3 model from raw bytes. The returned `Model` borrows
-    /// from `bytes` for `'a`.
+impl Model {
+    /// Parse a v3 model from raw bytes. The returned `Model` owns
+    /// its copy of the bake (heap-allocated `Box<[u8]>`); `input`
+    /// is consumed only at construction time.
     ///
-    /// Reserved fields in [`Header`] (`_pad0`, `reserved`, `flags`)
-    /// and [`LayerEntry`] (`reserved`, `flags`) are ignored on read,
-    /// so future format extensions can populate them without
-    /// invalidating the schema. Bakers MUST zero them.
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, PredictError> {
-        Self::from_bytes_inner(bytes, None)
+    /// On a compressed bake (`flags` bit 0 set), the loader
+    /// decompresses inline into the owned buffer. On `feature_order`
+    /// / `output_order` metadata, the loader applies the inverse
+    /// permutation in-place so the in-memory bake is in caller-natural
+    /// order — the predict hot path is unaffected.
+    ///
+    /// Reserved fields in [`Header`] and [`LayerEntry`] are ignored
+    /// on read, so future format extensions can populate them
+    /// without invalidating the schema. Bakers MUST zero them.
+    pub fn from_bytes(input: &[u8]) -> Result<Self, PredictError> {
+        Self::from_bytes_inner(input, None)
     }
 
     /// Parse and verify the schema_hash matches `expected` BEFORE any
@@ -366,37 +399,31 @@ impl<'a> Model<'a> {
     ///
     /// Convenience for codecs that compile-in a schema hash and want
     /// to fail loudly at load when a stale bake gets shipped.
-    pub fn from_bytes_with_schema(bytes: &'a [u8], expected: u64) -> Result<Self, PredictError> {
-        Self::from_bytes_inner(bytes, Some(expected))
+    pub fn from_bytes_with_schema(input: &[u8], expected: u64) -> Result<Self, PredictError> {
+        Self::from_bytes_inner(input, Some(expected))
     }
 
     fn from_bytes_inner(
-        bytes: &'a [u8],
+        input: &[u8],
         expected_schema: Option<u64>,
     ) -> Result<Self, PredictError> {
         // Resource limits — fail early on adversarial input before any
-        // section parsing or scratch allocation. These bounds are
-        // generous enough to cover every realistic V_X / picker bake
-        // (V0_18 is 93 KB; the largest shipped picker is the zenavif
-        // rav1e v0.1.1 at 217 KB). 64 MB ceiling protects fuzz / web
-        // consumers from gigabyte bakes that would slow load to a
-        // crawl. See `crate::limits` for the exact constants and the
-        // policy rationale.
-        if bytes.len() > crate::limits::MAX_BAKE_BYTES {
+        // section parsing or scratch allocation. See `crate::limits`.
+        if input.len() > crate::limits::MAX_BAKE_BYTES {
             return Err(PredictError::Truncated {
                 offset: 0,
                 want: crate::limits::MAX_BAKE_BYTES,
-                have: bytes.len(),
+                have: input.len(),
             });
         }
-        if bytes.len() < HEADER_SIZE {
+        if input.len() < HEADER_SIZE {
             return Err(PredictError::Truncated {
                 offset: 0,
                 want: HEADER_SIZE,
-                have: bytes.len(),
+                have: input.len(),
             });
         }
-        let header: Header = pod_read_unaligned(&bytes[..HEADER_SIZE]);
+        let header: Header = pod_read_unaligned(&input[..HEADER_SIZE]);
 
         if header.magic != MAGIC {
             return Err(PredictError::BadMagic {
@@ -433,9 +460,6 @@ impl<'a> Model<'a> {
         if n_layers == 0 {
             return Err(PredictError::ZeroDimension { what: "n_layers" });
         }
-        // Per-dimension upper bounds. Adversarial bakes with
-        // `n_inputs = 0xFFFF_FFFF` would otherwise multiply to a usize
-        // overflow inside the matmul allocations.
         if n_inputs > crate::limits::MAX_DIM {
             return Err(PredictError::DimensionOverflow { what: "n_inputs" });
         }
@@ -446,12 +470,72 @@ impl<'a> Model<'a> {
             return Err(PredictError::DimensionOverflow { what: "n_layers" });
         }
 
-        // Scaler.
-        let scaler_mean = cast_f32_section("scaler_mean", header.scaler_mean, bytes, n_inputs)?;
-        let scaler_scale = cast_f32_section("scaler_scale", header.scaler_scale, bytes, n_inputs)?;
+        // ── Stage 1: materialize the owned bake into a Box<[u8]>. ──
+        //
+        // For uncompressed bakes this is one memcpy of `input` into
+        // owned storage (~5 µs for a 38 KB picker). For compressed
+        // bakes, we decompress the payload directly into the owned
+        // storage at offset 128. Either way, after this block,
+        // `bytes` is a heap-owned `Box<[u8]>` we can mutate freely
+        // for load-time permutations.
+        let compressed = (header.flags & crate::wire::FLAG_COMPRESSED) != 0;
+        let algo = ((header.flags & crate::wire::FLAGS_COMPRESSION_ALGO_MASK) >> 1) as u8;
+        let bytes: alloc::boxed::Box<[u8]> = if compressed {
+            let payload_len = header.decompressed_payload_len as usize;
+            if payload_len == 0 {
+                return Err(PredictError::SectionOutOfRange {
+                    what: "decompressed_payload_len (zero with compressed flag set)",
+                    offset: crate::wire::OFF_DECOMPRESSED_PAYLOAD_LEN as u32,
+                    len: 4,
+                    file_len: input.len(),
+                });
+            }
+            let total_len = HEADER_SIZE
+                .checked_add(payload_len)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "HEADER_SIZE + decompressed_payload_len",
+                })?;
+            if total_len > crate::limits::MAX_BAKE_BYTES {
+                return Err(PredictError::Truncated {
+                    offset: 0,
+                    want: crate::limits::MAX_BAKE_BYTES,
+                    have: total_len,
+                });
+            }
+            let mut owned = alloc::vec![0u8; total_len].into_boxed_slice();
+            owned[..HEADER_SIZE].copy_from_slice(&input[..HEADER_SIZE]);
+            // Decompress payload into owned[HEADER_SIZE..]. Only LZ4
+            // is supported right now.
+            match algo {
+                crate::wire::COMPRESSION_ALGO_LZ4 => {
+                    decompress_lz4(&input[HEADER_SIZE..], &mut owned[HEADER_SIZE..])?;
+                }
+                crate::wire::COMPRESSION_ALGO_NONE => {
+                    return Err(PredictError::SectionOutOfRange {
+                        what: "flags.compressed=1 but algo=None",
+                        offset: 6,
+                        len: 2,
+                        file_len: input.len(),
+                    });
+                }
+                _ => {
+                    return Err(PredictError::SectionOutOfRange {
+                        what: "unknown compression algo",
+                        offset: 6,
+                        len: 2,
+                        file_len: input.len(),
+                    });
+                }
+            }
+            owned
+        } else {
+            // Uncompressed: copy verbatim. We always own the bake,
+            // so load-time permutations can mutate freely.
+            input.to_vec().into_boxed_slice()
+        };
 
-        // Layer table.
-        let layer_bytes = header.layer_table.slice("layer_table", bytes)?;
+        // ── Stage 2: parse + validate layer table from owned bytes. ──
+        let layer_bytes = header.layer_table.slice("layer_table", &bytes)?;
         let expected_layer_bytes =
             n_layers
                 .checked_mul(LAYER_ENTRY_SIZE)
@@ -466,17 +550,15 @@ impl<'a> Model<'a> {
                 file_len: bytes.len(),
             });
         }
-        // Layer table is a packed `[LayerEntry]`; cast via
-        // `bytemuck::try_cast_slice` (returns Err on alignment
-        // failure rather than panicking).
-        let layer_entries: &[LayerEntry] =
-            bytemuck::try_cast_slice(layer_bytes).map_err(|_| PredictError::SectionMisaligned {
+        let layer_entries: &[LayerEntry] = bytemuck::try_cast_slice(layer_bytes).map_err(|_| {
+            PredictError::SectionMisaligned {
                 what: "layer_table",
                 offset: header.layer_table.offset,
                 required_align: core::mem::align_of::<LayerEntry>(),
-            })?;
+            }
+        })?;
 
-        let mut layers = alloc::vec::Vec::with_capacity(n_layers);
+        let mut layer_offsets = alloc::vec::Vec::with_capacity(n_layers);
         let mut prev_out = n_inputs;
         for (layer_idx, entry) in layer_entries.iter().enumerate() {
             let in_dim = entry.in_dim as usize;
@@ -500,69 +582,41 @@ impl<'a> Model<'a> {
             }
             let activation = Activation::from_byte(entry.activation)?;
             let weight_dtype = WeightDtype::from_byte(entry.weight_dtype)?;
-
             let n_weights = in_dim
                 .checked_mul(out_dim)
                 .ok_or(PredictError::DimensionOverflow {
                     what: "layer.in_dim * layer.out_dim",
                 })?;
-            let weights = match weight_dtype {
-                WeightDtype::F32 => WeightStorage::F32(cast_f32_section(
-                    "layer.weights[f32]",
-                    entry.weights,
-                    bytes,
-                    n_weights,
-                )?),
-                WeightDtype::F16 => WeightStorage::F16(cast_u16_section(
-                    "layer.weights[f16]",
-                    entry.weights,
-                    bytes,
-                    n_weights,
-                )?),
+            // Validate weight section bounds + alignment now (one-shot;
+            // materialize_layer below assumes pre-validated).
+            match weight_dtype {
+                WeightDtype::F32 => {
+                    let _ = cast_f32_section(
+                        "layer.weights[f32]",
+                        entry.weights,
+                        &bytes,
+                        n_weights,
+                    )?;
+                }
+                WeightDtype::F16 => {
+                    let _ = cast_u16_section(
+                        "layer.weights[f16]",
+                        entry.weights,
+                        &bytes,
+                        n_weights,
+                    )?;
+                }
                 WeightDtype::I8 => {
-                    let w = cast_i8_section("layer.weights[i8]", entry.weights, bytes, n_weights)?;
-                    let s = cast_f32_section("layer.scales", entry.scales, bytes, out_dim)?;
-                    WeightStorage::I8 {
-                        weights: w,
-                        scales: s,
-                    }
+                    let _ = cast_i8_section(
+                        "layer.weights[i8]",
+                        entry.weights,
+                        &bytes,
+                        n_weights,
+                    )?;
+                    let _ = cast_f32_section("layer.scales", entry.scales, &bytes, out_dim)?;
                 }
-                #[cfg(feature = "compressed-weights")]
-                WeightDtype::I8Lz4 => {
-                    // Layout: [u32 decompressed_len_bytes][lz4 payload].
-                    // The decompressed payload feeds the same per-output
-                    // i8 dequant as WeightDtype::I8.
-                    let raw = entry.weights.slice("layer.weights[i8_lz4]", bytes)?;
-                    if raw.len() < 4 {
-                        return Err(PredictError::SectionOutOfRange {
-                            what: "layer.weights[i8_lz4] (missing length prefix)",
-                            offset: entry.weights.offset,
-                            len: entry.weights.len,
-                            file_len: bytes.len(),
-                        });
-                    }
-                    let dlen = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
-                    if dlen != n_weights {
-                        return Err(PredictError::SectionOutOfRange {
-                            what: "layer.weights[i8_lz4] (decompressed_len != in_dim*out_dim)",
-                            offset: entry.weights.offset,
-                            len: entry.weights.len,
-                            file_len: bytes.len(),
-                        });
-                    }
-                    let s = cast_f32_section("layer.scales", entry.scales, bytes, out_dim)?;
-                    WeightStorage::I8Lz4 {
-                        compressed: &raw[4..],
-                        scales: s,
-                        decompressed_len: dlen,
-                    }
-                }
-            };
-            // For non-I8 layers the scales section must be empty.
-            // (Both I8 and I8Lz4 carry scales.)
+            }
             let has_scales = matches!(weight_dtype, WeightDtype::I8);
-            #[cfg(feature = "compressed-weights")]
-            let has_scales = has_scales || matches!(weight_dtype, WeightDtype::I8Lz4);
             if !has_scales && !entry.scales.is_empty() {
                 return Err(PredictError::SectionOutOfRange {
                     what: "layer.scales (must be empty for non-I8 layer)",
@@ -571,14 +625,16 @@ impl<'a> Model<'a> {
                     file_len: bytes.len(),
                 });
             }
-            let biases = cast_f32_section("layer.biases", entry.biases, bytes, out_dim)?;
+            let _ = cast_f32_section("layer.biases", entry.biases, &bytes, out_dim)?;
 
-            layers.push(LayerView {
-                in_dim,
-                out_dim,
+            layer_offsets.push(LayerOffsets {
+                in_dim: entry.in_dim,
+                out_dim: entry.out_dim,
                 activation,
-                weights,
-                biases,
+                weight_dtype,
+                weights: entry.weights,
+                scales: entry.scales,
+                biases: entry.biases,
             });
             prev_out = out_dim;
         }
@@ -590,159 +646,51 @@ impl<'a> Model<'a> {
             });
         }
 
-        // Feature bounds (optional). Length, when present, must be
-        // 2 * n_inputs f32s.
-        let feature_bounds = if header.feature_bounds.is_empty() {
-            &[][..]
-        } else {
-            let n_bound_f32s = n_inputs
-                .checked_mul(2)
-                .ok_or(PredictError::DimensionOverflow {
-                    what: "feature_bounds = n_inputs * 2",
-                })?;
-            let raw =
-                cast_f32_section("feature_bounds", header.feature_bounds, bytes, n_bound_f32s)?;
-            // Reinterpret pairs of f32 as `[FeatureBound]`. They are
-            // `#[repr(C)] { low: f32, high: f32 }` so the layout is
-            // identical.
-            let bound_bytes = bytemuck::cast_slice::<f32, u8>(raw);
-            bytemuck::try_cast_slice::<u8, crate::bounds::FeatureBound>(bound_bytes).map_err(
-                |_| PredictError::SectionMisaligned {
-                    what: "feature_bounds",
-                    offset: header.feature_bounds.offset,
-                    required_align: core::mem::align_of::<crate::bounds::FeatureBound>(),
-                },
-            )?
-        };
+        // ── Stage 3: validate optional sections (without caching). ──
+        // We re-validate on each accessor call too, but check bounds
+        // here so corrupted bakes fail at parse time.
+        validate_scaler_section("scaler_mean", header.scaler_mean, &bytes, n_inputs)?;
+        validate_scaler_section("scaler_scale", header.scaler_scale, &bytes, n_inputs)?;
+        validate_feature_bounds(header.feature_bounds, &bytes, n_inputs)?;
+        validate_output_specs(header.output_specs, &bytes, n_outputs)?;
+        validate_discrete_sets(header.discrete_sets, &bytes)?;
+        validate_sparse_overrides(header.sparse_overrides, &bytes, n_outputs)?;
 
-        // Metadata blob (optional).
-        let metadata_bytes = header.metadata.slice("metadata", bytes)?;
-        let metadata = Metadata::parse(metadata_bytes)?;
-        // Pre-parse `zentrain.feature_transforms` so the
-        // `Predictor::predict_*_transformed` hot path doesn't have to
-        // re-walk the metadata blob and re-tokenize on every call.
-        let feature_transforms = parse_feature_transforms(&metadata, n_inputs)?;
-
-        // Output specs (optional). `n_outputs * sizeof(OutputSpec)`
-        // when present.
-        let output_specs: &[OutputSpec] = if header.output_specs.is_empty() {
-            &[]
-        } else {
-            let raw = header.output_specs.slice("output_specs", bytes)?;
-            let expected = n_outputs
-                .checked_mul(core::mem::size_of::<OutputSpec>())
-                .ok_or(PredictError::DimensionOverflow {
-                    what: "n_outputs * sizeof(OutputSpec)",
-                })?;
-            if raw.len() != expected {
-                return Err(PredictError::SectionOutOfRange {
-                    what: "output_specs",
-                    offset: header.output_specs.offset,
-                    len: header.output_specs.len,
-                    file_len: bytes.len(),
-                });
-            }
-            bytemuck::try_cast_slice::<u8, OutputSpec>(raw).map_err(|_| {
-                PredictError::SectionMisaligned {
-                    what: "output_specs",
-                    offset: header.output_specs.offset,
-                    required_align: core::mem::align_of::<OutputSpec>(),
-                }
-            })?
-        };
-
-        // Discrete-sets pool (optional). Flat `[f32]` referenced by
-        // `OutputSpec::{discrete_set_offset, discrete_set_len}`.
-        let discrete_sets: &[f32] = if header.discrete_sets.is_empty() {
-            &[]
-        } else {
-            let raw = header.discrete_sets.slice("discrete_sets", bytes)?;
-            if !raw.len().is_multiple_of(4) {
-                return Err(PredictError::SectionOutOfRange {
-                    what: "discrete_sets",
-                    offset: header.discrete_sets.offset,
-                    len: header.discrete_sets.len,
-                    file_len: bytes.len(),
-                });
-            }
-            bytemuck::try_cast_slice::<u8, f32>(raw).map_err(|_| {
-                PredictError::SectionMisaligned {
-                    what: "discrete_sets",
-                    offset: header.discrete_sets.offset,
-                    required_align: core::mem::align_of::<f32>(),
-                }
-            })?
-        };
-
-        // Validate every spec's slice into the discrete pool.
-        for spec in output_specs {
-            if spec.discrete_set_len > 0 {
-                let off = spec.discrete_set_offset as usize;
-                let len = spec.discrete_set_len as usize;
-                let end = off
-                    .checked_add(len)
-                    .ok_or(PredictError::DimensionOverflow {
-                        what: "discrete_set_offset + discrete_set_len",
-                    })?;
-                if end > discrete_sets.len() {
-                    return Err(PredictError::SectionOutOfRange {
-                        what: "OutputSpec.discrete_set range",
-                        offset: spec.discrete_set_offset,
-                        len: spec.discrete_set_len,
-                        file_len: discrete_sets.len(),
-                    });
-                }
-            }
+        // ── Stage 4: load-time inverse permutations. ──
+        //
+        // The bake's on-disk layout MAY be in a compression-optimal
+        // permuted order (feature_order / output_order metadata).
+        // The runtime expects everything in caller-natural order, so
+        // we apply the INVERSE permutation in-place to all affected
+        // sections. After this stage, `bytes` is in canonical order
+        // and the predict hot path never sees the permutation.
+        let mut bytes = bytes;
+        if !header.feature_order.is_empty() {
+            apply_feature_order_inverse(
+                &mut bytes,
+                &header,
+                &layer_offsets,
+                n_inputs,
+            )?;
+        }
+        if !header.output_order.is_empty() {
+            apply_output_order_inverse(
+                &mut bytes,
+                &header,
+                &layer_offsets,
+                n_outputs,
+            )?;
         }
 
-        // Sparse overrides (optional). Each entry is 8 bytes.
-        let sparse_overrides: &[SparseOverride] = if header.sparse_overrides.is_empty() {
-            &[]
-        } else {
-            let raw = header.sparse_overrides.slice("sparse_overrides", bytes)?;
-            if !raw
-                .len()
-                .is_multiple_of(core::mem::size_of::<SparseOverride>())
-            {
-                return Err(PredictError::SectionOutOfRange {
-                    what: "sparse_overrides",
-                    offset: header.sparse_overrides.offset,
-                    len: header.sparse_overrides.len,
-                    file_len: bytes.len(),
-                });
-            }
-            let parsed = bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
-                PredictError::SectionMisaligned {
-                    what: "sparse_overrides",
-                    offset: header.sparse_overrides.offset,
-                    required_align: core::mem::align_of::<SparseOverride>(),
-                }
-            })?;
-            // Reject overrides whose index is out of range — the
-            // baker checked too, but we want to fail loudly on
-            // mutated inputs.
-            for entry in parsed {
-                if (entry.idx as usize) >= n_outputs {
-                    return Err(PredictError::OutputDimMismatch {
-                        expected: n_outputs,
-                        got: entry.idx as usize,
-                    });
-                }
-            }
-            parsed
-        };
+        // ── Stage 5: parse feature_transforms metadata. ──
+        let metadata_bytes = header.metadata.slice("metadata", &bytes)?;
+        let metadata = Metadata::parse(metadata_bytes)?;
+        let feature_transforms = parse_feature_transforms(&metadata, n_inputs)?;
 
         Ok(Self {
             bytes,
             header,
-            scaler_mean,
-            scaler_scale,
-            layers,
-            feature_bounds,
-            metadata,
-            output_specs,
-            discrete_sets,
-            sparse_overrides,
+            layer_offsets,
             feature_transforms,
         })
     }
@@ -779,80 +727,155 @@ impl<'a> Model<'a> {
         self.header.schema_hash
     }
 
-    pub fn scaler_mean(&self) -> &'a [f32] {
-        self.scaler_mean
+    pub fn scaler_mean(&self) -> &[f32] {
+        let n = self.n_inputs();
+        // Parse-time validated, so unwrap is safe.
+        cast_f32_section("scaler_mean", self.header.scaler_mean, &self.bytes, n)
+            .expect("scaler_mean validated at parse time")
     }
 
-    pub fn scaler_scale(&self) -> &'a [f32] {
-        self.scaler_scale
+    pub fn scaler_scale(&self) -> &[f32] {
+        let n = self.n_inputs();
+        cast_f32_section("scaler_scale", self.header.scaler_scale, &self.bytes, n)
+            .expect("scaler_scale validated at parse time")
     }
 
-    pub fn layers(&self) -> &[LayerView<'a>] {
-        &self.layers
+    /// Iterator of materialized [`LayerView`]s, one per layer.
+    /// Each view is constructed on the fly from cached offsets +
+    /// `self.bytes`; the cost is negligible vs the matmul.
+    pub fn layers(&self) -> LayerIter<'_> {
+        LayerIter {
+            model: self,
+            idx: 0,
+            end: self.layer_offsets.len(),
+        }
     }
 
-    pub fn feature_bounds(&self) -> &'a [crate::bounds::FeatureBound] {
-        self.feature_bounds
+    /// Materialize layer `idx`. Panics if `idx >= n_layers`.
+    pub fn layer(&self, idx: usize) -> LayerView<'_> {
+        self.materialize_layer(idx)
     }
 
-    pub fn metadata(&self) -> &Metadata<'a> {
-        &self.metadata
+    fn materialize_layer(&self, idx: usize) -> LayerView<'_> {
+        let off = &self.layer_offsets[idx];
+        let in_dim = off.in_dim as usize;
+        let out_dim = off.out_dim as usize;
+        let n_weights = in_dim * out_dim;
+        let weights = match off.weight_dtype {
+            WeightDtype::F32 => WeightStorage::F32(
+                cast_f32_section("layer.weights[f32]", off.weights, &self.bytes, n_weights)
+                    .expect("layer weights validated at parse time"),
+            ),
+            WeightDtype::F16 => WeightStorage::F16(
+                cast_u16_section("layer.weights[f16]", off.weights, &self.bytes, n_weights)
+                    .expect("layer weights validated at parse time"),
+            ),
+            WeightDtype::I8 => {
+                let w = cast_i8_section("layer.weights[i8]", off.weights, &self.bytes, n_weights)
+                    .expect("layer weights validated at parse time");
+                let s = cast_f32_section("layer.scales", off.scales, &self.bytes, out_dim)
+                    .expect("layer scales validated at parse time");
+                WeightStorage::I8 {
+                    weights: w,
+                    scales: s,
+                }
+            }
+        };
+        let biases = cast_f32_section("layer.biases", off.biases, &self.bytes, out_dim)
+            .expect("layer biases validated at parse time");
+        LayerView {
+            in_dim,
+            out_dim,
+            activation: off.activation,
+            weights,
+            biases,
+        }
     }
 
-    /// Per-output [`OutputSpec`] table, as parsed from the bin's
-    /// `output_specs` section. Empty when the bake didn't ship the
-    /// section — callers that want post-processing should check
-    /// [`Self::has_output_specs`] first; the raw forward-pass path
-    /// works on every bake regardless.
-    pub fn output_specs(&self) -> &'a [OutputSpec] {
-        self.output_specs
+    pub fn feature_bounds(&self) -> &[crate::bounds::FeatureBound] {
+        if self.header.feature_bounds.is_empty() {
+            return &[];
+        }
+        let n_bound_f32s = self.n_inputs() * 2;
+        let raw = cast_f32_section(
+            "feature_bounds",
+            self.header.feature_bounds,
+            &self.bytes,
+            n_bound_f32s,
+        )
+        .expect("feature_bounds validated at parse time");
+        let bound_bytes = bytemuck::cast_slice::<f32, u8>(raw);
+        bytemuck::try_cast_slice::<u8, crate::bounds::FeatureBound>(bound_bytes)
+            .expect("feature_bounds alignment validated at parse time")
     }
 
-    /// `true` iff the bake shipped per-output specs. Equivalent to
-    /// `!self.output_specs().is_empty()` but spelled-out for the
-    /// codec-side branching that consumers want clearly named.
+    /// Reparse the metadata blob on demand. Cheap (just header.metadata
+    /// section slice + Metadata::parse on the byte view).
+    pub fn metadata(&self) -> Metadata<'_> {
+        let raw = self
+            .header
+            .metadata
+            .slice("metadata", &self.bytes)
+            .expect("metadata validated at parse time");
+        Metadata::parse(raw).expect("metadata blob parse validated at parse time")
+    }
+
+    /// Per-output [`OutputSpec`] table.
+    pub fn output_specs(&self) -> &[OutputSpec] {
+        if self.header.output_specs.is_empty() {
+            return &[];
+        }
+        let raw = self
+            .header
+            .output_specs
+            .slice("output_specs", &self.bytes)
+            .expect("output_specs validated at parse time");
+        bytemuck::try_cast_slice::<u8, OutputSpec>(raw)
+            .expect("output_specs alignment validated at parse time")
+    }
+
     pub fn has_output_specs(&self) -> bool {
-        !self.output_specs.is_empty()
+        !self.header.output_specs.is_empty()
     }
 
-    /// Flat f32 pool of discrete-set values referenced by
-    /// `OutputSpec::{discrete_set_offset, discrete_set_len}`.
-    pub fn discrete_sets(&self) -> &'a [f32] {
-        self.discrete_sets
+    pub fn discrete_sets(&self) -> &[f32] {
+        if self.header.discrete_sets.is_empty() {
+            return &[];
+        }
+        let raw = self
+            .header
+            .discrete_sets
+            .slice("discrete_sets", &self.bytes)
+            .expect("discrete_sets validated at parse time");
+        bytemuck::try_cast_slice::<u8, f32>(raw)
+            .expect("discrete_sets alignment validated at parse time")
     }
 
-    /// Sparse hand-tune overrides applied AFTER the forward pass +
-    /// per-output spec pipeline by [`crate::Predictor::predict_with_specs`].
-    pub fn sparse_overrides(&self) -> &'a [SparseOverride] {
-        self.sparse_overrides
+    pub fn sparse_overrides(&self) -> &[SparseOverride] {
+        if self.header.sparse_overrides.is_empty() {
+            return &[];
+        }
+        let raw = self
+            .header
+            .sparse_overrides
+            .slice("sparse_overrides", &self.bytes)
+            .expect("sparse_overrides validated at parse time");
+        bytemuck::try_cast_slice::<u8, SparseOverride>(raw)
+            .expect("sparse_overrides alignment validated at parse time")
     }
 
-    /// Bake-time safety + rescue summary, from the
-    /// `zentrain.safety_compact` metadata key. Returns `None` for
-    /// bakes that didn't emit the key (older bakes, or trainers
-    /// that opted out via `--no-safety-compact`).
-    ///
-    /// Codec runtime SHOULD refuse to load a bake whose
-    /// `safety_compact.passed == 0` unless the consumer explicitly
-    /// opts into `force_load`.
     #[cfg(feature = "advanced")]
     pub fn safety_compact(&self) -> Option<crate::SafetyCompact> {
-        self.metadata
+        self.metadata()
             .get_pod::<crate::SafetyCompact>(crate::keys::SAFETY_COMPACT)
     }
 
-    /// Per-cell rescue hints from the `zentrain.cell_rescue_hints`
-    /// metadata key. Returns an empty `Vec` when the key is absent.
-    /// Length equals the bake's `n_cells` (the categorical-bytes
-    /// head dim).
     #[cfg(feature = "advanced")]
     pub fn cell_rescue_hints(&self) -> alloc::vec::Vec<crate::CellHint> {
-        let Some(entry) = self.metadata.get(crate::keys::CELL_RESCUE_HINTS) else {
+        let md = self.metadata();
+        let Some(entry) = md.get(crate::keys::CELL_RESCUE_HINTS) else {
             return alloc::vec::Vec::new();
         };
-        // Pod-read each entry one at a time (unaligned-safe). Avoids
-        // alignment-cast errors when the metadata blob places the
-        // bytes at an odd offset.
         let len = core::mem::size_of::<crate::CellHint>();
         if entry.value.len() % len != 0 {
             return alloc::vec::Vec::new();
@@ -864,13 +887,10 @@ impl<'a> Model<'a> {
             .collect()
     }
 
-    /// Known-good `target_zq → fallback_cell + quality bump` table
-    /// from the `zentrain.zq_fallback_table` metadata key. Returns
-    /// an empty `Vec` when the key is absent. Used by the
-    /// `KnownGoodFallback` rescue strategy.
     #[cfg(feature = "advanced")]
     pub fn zq_fallback_table(&self) -> alloc::vec::Vec<crate::FallbackEntry> {
-        let Some(entry) = self.metadata.get(crate::keys::ZQ_FALLBACK_TABLE) else {
+        let md = self.metadata();
+        let Some(entry) = md.get(crate::keys::ZQ_FALLBACK_TABLE) else {
             return alloc::vec::Vec::new();
         };
         let len = core::mem::size_of::<crate::FallbackEntry>();
@@ -884,15 +904,10 @@ impl<'a> Model<'a> {
             .collect()
     }
 
-    /// Per-output-dim training-distribution bounds from the
-    /// `zentrain.output_bounds` metadata key. Returns an empty
-    /// `Vec` when the key is absent. Length equals `n_outputs`.
-    /// Codec uses [`crate::output_first_out_of_distribution`] to
-    /// detect picks where the MLP is extrapolating past its
-    /// training envelope.
     #[cfg(feature = "advanced")]
     pub fn output_bounds(&self) -> alloc::vec::Vec<crate::OutputBound> {
-        let Some(entry) = self.metadata.get(crate::keys::OUTPUT_BOUNDS) else {
+        let md = self.metadata();
+        let Some(entry) = md.get(crate::keys::OUTPUT_BOUNDS) else {
             return alloc::vec::Vec::new();
         };
         let len = core::mem::size_of::<crate::OutputBound>();
@@ -906,54 +921,63 @@ impl<'a> Model<'a> {
             .collect()
     }
 
-    /// Per-feature pre-standardize transforms from the
-    /// `zentrain.feature_transforms` metadata key (issue #52). Length
-    /// is exactly `n_inputs`. Returns `None` when the bake didn't
-    /// emit the key — consumers MUST treat that case as
-    /// "all-identity" (i.e. the [`Predictor::predict`] hot path
-    /// remains correct without applying any transform).
-    ///
-    /// When `Some(_)` is returned, callers MUST apply the named
-    /// transform to each feature element BEFORE the forward pass —
-    /// the trainer's `scaler_mean` / `scaler_scale` already encode
-    /// the post-transform distribution. The
-    /// [`Predictor::predict_transformed`] / [`Predictor::predict_with_specs_transformed`]
-    /// helpers do this automatically and are the recommended path
-    /// for codec runtimes.
-    ///
-    /// [`Predictor::predict`]: crate::Predictor::predict
-    /// [`Predictor::predict_transformed`]: crate::Predictor::predict_transformed
-    /// [`Predictor::predict_with_specs_transformed`]: crate::Predictor::predict_with_specs_transformed
     pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
         self.feature_transforms.as_deref()
     }
 
-    /// `true` iff the bake declared a non-trivial transform for at
-    /// least one feature (i.e. anything other than `Identity`).
-    /// Convenience for runtimes that want to log whether they're on
-    /// the transformed path.
     pub fn has_nontrivial_feature_transforms(&self) -> bool {
         self.feature_transforms
             .as_deref()
             .is_some_and(|ts| ts.iter().any(|t| *t != FeatureTransform::Identity))
     }
 
-    /// Length of the scratch buffers (`scratch_a`, `scratch_b`,
-    /// `output`) needed by the forward-pass kernel —
-    /// `max(n_inputs, max_layer_out_dim)`. [`Predictor`] reads this
-    /// to size its internal buffers in [`Predictor::new`].
-    ///
-    /// [`Predictor`]: crate::Predictor
-    /// [`Predictor::new`]: crate::Predictor::new
     pub fn scratch_len(&self) -> usize {
-        let max_out = self.layers.iter().map(|l| l.out_dim).max().unwrap_or(0);
+        let max_out = self
+            .layer_offsets
+            .iter()
+            .map(|l| l.out_dim as usize)
+            .max()
+            .unwrap_or(0);
         max_out.max(self.n_inputs())
     }
 
-    /// Raw bytes the model was parsed from. Useful for re-serializing
-    /// or hashing a known-good blob.
-    pub fn raw_bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub fn raw_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// Iterator over a `Model`'s layers. Yields owned `LayerView<'_>`
+/// values that borrow from the model.
+pub struct LayerIter<'a> {
+    model: &'a Model,
+    idx: usize,
+    end: usize,
+}
+
+impl<'a> Iterator for LayerIter<'a> {
+    type Item = LayerView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.end {
+            return None;
+        }
+        let v = self.model.materialize_layer(self.idx);
+        self.idx += 1;
+        Some(v)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.idx;
+        (n, Some(n))
+    }
+}
+
+impl<'a> ExactSizeIterator for LayerIter<'a> {}
+impl<'a> DoubleEndedIterator for LayerIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.end {
+            return None;
+        }
+        self.end -= 1;
+        Some(self.model.materialize_layer(self.end))
     }
 }
 
@@ -1036,4 +1060,467 @@ fn cast_i8_section<'a>(
         offset: section.offset,
         required_align: 1,
     })
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Helpers for load-time decompression + section validation.
+// ─────────────────────────────────────────────────────────────────
+
+fn decompress_lz4(input: &[u8], output: &mut [u8]) -> Result<(), PredictError> {
+    lz4_flex::block::decompress_into(input, output).map_err(|_| {
+        PredictError::SectionOutOfRange {
+            what: "compressed payload (lz4 decode failed)",
+            offset: HEADER_SIZE as u32,
+            len: input.len() as u32,
+            file_len: HEADER_SIZE + output.len(),
+        }
+    })?;
+    Ok(())
+}
+
+fn validate_scaler_section(
+    what: &'static str,
+    section: Section,
+    bytes: &[u8],
+    n: usize,
+) -> Result<(), PredictError> {
+    cast_f32_section(what, section, bytes, n).map(|_| ())
+}
+
+fn validate_feature_bounds(
+    section: Section,
+    bytes: &[u8],
+    n_inputs: usize,
+) -> Result<(), PredictError> {
+    if section.is_empty() {
+        return Ok(());
+    }
+    let n_bound_f32s = n_inputs
+        .checked_mul(2)
+        .ok_or(PredictError::DimensionOverflow {
+            what: "feature_bounds = n_inputs * 2",
+        })?;
+    let raw = cast_f32_section("feature_bounds", section, bytes, n_bound_f32s)?;
+    let bound_bytes = bytemuck::cast_slice::<f32, u8>(raw);
+    bytemuck::try_cast_slice::<u8, crate::bounds::FeatureBound>(bound_bytes).map_err(|_| {
+        PredictError::SectionMisaligned {
+            what: "feature_bounds",
+            offset: section.offset,
+            required_align: core::mem::align_of::<crate::bounds::FeatureBound>(),
+        }
+    })?;
+    Ok(())
+}
+
+fn validate_output_specs(
+    section: Section,
+    bytes: &[u8],
+    n_outputs: usize,
+) -> Result<(), PredictError> {
+    if section.is_empty() {
+        return Ok(());
+    }
+    let raw = section.slice("output_specs", bytes)?;
+    let expected =
+        n_outputs
+            .checked_mul(core::mem::size_of::<OutputSpec>())
+            .ok_or(PredictError::DimensionOverflow {
+                what: "n_outputs * sizeof(OutputSpec)",
+            })?;
+    if raw.len() != expected {
+        return Err(PredictError::SectionOutOfRange {
+            what: "output_specs",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    bytemuck::try_cast_slice::<u8, OutputSpec>(raw).map_err(|_| {
+        PredictError::SectionMisaligned {
+            what: "output_specs",
+            offset: section.offset,
+            required_align: core::mem::align_of::<OutputSpec>(),
+        }
+    })?;
+    Ok(())
+}
+
+fn validate_discrete_sets(section: Section, bytes: &[u8]) -> Result<(), PredictError> {
+    if section.is_empty() {
+        return Ok(());
+    }
+    let raw = section.slice("discrete_sets", bytes)?;
+    if !raw.len().is_multiple_of(4) {
+        return Err(PredictError::SectionOutOfRange {
+            what: "discrete_sets",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    bytemuck::try_cast_slice::<u8, f32>(raw).map_err(|_| PredictError::SectionMisaligned {
+        what: "discrete_sets",
+        offset: section.offset,
+        required_align: core::mem::align_of::<f32>(),
+    })?;
+    Ok(())
+}
+
+fn validate_sparse_overrides(
+    section: Section,
+    bytes: &[u8],
+    n_outputs: usize,
+) -> Result<(), PredictError> {
+    if section.is_empty() {
+        return Ok(());
+    }
+    let raw = section.slice("sparse_overrides", bytes)?;
+    if !raw
+        .len()
+        .is_multiple_of(core::mem::size_of::<SparseOverride>())
+    {
+        return Err(PredictError::SectionOutOfRange {
+            what: "sparse_overrides",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    let parsed =
+        bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
+            PredictError::SectionMisaligned {
+                what: "sparse_overrides",
+                offset: section.offset,
+                required_align: core::mem::align_of::<SparseOverride>(),
+            }
+        })?;
+    for entry in parsed {
+        if (entry.idx as usize) >= n_outputs {
+            return Err(PredictError::OutputDimMismatch {
+                expected: n_outputs,
+                got: entry.idx as usize,
+            });
+        }
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Load-time inverse permutations.
+//
+// `feature_order` and `output_order` are auto-sized indices (u8/u16/u32)
+// stored as flat byte arrays in the header sections. Width is inferred
+// from `section.len / n`. The forward permutation `π[bake_pos] = caller_idx`
+// is applied at bake time; the loader applies the INVERSE to rotate the
+// on-disk arrays back into caller-natural order.
+// ─────────────────────────────────────────────────────────────────
+
+/// Read a permutation index array from a section. Width is auto-detected
+/// from `section.len / n`: 1→u8, 2→u16, 4→u32. Validates that every
+/// index is `< n`. Returns a Vec<u32> of length `n`.
+fn read_permutation_indices(
+    what: &'static str,
+    section: Section,
+    bytes: &[u8],
+    n: usize,
+) -> Result<alloc::vec::Vec<u32>, PredictError> {
+    let raw = section.slice(what, bytes)?;
+    let width = if raw.len() == n {
+        1usize
+    } else if raw.len() == n * 2 {
+        2
+    } else if raw.len() == n * 4 {
+        4
+    } else {
+        return Err(PredictError::SectionOutOfRange {
+            what,
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    };
+    let mut out = alloc::vec::Vec::with_capacity(n);
+    match width {
+        1 => {
+            for &b in raw {
+                out.push(b as u32);
+            }
+        }
+        2 => {
+            for chunk in raw.chunks_exact(2) {
+                out.push(u16::from_le_bytes([chunk[0], chunk[1]]) as u32);
+            }
+        }
+        4 => {
+            for chunk in raw.chunks_exact(4) {
+                out.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            }
+        }
+        _ => unreachable!(),
+    }
+    // Validate: every index < n.
+    for &idx in &out {
+        if (idx as usize) >= n {
+            return Err(PredictError::OutputDimMismatch {
+                expected: n,
+                got: idx as usize,
+            });
+        }
+    }
+    // Validate: permutation (every index in 0..n appears exactly once).
+    let mut seen = alloc::vec![false; n];
+    for &idx in &out {
+        let i = idx as usize;
+        if seen[i] {
+            return Err(PredictError::OutputDimMismatch {
+                expected: n,
+                got: i,
+            });
+        }
+        seen[i] = true;
+    }
+    Ok(out)
+}
+
+/// Apply the inverse of `feature_order` to all input-indexed bake data:
+/// scaler_mean, scaler_scale, feature_bounds, layer[0] weight rows.
+///
+/// The forward permutation `feature_order[bake_pos] = caller_idx` says
+/// "the bake stored this entry at `bake_pos` should be reachable at
+/// `caller_idx` in caller-natural order." So the loader moves
+/// `bake_data[bake_pos]` to position `caller_idx`. This is implemented
+/// as a cycle-detection in-place permutation.
+fn apply_feature_order_inverse(
+    bytes: &mut [u8],
+    header: &Header,
+    layer_offsets: &[LayerOffsets],
+    n_inputs: usize,
+) -> Result<(), PredictError> {
+    let perm = read_permutation_indices("feature_order", header.feature_order, bytes, n_inputs)?;
+    // Reorder scaler_mean (n_inputs f32s).
+    permute_f32_array_inverse(bytes, header.scaler_mean, &perm)?;
+    permute_f32_array_inverse(bytes, header.scaler_scale, &perm)?;
+    if !header.feature_bounds.is_empty() {
+        // feature_bounds is n_inputs FeatureBounds = n_inputs × (low, high) f32s,
+        // = n_inputs × 8 bytes.
+        permute_pod_array_inverse(bytes, header.feature_bounds, &perm, 8)?;
+    }
+    // Layer[0] weight ROWS need permutation. Each row is `out_dim`
+    // elements of the layer's weight dtype.
+    let l0 = &layer_offsets[0];
+    let row_stride_elems = l0.out_dim as usize;
+    let elem_bytes = match l0.weight_dtype {
+        WeightDtype::F32 => 4,
+        WeightDtype::F16 => 2,
+        WeightDtype::I8 => 1,
+    };
+    let row_bytes = row_stride_elems * elem_bytes;
+    permute_rows_inverse(bytes, l0.weights, &perm, row_bytes)?;
+    Ok(())
+}
+
+/// Apply the inverse of `output_order` to all output-indexed bake data:
+/// layer[last] weight cols, layer[last] biases, output_specs,
+/// sparse_overrides indices. The contract is that metadata-side output
+/// indexed arrays (cell_rescue_hints, output_bounds) are emitted by
+/// the trainer in caller-natural order, so they don't need permutation
+/// at load.
+fn apply_output_order_inverse(
+    bytes: &mut [u8],
+    header: &Header,
+    layer_offsets: &[LayerOffsets],
+    n_outputs: usize,
+) -> Result<(), PredictError> {
+    let perm = read_permutation_indices("output_order", header.output_order, bytes, n_outputs)?;
+    let last = layer_offsets.last().expect("at least one layer");
+    let in_dim_last = last.in_dim as usize;
+    let elem_bytes = match last.weight_dtype {
+        WeightDtype::F32 => 4,
+        WeightDtype::F16 => 2,
+        WeightDtype::I8 => 1,
+    };
+    // Permute COLUMNS of layer[last].weights — row-major with
+    // in_dim rows × out_dim cols; column j is at offset
+    // (row * out_dim + j) * elem_bytes within the weight section.
+    permute_cols_inverse(
+        bytes,
+        last.weights,
+        &perm,
+        in_dim_last,
+        n_outputs,
+        elem_bytes,
+    )?;
+    // Permute biases (n_outputs f32s).
+    permute_f32_array_inverse(bytes, last.biases, &perm)?;
+    // Permute I8 scales if present (one f32 per output column).
+    if !last.scales.is_empty() {
+        permute_f32_array_inverse(bytes, last.scales, &perm)?;
+    }
+    // Permute output_specs (POD struct array indexed by output idx).
+    if !header.output_specs.is_empty() {
+        let spec_size = core::mem::size_of::<OutputSpec>();
+        permute_pod_array_inverse(bytes, header.output_specs, &perm, spec_size)?;
+    }
+    // Remap sparse_overrides.idx: each entry has u32 idx at offset 0.
+    if !header.sparse_overrides.is_empty() {
+        remap_sparse_override_indices(bytes, header.sparse_overrides, &perm)?;
+    }
+    Ok(())
+}
+
+/// Apply inverse permutation to an array of `n` POD elements
+/// (each `elem_bytes` bytes) at `section`. `perm[bake_pos] = caller_idx`;
+/// the result moves `data[bake_pos]` to position `caller_idx`.
+fn permute_pod_array_inverse(
+    bytes: &mut [u8],
+    section: Section,
+    perm: &[u32],
+    elem_bytes: usize,
+) -> Result<(), PredictError> {
+    let raw_offset = section.offset as usize;
+    let raw_len = section.len as usize;
+    let n = perm.len();
+    if raw_len != n * elem_bytes {
+        return Err(PredictError::SectionOutOfRange {
+            what: "permute_pod_array_inverse: section.len mismatch",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    // Allocate scratch (one alloc per call; total ~few KB).
+    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    {
+        let src = &bytes[raw_offset..raw_offset + raw_len];
+        for bake_pos in 0..n {
+            let caller_idx = perm[bake_pos] as usize;
+            let src_start = bake_pos * elem_bytes;
+            let dst_start = caller_idx * elem_bytes;
+            scratch[dst_start..dst_start + elem_bytes]
+                .copy_from_slice(&src[src_start..src_start + elem_bytes]);
+        }
+    }
+    bytes[raw_offset..raw_offset + raw_len].copy_from_slice(&scratch);
+    Ok(())
+}
+
+/// Apply inverse permutation to a contiguous f32 array.
+fn permute_f32_array_inverse(
+    bytes: &mut [u8],
+    section: Section,
+    perm: &[u32],
+) -> Result<(), PredictError> {
+    permute_pod_array_inverse(bytes, section, perm, 4)
+}
+
+/// Apply inverse permutation to ROWS of a row-major weight matrix.
+/// Matrix shape: `n_rows = perm.len()` × cols (each row is `row_bytes`
+/// bytes). Moves row `bake_pos` to row `caller_idx`.
+fn permute_rows_inverse(
+    bytes: &mut [u8],
+    section: Section,
+    perm: &[u32],
+    row_bytes: usize,
+) -> Result<(), PredictError> {
+    let raw_offset = section.offset as usize;
+    let raw_len = section.len as usize;
+    let n_rows = perm.len();
+    if raw_len != n_rows * row_bytes {
+        return Err(PredictError::SectionOutOfRange {
+            what: "permute_rows_inverse: section.len mismatch",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    {
+        let src = &bytes[raw_offset..raw_offset + raw_len];
+        for bake_pos in 0..n_rows {
+            let caller_idx = perm[bake_pos] as usize;
+            let src_start = bake_pos * row_bytes;
+            let dst_start = caller_idx * row_bytes;
+            scratch[dst_start..dst_start + row_bytes]
+                .copy_from_slice(&src[src_start..src_start + row_bytes]);
+        }
+    }
+    bytes[raw_offset..raw_offset + raw_len].copy_from_slice(&scratch);
+    Ok(())
+}
+
+/// Apply inverse permutation to COLUMNS of a row-major weight matrix.
+/// Matrix shape: n_rows × n_cols (each element `elem_bytes` bytes).
+/// Moves col `bake_pos` to col `caller_idx` for every row.
+fn permute_cols_inverse(
+    bytes: &mut [u8],
+    section: Section,
+    perm: &[u32],
+    n_rows: usize,
+    n_cols: usize,
+    elem_bytes: usize,
+) -> Result<(), PredictError> {
+    let raw_offset = section.offset as usize;
+    let raw_len = section.len as usize;
+    if raw_len != n_rows * n_cols * elem_bytes {
+        return Err(PredictError::SectionOutOfRange {
+            what: "permute_cols_inverse: section.len mismatch",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    let row_stride = n_cols * elem_bytes;
+    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    {
+        let src = &bytes[raw_offset..raw_offset + raw_len];
+        for r in 0..n_rows {
+            let row_off = r * row_stride;
+            for bake_pos in 0..n_cols {
+                let caller_idx = perm[bake_pos] as usize;
+                let src_start = row_off + bake_pos * elem_bytes;
+                let dst_start = row_off + caller_idx * elem_bytes;
+                scratch[dst_start..dst_start + elem_bytes]
+                    .copy_from_slice(&src[src_start..src_start + elem_bytes]);
+            }
+        }
+    }
+    bytes[raw_offset..raw_offset + raw_len].copy_from_slice(&scratch);
+    Ok(())
+}
+
+/// Remap the `idx: u32` field of each [`SparseOverride`] in `section`
+/// by applying the forward permutation: `entry.idx = perm[entry.idx]`.
+/// This is NOT a permutation of the array — it's a value substitution
+/// on each entry.
+fn remap_sparse_override_indices(
+    bytes: &mut [u8],
+    section: Section,
+    perm: &[u32],
+) -> Result<(), PredictError> {
+    let raw_offset = section.offset as usize;
+    let raw_len = section.len as usize;
+    let entry_size = core::mem::size_of::<SparseOverride>();
+    if !raw_len.is_multiple_of(entry_size) {
+        return Err(PredictError::SectionOutOfRange {
+            what: "remap_sparse_override_indices: section.len % entry_size != 0",
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    let region = &mut bytes[raw_offset..raw_offset + raw_len];
+    for chunk in region.chunks_exact_mut(entry_size) {
+        // SparseOverride layout: { idx: u32, value: f32 } @ #[repr(C)].
+        // First 4 bytes are the idx in LE.
+        let old_idx = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
+        if old_idx >= perm.len() {
+            return Err(PredictError::OutputDimMismatch {
+                expected: perm.len(),
+                got: old_idx,
+            });
+        }
+        let new_idx = perm[old_idx];
+        chunk[0..4].copy_from_slice(&new_idx.to_le_bytes());
+    }
+    Ok(())
 }

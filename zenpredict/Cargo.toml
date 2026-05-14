@@ -31,19 +31,6 @@ std = []
 # runtimes that only call `predict` / `argmin_masked` stay lean by
 # default; per-codec pickers that need the extras opt in.
 advanced = []
-# Enable loading bakes whose i8 weight bytes are LZ4-block compressed
-# (`WeightDtype::I8Lz4`, wire byte 3). Adds ~1 KB compiled cost
-# (the in-tree decoder at `src/lz4_block.rs` is pure-safe-Rust
-# single-alloc). Without this feature, encountering byte 3 in a
-# layer's `weight_dtype` field returns
-# `PredictError::UnknownWeightDtype { byte: 3 }`.
-#
-# Pair with `zenpredict-bake = "0.x"` and pass `WeightDtype::I8Lz4`
-# to `BakeLayer { dtype, ... }` to emit a compressed bake from
-# pre-zerobiased weights. The compressed-weights path only delivers
-# the headline 75% shrink AFTER a per-layer zerobias rebake — raw
-# i8 weights are near-incompressible.
-compressed-weights = []
 
 [dependencies]
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
@@ -57,6 +44,11 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 # pattern requires consumers to opt in to a private feature — bad UX
 # for a 13 KB compile-only cost on std builds.
 libm = { version = "0.2.16", default-features = false }
+# LZ4 block decoder for whole-bake-compressed payloads (header flag
+# bit 0 + algo nibble 1). ~4 KB binary; pure-safe-Rust + no_std.
+# Always available — the wire format may set the compressed flag,
+# so the loader needs decompression unconditionally.
+lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-decode"] }
 
 
 [dev-dependencies]

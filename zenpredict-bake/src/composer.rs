@@ -76,6 +76,20 @@ pub enum BakeError {
         idx: u32,
         n_outputs: usize,
     },
+    /// `feature_order` length didn't equal `n_inputs`.
+    FeatureOrderLengthMismatch {
+        expected: usize,
+        got: usize,
+    },
+    /// `output_order` length didn't equal `n_outputs`.
+    OutputOrderLengthMismatch {
+        expected: usize,
+        got: usize,
+    },
+    /// A permutation index was out of range (`>= n`) or duplicate.
+    InvalidPermutation {
+        what: &'static str,
+    },
 }
 
 impl fmt::Display for BakeError {
@@ -149,6 +163,17 @@ impl fmt::Display for BakeError {
                 f,
                 "bake: sparse_override idx {idx} >= n_outputs {n_outputs}"
             ),
+            Self::FeatureOrderLengthMismatch { expected, got } => write!(
+                f,
+                "bake: feature_order length {got} != expected {expected} (n_inputs)"
+            ),
+            Self::OutputOrderLengthMismatch { expected, got } => write!(
+                f,
+                "bake: output_order length {got} != expected {expected} (n_outputs)"
+            ),
+            Self::InvalidPermutation { what } => {
+                write!(f, "bake: {what} is not a valid permutation (out of range or duplicate)")
+            }
         }
     }
 }
@@ -184,6 +209,9 @@ pub struct BakeMetadataEntry<'a> {
 /// breaking-change cost in exchange for the construction ergonomics.
 pub struct BakeRequest<'a> {
     pub schema_hash: u64,
+    /// Header flags. Bits 0..=3 are managed by the composer based on
+    /// `compressed` / `compression_algo` — caller should leave them
+    /// zero. Bits 4..=15 are reserved.
     pub flags: u16,
     pub scaler_mean: &'a [f32],
     pub scaler_scale: &'a [f32],
@@ -200,10 +228,29 @@ pub struct BakeRequest<'a> {
     /// of this pool. Pass empty if no spec snaps to a discrete set.
     pub discrete_sets: &'a [f32],
     /// Sparse hand-tune overrides applied AFTER the per-output spec
-    /// pipeline. Each entry's `idx` must be `< n_outputs`. Use
-    /// `value = f32::NAN` to force [`OutputValue::Default`](zenpredict::OutputValue::Default)
-    /// for that output.
+    /// pipeline. Each entry's `idx` must be `< n_outputs`.
     pub sparse_overrides: &'a [SparseOverride],
+    /// Optional input-feature permutation: `feature_order[bake_pos] =
+    /// caller_idx`. When `Some`, the composer reorders all
+    /// input-indexed data (scaler_mean, scaler_scale, feature_bounds,
+    /// layer[0] weight rows) into bake (permuted) order at write
+    /// time, and stores the permutation in the `feature_order`
+    /// header section so the loader can apply the inverse at load.
+    /// Index width on disk is auto-sized to the smallest u8/u16/u32
+    /// that fits `n_inputs`. None = identity (no reorder).
+    pub feature_order: Option<&'a [u32]>,
+    /// Optional output permutation: `output_order[bake_pos] =
+    /// caller_idx`. Symmetric to `feature_order`. Affects
+    /// layer[last] weight cols + biases (and I8 scales), output_specs,
+    /// sparse_overrides indices. Metadata entries (cell_rescue_hints,
+    /// output_bounds) are NOT permuted — the trainer's contract is
+    /// to emit metadata in caller-natural order regardless.
+    pub output_order: Option<&'a [u32]>,
+    /// When true, the composer wraps bytes [128..end] in LZ4 block
+    /// compression and sets the `flags.compressed` bit + algo nibble
+    /// + `decompressed_payload_len` header fields. Loader transparently
+    /// decompresses at load time. Default false.
+    pub compressed: bool,
 }
 
 impl<'a> BakeRequest<'a> {
@@ -236,6 +283,9 @@ impl<'a> BakeRequest<'a> {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
         }
     }
 
@@ -305,6 +355,31 @@ impl<'a> BakeRequestBuilder<'a> {
     /// spec pipeline.
     pub fn sparse_overrides(mut self, overrides: &'a [SparseOverride]) -> Self {
         self.inner.sparse_overrides = overrides;
+        self
+    }
+
+    /// Input-feature permutation: `perm[bake_pos] = caller_idx`. The
+    /// composer reorders all input-indexed data into bake order and
+    /// writes the permutation as the `feature_order` header section.
+    /// Length must equal `n_inputs`.
+    pub fn feature_order(mut self, perm: &'a [u32]) -> Self {
+        self.inner.feature_order = Some(perm);
+        self
+    }
+
+    /// Output permutation: `perm[bake_pos] = caller_idx`. The composer
+    /// reorders all output-indexed data into bake order. Length must
+    /// equal `n_outputs`.
+    pub fn output_order(mut self, perm: &'a [u32]) -> Self {
+        self.inner.output_order = Some(perm);
+        self
+    }
+
+    /// Enable bake-level LZ4 compression. Bytes [128..end] are LZ4-
+    /// block-compressed at write time; the loader transparently
+    /// decompresses at load. ~58 % shrink on HU-reordered V0_18.
+    pub fn compressed(mut self, enabled: bool) -> Self {
+        self.inner.compressed = enabled;
         self
     }
 
@@ -530,39 +605,10 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 }
                 Section::new(start, layer.weights.len() as u32)
             }
-            #[cfg(feature = "lz4")]
-            WeightDtype::I8Lz4 => {
-                // Same i8 quantization as `WeightDtype::I8`, then LZ4-
-                // block-compress the i8 byte stream. Layout per the
-                // runtime parser:
-                //   [u32 decompressed_len_bytes][lz4 block payload]
-                let scales = compute_i8_scales_per_output(layer);
-                let mut i8_bytes = alloc::vec::Vec::with_capacity(layer.weights.len());
-                for (idx, &w) in layer.weights.iter().enumerate() {
-                    let o = idx % layer.out_dim;
-                    let q = if scales[o] == 0.0 {
-                        0
-                    } else {
-                        (w / scales[o]).round().clamp(-128.0, 127.0) as i8
-                    };
-                    i8_bytes.push(q as u8);
-                }
-                let compressed = lz4_flex::block::compress(&i8_bytes);
-                pad_to(&mut buf, 4);
-                let start = buf.len() as u32;
-                buf.extend_from_slice(&(i8_bytes.len() as u32).to_le_bytes());
-                buf.extend_from_slice(&compressed);
-                Section::new(start, (4 + compressed.len()) as u32)
-            }
         };
 
         let scales_section = match layer.dtype {
             WeightDtype::I8 => {
-                pad_to(&mut buf, 4);
-                append_f32(&mut buf, &compute_i8_scales_per_output(layer))
-            }
-            #[cfg(feature = "lz4")]
-            WeightDtype::I8Lz4 => {
                 pad_to(&mut buf, 4);
                 append_f32(&mut buf, &compute_i8_scales_per_output(layer))
             }
@@ -664,7 +710,285 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         sparse_overrides_section,
     );
 
+    // ─── Forward permutation + permutation-table emission ──────────
+    //
+    // The bake's on-disk layout SHOULD be in compression-optimal
+    // (bake-natural) order. We just wrote everything in caller order
+    // — now we apply forward permutations in-place AND emit the
+    // permutation tables so the loader can invert at load time.
+    if let Some(perm) = req.feature_order {
+        if perm.len() != n_inputs {
+            return Err(BakeError::FeatureOrderLengthMismatch {
+                expected: n_inputs,
+                got: perm.len(),
+            });
+        }
+        validate_permutation(perm, n_inputs, "feature_order")?;
+        // Read layer[0]'s weight section from the layer table BEFORE
+        // we mut-borrow buf for the permutation pass.
+        let layer0_weights = read_section_inline(&buf, HEADER_SIZE, 12);
+        forward_permute_inputs(
+            &mut buf,
+            perm,
+            scaler_mean_section,
+            scaler_scale_section,
+            feature_bounds_section,
+            layer0_weights,
+            layers[0].out_dim,
+            layers[0].dtype,
+        );
+        // Emit feature_order section with auto-sized index width.
+        pad_to(&mut buf, 4);
+        let start = buf.len() as u32;
+        let written = write_permutation_indices(&mut buf, perm);
+        write_section(
+            &mut buf,
+            zenpredict::wire::SECTION_OFF_FEATURE_ORDER,
+            Section::new(start, written as u32),
+        );
+    }
+    if let Some(perm) = req.output_order {
+        if perm.len() != n_outputs {
+            return Err(BakeError::OutputOrderLengthMismatch {
+                expected: n_outputs,
+                got: perm.len(),
+            });
+        }
+        validate_permutation(perm, n_outputs, "output_order")?;
+        let last_idx = n_layers - 1;
+        let last_layer = &layers[last_idx];
+        let last_entry_off = HEADER_SIZE + last_idx * LAYER_ENTRY_SIZE;
+        let last_weights = read_section_inline(&buf, last_entry_off, 12);
+        let last_scales = read_section_inline(&buf, last_entry_off, 20);
+        let last_biases = read_section_inline(&buf, last_entry_off, 28);
+        forward_permute_outputs(
+            &mut buf,
+            perm,
+            last_weights,
+            last_scales,
+            last_biases,
+            last_layer.in_dim,
+            last_layer.out_dim,
+            last_layer.dtype,
+            output_specs_section,
+            sparse_overrides_section,
+        );
+        pad_to(&mut buf, 4);
+        let start = buf.len() as u32;
+        let written = write_permutation_indices(&mut buf, perm);
+        write_section(
+            &mut buf,
+            zenpredict::wire::SECTION_OFF_OUTPUT_ORDER,
+            Section::new(start, written as u32),
+        );
+    }
+
+    // ─── Whole-bake LZ4 compression (optional) ─────────────────────
+    //
+    // Compress bytes [128..end] in place. Set the header's
+    // compressed flag, algo nibble, and decompressed_payload_len.
+    if req.compressed {
+        let payload_len = (buf.len() - HEADER_SIZE) as u32;
+        let compressed = lz4_flex::block::compress(&buf[HEADER_SIZE..]);
+        // Replace bytes [HEADER_SIZE..] with the compressed blob.
+        buf.truncate(HEADER_SIZE);
+        buf.extend_from_slice(&compressed);
+        // Set flags: bit 0 (compressed) + algo nibble (LZ4 = 1).
+        let mut flags = u16::from_le_bytes([buf[6], buf[7]]);
+        flags |= zenpredict::wire::FLAG_COMPRESSED;
+        // Clear algo nibble first, then set LZ4 (1 << 1 == 0x02).
+        flags &= !zenpredict::wire::FLAGS_COMPRESSION_ALGO_MASK;
+        flags |= (zenpredict::wire::COMPRESSION_ALGO_LZ4 as u16) << 1;
+        buf[6..8].copy_from_slice(&flags.to_le_bytes());
+        // Write decompressed_payload_len.
+        buf[zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN
+            ..zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN + 4]
+            .copy_from_slice(&payload_len.to_le_bytes());
+    }
+
     Ok(buf)
+}
+
+// ───── Permutation + compression helpers ─────────────────────────
+
+fn read_section_inline(buf: &[u8], entry_off: usize, field_off: usize) -> Section {
+    let off = u32::from_le_bytes(
+        buf[entry_off + field_off..entry_off + field_off + 4]
+            .try_into()
+            .unwrap(),
+    );
+    let len = u32::from_le_bytes(
+        buf[entry_off + field_off + 4..entry_off + field_off + 8]
+            .try_into()
+            .unwrap(),
+    );
+    Section::new(off, len)
+}
+
+fn validate_permutation(perm: &[u32], n: usize, what: &'static str) -> Result<(), BakeError> {
+    let mut seen = alloc::vec![false; n];
+    for &v in perm {
+        let i = v as usize;
+        if i >= n || seen[i] {
+            return Err(BakeError::InvalidPermutation { what });
+        }
+        seen[i] = true;
+    }
+    Ok(())
+}
+
+/// Emit a permutation array with auto-sized width (u8/u16/u32) chosen
+/// to minimize on-disk size while addressing all indices.
+fn write_permutation_indices(buf: &mut alloc::vec::Vec<u8>, perm: &[u32]) -> usize {
+    let max_val = perm.iter().copied().max().unwrap_or(0);
+    if max_val <= 255 {
+        for &v in perm {
+            buf.push(v as u8);
+        }
+        perm.len()
+    } else if max_val <= 65_535 {
+        for &v in perm {
+            buf.extend_from_slice(&(v as u16).to_le_bytes());
+        }
+        perm.len() * 2
+    } else {
+        for &v in perm {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        perm.len() * 4
+    }
+}
+
+/// Forward permutation: `bake_data[bake_pos] = caller_data[perm[bake_pos]]`.
+fn forward_permute_inputs(
+    buf: &mut [u8],
+    perm: &[u32],
+    scaler_mean_section: Section,
+    scaler_scale_section: Section,
+    feature_bounds_section: Section,
+    layer0_weights_section: Section,
+    layer0_out_dim: usize,
+    layer0_dtype: WeightDtype,
+) {
+    forward_permute_f32(buf, scaler_mean_section, perm);
+    forward_permute_f32(buf, scaler_scale_section, perm);
+    if !feature_bounds_section.is_empty() {
+        forward_permute_pod(buf, feature_bounds_section, perm, 8);
+    }
+    let elem_bytes = match layer0_dtype {
+        WeightDtype::F32 => 4,
+        WeightDtype::F16 => 2,
+        WeightDtype::I8 => 1,
+    };
+    let row_bytes = layer0_out_dim * elem_bytes;
+    forward_permute_rows(buf, layer0_weights_section, perm, row_bytes);
+}
+
+fn forward_permute_outputs(
+    buf: &mut [u8],
+    perm: &[u32],
+    last_weights: Section,
+    last_scales: Section,
+    last_biases: Section,
+    last_in_dim: usize,
+    last_out_dim: usize,
+    last_dtype: WeightDtype,
+    output_specs_section: Section,
+    sparse_overrides_section: Section,
+) {
+    let elem_bytes = match last_dtype {
+        WeightDtype::F32 => 4,
+        WeightDtype::F16 => 2,
+        WeightDtype::I8 => 1,
+    };
+    // Permute COLS of last-layer weights.
+    forward_permute_cols(buf, last_weights, perm, last_in_dim, last_out_dim, elem_bytes);
+    forward_permute_f32(buf, last_biases, perm);
+    if !last_scales.is_empty() {
+        forward_permute_f32(buf, last_scales, perm);
+    }
+    if !output_specs_section.is_empty() {
+        let spec_size = core::mem::size_of::<OutputSpec>();
+        forward_permute_pod(buf, output_specs_section, perm, spec_size);
+    }
+    if !sparse_overrides_section.is_empty() {
+        // Remap idx of each entry: idx = inverse_perm[old_idx].
+        // For sparse_overrides, the caller wrote entries with idx
+        // pointing into CALLER-natural output positions. After bake
+        // reorder, idx should point into BAKE positions, so we need
+        // the inverse mapping: caller_idx → bake_pos.
+        let mut inv = alloc::vec![0u32; perm.len()];
+        for (bake_pos, &caller_idx) in perm.iter().enumerate() {
+            inv[caller_idx as usize] = bake_pos as u32;
+        }
+        forward_remap_sparse_indices(buf, sparse_overrides_section, &inv);
+    }
+}
+
+fn forward_permute_f32(buf: &mut [u8], section: Section, perm: &[u32]) {
+    forward_permute_pod(buf, section, perm, 4);
+}
+
+fn forward_permute_pod(buf: &mut [u8], section: Section, perm: &[u32], elem_bytes: usize) {
+    let off = section.offset() as usize;
+    let n = perm.len();
+    let mut new_bytes = alloc::vec![0u8; n * elem_bytes];
+    for bake_pos in 0..n {
+        let caller_idx = perm[bake_pos] as usize;
+        let src = &buf[off + caller_idx * elem_bytes..off + (caller_idx + 1) * elem_bytes];
+        new_bytes[bake_pos * elem_bytes..(bake_pos + 1) * elem_bytes].copy_from_slice(src);
+    }
+    buf[off..off + n * elem_bytes].copy_from_slice(&new_bytes);
+}
+
+fn forward_permute_rows(buf: &mut [u8], section: Section, perm: &[u32], row_bytes: usize) {
+    let off = section.offset() as usize;
+    let n = perm.len();
+    let mut new_bytes = alloc::vec![0u8; n * row_bytes];
+    for bake_pos in 0..n {
+        let caller_idx = perm[bake_pos] as usize;
+        let src = &buf[off + caller_idx * row_bytes..off + (caller_idx + 1) * row_bytes];
+        new_bytes[bake_pos * row_bytes..(bake_pos + 1) * row_bytes].copy_from_slice(src);
+    }
+    buf[off..off + n * row_bytes].copy_from_slice(&new_bytes);
+}
+
+fn forward_permute_cols(
+    buf: &mut [u8],
+    section: Section,
+    perm: &[u32],
+    n_rows: usize,
+    n_cols: usize,
+    elem_bytes: usize,
+) {
+    let off = section.offset() as usize;
+    let row_stride = n_cols * elem_bytes;
+    let total = n_rows * row_stride;
+    let mut new_bytes = alloc::vec![0u8; total];
+    for r in 0..n_rows {
+        let row_off = r * row_stride;
+        for bake_pos in 0..n_cols {
+            let caller_idx = perm[bake_pos] as usize;
+            let src = &buf[off + row_off + caller_idx * elem_bytes
+                ..off + row_off + (caller_idx + 1) * elem_bytes];
+            new_bytes[row_off + bake_pos * elem_bytes
+                ..row_off + (bake_pos + 1) * elem_bytes]
+                .copy_from_slice(src);
+        }
+    }
+    buf[off..off + total].copy_from_slice(&new_bytes);
+}
+
+fn forward_remap_sparse_indices(buf: &mut [u8], section: Section, inv: &[u32]) {
+    let off = section.offset() as usize;
+    let len = section.len_bytes() as usize;
+    let entry_size = core::mem::size_of::<SparseOverride>();
+    let region = &mut buf[off..off + len];
+    for chunk in region.chunks_exact_mut(entry_size) {
+        let old = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
+        let new_idx = inv[old];
+        chunk[0..4].copy_from_slice(&new_idx.to_le_bytes());
+    }
 }
 
 fn pad_to(buf: &mut alloc::vec::Vec<u8>, alignment: usize) {
