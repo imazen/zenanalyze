@@ -7,88 +7,90 @@
      bumps stay non-breaking). Persist across patch releases. Only
      clear when the breaking release ships. -->
 
-- `Header.*` and `LayerEntry.*` fields will become `pub(crate)` with
-  accessor methods. Currently `pub` for compat with `zenavif::auto_tune`
-  reading `model.header().n_outputs` directly. Migration: switch to
-  `model.n_outputs()` accessor; the cross-repo update lands alongside
-  the bump.
-- `LayerView.*` fields may follow the same tightening once `WeightStorage`
-  variant pattern-matching has a stable accessor pair (likely
-  `LayerView::weights() -> &WeightStorage<'_>`).
-
-### ROADMAP: compressed-weights feature (planned for ~zenpredict 0.3)
-
-A `compressed-weights` cargo feature will add `WeightDtype::I8Lz4`
-(byte value 3 in the wire format) for layers whose i8 weight bytes
-are LZ4-block-compressed. This is the queued size-shrink path the
-RLE/zero-bias and compression-eval reviews concluded on
-(`zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`,
-`zensim/benchmarks/zenpredict_compression_eval_2026-05-13.md`).
-
-**Prerequisites (must land first, in order):**
-
-1. **Zero-bias support on the bake side** (zenpredict-bake change,
-   no zenpredict-runtime change). Add a `zero_bias_threshold: f32`
-   field to `BakeLayer`. When > 0, the composer thresholds
-   `|W[i, o]| < tau * max(|W[:, o]|)` to exactly 0 before computing
-   the per-output i8 scale. At τ=0.005 the V0_18 weight tensor goes
-   from 1.4 % zeros to 87.5 % zeros at SROCC cost ≤ 0.0001 on CID22.
-   This makes the weight bytes compressible — without it, raw V_X
-   weight bytes are near-uniform-random and zstd/lz4/deflate all
-   plateau at ratio 0.93.
-2. **A baked-with-zero-bias V_X model** (zensim-side bake call adds
-   the threshold). V0_18-zerobiased keeps the same MLP, just with
-   weights pre-thresholded. Methodology doc accompanies the bake
-   per the per-bake requirement in `zensim/CLAUDE.md`.
-3. **LZ4 decoder vendor or dep** in zenpredict. The compression-eval
-   report measured `lz4_flex` block decoder at 1.8 µs / 1 alloc /
-   4 KB compiled binary — fastest of every candidate tested,
-   meets all four bars (ratio ≤ 0.40 after zero-bias, ≤ 100 µs, ≤ 2
-   allocs, ≤ 30 KB binary). Vendor scope: `src/block/decompress_safe.rs`
-   (485 LOC), `src/sink.rs` (335 LOC), `src/block/mod.rs` (180 LOC)
-   — ~1 KLOC total, MIT licensed, zero deps when frame format
-   skipped. Skip `src/block/decompress.rs` (uses `unsafe` pointer
-   copies; `#![forbid(unsafe_code)]` requires the `_safe` variant)
-   and `src/frame/` (requires `twox_hash` for checksums).
-
-**Format / API design:**
-
-- Wire format: `WeightDtype::I8Lz4 = 3` (next free dtype byte).
-  Layer bytes are: `[u32 decompressed_len_bytes][lz4_block_payload]`,
-  followed by the existing per-output f32 scales section unchanged.
-- Inference: single-alloc decompress into a per-layer scratch buffer
-  reused across `predict()` calls (allocated at `Predictor::new`
-  time, not per call). Then existing `saxpy_matmul_i8` consumes the
-  decompressed i8 slice — same hot path as today, zero extra allocs
-  per predict.
-- "Very fast uncached expansion and evaluation" per 2026-05-13 user
-  directive: decompress is per-layer, fused with the matmul (cache-
-  blocking the decompressed weight stream against the f32 input
-  accumulator to keep decompressed weights in L1/L2). No global
-  decompressed-weight cache — re-decompress every predict call,
-  trusting lz4's ~88 GiB/s decode throughput to stay under the
-  matmul's own bandwidth budget.
-
-**API:**
-
-- New cargo feature `compressed-weights` (default-off) gates
-  `saxpy_matmul_i8_lz4` and the `WeightDtype::I8Lz4` variant of the
-  match arm. Without the feature, encountering byte 3 fails with
-  `PredictError::UnknownWeightDtype { byte: 3 }`, so consumers
-  building lean runtimes that never load compressed bakes don't
-  pay the lz4 decoder cost.
-- `zenpredict-bake` always supports the `I8Lz4` write path (even
-  without `compressed-weights` on the runtime side); bakes built
-  with i8_lz4 layers fail to load only at zenpredict runtimes
-  that didn't enable the feature.
-
-**Not doing yet**: shipping any of this in 0.2.0. The 4.5-9 % shrink
-from compression alone on raw weights doesn't justify the binary
-cost. The 73 % shrink lives in the **zero-bias rebake**, which is
-prerequisite (1) above. Until V_X is rebaked with τ > 0, lz4 stays
-on the roadmap.
+- `Header.*` fields became `pub(crate)` in this 0.2.0 cut. zenavif
+  migrated to `model.n_outputs()` ahead of release. Other internal
+  consumers (zenwebp, zenjpeg, zenpicker) build clean.
+- `LayerEntry.*` and `LayerView.*` field tightening may follow once
+  `WeightStorage` variant pattern-matching has a stable accessor
+  pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
 
 ## [0.2.0] - 2026-05-13
+
+### Added: `compressed-weights` feature (LZ4 + zerobias)
+
+New cargo feature `compressed-weights` (default-off) ships
+`WeightDtype::I8Lz4` (wire byte 3) for layers whose i8 weight bytes
+are LZ4-block-compressed. Bake-side support is in
+[`zenpredict-bake`](../zenpredict-bake/) behind its parallel `lz4`
+feature.
+
+**Decoder**: pure-safe-Rust `src/lz4_block.rs` (~280 LOC, single
+allocation, `#![forbid(unsafe_code)]`-compatible). Hand-rolled
+instead of vendoring `lz4_flex` to keep the binary cost under 1 KB
+and stay free of `unsafe` blocks; round-trip-tested against
+`lz4_flex`'s encoder. 9 unit tests cover overlap-RLE semantics,
+truncated input, invalid offsets, output-overflow, and a fuzz-style
+random-input probe.
+
+**Wire layout**: layer's weights section is `[u32 decompressed_len_bytes][lz4_block_payload]`,
+followed by the existing per-output f32 scales section unchanged.
+`decompressed_len_bytes` must equal `in_dim * out_dim`; the scales
+section is byte-identical to plain `I8`. Switching `I8 ↔ I8Lz4` is
+a wire-format change only — quantized weights, matmul kernel, and
+score outputs are bit-equivalent.
+
+**Inference**: single-alloc scratch buffer per Predictor sized at
+`Predictor::new` to `max(decompressed_len)` across all `I8Lz4`
+layers; zero alloc if the bake has no compressed layers. Per
+`predict()`, the scratch is re-decompressed fresh — "very fast
+uncached expansion" per the 2026-05-13 design directive. No global
+decoded-weight cache.
+
+**Measured on V0_17 → V0_18 shape (228 → 384 → 1, 87.5K i8 weights)**:
+
+| variant | bake bytes | shrink | first-parse µs (median) | per-predict µs (median) |
+|---|---:|---:|---:|---:|
+| I8 raw | 93,064 | — | 0.1 | 140.3 |
+| I8 zerobias (τ=0.005, per-layer) | 93,064 | 0 | 0.1 | 140.9 |
+| I8Lz4 raw | 93,280 | +0.2 % (expansion) | 0.8 | 142.8 |
+| **I8Lz4 zerobias (τ=0.005)** | **37,976** | **-59.2 %** | **0.7** | **179.8** |
+
+Reading: lz4 alone on raw weights _expands_ (i8 LSBs are near-uniform-
+random). Pair lz4 with τ-zerobias and the bake shrinks 59 % with
+only ~40 µs of added per-predict cost (the per-`predict()`
+decompression). First-parse is ~0.6 µs slower with lz4 (scratch
+allocation in `Predictor::new`), still under 1 µs.
+
+**Trade-off summary**: compress for binary-size-sensitive embeds;
+keep uncompressed for predict-throughput-sensitive consumers. The
+40 µs/predict overhead matters for batch sweeps that call
+`predict()` thousands of times per second; for one-shot zensim
+scoring it's invisible.
+
+### Added: Resource limits
+
+`src/limits.rs` exposes four constants enforced at parse time
+**before** any allocation against the value being checked:
+
+- `MAX_BAKE_BYTES = 64 MiB` — bytes-slice ceiling. Every shipped
+  bake is < 1 MiB; the limit bounds fuzz / adversarial input.
+- `MAX_DIM = 65,536` — per-dim ceiling on `n_inputs`, `n_outputs`,
+  `in_dim`, `out_dim`. Largest shipped dim is 384.
+- `MAX_LAYERS = 256` — every shipped bake has ≤ 4 layers.
+- `MAX_LZ4_DECOMPRESSED_BYTES` (with `compressed-weights`): caps
+  the per-layer decompressed scratch.
+
+A 1 GB-claiming header now fails in O(1).
+
+### Added: Fuzz targets
+
+`fuzz/` directory with three `libfuzzer-sys` targets covering
+`Model::from_bytes`, `lz4_block::decompress_into`, and the full
+`Predictor::predict` pipeline against arbitrary bytes. 5K-iteration
+smoke runs pass clean on every target. Corpora live under
+`/mnt/v/fuzzes/zenanalyze/` per CLAUDE.md fuzz-corpus policy
+(not committed to git).
+
 
 This is a **hard fork**: v2-format bakes do not load. Migrate via
 [`zentrain/tools/migrate_znpr_v2_to_v3.py`](../zentrain/tools/migrate_znpr_v2_to_v3.py)
