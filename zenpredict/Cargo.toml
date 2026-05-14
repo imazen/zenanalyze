@@ -48,6 +48,9 @@ libm = { version = "0.2.16", default-features = false }
 # bit 0 + algo nibble 1). ~4 KB binary; pure-safe-Rust + no_std.
 # Always available — the wire format may set the compressed flag,
 # so the loader needs decompression unconditionally.
+# `default-features = false` strips the encoder/frame helpers; we
+# only need `safe-decode`. The bake-side crate pulls `safe-encode`
+# separately.
 lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-decode"] }
 
 

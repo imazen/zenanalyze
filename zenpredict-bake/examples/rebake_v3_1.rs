@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use zenpredict::{Activation, Model, WeightDtype, WeightStorage, f16_bits_to_f32};
 use zenpredict_bake::{
     BakeLayer, BakeMetadataEntry, BakeRequest, apply_zero_bias_per_layer_in_place, bake,
+    bake_optimized,
 };
 
 fn main() {
@@ -43,6 +44,7 @@ fn main() {
             "i8" => WeightDtype::I8,
             other => panic!("unknown dtype: {}", other),
         });
+    let optimize = args.iter().any(|a| a == "--optimize");
 
     let input_bytes = fs::read(&in_path).unwrap_or_else(|e| {
         eprintln!("read {}: {}", in_path.display(), e);
@@ -162,10 +164,17 @@ fn main() {
         compressed: compress,
     };
 
-    let new_bytes = bake(&req).unwrap_or_else(|e| {
-        eprintln!("bake: {:?}", e);
-        std::process::exit(1);
-    });
+    let new_bytes = if optimize {
+        bake_optimized(&req).unwrap_or_else(|e| {
+            eprintln!("bake_optimized: {:?}", e);
+            std::process::exit(1);
+        })
+    } else {
+        bake(&req).unwrap_or_else(|e| {
+            eprintln!("bake: {:?}", e);
+            std::process::exit(1);
+        })
+    };
 
     fs::write(&out_path, &new_bytes).unwrap_or_else(|e| {
         eprintln!("write {}: {}", out_path.display(), e);

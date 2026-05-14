@@ -37,11 +37,13 @@ extern crate alloc;
 pub mod composer;
 pub(crate) mod hu_reorder;
 pub mod json;
+pub mod optimize;
 pub mod zero_bias;
 
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
+pub use optimize::bake_optimized;
 pub use zero_bias::{
     apply_zero_bias, apply_zero_bias_in_place, apply_zero_bias_per_layer,
     apply_zero_bias_per_layer_in_place,
