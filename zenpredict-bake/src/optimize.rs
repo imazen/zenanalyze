@@ -163,9 +163,7 @@ pub fn bake_optimized_with(
         // when not Default; None when Default).
         let hu_slices: Option<Vec<&[u32]>> = match hu {
             HuCandidate::Default => None,
-            HuCandidate::Explicit(perms) => {
-                Some(perms.iter().map(|v| v.as_slice()).collect())
-            }
+            HuCandidate::Explicit(perms) => Some(perms.iter().map(|v| v.as_slice()).collect()),
         };
         for f_perm in &input_candidates {
             for o_perm in &output_candidates {
@@ -252,11 +250,11 @@ pub fn bake_optimized_with(
 
         // Try improving the INPUT permutation (rows of layer 0).
         if cfg.explore_input_order && n_in > 1 {
-            let mut perm = best_input
-                .clone()
-                .unwrap_or_else(|| identity_perm(n_in));
+            let mut perm = best_input.clone().unwrap_or_else(|| identity_perm(n_in));
             let mut current_size = best_bytes.as_ref().unwrap().len();
-            let iters = cfg.local_search_iters.min(cfg.max_evaluations - evaluations);
+            let iters = cfg
+                .local_search_iters
+                .min(cfg.max_evaluations - evaluations);
             for _ in 0..iters {
                 if evaluations >= cfg.max_evaluations {
                     break;
@@ -287,11 +285,11 @@ pub fn bake_optimized_with(
 
         // Try improving the OUTPUT permutation (cols of last layer).
         if cfg.explore_output_order && n_out > 1 && evaluations < cfg.max_evaluations {
-            let mut perm = best_output
-                .clone()
-                .unwrap_or_else(|| identity_perm(n_out));
+            let mut perm = best_output.clone().unwrap_or_else(|| identity_perm(n_out));
             let mut current_size = best_bytes.as_ref().unwrap().len();
-            let iters = cfg.local_search_iters.min(cfg.max_evaluations - evaluations);
+            let iters = cfg
+                .local_search_iters
+                .min(cfg.max_evaluations - evaluations);
             for _ in 0..iters {
                 if evaluations >= cfg.max_evaluations {
                     break;
@@ -366,9 +364,7 @@ fn resolve_hu_to_explicit(req: &BakeRequest<'_>, candidate: &HuCandidate) -> Vec
             (0..n_interior)
                 .map(|i| {
                     let l = &req.layers[i];
-                    crate::hu_reorder::compute_hu_perm_l2_asc(
-                        l.weights, l.in_dim, l.out_dim,
-                    )
+                    crate::hu_reorder::compute_hu_perm_l2_asc(l.weights, l.in_dim, l.out_dim)
                 })
                 .collect()
         }
@@ -413,9 +409,7 @@ fn hu_heuristics(req: &BakeRequest<'_>) -> Vec<HuCandidate> {
             let l = &req.layers[i];
             let layer_max = l.weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
             let cut = layer_max * 0.005;
-            crate::hu_reorder::compute_hu_perm_zero_count(
-                l.weights, l.in_dim, l.out_dim, cut, true,
-            )
+            crate::hu_reorder::compute_hu_perm_zero_count(l.weights, l.in_dim, l.out_dim, cut, true)
         })
         .collect();
     out.push(HuCandidate::Explicit(zc_asc));
@@ -437,9 +431,7 @@ fn hu_heuristics(req: &BakeRequest<'_>) -> Vec<HuCandidate> {
         (0..n_interior)
             .map(|i| {
                 let l = &req.layers[i];
-                crate::hu_reorder::compute_hu_perm_sign_balance(
-                    l.weights, l.in_dim, l.out_dim,
-                )
+                crate::hu_reorder::compute_hu_perm_sign_balance(l.weights, l.in_dim, l.out_dim)
             })
             .collect(),
     ));
@@ -451,9 +443,7 @@ fn hu_heuristics(req: &BakeRequest<'_>) -> Vec<HuCandidate> {
                 let l = &req.layers[i];
                 let layer_max = l.weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
                 let cut = layer_max * 0.005;
-                crate::hu_reorder::compute_hu_perm_nn_chain(
-                    l.weights, l.in_dim, l.out_dim, cut,
-                )
+                crate::hu_reorder::compute_hu_perm_nn_chain(l.weights, l.in_dim, l.out_dim, cut)
             })
             .collect(),
     ));
@@ -559,7 +549,10 @@ fn output_heuristics(req: &BakeRequest<'_>) -> Vec<Option<Vec<u32>>> {
         let layer_max = weights.iter().fold(0.0f32, |m, &w| m.max(w.abs()));
         let zerobias_cut = layer_max * 0.005;
         out.push(Some(greedy_nn_chain_cols(
-            weights, in_dim, n_out, zerobias_cut,
+            weights,
+            in_dim,
+            n_out,
+            zerobias_cut,
         )));
     }
 
@@ -743,10 +736,7 @@ impl SmallRng {
         }
     }
     fn next_u64(&mut self) -> u64 {
-        let result = self.state[1]
-            .wrapping_mul(5)
-            .rotate_left(7)
-            .wrapping_mul(9);
+        let result = self.state[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = self.state[1] << 17;
         self.state[2] ^= self.state[0];
         self.state[3] ^= self.state[1];
@@ -850,11 +840,9 @@ mod tests {
 
     #[test]
     fn deterministic_under_fixed_seed() {
-        let weights_0: alloc::vec::Vec<f32> =
-            (0..64).map(|i| (i as f32 * 0.31).sin()).collect();
+        let weights_0: alloc::vec::Vec<f32> = (0..64).map(|i| (i as f32 * 0.31).sin()).collect();
         let biases_0 = alloc::vec![0.0f32; 8];
-        let weights_1: alloc::vec::Vec<f32> =
-            (0..16).map(|i| (i as f32 * 0.27).cos()).collect();
+        let weights_1: alloc::vec::Vec<f32> = (0..16).map(|i| (i as f32 * 0.27).cos()).collect();
         let biases_1 = alloc::vec![0.0f32; 2];
         let layers = alloc::vec![
             BakeLayer {

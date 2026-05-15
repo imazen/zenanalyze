@@ -23,9 +23,7 @@ use zenpredict_bake::{
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!(
-            "usage: rebake_v3_1 <input.bin> <output.bin> [--compress] [--zerobias <tau>]"
-        );
+        eprintln!("usage: rebake_v3_1 <input.bin> <output.bin> [--compress] [--zerobias <tau>]");
         std::process::exit(1);
     }
     let in_path = PathBuf::from(&args[1]);
@@ -35,15 +33,15 @@ fn main() {
         .windows(2)
         .find(|w| w[0] == "--zerobias")
         .map(|w| w[1].parse().expect("zerobias tau must be a float"));
-    let force_dtype: Option<WeightDtype> = args
-        .windows(2)
-        .find(|w| w[0] == "--dtype")
-        .map(|w| match w[1].as_str() {
-            "f32" => WeightDtype::F32,
-            "f16" => WeightDtype::F16,
-            "i8" => WeightDtype::I8,
-            other => panic!("unknown dtype: {}", other),
-        });
+    let force_dtype: Option<WeightDtype> =
+        args.windows(2)
+            .find(|w| w[0] == "--dtype")
+            .map(|w| match w[1].as_str() {
+                "f32" => WeightDtype::F32,
+                "f16" => WeightDtype::F16,
+                "i8" => WeightDtype::I8,
+                other => panic!("unknown dtype: {}", other),
+            });
     let optimize = args.iter().any(|a| a == "--optimize");
 
     let input_bytes = fs::read(&in_path).unwrap_or_else(|e| {
@@ -61,7 +59,10 @@ fn main() {
     let n_layers = model.n_layers();
     eprintln!(
         "loaded: {} inputs, {} outputs, {} layers, {} bytes",
-        n_inputs, n_outputs, n_layers, input_bytes.len()
+        n_inputs,
+        n_outputs,
+        n_layers,
+        input_bytes.len()
     );
 
     let scaler_mean: Vec<f32> = model.scaler_mean().to_vec();
@@ -81,9 +82,10 @@ fn main() {
         let activation = layer.activation;
         let (dtype, weights_f32) = match &layer.weights {
             WeightStorage::F32(w) => (WeightDtype::F32, w.to_vec()),
-            WeightStorage::F16(w) => {
-                (WeightDtype::F16, w.iter().map(|b| f16_bits_to_f32(*b)).collect())
-            }
+            WeightStorage::F16(w) => (
+                WeightDtype::F16,
+                w.iter().map(|b| f16_bits_to_f32(*b)).collect(),
+            ),
             WeightStorage::I8 { weights, scales } => {
                 let mut out = Vec::with_capacity(weights.len());
                 for (idx, w) in weights.iter().enumerate() {
@@ -94,7 +96,14 @@ fn main() {
             }
         };
         let final_dtype = force_dtype.unwrap_or(dtype);
-        owned_layers.push((in_dim, out_dim, activation, final_dtype, weights_f32, layer.biases.to_vec()));
+        owned_layers.push((
+            in_dim,
+            out_dim,
+            activation,
+            final_dtype,
+            weights_f32,
+            layer.biases.to_vec(),
+        ));
     }
 
     // Optional zerobias pass: zero out weights with magnitude below
@@ -138,14 +147,16 @@ fn main() {
 
     let layers_borrowed: Vec<BakeLayer<'_>> = owned_layers
         .iter()
-        .map(|(in_dim, out_dim, activation, dtype, weights, biases)| BakeLayer {
-            in_dim: *in_dim,
-            out_dim: *out_dim,
-            activation: *activation,
-            dtype: *dtype,
-            weights: weights.as_slice(),
-            biases: biases.as_slice(),
-        })
+        .map(
+            |(in_dim, out_dim, activation, dtype, weights, biases)| BakeLayer {
+                in_dim: *in_dim,
+                out_dim: *out_dim,
+                activation: *activation,
+                dtype: *dtype,
+                weights: weights.as_slice(),
+                biases: biases.as_slice(),
+            },
+        )
         .collect();
 
     let req = BakeRequest {
@@ -206,9 +217,12 @@ fn main() {
         .fold(0.0f32, f32::max);
     eprintln!(
         "round-trip max|Δ| on uniform-0.5 input: {} (n_outputs={})",
-        max_diff, out_old.len()
+        max_diff,
+        out_old.len()
     );
     if max_diff > 1e-3 {
-        eprintln!("WARNING: round-trip differs by > 1e-3 — likely I8 quantization noise from re-baking");
+        eprintln!(
+            "WARNING: round-trip differs by > 1e-3 — likely I8 quantization noise from re-baking"
+        );
     }
 }

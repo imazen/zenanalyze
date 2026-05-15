@@ -403,10 +403,7 @@ impl Model {
         Self::from_bytes_inner(input, Some(expected))
     }
 
-    fn from_bytes_inner(
-        input: &[u8],
-        expected_schema: Option<u64>,
-    ) -> Result<Self, PredictError> {
+    fn from_bytes_inner(input: &[u8], expected_schema: Option<u64>) -> Result<Self, PredictError> {
         // Resource limits — fail early on adversarial input before any
         // section parsing or scratch allocation. See `crate::limits`.
         if input.len() > crate::limits::MAX_BAKE_BYTES {
@@ -490,11 +487,12 @@ impl Model {
                     file_len: input.len(),
                 });
             }
-            let total_len = HEADER_SIZE
-                .checked_add(payload_len)
-                .ok_or(PredictError::DimensionOverflow {
-                    what: "HEADER_SIZE + decompressed_payload_len",
-                })?;
+            let total_len =
+                HEADER_SIZE
+                    .checked_add(payload_len)
+                    .ok_or(PredictError::DimensionOverflow {
+                        what: "HEADER_SIZE + decompressed_payload_len",
+                    })?;
             if total_len > crate::limits::MAX_BAKE_BYTES {
                 return Err(PredictError::Truncated {
                     offset: 0,
@@ -550,13 +548,12 @@ impl Model {
                 file_len: bytes.len(),
             });
         }
-        let layer_entries: &[LayerEntry] = bytemuck::try_cast_slice(layer_bytes).map_err(|_| {
-            PredictError::SectionMisaligned {
+        let layer_entries: &[LayerEntry] =
+            bytemuck::try_cast_slice(layer_bytes).map_err(|_| PredictError::SectionMisaligned {
                 what: "layer_table",
                 offset: header.layer_table.offset,
                 required_align: core::mem::align_of::<LayerEntry>(),
-            }
-        })?;
+            })?;
 
         let mut layer_offsets = alloc::vec::Vec::with_capacity(n_layers);
         let mut prev_out = n_inputs;
@@ -591,28 +588,15 @@ impl Model {
             // materialize_layer below assumes pre-validated).
             match weight_dtype {
                 WeightDtype::F32 => {
-                    let _ = cast_f32_section(
-                        "layer.weights[f32]",
-                        entry.weights,
-                        &bytes,
-                        n_weights,
-                    )?;
+                    let _ =
+                        cast_f32_section("layer.weights[f32]", entry.weights, &bytes, n_weights)?;
                 }
                 WeightDtype::F16 => {
-                    let _ = cast_u16_section(
-                        "layer.weights[f16]",
-                        entry.weights,
-                        &bytes,
-                        n_weights,
-                    )?;
+                    let _ =
+                        cast_u16_section("layer.weights[f16]", entry.weights, &bytes, n_weights)?;
                 }
                 WeightDtype::I8 => {
-                    let _ = cast_i8_section(
-                        "layer.weights[i8]",
-                        entry.weights,
-                        &bytes,
-                        n_weights,
-                    )?;
+                    let _ = cast_i8_section("layer.weights[i8]", entry.weights, &bytes, n_weights)?;
                     let _ = cast_f32_section("layer.scales", entry.scales, &bytes, out_dim)?;
                 }
             }
@@ -666,20 +650,10 @@ impl Model {
         // and the predict hot path never sees the permutation.
         let mut bytes = bytes;
         if !header.feature_order.is_empty() {
-            apply_feature_order_inverse(
-                &mut bytes,
-                &header,
-                &layer_offsets,
-                n_inputs,
-            )?;
+            apply_feature_order_inverse(&mut bytes, &header, &layer_offsets, n_inputs)?;
         }
         if !header.output_order.is_empty() {
-            apply_output_order_inverse(
-                &mut bytes,
-                &header,
-                &layer_offsets,
-                n_outputs,
-            )?;
+            apply_output_order_inverse(&mut bytes, &header, &layer_offsets, n_outputs)?;
         }
 
         // ── Stage 5: parse feature_transforms metadata. ──
@@ -1121,12 +1095,11 @@ fn validate_output_specs(
         return Ok(());
     }
     let raw = section.slice("output_specs", bytes)?;
-    let expected =
-        n_outputs
-            .checked_mul(core::mem::size_of::<OutputSpec>())
-            .ok_or(PredictError::DimensionOverflow {
-                what: "n_outputs * sizeof(OutputSpec)",
-            })?;
+    let expected = n_outputs
+        .checked_mul(core::mem::size_of::<OutputSpec>())
+        .ok_or(PredictError::DimensionOverflow {
+            what: "n_outputs * sizeof(OutputSpec)",
+        })?;
     if raw.len() != expected {
         return Err(PredictError::SectionOutOfRange {
             what: "output_specs",
@@ -1186,14 +1159,13 @@ fn validate_sparse_overrides(
             file_len: bytes.len(),
         });
     }
-    let parsed =
-        bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
-            PredictError::SectionMisaligned {
-                what: "sparse_overrides",
-                offset: section.offset,
-                required_align: core::mem::align_of::<SparseOverride>(),
-            }
-        })?;
+    let parsed = bytemuck::try_cast_slice::<u8, SparseOverride>(raw).map_err(|_| {
+        PredictError::SectionMisaligned {
+            what: "sparse_overrides",
+            offset: section.offset,
+            required_align: core::mem::align_of::<SparseOverride>(),
+        }
+    })?;
     for entry in parsed {
         if (entry.idx as usize) >= n_outputs {
             return Err(PredictError::OutputDimMismatch {

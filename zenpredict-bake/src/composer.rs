@@ -172,7 +172,10 @@ impl fmt::Display for BakeError {
                 "bake: output_order length {got} != expected {expected} (n_outputs)"
             ),
             Self::InvalidPermutation { what } => {
-                write!(f, "bake: {what} is not a valid permutation (out of range or duplicate)")
+                write!(
+                    f,
+                    "bake: {what} is not a valid permutation (out of range or duplicate)"
+                )
             }
         }
     }
@@ -915,7 +918,14 @@ fn forward_permute_outputs(
         WeightDtype::I8 => 1,
     };
     // Permute COLS of last-layer weights.
-    forward_permute_cols(buf, last_weights, perm, last_in_dim, last_out_dim, elem_bytes);
+    forward_permute_cols(
+        buf,
+        last_weights,
+        perm,
+        last_in_dim,
+        last_out_dim,
+        elem_bytes,
+    );
     forward_permute_f32(buf, last_biases, perm);
     if !last_scales.is_empty() {
         forward_permute_f32(buf, last_scales, perm);
@@ -984,8 +994,7 @@ fn forward_permute_cols(
             let caller_idx = perm[bake_pos] as usize;
             let src = &buf[off + row_off + caller_idx * elem_bytes
                 ..off + row_off + (caller_idx + 1) * elem_bytes];
-            new_bytes[row_off + bake_pos * elem_bytes
-                ..row_off + (bake_pos + 1) * elem_bytes]
+            new_bytes[row_off + bake_pos * elem_bytes..row_off + (bake_pos + 1) * elem_bytes]
                 .copy_from_slice(src);
         }
     }

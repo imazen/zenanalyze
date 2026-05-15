@@ -18,7 +18,11 @@ fn main() {
     let model_b = Model::from_bytes(&bytes_b).unwrap();
     let n_in = model_a.n_inputs();
     assert_eq!(n_in, model_b.n_inputs(), "n_inputs mismatch");
-    assert_eq!(model_a.n_outputs(), model_b.n_outputs(), "n_outputs mismatch");
+    assert_eq!(
+        model_a.n_outputs(),
+        model_b.n_outputs(),
+        "n_outputs mismatch"
+    );
     let mut p_a = Predictor::new(&model_a);
     let mut p_b = Predictor::new(&model_b);
     // Try a small grid of inputs covering reasonable feature ranges.
@@ -44,6 +48,9 @@ fn main() {
         }
     }
     let rmse = (sum_sq_diff / n_samples as f32).sqrt();
-    println!("{} samples, max|Δ| = {}, RMSE = {}", n_samples, max_abs_diff, rmse);
+    println!(
+        "{} samples, max|Δ| = {}, RMSE = {}",
+        n_samples, max_abs_diff, rmse
+    );
     println!("a: {} bytes, b: {} bytes", bytes_a.len(), bytes_b.len());
 }

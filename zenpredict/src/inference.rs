@@ -84,11 +84,7 @@ pub fn forward(
     Ok(())
 }
 
-fn layer_forward(
-    layer: &LayerView<'_>,
-    src: &[f32],
-    dst: &mut [f32],
-) -> Result<(), PredictError> {
+fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) -> Result<(), PredictError> {
     let out_dim = layer.out_dim;
     let in_dim = layer.in_dim;
     debug_assert_eq!(src.len(), in_dim);

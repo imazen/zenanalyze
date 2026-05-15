@@ -1,7 +1,6 @@
 use zenpredict::*;
 use zenpredict_bake::*;
 
-
 mod feature_transform_tests {
     //! Tests for issue #52 — `zentrain.feature_transforms` metadata
     //! key + `Predictor::predict_*_transformed` runtime helpers.
@@ -20,9 +19,9 @@ mod feature_transform_tests {
     //!   `predict()` matches `predict_transformed()` byte-for-byte.
     //!   This is the small synthetic train/serve parity check the
     //!   #52 plan asks for.
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
     use zenpredict::MetadataType;
     use zenpredict::*;
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
     #[repr(C, align(16))]
     struct Aligned(Vec<u8>);
@@ -58,10 +57,10 @@ mod feature_transform_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap()
     }

@@ -39,4 +39,3 @@ pub const MAX_DIM: usize = 65_536;
 /// Maximum layer count. 256 — every shipped bake has ≤ 4 layers;
 /// the limit exists so that `layer_table` allocations are bounded.
 pub const MAX_LAYERS: usize = 256;
-

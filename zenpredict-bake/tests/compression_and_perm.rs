@@ -14,7 +14,11 @@ use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 #[repr(C, align(16))]
 struct Aligned(Vec<u8>);
 
-fn build_layers(n_in: usize, n_hidden: usize, n_out: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+fn build_layers(
+    n_in: usize,
+    n_hidden: usize,
+    n_out: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     // Deterministic-ish small weights.
     let mut w0 = vec![0.0f32; n_in * n_hidden];
     for (i, w) in w0.iter_mut().enumerate() {
@@ -89,14 +93,21 @@ fn compression_round_trip_matches_uncompressed() {
     // (and ours has enough structure to compress meaningfully). We
     // tolerate edge cases where lz4 might not shrink very small bakes,
     // so just check it's not catastrophic.
-    println!("plain = {} B, compressed = {} B", plain.len(), compressed.len());
+    println!(
+        "plain = {} B, compressed = {} B",
+        plain.len(),
+        compressed.len()
+    );
     assert!(compressed.len() <= plain.len() + 64);
 
     let features: Vec<f32> = (0..16).map(|i| (i as f32) * 0.05 - 0.4).collect();
     let out_plain = predict_features(&plain, &features);
     let out_compressed = predict_features(&compressed, &features);
 
-    assert_eq!(out_plain, out_compressed, "compressed predict output != plain");
+    assert_eq!(
+        out_plain, out_compressed,
+        "compressed predict output != plain"
+    );
 }
 
 #[test]
@@ -112,8 +123,10 @@ fn feature_order_round_trip() {
     // Layer 0's weights section offset lives at byte 140..144 in the
     // first layer entry (entry starts at byte 128, weights Section
     // starts at offset 12 within the entry).
-    let l0_weights_off = u32::from_le_bytes([plain[140], plain[141], plain[142], plain[143]]) as usize;
-    let l0_weights_len = u32::from_le_bytes([plain[144], plain[145], plain[146], plain[147]]) as usize;
+    let l0_weights_off =
+        u32::from_le_bytes([plain[140], plain[141], plain[142], plain[143]]) as usize;
+    let l0_weights_len =
+        u32::from_le_bytes([plain[144], plain[145], plain[146], plain[147]]) as usize;
     assert_ne!(
         &plain[l0_weights_off..l0_weights_off + l0_weights_len],
         &permuted[l0_weights_off..l0_weights_off + l0_weights_len],
@@ -156,7 +169,10 @@ fn all_three_compose() {
     let out_plain = predict_features(&plain, &features);
     let out_combined = predict_features(&combined, &features);
 
-    assert_eq!(out_plain, out_combined, "feature_order + output_order + compressed mismatch");
+    assert_eq!(
+        out_plain, out_combined,
+        "feature_order + output_order + compressed mismatch"
+    );
 }
 
 #[test]
@@ -169,7 +185,10 @@ fn feature_order_u8_indices_when_fits() {
     // Find header.feature_order section: offset 100, len 8 bytes.
     let off = u32::from_le_bytes([bake[100], bake[101], bake[102], bake[103]]) as usize;
     let len = u32::from_le_bytes([bake[104], bake[105], bake[106], bake[107]]) as usize;
-    assert_eq!(len, n_in, "u8 width expected (1 byte per index = n_in bytes)");
+    assert_eq!(
+        len, n_in,
+        "u8 width expected (1 byte per index = n_in bytes)"
+    );
     // Verify content: bake[off + bake_pos] == n_in - 1 - bake_pos.
     for bake_pos in 0..n_in {
         assert_eq!(bake[off + bake_pos] as u32, (n_in - 1 - bake_pos) as u32);
@@ -191,7 +210,9 @@ fn feature_order_u16_indices_when_needed() {
 fn invalid_permutation_rejected() {
     let n_in = 16;
     // Duplicate index 0.
-    let bad: Vec<u32> = (0..n_in as u32).map(|i| if i == 5 { 0 } else { i }).collect();
+    let bad: Vec<u32> = (0..n_in as u32)
+        .map(|i| if i == 5 { 0 } else { i })
+        .collect();
 
     let (w0, b0, w1, b1) = build_layers(n_in, 8, 2);
     let scaler_mean = vec![0.0f32; n_in];

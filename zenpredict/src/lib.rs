@@ -137,11 +137,11 @@ mod metadata;
 mod model;
 pub mod output_spec;
 mod predictor;
-pub mod wire;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]
 mod safety;
+pub mod wire;
 
 pub use argmin::{
     AllowedMask, ArgminOffsets, ScoreTransform, argmin_masked, argmin_masked_in_range,

@@ -2,9 +2,9 @@ use zenpredict::*;
 use zenpredict_bake::*;
 
 mod bake_roundtrip {
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
     use zenpredict::MetadataType;
     use zenpredict::*;
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
     /// Wrapper that guarantees 16-byte alignment of an in-memory
     /// model blob — what `include_bytes!` consumers do via
@@ -56,10 +56,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
         bake(&req).unwrap()
     }
@@ -127,10 +127,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -176,10 +176,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -219,10 +219,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -264,10 +264,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -382,10 +382,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -483,10 +483,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -532,10 +532,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -573,10 +573,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -627,10 +627,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -675,10 +675,10 @@ mod bake_roundtrip {
                 output_specs: &[],
                 discrete_sets: &[],
                 sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+                feature_order: None,
+                output_order: None,
+                compressed: false,
+                hu_permutations: None,
             })
             .unwrap();
             let aligned = Aligned(bytes);
@@ -722,10 +722,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -868,10 +868,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -920,10 +920,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1188,10 +1188,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1242,10 +1242,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap_err();
         assert!(matches!(
@@ -1347,10 +1347,10 @@ mod bake_roundtrip {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap_err();
         assert!(matches!(err, zenpredict_bake::BakeError::EmptyLayers));

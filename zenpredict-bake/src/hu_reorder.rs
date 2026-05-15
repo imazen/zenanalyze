@@ -85,8 +85,7 @@ pub(crate) fn apply_hu_reorder(
     layers: &[BakeLayer<'_>],
     perms: Option<&[&[u32]]>,
 ) -> Vec<OwnedBakeLayer> {
-    let mut owned: Vec<OwnedBakeLayer> =
-        layers.iter().map(OwnedBakeLayer::from_borrowed).collect();
+    let mut owned: Vec<OwnedBakeLayer> = layers.iter().map(OwnedBakeLayer::from_borrowed).collect();
 
     let n_interior = owned.len().saturating_sub(1);
     if let Some(p) = perms {
@@ -126,8 +125,7 @@ pub(crate) fn apply_hu_permutation(
     for r in 0..in_dim_i {
         let row_start = r * interior_dim;
         for (c_new, &c_old) in perm.iter().enumerate() {
-            owned[i].weights[row_start + c_new] =
-                old_weights_i[row_start + c_old as usize];
+            owned[i].weights[row_start + c_new] = old_weights_i[row_start + c_old as usize];
         }
     }
     for (c_new, &c_old) in perm.iter().enumerate() {
@@ -140,8 +138,7 @@ pub(crate) fn apply_hu_permutation(
         let new_row_start = r_new * out_dim_ip1;
         let old_row_start = (r_old as usize) * out_dim_ip1;
         for o in 0..out_dim_ip1 {
-            owned[i + 1].weights[new_row_start + o] =
-                old_weights_ip1[old_row_start + o];
+            owned[i + 1].weights[new_row_start + o] = old_weights_ip1[old_row_start + o];
         }
     }
 }
@@ -331,10 +328,7 @@ mod tests {
     fn dead_hu_clusters_at_start() {
         // 2 → 3 → 1: layer 0 weights = [r0c0 r0c1 r0c2 | r1c0 r1c1 r1c2]
         // Make col 1 (HU 1) all zeros — it's dead.
-        let w0 = [
-            1.0f32, 0.0, 3.0,
-            4.0,    0.0, 6.0,
-        ];
+        let w0 = [1.0f32, 0.0, 3.0, 4.0, 0.0, 6.0];
         let b0 = [0.1f32, 0.99, 0.3];
         let w1 = [10.0f32, 11.0, 12.0]; // layer 1 rows: [r0o0, r1o0, r2o0]
         let b1 = [0.0f32];
@@ -378,10 +372,7 @@ mod tests {
     #[test]
     fn forward_pass_is_invariant() {
         // 2 → 4 → 1 with deliberate variance per HU.
-        let w0 = [
-            1.5f32, 0.0, -2.3, 0.7,
-            0.4,    0.0,  1.1, -0.9,
-        ];
+        let w0 = [1.5f32, 0.0, -2.3, 0.7, 0.4, 0.0, 1.1, -0.9];
         let b0 = [0.5f32, 1.0, -0.2, 0.3];
         let w1 = [2.0f32, -1.5, 0.7, 3.3]; // 4 rows × 1 col
         let b1 = [0.1f32];
@@ -421,15 +412,10 @@ mod tests {
     #[test]
     fn forward_pass_invariant_three_layers() {
         // 2 → 3 → 4 → 1
-        let w0 = [
-            0.5f32, -1.0, 2.5,
-            1.2,     0.0, -0.3,
-        ];
+        let w0 = [0.5f32, -1.0, 2.5, 1.2, 0.0, -0.3];
         let b0 = [0.1f32, 0.0, -0.5];
         let w1 = [
-             1.0f32, 0.0, -1.5,  2.0,
-            -0.5,    0.7,  0.0, -0.3,
-             0.2,   -1.1,  0.8,  1.4,
+            1.0f32, 0.0, -1.5, 2.0, -0.5, 0.7, 0.0, -0.3, 0.2, -1.1, 0.8, 1.4,
         ];
         let b1 = [0.0f32, 0.6, -0.1, 0.4];
         let w2 = [1.0f32, -0.7, 0.3, 1.5];
@@ -467,12 +453,7 @@ mod tests {
 
         // Try a few inputs to make sure both interior permutations
         // round-trip correctly.
-        for input in [
-            [1.0f32, 0.0],
-            [-2.0, 3.0],
-            [0.5, -0.5],
-            [0.0, 0.0],
-        ] {
+        for input in [[1.0f32, 0.0], [-2.0, 3.0], [0.5, -0.5], [0.0, 0.0]] {
             let out_orig = forward_f32(&layers, &input);
             let out_permuted = forward_f32(&permuted_borrowed, &input);
             assert_eq!(out_orig, out_permuted, "input={input:?}");

@@ -199,7 +199,10 @@ mod tests {
         let mut w = alloc::vec![100.0_f32, 0.4, 0.6, 0.51, 50.0, 50.0, 0.0, 100.0];
         // out_dim=4 → col maxes [100, 50, 50, 100]; cuts [0.5, 0.25, 0.25, 0.5]
         apply_zero_bias_in_place(&mut w, 4, 0.005);
-        assert_eq!(w, alloc::vec![100.0, 0.4, 0.6, 0.51, 50.0, 50.0, 0.0, 100.0]);
+        assert_eq!(
+            w,
+            alloc::vec![100.0, 0.4, 0.6, 0.51, 50.0, 50.0, 0.0, 100.0]
+        );
         //                          ^col0 ^col1 ^col2 ^col3  ^col0 ^col1 ^col2 ^col3
         // col 0: cut=0.5; 100, 50 kept.
         // col 1: cut=0.25; 0.4, 50 kept (0.4 > 0.25).
@@ -211,6 +214,9 @@ mod tests {
         //                                  idx-2 (col 2) 0.6 stays (> 0.012).
         let mut w2 = alloc::vec![100.0_f32, 0.4, 0.6, 0.51, 50.0, 50.0, 0.0, 100.0];
         apply_zero_bias_in_place(&mut w2, 4, 0.02);
-        assert_eq!(w2, alloc::vec![100.0, 0.0, 0.6, 0.0, 50.0, 50.0, 0.0, 100.0]);
+        assert_eq!(
+            w2,
+            alloc::vec![100.0, 0.0, 0.6, 0.0, 50.0, 50.0, 0.0, 100.0]
+        );
     }
 }

@@ -3,13 +3,13 @@ use zenpredict_bake::*;
 
 #[cfg(test)]
 mod safety_summary_tests {
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
+    use bytemuck::bytes_of;
     use zenpredict::MetadataType;
     use zenpredict::{
         Activation, CellHint, FallbackEntry, Model, OutputBound, RescuePolicy, SafetyCompact,
         SafetyProfile, WeightDtype, keys, output_first_out_of_distribution,
     };
-    use bytemuck::bytes_of;
+    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
     #[repr(C, align(16))]
     struct Aligned(Vec<u8>);
@@ -92,10 +92,10 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap()
     }
@@ -234,10 +234,10 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -275,10 +275,10 @@ mod safety_summary_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);

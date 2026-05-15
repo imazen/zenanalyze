@@ -179,5 +179,3 @@ fn rescue_default_threshold_three_pp() {
     let policy = RescuePolicy::default();
     assert!((policy.rescue_threshold - 3.0).abs() < f32::EPSILON);
 }
-
-

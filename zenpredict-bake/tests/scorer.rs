@@ -80,7 +80,6 @@ mod scorer_tests {
         assert_eq!(scorer_pick, transform_pick);
     }
 
-    
     fn make_two_head_model() -> Vec<u8> {
         // Hybrid-heads layout: 3 cells, [bytes_log[0..3], time[3..6]].
         // Identity weights so the model passes its inputs straight
@@ -113,17 +112,17 @@ mod scorer_tests {
             output_specs: &[],
             discrete_sets: &[],
             sparse_overrides: &[],
-        feature_order: None,
-        output_order: None,
-        compressed: false,
-        hu_permutations: None,
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         })
         .unwrap()
     }
 
     /// Motivating case: RD-vs-time argmin with hybrid-heads outputs.
     /// `score = bytes + μ·ms`; closure reads from both heads.
-    
+
     #[test]
     fn predictor_scorer_rd_vs_time() {
         #[repr(C, align(16))]
@@ -172,7 +171,6 @@ mod scorer_tests {
         assert_eq!(pick, Some(2));
     }
 
-    
     #[test]
     fn predictor_scorer_top_k_rd_vs_time() {
         #[repr(C, align(16))]
