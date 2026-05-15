@@ -101,7 +101,9 @@
 use bytemuck::{Pod, Zeroable, pod_read_unaligned};
 
 use crate::error::PredictError;
-use crate::feature_transform::{FeatureTransform, parse_feature_transforms};
+use crate::feature_transform::{
+    FeatureTransform, parse_feature_transform_params, parse_feature_transforms,
+};
 use crate::metadata::Metadata;
 use crate::output_spec::{OutputSpec, SparseOverride};
 
@@ -373,6 +375,13 @@ pub struct Model {
     /// when the bake omitted the key (consumer treats every feature
     /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
     feature_transforms: Option<alloc::vec::Vec<FeatureTransform>>,
+    /// Owned cache of parsed `zentrain.feature_transform_params`.
+    /// `None` when the bake omitted the key; `Some(_)` with one
+    /// per-feature `Vec<f32>` of variant-specific params otherwise.
+    /// Inner vec is empty for features whose transform variant
+    /// doesn't consume params (e.g., `Identity`, `Log1p`,
+    /// `SignedLog1p`). Required for V0_20 parameterized variants.
+    feature_transform_params: Option<alloc::vec::Vec<alloc::vec::Vec<f32>>>,
 }
 
 impl Model {
@@ -656,16 +665,18 @@ impl Model {
             apply_output_order_inverse(&mut bytes, &header, &layer_offsets, n_outputs)?;
         }
 
-        // ── Stage 5: parse feature_transforms metadata. ──
+        // ── Stage 5: parse feature_transforms + transform_params metadata. ──
         let metadata_bytes = header.metadata.slice("metadata", &bytes)?;
         let metadata = Metadata::parse(metadata_bytes)?;
         let feature_transforms = parse_feature_transforms(&metadata, n_inputs)?;
+        let feature_transform_params = parse_feature_transform_params(&metadata, n_inputs)?;
 
         Ok(Self {
             bytes,
             header,
             layer_offsets,
             feature_transforms,
+            feature_transform_params,
         })
     }
 
@@ -897,6 +908,25 @@ impl Model {
 
     pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
         self.feature_transforms.as_deref()
+    }
+
+    /// Per-feature transform params from the
+    /// `zentrain.feature_transform_params` metadata key, parallel to
+    /// [`Self::feature_transforms`]. `None` when the metadata was
+    /// absent (consumer treats every feature's params as `&[]`).
+    /// `Some(_)` with `len == n_inputs`; each inner slice is empty
+    /// for features whose transform variant doesn't consume params
+    /// (e.g., `Identity`, `Log1p`, `SignedLog1p`).
+    ///
+    /// Required for the V0_20 parameterized variants
+    /// ([`FeatureTransform::ClipThenLog1p`],
+    /// [`FeatureTransform::WinsorP99`],
+    /// [`FeatureTransform::QuantileBins`]). When a parameterized
+    /// variant is present but its per-feature params slice is empty,
+    /// [`FeatureTransform::apply_with_params`] falls back to a sane
+    /// no-op (see that method's docs).
+    pub fn feature_transform_params(&self) -> Option<&[alloc::vec::Vec<f32>]> {
+        self.feature_transform_params.as_deref()
     }
 
     pub fn has_nontrivial_feature_transforms(&self) -> bool {

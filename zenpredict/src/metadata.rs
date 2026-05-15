@@ -328,6 +328,19 @@ pub mod keys {
     /// feature is `identity`; consumers MUST treat absence as
     /// "all-identity".
     pub const FEATURE_TRANSFORMS: &str = "zentrain.feature_transforms";
+    /// utf8 — newline-separated, comma-separated f32 params per
+    /// feature (one line per input column, parallel to
+    /// [`FEATURE_TRANSFORMS`]). An empty line means "no params for
+    /// this feature" (matches non-parameterized variants like
+    /// `Identity` / `Log` / `SignedLog1p`). Required for the V0_20
+    /// parameterized variants:
+    /// - [`crate::FeatureTransform::ClipThenLog1p`] — 1 param: `ε`
+    /// - [`crate::FeatureTransform::WinsorP99`]    — 2 params: `p1, p99`
+    /// - [`crate::FeatureTransform::QuantileBins`] — N params: edges (sorted)
+    ///
+    /// Bakers omit the key entirely when every feature line would
+    /// be empty (i.e., no parameterized variants are in use).
+    pub const FEATURE_TRANSFORM_PARAMS: &str = "zentrain.feature_transform_params";
     /// bytes — `#[repr(C)] { n_cells: u32, n_heads: u32, head_kinds: [u8; n_heads] }`.
     pub const HYBRID_HEADS_LAYOUT: &str = "zentrain.hybrid_heads_layout";
     /// utf8 — free-form provenance (git, corpus, sklearn, ts, host).

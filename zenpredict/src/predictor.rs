@@ -199,7 +199,13 @@ impl<'a> Predictor<'a> {
     pub fn predict_transformed(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
         // Apply transforms inline so the forward call can borrow
         // `scratch_a`/`scratch_b`/`output` mutably without aliasing
-        // through a helper that also borrows `self`.
+        // through a helper that also borrows `self`. When the bake
+        // declares parameterized variants (V0_20 ClipThenLog1p /
+        // WinsorP99 / QuantileBins), `apply_with_params` is used
+        // per-feature with the matching slice from
+        // `feature_transform_params`. Non-parameterized features
+        // (Identity / Log* / Signed*) take the empty params path
+        // and behave identically to the no-params call.
         if let Some(transforms) = self.model.feature_transforms() {
             if features.len() != transforms.len() {
                 return Err(PredictError::FeatureLenMismatch {
@@ -211,7 +217,15 @@ impl<'a> Predictor<'a> {
                 self.feat_scratch.resize(features.len(), 0.0);
             }
             let dst = &mut self.feat_scratch[..features.len()];
-            apply_feature_transforms(transforms, features, dst)?;
+            match self.model.feature_transform_params() {
+                Some(params) => {
+                    debug_assert_eq!(params.len(), transforms.len());
+                    for i in 0..features.len() {
+                        dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
+                    }
+                }
+                None => apply_feature_transforms(transforms, features, dst)?,
+            }
             forward(
                 self.model,
                 dst,
