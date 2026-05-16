@@ -15,7 +15,7 @@
 //! per-output structure matches the per-output i8 scale.
 //!
 //! ## Calibrated thresholds (from
-//! [`zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`])
+//! `zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`)
 //!
 //! | τ | i8-byte zero density | CID22 SROCC vs V0_18 |
 //! |--:|--:|--:|
@@ -54,7 +54,10 @@ use alloc::vec::Vec;
 /// assert_eq!(w, vec![1.0, 0.0, 0.0, 2.0]);
 /// ```
 pub fn apply_zero_bias_in_place(weights: &mut [f32], out_dim: usize, tau: f32) {
-    if !(tau > 0.0) || out_dim == 0 {
+    // Explicit: tau must be finite AND > 0. NaN / negative / zero
+    // all skip the rewrite. Phrased this way to make NaN handling
+    // visible (per clippy::neg_cmp_op_on_partial_ord).
+    if !(tau.is_finite() && tau > 0.0) || out_dim == 0 {
         return;
     }
     assert_eq!(
@@ -99,7 +102,7 @@ pub fn apply_zero_bias(weights: &[f32], out_dim: usize, tau: f32) -> Vec<f32> {
 ///
 /// This is the convention used by the 2026-05-13 sparse-coding
 /// evaluation in
-/// [`zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`] —
+/// `zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md` —
 /// the 87.5 % i8 zero density at `τ = 0.005` comes from THIS
 /// variant, not [`apply_zero_bias_in_place`]. Use it when shipping
 /// the V_X compression bake (LZ4 captures only zeros, and per-layer
@@ -114,7 +117,7 @@ pub fn apply_zero_bias(weights: &[f32], out_dim: usize, tau: f32) -> Vec<f32> {
 ///
 /// `tau <= 0.0` is a no-op.
 pub fn apply_zero_bias_per_layer_in_place(weights: &mut [f32], tau: f32) {
-    if !(tau > 0.0) {
+    if !(tau.is_finite() && tau > 0.0) {
         return;
     }
     let mut max_abs = 0.0f32;

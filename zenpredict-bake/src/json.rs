@@ -244,7 +244,8 @@ pub struct OutputSpecJson {
     #[serde(default)]
     pub discrete_set: Option<Vec<f32>>,
     /// Output value that should surface as
-    /// [`OutputValue::Default`](zenpredict::OutputValue::Default). `null` = no sentinel.
+    /// `zenpredict::OutputValue::Default` (re-exported when the
+    /// `advanced` feature is on). `null` = no sentinel.
     #[serde(default)]
     pub sentinel: Option<f32>,
 }
@@ -280,7 +281,8 @@ impl From<OutputTransformJson> for OutputTransform {
 
 /// Sparse hand-tune override, JSON-side. `value: null` (or omitted)
 /// emits `f32::NAN`, which surfaces as
-/// [`OutputValue::Default`](zenpredict::OutputValue::Default) at runtime.
+/// `zenpredict::OutputValue::Default` (re-exported when the
+/// `advanced` feature is on) at runtime.
 #[derive(Deserialize, Debug, Clone, Copy)]
 pub struct SparseOverrideJson {
     pub idx: u32,

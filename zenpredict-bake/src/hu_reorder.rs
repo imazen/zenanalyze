@@ -137,9 +137,8 @@ pub(crate) fn apply_hu_permutation(
     for (r_new, &r_old) in perm.iter().enumerate() {
         let new_row_start = r_new * out_dim_ip1;
         let old_row_start = (r_old as usize) * out_dim_ip1;
-        for o in 0..out_dim_ip1 {
-            owned[i + 1].weights[new_row_start + o] = old_weights_ip1[old_row_start + o];
-        }
+        owned[i + 1].weights[new_row_start..new_row_start + out_dim_ip1]
+            .copy_from_slice(&old_weights_ip1[old_row_start..old_row_start + out_dim_ip1]);
     }
 }
 
@@ -274,8 +273,8 @@ pub(crate) fn compute_hu_perm_nn_chain(
         let cur_start = cur * words_per_col;
         let mut best: usize = 0;
         let mut best_dist: u32 = u32::MAX;
-        for c in 0..interior_dim {
-            if visited[c] {
+        for (c, &is_visited) in visited.iter().enumerate() {
+            if is_visited {
                 continue;
             }
             let c_start = c * words_per_col;

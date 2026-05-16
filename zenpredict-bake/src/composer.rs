@@ -236,7 +236,7 @@ pub struct BakeRequest<'a> {
     /// Optional input-feature permutation: `feature_order[bake_pos] =
     /// caller_idx`. When `Some`, the composer reorders all
     /// input-indexed data (scaler_mean, scaler_scale, feature_bounds,
-    /// layer[0] weight rows) into bake (permuted) order at write
+    /// `layer[0]` weight rows) into bake (permuted) order at write
     /// time, and stores the permutation in the `feature_order`
     /// header section so the loader can apply the inverse at load.
     /// Index width on disk is auto-sized to the smallest u8/u16/u32
@@ -244,14 +244,15 @@ pub struct BakeRequest<'a> {
     pub feature_order: Option<&'a [u32]>,
     /// Optional output permutation: `output_order[bake_pos] =
     /// caller_idx`. Symmetric to `feature_order`. Affects
-    /// layer[last] weight cols + biases (and I8 scales), output_specs,
+    /// `layer[last]` weight cols + biases (and I8 scales), output_specs,
     /// sparse_overrides indices. Metadata entries (cell_rescue_hints,
     /// output_bounds) are NOT permuted — the trainer's contract is
     /// to emit metadata in caller-natural order regardless.
     pub output_order: Option<&'a [u32]>,
-    /// When true, the composer wraps bytes [128..end] in LZ4 block
-    /// compression and sets the `flags.compressed` bit + algo nibble
-    /// + `decompressed_payload_len` header fields. Loader transparently
+    /// When true, the composer wraps bytes `[128..end]` in LZ4 block
+    /// compression and sets three related header fields: the
+    /// `flags.compressed` bit, the algo nibble, and
+    /// `decompressed_payload_len`. The loader transparently
     /// decompresses at load time. Default false.
     pub compressed: bool,
     /// Optional caller-supplied hidden-unit permutations, one entry
@@ -876,6 +877,8 @@ fn write_permutation_indices(buf: &mut alloc::vec::Vec<u8>, perm: &[u32]) -> usi
 }
 
 /// Forward permutation: `bake_data[bake_pos] = caller_data[perm[bake_pos]]`.
+#[allow(clippy::too_many_arguments)] // internal helper; refactoring to a
+                                     // struct adds plumbing without clarity
 fn forward_permute_inputs(
     buf: &mut [u8],
     perm: &[u32],
@@ -900,6 +903,8 @@ fn forward_permute_inputs(
     forward_permute_rows(buf, layer0_weights_section, perm, row_bytes);
 }
 
+#[allow(clippy::too_many_arguments)] // internal helper; refactoring to a
+                                     // struct adds plumbing without clarity
 fn forward_permute_outputs(
     buf: &mut [u8],
     perm: &[u32],

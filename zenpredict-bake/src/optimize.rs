@@ -182,7 +182,7 @@ pub fn bake_optimized_with(
                         + u8::from(o_perm.is_none())
                         + u8::from(matches!(hu, HuCandidate::Default));
                     let score = (bytes.len(), 255 - identity_pref * 32);
-                    if best_score.map_or(true, |b| score < b) {
+                    if best_score.is_none_or(|b| score < b) {
                         best_score = Some(score);
                         best_bytes = Some(bytes);
                         best_input = f_perm.clone();
@@ -619,8 +619,8 @@ fn greedy_nn_chain(weights: &[f32], n_rows: usize, n_cols: usize, cut: f32) -> V
         let cur_start = cur * words_per_row;
         let mut best: usize = 0;
         let mut best_dist: u32 = u32::MAX;
-        for r in 0..n_rows {
-            if visited[r] {
+        for (r, &is_visited) in visited.iter().enumerate() {
+            if is_visited {
                 continue;
             }
             let r_start = r * words_per_row;
@@ -670,8 +670,8 @@ fn greedy_nn_chain_cols(weights: &[f32], n_rows: usize, n_cols: usize, cut: f32)
         let cur_start = cur * words_per_col;
         let mut best: usize = 0;
         let mut best_dist: u32 = u32::MAX;
-        for c in 0..n_cols {
-            if visited[c] {
+        for (c, &is_visited) in visited.iter().enumerate() {
+            if is_visited {
                 continue;
             }
             let c_start = c * words_per_col;
