@@ -443,6 +443,7 @@ pub fn pick_with_confidence_in_range(
     pick_confidence_from_top_k(slice, transform, offsets, top)
 }
 
+#[cfg(feature = "advanced")]
 pub(crate) fn pick_confidence_from_top_k(
     predictions: &[f32],
     transform: ScoreTransform,

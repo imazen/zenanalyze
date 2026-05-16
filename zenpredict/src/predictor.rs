@@ -5,11 +5,14 @@
 //! shapes — codec picker, perceptual scorer — wrap a `Predictor`
 //! and add their own typed front door.
 
-use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform, pick_confidence_from_top_k};
+use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform};
+#[cfg(feature = "advanced")]
+use crate::argmin::pick_confidence_from_top_k;
 use crate::error::PredictError;
 use crate::feature_transform::{FeatureTransform, apply_feature_transforms};
 use crate::inference::forward;
 use crate::model::Model;
+#[cfg(feature = "advanced")]
 use crate::output_spec::{OutputValue, apply_spec};
 
 /// Scratch-owning forward-pass wrapper. Allocations happen in
@@ -31,6 +34,9 @@ pub struct Predictor<'a> {
     output: alloc::vec::Vec<f32>,
     /// Post-processed output buffer for [`Self::predict_with_specs`].
     /// Sized to `n_outputs` at construction; reused across calls.
+    /// Gated behind `advanced` — `predict_with_specs` lives under
+    /// the same feature, so the buffer only exists when callable.
+    #[cfg(feature = "advanced")]
     spec_output: alloc::vec::Vec<OutputValue>,
     /// Scratch buffer for the `_transformed` family. Sized to
     /// `n_inputs` when the bake declared `feature_transforms`, and
@@ -76,6 +82,7 @@ impl<'a> Predictor<'a> {
             scratch_a: alloc::vec![0.0; need],
             scratch_b: alloc::vec![0.0; need],
             output: alloc::vec![0.0; n_out],
+            #[cfg(feature = "advanced")]
             spec_output: alloc::vec![OutputValue::Default; n_out],
             feat_scratch: alloc::vec![0.0; feat_scratch_len],
         }

@@ -391,6 +391,16 @@ pub fn apply_feature_transforms(
 /// Each `params[i]` is a `&[f32]` slice carrying the variant-specific
 /// parameters. Empty slices fall back to the no-param variant of
 /// `apply` (e.g., `WinsorP99` with no params → `Identity`).
+///
+/// **API-stability note**: this fn is currently unused inside
+/// zenpredict — `Predictor::predict_transformed` calls
+/// `apply_feature_transforms` directly with the per-feature param
+/// slices already resolved. The `_with_params` parallel exists for
+/// downstream consumers that want to apply transforms without
+/// owning a `Predictor` (i.e., feature-preprocessing pipelines).
+/// Kept per the 0.1.x API-stability contract (see
+/// zenanalyze/CLAUDE.md "There will never be a 0.2.x").
+#[allow(dead_code)]
 #[inline]
 pub fn apply_feature_transforms_with_params(
     transforms: &[FeatureTransform],
