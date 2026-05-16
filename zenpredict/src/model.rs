@@ -127,7 +127,7 @@ impl Section {
     }
 
     /// Construct from raw `(offset, len)` — the inverse of
-    /// [`Self::offset`] / [`Self::len`]. Used by the composer in the
+    /// [`Self::offset`] / [`Self::len_bytes`]. Used by the composer in the
     /// sibling `zenpredict-bake` crate; runtime consumers shouldn't
     /// need to mint Sections directly.
     pub const fn new(offset: u32, len: u32) -> Self {
@@ -192,6 +192,7 @@ impl Section {
 ///   `len / n_inputs`).
 /// - `output_order` (Section @ 108..116): optional output
 ///   permutation index. Auto-sized analogous to feature_order.
+///
 /// The remaining 12 bytes stay reserved for future use.
 #[repr(C)]
 #[non_exhaustive]
@@ -1394,8 +1395,8 @@ fn permute_pod_array_inverse(
     let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
-        for bake_pos in 0..n {
-            let caller_idx = perm[bake_pos] as usize;
+        for (bake_pos, &caller_u32) in perm.iter().enumerate() {
+            let caller_idx = caller_u32 as usize;
             let src_start = bake_pos * elem_bytes;
             let dst_start = caller_idx * elem_bytes;
             scratch[dst_start..dst_start + elem_bytes]
@@ -1438,8 +1439,8 @@ fn permute_rows_inverse(
     let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
-        for bake_pos in 0..n_rows {
-            let caller_idx = perm[bake_pos] as usize;
+        for (bake_pos, &caller_u32) in perm.iter().enumerate() {
+            let caller_idx = caller_u32 as usize;
             let src_start = bake_pos * row_bytes;
             let dst_start = caller_idx * row_bytes;
             scratch[dst_start..dst_start + row_bytes]
@@ -1477,8 +1478,8 @@ fn permute_cols_inverse(
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for r in 0..n_rows {
             let row_off = r * row_stride;
-            for bake_pos in 0..n_cols {
-                let caller_idx = perm[bake_pos] as usize;
+            for (bake_pos, &caller_u32) in perm.iter().enumerate() {
+                let caller_idx = caller_u32 as usize;
                 let src_start = row_off + bake_pos * elem_bytes;
                 let dst_start = row_off + caller_idx * elem_bytes;
                 scratch[dst_start..dst_start + elem_bytes]
