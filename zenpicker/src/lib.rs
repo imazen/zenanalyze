@@ -220,7 +220,13 @@ impl<'b> MetaPicker<'b> {
     /// Call [`MetaPicker::validate_family_order`] right after
     /// construction to confirm bake-time and runtime agree on the
     /// family enum layout.
-    pub fn new(model: Model<'b>) -> Self {
+    ///
+    /// Takes `&'b Model` — the Model is the long-lived parsed bake
+    /// (typically inside a `static OnceLock<Model>`); the borrow
+    /// lifetime `'b` flows through into `Predictor<'b>` and then
+    /// `MetaPicker<'b>`. zenpredict 0.2.0+ made Model own its
+    /// reference-data rather than carry a lifetime parameter.
+    pub fn new(model: &'b Model) -> Self {
         Self {
             predictor: Predictor::new(model),
         }
