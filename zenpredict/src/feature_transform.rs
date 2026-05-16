@@ -343,12 +343,12 @@ pub(crate) fn parse_feature_transform_params(
         let mut row: alloc::vec::Vec<f32> = alloc::vec::Vec::new();
         if !line.is_empty() {
             for tok in line.split(',') {
-                let v: f32 = tok
-                    .trim()
-                    .parse()
-                    .map_err(|_| PredictError::MetadataValueNotUtf8 {
-                        key_len: crate::keys::FEATURE_TRANSFORM_PARAMS.len(),
-                    })?;
+                let v: f32 =
+                    tok.trim()
+                        .parse()
+                        .map_err(|_| PredictError::MetadataValueNotUtf8 {
+                            key_len: crate::keys::FEATURE_TRANSFORM_PARAMS.len(),
+                        })?;
                 row.push(v);
             }
         }
@@ -486,4 +486,3 @@ mod tests {
         assert!((y - 3f32.ln_1p()).abs() < 1e-6);
     }
 }
-
