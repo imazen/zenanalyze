@@ -18,3 +18,5 @@ __pycache__/
 # Keep correlation_*.json and student_perm_*.json (small, comparison-
 # critical), drop hybrid model weights.
 benchmarks/*_hybrid_*.json
+benchmarks/**/distill_*_picker.json
+benchmarks/**/multi_codec_*_picker.json

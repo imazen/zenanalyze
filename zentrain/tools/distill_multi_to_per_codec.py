@@ -360,13 +360,18 @@ def write_distilled_codec_json(
     )
 
     # Hybrid-heads manifest: list of (codec config, scalar values) per
-    # cell, plus output layout block boundaries.
+    # cell, plus output layout block boundaries. The build_cell_index
+    # output stores per-axis values directly on the cell dict (one key
+    # per CATEGORICAL_AXES entry); we reconstruct the categorical key
+    # tuple from those.
     cells_meta = []
+    categorical_axes = list(TH.CATEGORICAL_AXES)
     for c in cd["cells"]:
         cells_meta.append({
             "id": c["id"],
             "label": c["label"],
-            "key": list(c["key"]),
+            "key": [c.get(axis) for axis in categorical_axes],
+            "categorical_axes": categorical_axes,
             "member_config_ids": list(c["member_config_ids"]),
         })
 
