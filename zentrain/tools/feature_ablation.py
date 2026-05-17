@@ -306,6 +306,94 @@ def train_and_eval(X_tr, Y_tr, X_va, Y_va, meta_va, mask_cols, n_configs):
     return evaluate_argmin(Y_pred, Y_va, meta_va, np.ones(n_configs, dtype=bool))
 
 
+def train_and_eval_warm_start(
+    X_tr,
+    Y_tr,
+    X_va,
+    Y_va,
+    meta_va,
+    drop_col_idx,
+    n_configs,
+    full_teachers,
+    mode,
+    histgb_kw,
+):
+    """LOO variant using warm-start helpers from `_picker_lib`.
+
+    `mode` selects the strategy:
+      - "distilled": fit a small GBM per-config on
+        `(X_tr[:, !drop], full_teacher.predict(X_tr))`.
+      - "residual": fit a small GBM per-config on the residual
+        `Y - full_teacher.predict(X_tr_imputed)`, where the dropped
+        column is mean-imputed back to the full schema.
+
+    `drop_col_idx` is the index in `X_tr`'s columns (NOT just the
+    feature index — fixed_indices like size_oh + zq + log_px are not
+    valid drop targets here because the full teacher trained on them).
+
+    NEGATIVE-RESULT NOTE: at the HISTGB preset
+    `feature_ablation.py` already uses (max_iter=100, max_depth=4),
+    warm-start is SLOWER than plain retrain on synthetic data — see
+    `benchmarks/loo_warmstart_bench_2026-05-17.md`. This path is kept
+    for forensic comparisons and for future regimes with much more
+    expensive teachers (e.g., max_iter≥400 on 100k+ rows).
+    """
+    # Add zentrain/tools to sys.path so we can import _picker_lib
+    # without modifying the install layout.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _picker_lib as picker  # noqa: E402
+
+    # Build X_loo (dropped column removed) and X_tr_imputed (dropped
+    # column replaced with its training mean). The "full" matrices
+    # for the residual path keep the full schema.
+    keep_mask = np.ones(X_tr.shape[1], dtype=bool)
+    keep_mask[drop_col_idx] = False
+    X_tr_loo = X_tr[:, keep_mask]
+    X_va_loo = X_va[:, keep_mask]
+    if mode == "residual":
+        X_tr_imp = X_tr.copy()
+        X_tr_imp[:, drop_col_idx] = X_tr[:, drop_col_idx].mean()
+        X_va_imp = X_va.copy()
+        X_va_imp[:, drop_col_idx] = X_tr[:, drop_col_idx].mean()
+
+    Y_pred = np.zeros_like(Y_va)
+    for cfg in range(n_configs):
+        mask = ~np.isnan(Y_tr[:, cfg])
+        if mask.sum() < 50 or full_teachers[cfg] is None:
+            Y_pred[:, cfg] = np.nanmean(Y_tr[:, cfg]) if mask.any() else 0.0
+            continue
+        if mode == "distilled":
+            distilled = picker.fit_distilled_teacher(
+                full_teachers[cfg],
+                X_full=X_tr,
+                X_loo=X_tr_loo,
+                params=histgb_kw,
+                sample_mask=mask,
+            )
+            Y_pred[:, cfg] = distilled.predict(X_va_loo)
+        elif mode == "residual":
+            wrap = picker.fit_residual_teacher(
+                full_teachers[cfg],
+                X_full_imputed=X_tr_imp,
+                X_loo=X_tr_loo,
+                y=Y_tr[:, cfg],
+                params=histgb_kw,
+                sample_mask=mask,
+            )
+            full = full_teachers[cfg]
+            imp_va = X_va_imp
+
+            def _prior_for_val(_x_loo, _full=full, _imp=imp_va):
+                return _full.predict(_imp)
+
+            wrap.prior_predict = _prior_for_val
+            Y_pred[:, cfg] = wrap.predict(X_va_loo)
+        else:
+            raise ValueError(f"unknown warm-start mode: {mode}")
+
+    return evaluate_argmin(Y_pred, Y_va, meta_va, np.ones(n_configs, dtype=bool))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -354,6 +442,20 @@ def main():
         "violation. Default -0.05pp — features that improve the picker by "
         "more than 0.05pp when shuffled are flagged. Set to e.g. -0.20 for "
         "looser tolerance.",
+    )
+    parser.add_argument(
+        "--use-warm-start",
+        choices=["off", "distilled", "residual"],
+        default="off",
+        help="EXPERIMENTAL. Use warm-start LOO teachers instead of full "
+        "retrain. Only meaningful with `--method loo`. `distilled` fits a "
+        "small GBM on the full teacher's soft labels; `residual` fits a "
+        "small GBM on the residual w.r.t. an imputed full-schema "
+        "prediction. NEGATIVE RESULT on synthetic data — warm-start is "
+        "SLOWER than plain `HISTGB_FAST` retrain at this script's preset; "
+        "see `benchmarks/loo_warmstart_bench_2026-05-17.md`. Kept behind "
+        "this flag (default `off`) so future expensive-teacher regimes "
+        "can re-evaluate without a code change.",
     )
     args = parser.parse_args()
     is_ci = bool(os.environ.get("CI"))
@@ -434,14 +536,44 @@ def main():
             f"argmin_acc {baseline['argmin_acc']:.1%}\n"
         )
 
+        # Warm-start path: train full-schema teachers ONCE and reuse
+        # them across LOO variants via distillation / residual fitting.
+        # See `benchmarks/loo_warmstart_bench_2026-05-17.md` for why
+        # this is OFF by default — at the script's HISTGB_FAST preset,
+        # warm-start is slower than plain retrain. Kept for future
+        # expensive-teacher regimes.
+        full_teachers = None
+        if args.use_warm_start != "off":
+            sys.stderr.write(
+                f"\n[!] EXPERIMENTAL warm-start path: mode={args.use_warm_start}\n"
+                f"    Pre-training full-schema teachers once (all {n_feat} feats)…\n"
+            )
+            full_teachers = train_all_configs(X_tr, Y_tr, n_configs)
+
         sys.stderr.write(f"\n[2/3] Leave-one-out across {n_feat} features...\n")
         loo_results = {}
         for fi in range(n_feat):
-            mask = np.ones(n_total, dtype=bool)
-            mask[fi] = False
-            m = train_and_eval(
-                X_tr, Y_tr, X_va, Y_va, meta_va, mask, n_configs
-            )
+            if args.use_warm_start == "off":
+                mask = np.ones(n_total, dtype=bool)
+                mask[fi] = False
+                m = train_and_eval(
+                    X_tr, Y_tr, X_va, Y_va, meta_va, mask, n_configs
+                )
+            else:
+                # Drop feature column `fi` (features sit at indices
+                # [0, n_feat); size_oh + zq + log_px are kept).
+                m = train_and_eval_warm_start(
+                    X_tr,
+                    Y_tr,
+                    X_va,
+                    Y_va,
+                    meta_va,
+                    drop_col_idx=fi,
+                    n_configs=n_configs,
+                    full_teachers=full_teachers,
+                    mode=args.use_warm_start,
+                    histgb_kw=HISTGB_KW,
+                )
             loo_results[feat_cols[fi]] = m
             delta = m["mean_pct"] - baseline["mean_pct"]
             sys.stderr.write(
