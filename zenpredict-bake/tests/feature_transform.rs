@@ -21,7 +21,7 @@ mod feature_transform_tests {
     //!   #52 plan asks for.
     use zenpredict::MetadataType;
     use zenpredict::*;
-    use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
+    use zenpredict_bake::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
     #[repr(C, align(16))]
     struct Aligned(Vec<u8>);
@@ -241,38 +241,103 @@ mod feature_transform_tests {
     }
 
     #[test]
-    fn unknown_token_rejected_at_load() {
+    fn unknown_token_rejected_at_bake() {
+        // 2026-05-17: bake-side validator now rejects unknown
+        // tokens before they reach the wire format. Previously this
+        // test asserted load-time rejection; the runtime parser
+        // still rejects, but the bake gate is the first line of
+        // defense.
         let txt = b"identity\nlog\nbogus\nidentity";
         let metadata = [BakeMetadataEntry {
             key: keys::FEATURE_TRANSFORMS,
             kind: MetadataType::Utf8,
             value: txt,
         }];
-        let bytes = make_identity_passthrough(&metadata);
-        let aligned = Aligned(bytes);
-        let err = Model::from_bytes(&aligned.0).unwrap_err();
+        let scaler_mean = [0.0f32; 4];
+        let scaler_scale = [1.0f32; 4];
+        let w0 = [
+            1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let b0 = [0.0f32; 4];
+        let layers = [BakeLayer {
+            in_dim: 4,
+            out_dim: 4,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w0,
+            biases: &b0,
+        }];
+        let err = bake(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &metadata,
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+            multi_codec_schema: None,
+        })
+        .unwrap_err();
         assert!(
-            matches!(err, PredictError::UnknownFeatureTransform),
+            matches!(err, BakeError::UnknownFeatureTransformToken { feature_index: 2 }),
             "got {err:?}"
         );
     }
 
     #[test]
-    fn length_mismatch_rejected_at_load() {
-        // 4 inputs but 3 transforms.
+    fn length_mismatch_rejected_at_bake() {
+        // 4 inputs but 3 transforms — bake validator catches it
+        // before the runtime parser (which still rejects on load
+        // as a backup).
         let txt = b"identity\nlog\nidentity";
         let metadata = [BakeMetadataEntry {
             key: keys::FEATURE_TRANSFORMS,
             kind: MetadataType::Utf8,
             value: txt,
         }];
-        let bytes = make_identity_passthrough(&metadata);
-        let aligned = Aligned(bytes);
-        let err = Model::from_bytes(&aligned.0).unwrap_err();
+        let scaler_mean = [0.0f32; 4];
+        let scaler_scale = [1.0f32; 4];
+        let w0 = [
+            1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let b0 = [0.0f32; 4];
+        let layers = [BakeLayer {
+            in_dim: 4,
+            out_dim: 4,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w0,
+            biases: &b0,
+        }];
+        let err = bake(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &metadata,
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+            multi_codec_schema: None,
+        })
+        .unwrap_err();
         assert!(
             matches!(
                 err,
-                PredictError::FeatureTransformsLenMismatch {
+                BakeError::FeatureTransformsLenMismatch {
                     expected: 4,
                     got: 3
                 }

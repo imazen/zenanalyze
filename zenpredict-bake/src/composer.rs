@@ -153,6 +153,40 @@ pub enum BakeError {
         expected: usize,
         got: usize,
     },
+    /// Per-feature `FeatureTransform` declared in
+    /// `zentrain.feature_transforms` metadata was unrecognized at
+    /// bake time. Mirrors the runtime parser's
+    /// `PredictError::UnknownFeatureTransform`. Bake-side rejection
+    /// stops a misspelled token from shipping in a wire-format bake.
+    UnknownFeatureTransformToken {
+        feature_index: usize,
+    },
+    /// `feature_transforms` and `feature_transform_params` line counts
+    /// didn't agree (both must equal `n_inputs` when present).
+    FeatureTransformsLenMismatch {
+        expected: usize,
+        got: usize,
+    },
+    /// A parameterized [`zenpredict::FeatureTransform`] entry carried
+    /// fewer params than its variant requires. Two-step stacked
+    /// variants need 2 params (`p1, p99` or `q1, q99`);
+    /// `ClipThenLog1pThenWinsor` needs 3 (`eps, q1, q99`);
+    /// `ClipThenLog1p` needs 1.
+    FeatureTransformParamArityMismatch {
+        feature_index: usize,
+        transform: &'static str,
+        expected: usize,
+        got: usize,
+    },
+    /// A `WinsorThenLog` / `WinsorThenLog1p` entry carried a `p1`
+    /// outside the variant's domain (`p1 <= 0` for `WinsorThenLog`;
+    /// `p1 < -1` for `WinsorThenLog1p`). Shipping would produce
+    /// `NaN` / `-Inf` at runtime, so the composer refuses.
+    FeatureTransformParamInvalid {
+        feature_index: usize,
+        transform: &'static str,
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for BakeError {
@@ -260,6 +294,31 @@ impl fmt::Display for BakeError {
             Self::MultiCodecInputDimMismatch { expected, got } => write!(
                 f,
                 "bake: multi_codec_schema expects n_inputs {expected}, layers[0].in_dim is {got}"
+            ),
+            Self::UnknownFeatureTransformToken { feature_index } => write!(
+                f,
+                "bake: feature_transforms[{feature_index}] is not a known token"
+            ),
+            Self::FeatureTransformsLenMismatch { expected, got } => write!(
+                f,
+                "bake: feature_transforms / feature_transform_params length {got} != expected {expected} (n_inputs)"
+            ),
+            Self::FeatureTransformParamArityMismatch {
+                feature_index,
+                transform,
+                expected,
+                got,
+            } => write!(
+                f,
+                "bake: feature_transform_params[{feature_index}] for {transform} expected {expected} param(s), got {got}"
+            ),
+            Self::FeatureTransformParamInvalid {
+                feature_index,
+                transform,
+                reason,
+            } => write!(
+                f,
+                "bake: feature_transform_params[{feature_index}] for {transform}: {reason}"
             ),
         }
     }
@@ -657,6 +716,13 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
             });
         }
     }
+
+    // Validate `zentrain.feature_transforms` + `feature_transform_params`
+    // pair (if present). Catches misspelled tokens and per-variant
+    // arity / domain errors at bake time so they never ship in a
+    // wire bake. See `validate_feature_transforms` for the full set
+    // of checks.
+    validate_feature_transforms(req.metadata, n_inputs)?;
 
     // Layout: Header at 0, LayerEntry table at HEADER_SIZE, then
     // aligned data sections in this order:
@@ -1285,6 +1351,240 @@ fn emit_multi_codec_section(
 
     let section_len = buf.len() as u32 - section_start_abs;
     Ok(Section::new(section_start_abs, section_len))
+}
+
+/// Validate the optional `zentrain.feature_transforms` and
+/// `zentrain.feature_transform_params` metadata entries.
+///
+/// Both keys are optional. When present, the lines (split on `\n`)
+/// must equal `n_inputs`, and each parameterized variant's param row
+/// must match its required arity. Domain checks reject parameters
+/// that would produce `NaN` / `-Inf` at runtime
+/// (`WinsorThenLog` with `p1 ≤ 0`, `WinsorThenLog1p` with `p1 < -1`).
+///
+/// Returns `Ok(())` when neither key is present, when both are well
+/// formed, or when only `feature_transforms` is present (every
+/// transform is then non-parameterized — runtime fallback handles
+/// missing params).
+fn validate_feature_transforms(
+    metadata: &[BakeMetadataEntry<'_>],
+    n_inputs: usize,
+) -> Result<(), BakeError> {
+    use zenpredict::FeatureTransform;
+    use zenpredict::keys;
+    let transforms_entry = metadata
+        .iter()
+        .find(|m| m.key == keys::FEATURE_TRANSFORMS);
+    let params_entry = metadata
+        .iter()
+        .find(|m| m.key == keys::FEATURE_TRANSFORM_PARAMS);
+
+    let Some(t_entry) = transforms_entry else {
+        // No transforms declared → nothing to validate. Stray
+        // `feature_transform_params` without `feature_transforms` is
+        // legal at the wire level (runtime ignores it); accept it
+        // here too rather than imposing a new constraint.
+        return Ok(());
+    };
+    let Ok(t_text) = core::str::from_utf8(t_entry.value) else {
+        // Non-UTF-8 transforms blob — caller error, but the existing
+        // `MetadataKeyTooLong` etc. errors don't cover this. Skip
+        // here; the runtime parser will reject at load time.
+        return Ok(());
+    };
+    // Parse transforms (lines).
+    let mut transforms: alloc::vec::Vec<FeatureTransform> = alloc::vec::Vec::new();
+    for (i, tok) in t_text.split('\n').enumerate() {
+        match FeatureTransform::from_token(tok) {
+            Ok(v) => transforms.push(v),
+            Err(_) => {
+                return Err(BakeError::UnknownFeatureTransformToken { feature_index: i });
+            }
+        }
+    }
+    if transforms.len() != n_inputs {
+        return Err(BakeError::FeatureTransformsLenMismatch {
+            expected: n_inputs,
+            got: transforms.len(),
+        });
+    }
+
+    // If params are missing, parameterized variants will fall back
+    // to their no-op behaviour at runtime. That's a soft caller
+    // error, not a bake-time hard failure (matches the runtime's
+    // `Identity` / plain-Log degradation). We do NOT reject here
+    // so the existing "feature_transforms only" workflow keeps
+    // baking.
+    let Some(p_entry) = params_entry else {
+        return Ok(());
+    };
+    let Ok(p_text) = core::str::from_utf8(p_entry.value) else {
+        return Ok(());
+    };
+    let mut params: alloc::vec::Vec<alloc::vec::Vec<f32>> = alloc::vec::Vec::new();
+    for line in p_text.split('\n') {
+        let mut row: alloc::vec::Vec<f32> = alloc::vec::Vec::new();
+        if !line.is_empty() {
+            for tok in line.split(',') {
+                let v: f32 = match tok.trim().parse() {
+                    Ok(v) => v,
+                    Err(_) => return Ok(()), // runtime will reject
+                };
+                row.push(v);
+            }
+        }
+        params.push(row);
+    }
+    if params.len() != n_inputs {
+        return Err(BakeError::FeatureTransformsLenMismatch {
+            expected: n_inputs,
+            got: params.len(),
+        });
+    }
+
+    // Per-variant arity + domain checks.
+    for (i, (&t, p)) in transforms.iter().zip(params.iter()).enumerate() {
+        // QuantileBins has variable arity (N edges) — validate
+        // separately from the fixed-arity variants.
+        if matches!(t, FeatureTransform::QuantileBins) {
+            for &edge in p {
+                if !edge.is_finite() {
+                    return Err(BakeError::FeatureTransformParamInvalid {
+                        feature_index: i,
+                        transform: t.as_token(),
+                        reason: "all bin edges must be finite",
+                    });
+                }
+            }
+            continue;
+        }
+        let needed = required_param_arity(t);
+        if let Some(expected) = needed {
+            if p.len() != expected {
+                return Err(BakeError::FeatureTransformParamArityMismatch {
+                    feature_index: i,
+                    transform: t.as_token(),
+                    expected,
+                    got: p.len(),
+                });
+            }
+            // Domain checks for the variants whose math breaks on
+            // out-of-domain inputs.
+            match t {
+                FeatureTransform::WinsorThenLog => {
+                    // ln(p1) is undefined for p1 <= 0.
+                    if p[0] <= 0.0 || !p[0].is_finite() {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "p1 must be > 0 (ln domain)",
+                        });
+                    }
+                    if !p[1].is_finite() || p[1] < p[0] {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "p99 must be finite and >= p1",
+                        });
+                    }
+                }
+                FeatureTransform::WinsorThenLog1p => {
+                    // log1p(1 + p1) requires p1 > -1 (else ln(<=0)).
+                    if !p[0].is_finite() || p[0] <= -1.0 {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "p1 must be > -1 (log1p domain)",
+                        });
+                    }
+                    if !p[1].is_finite() || p[1] < p[0] {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "p99 must be finite and >= p1",
+                        });
+                    }
+                }
+                FeatureTransform::WinsorThenSignedCbrt
+                | FeatureTransform::SignedCbrtThenWinsor
+                | FeatureTransform::WinsorP99 => {
+                    if !p[0].is_finite() || !p[1].is_finite() || p[1] < p[0] {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "bounds must be finite and p99 >= p1",
+                        });
+                    }
+                }
+                FeatureTransform::ClipThenLog1pThenWinsor => {
+                    // p = [eps, q1, q99]. eps >= 0 (negative noise floor
+                    // would shift the inner output negative, which the
+                    // max(0, .) clamp eats — caller probably meant 0).
+                    // q1 <= q99, both finite. q1 < 0 is rejected too:
+                    // the inner stage produces non-negative output, so
+                    // a negative lower bound is dead code (and likely
+                    // a transcription bug).
+                    if !p[0].is_finite() || p[0] < 0.0 {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "eps must be finite and >= 0",
+                        });
+                    }
+                    if !p[1].is_finite() || !p[2].is_finite() || p[2] < p[1] {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "q1, q99 must be finite and q99 >= q1",
+                        });
+                    }
+                    if p[1] < 0.0 {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "q1 must be >= 0 (inner stage output is non-negative)",
+                        });
+                    }
+                }
+                FeatureTransform::ClipThenLog1p => {
+                    // eps >= 0; non-finite eps would yield NaN inputs
+                    // to log1p. Negative eps is legal mathematically
+                    // (it lowers the noise floor below zero, harmless
+                    // after the max(0, .) clamp), but reject anyway
+                    // to surface a likely transcription bug.
+                    if !p[0].is_finite() {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "eps must be finite",
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Non-parameterized variants may carry an empty params row,
+        // or no row at all — both are valid (runtime ignores params).
+    }
+    Ok(())
+}
+
+/// Per-variant required param count. `None` for variants whose
+/// arity is either variable (`QuantileBins`, handled separately) or
+/// who don't consume params at all (the non-parameterized variants).
+/// Used by the bake-side validator.
+fn required_param_arity(t: zenpredict::FeatureTransform) -> Option<usize> {
+    use zenpredict::FeatureTransform;
+    match t {
+        FeatureTransform::ClipThenLog1p => Some(1),
+        FeatureTransform::WinsorP99
+        | FeatureTransform::WinsorThenLog
+        | FeatureTransform::WinsorThenLog1p
+        | FeatureTransform::WinsorThenSignedCbrt
+        | FeatureTransform::SignedCbrtThenWinsor => Some(2),
+        FeatureTransform::ClipThenLog1pThenWinsor => Some(3),
+        _ => None,
+    }
 }
 
 /// Per-output max-abs scale: `scales[o] = max_i |W[i, o]| / 127.0`.
