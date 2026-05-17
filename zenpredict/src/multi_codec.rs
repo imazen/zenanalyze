@@ -175,11 +175,12 @@ pub fn parse(section_bytes: &[u8]) -> Result<MultiCodecSchema<'_>, PredictError>
         let head_n_heads = u32::from_le_bytes(entry[28..32].try_into().unwrap());
 
         // Validate name range.
-        let name_end = name_offset.checked_add(name_len).ok_or(
-            PredictError::DimensionOverflow {
-                what: "multi_codec_schema: name_offset + name_len",
-            },
-        )?;
+        let name_end =
+            name_offset
+                .checked_add(name_len)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "multi_codec_schema: name_offset + name_len",
+                })?;
         if name_end > section_bytes.len() {
             return Err(PredictError::SectionOutOfRange {
                 what: "multi_codec_schema: codec_name range",
@@ -188,8 +189,12 @@ pub fn parse(section_bytes: &[u8]) -> Result<MultiCodecSchema<'_>, PredictError>
                 file_len: section_bytes.len(),
             });
         }
-        let codec_name = core::str::from_utf8(&section_bytes[name_offset..name_end])
-            .map_err(|_| PredictError::MetadataKeyNotUtf8 { offset: name_offset })?;
+        let codec_name =
+            core::str::from_utf8(&section_bytes[name_offset..name_end]).map_err(|_| {
+                PredictError::MetadataKeyNotUtf8 {
+                    offset: name_offset,
+                }
+            })?;
 
         // Validate slots range.
         if !slots_offset.is_multiple_of(4) {
@@ -204,11 +209,12 @@ pub fn parse(section_bytes: &[u8]) -> Result<MultiCodecSchema<'_>, PredictError>
             .ok_or(PredictError::DimensionOverflow {
                 what: "multi_codec_schema: slots_count * 4",
             })?;
-        let slots_end = slots_offset.checked_add(slots_bytes).ok_or(
-            PredictError::DimensionOverflow {
-                what: "multi_codec_schema: slots_offset + slots_bytes",
-            },
-        )?;
+        let slots_end =
+            slots_offset
+                .checked_add(slots_bytes)
+                .ok_or(PredictError::DimensionOverflow {
+                    what: "multi_codec_schema: slots_offset + slots_bytes",
+                })?;
         if slots_end > section_bytes.len() {
             return Err(PredictError::SectionOutOfRange {
                 what: "multi_codec_schema: slot table range",
@@ -218,13 +224,12 @@ pub fn parse(section_bytes: &[u8]) -> Result<MultiCodecSchema<'_>, PredictError>
             });
         }
         let slots_raw = &section_bytes[slots_offset..slots_end];
-        let slots: &[u32] = bytemuck::try_cast_slice(slots_raw).map_err(|_| {
-            PredictError::SectionMisaligned {
+        let slots: &[u32] =
+            bytemuck::try_cast_slice(slots_raw).map_err(|_| PredictError::SectionMisaligned {
                 what: "multi_codec_schema: slot table u32 cast",
                 offset: slots_offset as u32,
                 required_align: 4,
-            }
-        })?;
+            })?;
         // Validate every slot < union_feat_count.
         for &s in slots {
             if s >= union_feat_count {
@@ -261,9 +266,10 @@ pub fn parse(section_bytes: &[u8]) -> Result<MultiCodecSchema<'_>, PredictError>
     })
 }
 
-/// Expected `n_inputs` for a multi-codec trunk: `2 * union_feat_count
-/// + 6 + n_codecs`. Used by [`crate::Predictor::predict_multi_codec`]
-/// and the load-time validator to size scratch and verify the bake.
+/// Expected `n_inputs` for a multi-codec trunk:
+/// `2 * union_feat_count + 6 + n_codecs`. Used by
+/// [`crate::Predictor::predict_multi_codec`] and the load-time
+/// validator to size scratch and verify the bake.
 pub fn expected_n_inputs(union_feat_count: u32, n_codecs: u32) -> usize {
     2 * (union_feat_count as usize) + 6 + (n_codecs as usize)
 }

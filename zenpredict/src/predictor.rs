@@ -5,9 +5,9 @@
 //! shapes — codec picker, perceptual scorer — wrap a `Predictor`
 //! and add their own typed front door.
 
-use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform};
 #[cfg(feature = "advanced")]
 use crate::argmin::pick_confidence_from_top_k;
+use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform};
 use crate::error::PredictError;
 use crate::feature_transform::{FeatureTransform, apply_feature_transforms};
 use crate::inference::forward;
@@ -386,10 +386,7 @@ impl<'a> Predictor<'a> {
                 .ok_or(PredictError::MultiCodecNotSupported)?;
             let n_codecs = schema.n_codecs;
             if codec_id >= n_codecs {
-                return Err(PredictError::UnknownCodecId {
-                    codec_id,
-                    n_codecs,
-                });
+                return Err(PredictError::UnknownCodecId { codec_id, n_codecs });
             }
             let map = schema.per_codec(codec_id).expect("bounds-checked above");
             let n_codec_feats = map.union_slot_for_codec_feat.len();

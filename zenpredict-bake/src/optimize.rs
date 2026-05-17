@@ -711,6 +711,7 @@ fn clone_request<'a>(req: &BakeRequest<'a>) -> BakeRequest<'a> {
         output_order: req.output_order,
         compressed: req.compressed,
         hu_permutations: req.hu_permutations,
+        multi_codec_schema: req.multi_codec_schema.clone(),
     }
 }
 

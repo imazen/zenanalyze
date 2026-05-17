@@ -96,6 +96,8 @@ mod safety_summary_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
+
+            multi_codec_schema: None,
         })
         .unwrap()
     }
@@ -238,6 +240,8 @@ mod safety_summary_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
+
+            multi_codec_schema: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -279,6 +283,8 @@ mod safety_summary_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
+
+            multi_codec_schema: None,
         })
         .unwrap();
         let aligned = Aligned(bytes);

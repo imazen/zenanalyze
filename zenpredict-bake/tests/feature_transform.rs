@@ -61,6 +61,8 @@ mod feature_transform_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
+
+            multi_codec_schema: None,
         })
         .unwrap()
     }

@@ -24,6 +24,22 @@ The legacy `zenpredict-bake` and `zenpredict-inspect` binaries
 remain present and produce byte-for-byte identical stdout/stderr
 output, exit codes, and arg semantics.
 
+- **Multi-codec shared-trunk picker bake (ZNPR v3.2).** New
+  `BakeRequest.multi_codec_schema: Option<MultiCodecSchemaInput>`
+  field; when `Some(_)`, the composer emits the v3.2
+  `multi_codec_schema` section that
+  `zenpredict::Predictor::predict_multi_codec` reads at runtime.
+  New public types: `MultiCodecSchemaInput`, `PerCodecMapInput`.
+  New `BakeRequestBuilder::multi_codec_schema()` setter. New
+  `BakeError::MultiCodecSlotOutOfRange` /
+  `MultiCodecOutputRangeInvalid` / `MultiCodecEmpty` /
+  `MultiCodecInputDimMismatch` variants. The composer
+  cross-validates against `layers[0].in_dim` so a mis-shaped bake
+  fails at bake time, not load time. The Python emitter
+  (`zentrain/tools/bake_picker.py`) is not yet wired — follow-up
+  to flip joint-trained checkpoints from the per-codec distill
+  path to the joint-picker bake.
+
 ## [0.1.0] - 2026-05-13
 
 Initial release. Extracted from `zenpredict 0.1.x`'s `bake` feature.

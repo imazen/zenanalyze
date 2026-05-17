@@ -34,16 +34,17 @@
 
 extern crate alloc;
 
-pub mod composer;
 #[cfg(feature = "std")]
 pub mod cli;
+pub mod composer;
 pub(crate) mod hu_reorder;
 pub mod json;
 pub mod optimize;
 pub mod zero_bias;
 
 pub use composer::{
-    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
+    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder,
+    MultiCodecSchemaInput, PerCodecMapInput, bake,
 };
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,

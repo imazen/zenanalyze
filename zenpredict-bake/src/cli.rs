@@ -200,9 +200,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
             if want_weights {
                 let weights_arr: Vec<f32> = match &layer.weights {
                     WeightStorage::F32(w) => w.to_vec(),
-                    WeightStorage::F16(w) => {
-                        w.iter().map(|b| f16_bits_to_f32(*b)).collect()
-                    }
+                    WeightStorage::F16(w) => w.iter().map(|b| f16_bits_to_f32(*b)).collect(),
                     WeightStorage::I8 { weights, scales } => {
                         let mut out = Vec::with_capacity(weights.len());
                         for (idx, w) in weights.iter().enumerate() {
@@ -410,6 +408,7 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
         output_order: None,
         compressed: compress,
         hu_permutations: None,
+        multi_codec_schema: None,
     };
 
     let new_bytes = if optimize {

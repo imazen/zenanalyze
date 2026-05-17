@@ -14,6 +14,25 @@
   `WeightStorage` variant pattern-matching has a stable accessor
   pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
 
+### Added
+
+- **Multi-codec shared-trunk picker runtime (ZNPR v3.2).** New
+  optional `multi_codec_schema` header section (offset 116..124)
+  carrying the per-codec scatter map for joint-trained pickers.
+  When present, `Predictor::predict_multi_codec(codec_id,
+  codec_features, size_class, log_pixels, zq_norm)` composes the
+  trunk's input vector (union features + presence mask + size
+  onehot + scalars + codec onehot) from a single codec's natural
+  feature vector and returns that codec's output range. Backwards
+  compatible — single-codec bakes leave the section empty and load
+  unchanged. New public types: `MultiCodecSchema`, `PerCodecMap`,
+  `HeadMeta`. New `Model::multi_codec_schema()` /
+  `has_multi_codec_schema()` accessors. New
+  `PredictError::MultiCodecNotSupported` /
+  `UnknownCodecId` / `CodecFeatureLenMismatch` variants on the
+  `#[non_exhaustive]` enum. Parse-time validation cross-checks the
+  schema against the trunk's `n_inputs` (must equal `2*U + 6 + C`).
+
 ## [0.2.0] - 2026-05-13
 
 ### Added: `compressed-weights` feature (LZ4 + zerobias)
