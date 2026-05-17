@@ -549,31 +549,27 @@ def _read_table_columns(path: Path):
 
 
 def load_pareto(path):
-    """Load the Pareto sweep TSV.
+    """Load the Pareto sweep TSV / Parquet (columnar return shape).
 
     Returns `(rows, ceilings, has_ceiling_column, has_time_column)` where:
-      - rows: `{(image_path, size_class, w, h) -> [{"config_id", "bytes",
-        "zensim"[, "time_ms"]}]}`. The `"zensim"` key holds the value
-        from `METRIC_COLUMN` (which defaults to "zensim" but can be
-        any quality column the codec targets — butteraugli, dssim, …).
-        Direction is interpreted via `METRIC_DIRECTION`.
-      - ceilings: `{(image_path, size_class) -> effective_max_zensim}` —
-        only populated if the sweep TSV declares the
-        `effective_max_zensim` column. The value is the max metric score
-        physically achievable for that image at that size, computed by
-        the sweep harness as a byproduct (typically `max(metric)` across
-        all configs at the highest q values when METRIC_DIRECTION is
-        higher_better, or `min(metric)` for lower_better).
-      - has_ceiling_column: True iff the sweep TSV declared
-        `effective_max_zensim`.
-      - has_time_column: True iff the sweep TSV declared the
-        configured TIME_COLUMN. When True, rows carry a `"time_ms"`
-        key (float, milliseconds). Drives the time_budgeted objective's
-        per-cell time head.
+      - rows: `{(image_path, size_class, w, h) -> {"config_id": int64[],
+        "bytes": int64[], "zensim": float64[], "time_ms": float64[] | None}}`.
+        Each per-key entry is a small dict of typed numpy arrays —
+        one element per (config, q) sample for that (image, size).
+        Downstream code iterates the arrays directly (vectorized
+        groupby / reach mask) instead of looping over per-row dicts.
+      - ceilings: `{(image_path, size_class) -> effective_max_zensim}`.
+      - has_ceiling_column / has_time_column: presence flags.
+
+    Layout note: this used to return a `list[dict]` per key with one
+    dict per (config, q) sample. The dict layout cost ~22 M dict
+    allocations on a 22 M-row pareto and ~50 s of wall in
+    `build_dataset`'s tight inner loops. The columnar shape allocates
+    O(n_keys) small dicts instead of O(n_rows), and the row reads in
+    `build_dataset` become numpy slices.
 
     See imazen/zenanalyze#51 for the cross-codec design context.
     """
-    rows = defaultdict(list)
     ceilings: dict = {}
     fieldnames, cols = _read_table_columns(Path(path))
     has_ceiling_column = "effective_max_zensim" in fieldnames
@@ -583,54 +579,123 @@ def load_pareto(path):
             f"pareto file {path} is missing METRIC_COLUMN={METRIC_COLUMN!r}; "
             f"available columns: {fieldnames}"
         )
-    image_path = cols["image_path"]
-    size_class = cols["size_class"]
-    width = cols["width"]
-    height = cols["height"]
-    config_id = cols["config_id"]
-    config_name = cols["config_name"]
-    bytes_col = cols["bytes"]
-    metric = cols[METRIC_COLUMN]
-    time_col = cols[TIME_COLUMN] if has_time_column else None
-    ceil_col = cols["effective_max_zensim"] if has_ceiling_column else None
-    n = len(width)
-    # Tight Python loop — no per-row dict from a CSV parser. The
-    # only allocations are the inner-list dict (downstream needs
-    # `row["config_id"]` etc.) and the tuple key.
+
+    # Typed numpy coercion once. `_read_table_columns` already returns
+    # numpy arrays for numeric Parquet columns; the CSV path returns
+    # Python lists that np.asarray converts. Coerce numeric columns
+    # via float64 first to absorb NaN/missing cells cleanly (NaN ->
+    # int64 directly emits a RuntimeWarning); the `valid` mask below
+    # drops them before we re-cast to int64.
+    metric_np = np.asarray(cols[METRIC_COLUMN], dtype=np.float64)
+    config_id_f = np.asarray(cols["config_id"], dtype=np.float64)
+    bytes_f = np.asarray(cols["bytes"], dtype=np.float64)
+    width_f = np.asarray(cols["width"], dtype=np.float64)
+    height_f = np.asarray(cols["height"], dtype=np.float64)
+    time_np = (
+        np.asarray(cols[TIME_COLUMN], dtype=np.float64)
+        if has_time_column else None
+    )
+    ceil_np = (
+        np.asarray(cols["effective_max_zensim"], dtype=np.float64)
+        if has_ceiling_column else None
+    )
+
+    # Vectorized parse-failure / NaN drop in one pass.
+    valid = (
+        np.isfinite(metric_np)
+        & np.isfinite(config_id_f) & (config_id_f >= 0)
+        & np.isfinite(bytes_f) & (bytes_f > 0)
+        & np.isfinite(width_f) & np.isfinite(height_f)
+    )
+    n_dropped = int((~valid).sum())
+    if n_dropped:
+        metric_np = metric_np[valid]
+        config_id_f = config_id_f[valid]
+        bytes_f = bytes_f[valid]
+        width_f = width_f[valid]
+        height_f = height_f[valid]
+        if time_np is not None:
+            time_np = time_np[valid]
+        if ceil_np is not None:
+            ceil_np = ceil_np[valid]
+    # Now safe to cast the numeric integer columns.
+    config_id_np = config_id_f.astype(np.int64)
+    bytes_np = bytes_f.astype(np.int64)
+    width_np = width_f.astype(np.int64)
+    height_np = height_f.astype(np.int64)
+
+    image_path_full = cols["image_path"]
+    size_class_full = cols["size_class"]
+    config_name_full = cols["config_name"]
+    if n_dropped:
+        valid_list = valid.tolist()
+        image_path = [v for v, keep in zip(image_path_full, valid_list) if keep]
+        size_class = [v for v, keep in zip(size_class_full, valid_list) if keep]
+        config_name = [v for v, keep in zip(config_name_full, valid_list) if keep]
+    else:
+        image_path = image_path_full
+        size_class = size_class_full
+        config_name = config_name_full
+
+    n = len(width_np)
+    if n == 0:
+        return {}, {}, has_ceiling_column, has_time_column
+
+    # Build the per-key group index. `key_id` maps each row to a small
+    # integer key index; we then use sort-by-key + np.diff boundaries
+    # to materialize per-key slices.
+    keys: list = []
+    key_index: dict = {}
+    key_id = np.empty(n, dtype=np.int64)
     for i in range(n):
-        try:
-            cid = int(config_id[i])
-            bytes_v = int(bytes_col[i])
-            metric_v = float(metric[i])
-        except (ValueError, TypeError):
-            continue
-        # Skip rows whose metric is NaN.
-        if metric_v != metric_v:
-            continue
-        if cid not in CONFIG_NAMES:
-            CONFIG_NAMES[cid] = config_name[i]
-        key = (image_path[i], size_class[i], int(width[i]), int(height[i]))
-        row = {"config_id": cid, "bytes": bytes_v, "zensim": metric_v}
-        if has_time_column:
-            t = time_col[i]
-            # NaN check (works for numpy floats and Python None)
-            if t is not None and t == t:
-                try:
-                    row["time_ms"] = float(t)
-                except (ValueError, TypeError):
-                    pass
-        rows[key].append(row)
-        if has_ceiling_column:
-            cv = ceil_col[i]
-            if cv is not None and cv == cv:
-                # Per-(image, size) — value is identical across
-                # all (config, q) rows of that key. Take first.
-                ceil_key = (image_path[i], size_class[i])
-                if ceil_key not in ceilings:
-                    try:
-                        ceilings[ceil_key] = float(cv)
-                    except (ValueError, TypeError):
-                        pass
+        k = (image_path[i], size_class[i], int(width_np[i]), int(height_np[i]))
+        idx = key_index.get(k)
+        if idx is None:
+            idx = len(keys)
+            key_index[k] = idx
+            keys.append(k)
+        key_id[i] = idx
+
+    # Record config_name on first sighting of each cid.
+    config_names = CONFIG_NAMES
+    cid_list = config_id_np.tolist()
+    for i in range(n):
+        cid = cid_list[i]
+        if cid not in config_names:
+            config_names[cid] = config_name[i]
+
+    # Sort by key_id so contiguous slabs == per-key entries.
+    sort_idx = np.argsort(key_id, kind="stable")
+    key_id_s = key_id[sort_idx]
+    boundaries = np.flatnonzero(np.diff(key_id_s)) + 1
+    boundaries = np.concatenate(([0], boundaries, [n]))
+
+    config_id_s = config_id_np[sort_idx]
+    bytes_s = bytes_np[sort_idx]
+    metric_s = metric_np[sort_idx]
+    time_s = time_np[sort_idx] if time_np is not None else None
+    ceil_s = ceil_np[sort_idx] if ceil_np is not None else None
+
+    rows: dict = {}
+    for gi in range(len(boundaries) - 1):
+        lo = int(boundaries[gi])
+        hi = int(boundaries[gi + 1])
+        k = keys[int(key_id_s[lo])]
+        entry: dict = {
+            "config_id": config_id_s[lo:hi],
+            "bytes": bytes_s[lo:hi],
+            "zensim": metric_s[lo:hi],
+        }
+        if time_s is not None:
+            entry["time_ms"] = time_s[lo:hi]
+        rows[k] = entry
+        if ceil_s is not None:
+            ceil_key = (k[0], k[1])
+            if ceil_key not in ceilings:
+                slab = ceil_s[lo:hi]
+                ok = np.isfinite(slab)
+                if ok.any():
+                    ceilings[ceil_key] = float(slab[ok][0])
     return rows, ceilings, has_ceiling_column, has_time_column
 
 
@@ -780,17 +845,11 @@ def build_cell_index():
 
 
 def rows_have_time(pareto):
-    """True iff any row in the pareto dict carries a `time_ms` key.
-    Used to decide whether to emit the per-cell time_log head."""
+    """True iff the pareto's columnar dict carries a `time_ms` array.
+    Column presence is uniform across keys (one TSV pass produced all
+    of them), so checking any one nonempty key is enough."""
     for samples in pareto.values():
-        for s in samples:
-            if "time_ms" in s:
-                return True
-        # Only need to inspect the first nonempty sample list — rows in
-        # one (image, size) cell come from the same TSV pass, so the
-        # column-presence is uniform.
-        if samples:
-            break
+        return "time_ms" in samples
     return False
 
 
@@ -798,23 +857,25 @@ def compute_time_baselines(pareto):
     """Median `time_ms` per size_class across all samples in the
     dataset. Returned as `{size_class: median_ms}`. Used to compute
     the per-(image, size_class) budget when --time-budget-multiplier > 0
-    filters within-cell candidates."""
+    filters within-cell candidates.
+
+    Vectorized over the columnar `pareto` shape — `samples["time_ms"]`
+    is a numpy float64 array per key; we filter to finite positive
+    values and accumulate per size_class.
+    """
     by_size: dict = defaultdict(list)
     for (image, size, w, h), samples in pareto.items():
-        for s in samples:
-            t = s.get("time_ms")
-            if t is not None and not math.isinf(t) and t > 0:
-                by_size[size].append(t)
+        t_arr = samples.get("time_ms")
+        if t_arr is None:
+            continue
+        ok = np.isfinite(t_arr) & (t_arr > 0)
+        if ok.any():
+            by_size[size].append(t_arr[ok])
     baselines = {}
-    for sz, vals in by_size.items():
-        if vals:
-            vals_sorted = sorted(vals)
-            mid = len(vals_sorted) // 2
-            baselines[sz] = (
-                vals_sorted[mid]
-                if len(vals_sorted) % 2 == 1
-                else 0.5 * (vals_sorted[mid - 1] + vals_sorted[mid])
-            )
+    for sz, chunks in by_size.items():
+        if chunks:
+            all_t = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+            baselines[sz] = float(np.median(all_t))
     return baselines
 
 
@@ -881,6 +942,27 @@ def build_dataset(
     CEILING_MARGIN = 0.0
     skipped_above_ceiling = 0
 
+    higher_is_better = METRIC_DIRECTION == "higher_better"
+    # Pre-compute per-config → cell map as a numpy lookup so we can
+    # gather the cell index for a vector of config_ids in one op.
+    if config_to_cell:
+        max_cid = max(config_to_cell.keys())
+        cell_lookup = np.full(max_cid + 1, -1, dtype=np.int64)
+        for cid, c in config_to_cell.items():
+            cell_lookup[cid] = c
+        scalar_lookup = {
+            axis: np.full(max_cid + 1, np.nan, dtype=np.float64)
+            for axis in SCALAR_AXES
+        }
+        for cid, p in parsed_all.items():
+            for axis in SCALAR_AXES:
+                v = p.get(axis)
+                if v is not None:
+                    scalar_lookup[axis][cid] = v
+    else:
+        cell_lookup = np.empty(0, dtype=np.int64)
+        scalar_lookup = {axis: np.empty(0, dtype=np.float64) for axis in SCALAR_AXES}
+
     for (image, size, w, h), samples in pareto.items():
         feat_key = (image, size)
         if feat_key not in feats:
@@ -895,12 +977,28 @@ def build_dataset(
         if ceilings:
             ceiling = ceilings.get((image, size))
 
-        # Group samples by config to track per-config best.
-        # (one config can have multiple q values; pareto-best for each
-        # cell at each zq target is the cheapest config that crosses zq.)
-        by_cfg = defaultdict(list)
-        for s in samples:
-            by_cfg[s["config_id"]].append(s)
+        # Columnar samples — typed numpy arrays from load_pareto.
+        cfg_arr = samples["config_id"]
+        bytes_arr = samples["bytes"]
+        metric_arr = samples["zensim"]
+        time_arr = samples.get("time_ms") if has_time else None
+        if len(cfg_arr) == 0:
+            continue
+
+        # Sort once by config_id; "per-config best" becomes contiguous
+        # slicing instead of a defaultdict(list) loop. Stable sort
+        # preserves intra-config q ordering for debugging clarity.
+        sort_idx = np.argsort(cfg_arr, kind="stable")
+        cfg_s = cfg_arr[sort_idx]
+        bytes_sorted = bytes_arr[sort_idx]
+        metric_sorted = metric_arr[sort_idx]
+        time_sorted = time_arr[sort_idx] if time_arr is not None else None
+
+        # Group boundaries within the sorted array.
+        diffs = np.flatnonzero(np.diff(cfg_s)) + 1
+        group_starts = np.concatenate(([0], diffs))
+        group_ends = np.concatenate((diffs, [len(cfg_s)]))
+        unique_cfgs = cfg_s[group_starts]
 
         for zq in ZQ_TARGETS:
             # Ceiling-aware skip: targets above the per-image achievable
@@ -910,11 +1008,6 @@ def build_dataset(
             if ceiling is not None and zq > ceiling + CEILING_MARGIN:
                 skipped_above_ceiling += 1
                 continue
-            cell_bytes = [math.inf] * n_cells
-            cell_time = [math.inf] * n_cells if has_time else None
-            cell_metric = [math.nan] * n_cells if emit_metric_head else None
-            cell_scalars = {axis: [math.nan] * n_cells for axis in SCALAR_AXES}
-            cell_reach = [False] * n_cells
 
             # Per-(image, size) budget gate. When apply_budget is on,
             # only candidates with time ≤ this value are considered.
@@ -924,51 +1017,66 @@ def build_dataset(
                 if base is not None:
                     budget_ms = base * time_budget_multiplier
 
-            # Track whether ANY config (ignoring budget) would have
-            # reached this zq for this (image, size). Used to attribute
-            # post-filter failures to the budget vs to physical
-            # unreachability.
-            any_unfiltered_reach = False
+            # Vectorized reach mask across the WHOLE key (sorted by
+            # config), then within-budget mask AND'd in. Per-config
+            # slices below see the right entries.
+            if higher_is_better:
+                reach_full = metric_sorted >= zq
+            else:
+                reach_full = metric_sorted <= zq
+            any_unfiltered_reach = bool(reach_full.any())
+            if apply_budget and time_sorted is not None:
+                reach_after_budget = reach_full & (time_sorted <= budget_ms)
+            else:
+                reach_after_budget = reach_full
 
-            for cfg_id, hits in by_cfg.items():
-                # Cheapest sample for this config that reaches the target
-                # (direction-aware: higher_better → metric ≥ zq;
-                # lower_better → metric ≤ zq) AND within budget.
-                best_b = math.inf
-                best_t: float = math.inf
-                best_m: float = math.nan
-                for s in hits:
-                    if METRIC_DIRECTION == "higher_better":
-                        reaches = s["zensim"] >= zq
-                    else:
-                        reaches = s["zensim"] <= zq
-                    if not reaches:
-                        continue
-                    any_unfiltered_reach = True
-                    t_ms = s.get("time_ms", math.inf) if has_time else math.inf
-                    if apply_budget and t_ms > budget_ms:
-                        continue
-                    if s["bytes"] < best_b:
-                        best_b = s["bytes"]
-                        if has_time:
-                            best_t = t_ms
-                        if emit_metric_head:
-                            best_m = s["zensim"]
-                if math.isinf(best_b):
+            cell_bytes = np.full(n_cells, math.inf, dtype=np.float64)
+            cell_time = (
+                np.full(n_cells, math.inf, dtype=np.float64)
+                if has_time else None
+            )
+            cell_metric = (
+                np.full(n_cells, math.nan, dtype=np.float64)
+                if emit_metric_head else None
+            )
+            cell_scalars = {
+                axis: np.full(n_cells, math.nan, dtype=np.float64)
+                for axis in SCALAR_AXES
+            }
+            cell_reach = np.zeros(n_cells, dtype=bool)
+
+            # Iterate per-config groups (typically 60-120 cfgs). Each
+            # group's reach + bytes are array slices; argmin is
+            # vectorized C-speed via np.where + .argmin().
+            int_max = np.iinfo(np.int64).max
+            for gi in range(len(unique_cfgs)):
+                lo = int(group_starts[gi])
+                hi = int(group_ends[gi])
+                g_reach = reach_after_budget[lo:hi]
+                if not g_reach.any():
                     continue
-                c = config_to_cell[cfg_id]
+                g_bytes = bytes_sorted[lo:hi]
+                masked_b = np.where(g_reach, g_bytes, int_max)
+                local_argmin = int(masked_b.argmin())
+                best_b = int(g_bytes[local_argmin])
+                cfg_id = int(unique_cfgs[gi])
+                c = (
+                    int(cell_lookup[cfg_id])
+                    if 0 <= cfg_id < len(cell_lookup) else -1
+                )
+                if c < 0:
+                    continue
                 if best_b < cell_bytes[c]:
                     cell_bytes[c] = best_b
-                    if has_time:
-                        cell_time[c] = best_t
-                    if emit_metric_head:
-                        cell_metric[c] = best_m
-                    p = parsed_all[cfg_id]
+                    if has_time and time_sorted is not None and cell_time is not None:
+                        cell_time[c] = float(time_sorted[lo + local_argmin])
+                    if emit_metric_head and cell_metric is not None:
+                        cell_metric[c] = float(metric_sorted[lo + local_argmin])
                     for axis in SCALAR_AXES:
-                        cell_scalars[axis][c] = p[axis]
+                        cell_scalars[axis][c] = scalar_lookup[axis][cfg_id]
                     cell_reach[c] = True
 
-            if not any(cell_reach):
+            if not cell_reach.any():
                 # Mark as budget-infeasible only when the unfiltered
                 # version would have reached. Otherwise this is a
                 # physically-unreachable target, not a budget problem.
@@ -980,40 +1088,35 @@ def build_dataset(
             # alternative cells that would either slow encoding by
             # > safety_speed_tol or fail to deliver
             # safety_bytes_min_gain bytes savings vs the default.
-            # Forces the picker to default unless an alternative is
-            # both meaningfully smaller AND not slower. The picker
-            # learns to recognize images where a safe alternative
-            # exists (rather than blindly preferring fast effort=3
-            # cells that regress quality at non-tight distances).
             if (
                 safety_default_cell_idx is not None
                 and 0 <= safety_default_cell_idx < n_cells
                 and cell_reach[safety_default_cell_idx]
                 and has_time
+                and cell_time is not None
             ):
                 d_idx = safety_default_cell_idx
-                d_bytes = cell_bytes[d_idx]
-                d_time = cell_time[d_idx]  # type: ignore[index]
+                d_bytes = float(cell_bytes[d_idx])
+                d_time = float(cell_time[d_idx])
                 bytes_ceiling = d_bytes * safety_bytes_min_gain
                 time_ceiling = (
                     d_time * safety_speed_tol
                     if not math.isinf(d_time)
                     else math.inf
                 )
-                for c in range(n_cells):
-                    if c == d_idx or not cell_reach[c]:
-                        continue
-                    too_slow = cell_time[c] > time_ceiling  # type: ignore[index]
-                    no_real_gain = cell_bytes[c] >= bytes_ceiling
-                    if too_slow or no_real_gain:
-                        cell_bytes[c] = math.inf
-                        cell_reach[c] = False
-                        if has_time:
-                            cell_time[c] = math.inf  # type: ignore[index]
-                        if emit_metric_head:
-                            cell_metric[c] = math.nan  # type: ignore[index]
-                        for axis in SCALAR_AXES:
-                            cell_scalars[axis][c] = math.nan
+                others = cell_reach.copy()
+                others[d_idx] = False
+                too_slow = cell_time > time_ceiling
+                no_real_gain = cell_bytes >= bytes_ceiling
+                kill = others & (too_slow | no_real_gain)
+                if kill.any():
+                    cell_bytes[kill] = math.inf
+                    cell_reach[kill] = False
+                    cell_time[kill] = math.inf
+                    if emit_metric_head and cell_metric is not None:
+                        cell_metric[kill] = math.nan
+                    for axis in SCALAR_AXES:
+                        cell_scalars[axis][kill] = math.nan
                 # If masking eliminated every alternative AND default
                 # is the only reachable cell, keep going — picker will
                 # learn to pick default for this row, which is correct.
@@ -1033,42 +1136,40 @@ def build_dataset(
                 np.array([0.0], dtype=np.float32),  # icc placeholder
             ])
 
-            bytes_log = np.array(
-                [math.log(b) if not math.isinf(b) else math.nan for b in cell_bytes],
-                dtype=np.float32,
-            )
-            reach = np.array(cell_reach, dtype=bool)
+            # Vectorized log: unreachable cells → NaN.
+            bytes_log = np.where(
+                np.isinf(cell_bytes),
+                math.nan,
+                np.log(np.where(cell_bytes > 0, cell_bytes, 1.0)),
+            ).astype(np.float32)
+            reach = cell_reach.copy()
 
             Xs_rows.append(xs)
             Xe_rows.append(xe)
             bytes_log_rows.append(bytes_log)
-            if time_log_rows is not None:
-                # log(time_ms); NaN where the cell didn't reach.
-                tlog = np.array(
-                    [
-                        math.log(t) if (t is not None and not math.isinf(t) and t > 0)
-                        else math.nan
-                        for t in cell_time  # type: ignore[union-attr]
-                    ],
-                    dtype=np.float32,
-                )
+            if time_log_rows is not None and cell_time is not None:
+                # log(time_ms); NaN where the cell didn't reach or
+                # time is non-positive / inf.
+                valid_time = (cell_time > 0) & np.isfinite(cell_time)
+                tlog = np.where(
+                    valid_time,
+                    np.log(np.where(valid_time, cell_time, 1.0)),
+                    math.nan,
+                ).astype(np.float32)
                 time_log_rows.append(tlog)
-            if metric_log_rows is not None:
-                # For higher_better metrics (zensim, ssim2), values are
-                # always > 0 — log is fine. For lower_better (butteraugli),
-                # also > 0 in practice (distance is non-negative). Use
-                # log everywhere for numeric stability across metrics.
-                # NaN preserved for unreached cells.
-                mlog = np.array(
-                    [
-                        math.log(m) if (not math.isnan(m) and m > 0) else math.nan
-                        for m in cell_metric  # type: ignore[union-attr]
-                    ],
-                    dtype=np.float32,
-                )
+            if metric_log_rows is not None and cell_metric is not None:
+                # NaN preserved for unreached cells. zensim/ssim2 always
+                # > 0; butteraugli also > 0 in practice — log everywhere
+                # for numeric stability across metrics.
+                valid_metric = (~np.isnan(cell_metric)) & (cell_metric > 0)
+                mlog = np.where(
+                    valid_metric,
+                    np.log(np.where(valid_metric, cell_metric, 1.0)),
+                    math.nan,
+                ).astype(np.float32)
                 metric_log_rows.append(mlog)
             for axis in SCALAR_AXES:
-                scalar_rows[axis].append(np.array(cell_scalars[axis], dtype=np.float32))
+                scalar_rows[axis].append(cell_scalars[axis].astype(np.float32))
             reach_rows.append(reach)
             meta.append((image, size, zq))
 
