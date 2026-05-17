@@ -68,7 +68,10 @@ use alloc::vec::Vec;
 
 use serde::Deserialize;
 
-use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake};
+use crate::composer::{
+    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, MultiCodecSchemaInput, PerCodecMapInput,
+    bake,
+};
 use zenpredict::{
     Activation, FeatureBound, MetadataType, OutputSpec, OutputTransform, SparseOverride,
     WeightDtype,
@@ -167,6 +170,57 @@ pub struct BakeRequestJson {
     /// ```
     #[serde(default)]
     pub sparse_overrides: Vec<SparseOverrideJson>,
+    /// Multi-codec joint-picker schema. When present, emits the v3.2
+    /// `multi_codec_schema` section so the runtime can dispatch
+    /// [`zenpredict::Predictor::predict_multi_codec`]. Absent (or
+    /// `null` in JSON) → single-codec bake.
+    ///
+    /// JSON shape:
+    /// ```json
+    /// {
+    ///   "union_feat_count": 64,
+    ///   "per_codec": [
+    ///     {
+    ///       "codec_name": "zenjpeg",
+    ///       "union_slot_for_codec_feat": [0, 1, 4, ...],
+    ///       "output_range": [0, 48],
+    ///       "head_n_cells": 12,
+    ///       "head_n_heads": 4
+    ///     },
+    ///     ...
+    ///   ]
+    /// }
+    /// ```
+    #[serde(default)]
+    pub multi_codec_schema: Option<MultiCodecSchemaJson>,
+}
+
+/// Multi-codec joint-picker schema, JSON-side.
+#[derive(Deserialize, Debug, Clone)]
+pub struct MultiCodecSchemaJson {
+    /// `U` — number of union image features across all codecs.
+    pub union_feat_count: u32,
+    /// Per-codec entries. Index = codec id at runtime.
+    pub per_codec: Vec<PerCodecMapJson>,
+}
+
+/// Per-codec map entry, JSON-side. Mirrors
+/// [`crate::composer::PerCodecMapInput`] but owns its data so the
+/// JSON layer doesn't pin lifetimes to the request.
+#[derive(Deserialize, Debug, Clone)]
+pub struct PerCodecMapJson {
+    /// Stable codec name (`"zenjpeg"`, `"zenwebp"`, …).
+    pub codec_name: String,
+    /// For each of this codec's natural feat_cols, the union slot
+    /// index `[0..union_feat_count)` to scatter that value into.
+    pub union_slot_for_codec_feat: Vec<u32>,
+    /// `[lo, hi]` — half-open range into the trunk's flat output
+    /// vector that belongs to this codec.
+    pub output_range: [u32; 2],
+    /// Number of config cells in this codec's argmin space.
+    pub head_n_cells: u32,
+    /// Number of heads per cell (bytes + scalar heads).
+    pub head_n_heads: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -496,6 +550,32 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         })
         .collect();
 
+    // The multi-codec section, when present, needs borrowed slices
+    // backed by allocations that outlive the BakeRequest. Build them
+    // here so the lifetimes are clean.
+    let per_codec_owned: Vec<PerCodecMapJson> = req
+        .multi_codec_schema
+        .as_ref()
+        .map(|s| s.per_codec.clone())
+        .unwrap_or_default();
+    let per_codec_inputs: Vec<PerCodecMapInput<'_>> = per_codec_owned
+        .iter()
+        .map(|m| PerCodecMapInput {
+            codec_name: &m.codec_name,
+            union_slot_for_codec_feat: &m.union_slot_for_codec_feat,
+            output_range: (m.output_range[0], m.output_range[1]),
+            head_n_cells: m.head_n_cells,
+            head_n_heads: m.head_n_heads,
+        })
+        .collect();
+    let multi_codec_input: Option<MultiCodecSchemaInput<'_>> =
+        req.multi_codec_schema
+            .as_ref()
+            .map(|s| MultiCodecSchemaInput {
+                union_feat_count: s.union_feat_count,
+                per_codec: &per_codec_inputs,
+            });
+
     let request = BakeRequest {
         schema_hash: req.schema_hash,
         flags: req.flags,
@@ -511,7 +591,7 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         output_order: None,
         compressed: false,
         hu_permutations: None,
-        multi_codec_schema: None,
+        multi_codec_schema: multi_codec_input,
     };
     Ok(bake(&request)?)
 }

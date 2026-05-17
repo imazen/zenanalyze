@@ -359,6 +359,97 @@ fn json_sigmoid_scaled_transform() {
     }
 }
 
+#[test]
+fn json_round_trip_with_multi_codec_schema() {
+    // Two codecs, 4 union features, codec 0 owns slots [0, 1, 2], codec
+    // 1 owns slots [3, 1] (overlap on slot 1 — they share the same
+    // image feature). Trunk inputs = 2*4 + 4 + 2 + 2 = 16. Output dim 4:
+    // codec 0 owns [0, 2), codec 1 owns [2, 4).
+    let json = r#"{
+        "schema_hash": 7777,
+        "scaler_mean":  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "scaler_scale": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "layers": [
+            {
+                "in_dim": 16,
+                "out_dim": 4,
+                "activation": "identity",
+                "dtype": "f32",
+                "weights": [
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0
+                ],
+                "biases": [0.0, 0.0, 0.0, 0.0]
+            }
+        ],
+        "multi_codec_schema": {
+            "union_feat_count": 4,
+            "per_codec": [
+                {
+                    "codec_name": "zenjpeg",
+                    "union_slot_for_codec_feat": [0, 1, 2],
+                    "output_range": [0, 2],
+                    "head_n_cells": 2,
+                    "head_n_heads": 1
+                },
+                {
+                    "codec_name": "zenwebp",
+                    "union_slot_for_codec_feat": [3, 1],
+                    "output_range": [2, 4],
+                    "head_n_cells": 2,
+                    "head_n_heads": 1
+                }
+            ]
+        }
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+
+    // The multi-codec schema must round-trip and the runtime must
+    // dispatch through predict_multi_codec.
+    assert!(model.has_multi_codec_schema());
+    let schema = model.multi_codec_schema().expect("multi-codec schema");
+    assert_eq!(schema.union_feat_count, 4);
+    assert_eq!(schema.n_codecs, 2);
+    assert_eq!(schema.per_codec(0).unwrap().codec_name, "zenjpeg");
+    assert_eq!(schema.per_codec(1).unwrap().codec_name, "zenwebp");
+
+    let mut p = Predictor::new(&model);
+
+    // Codec 0 (zenjpeg): feed feature values [10, 20, 30] into the
+    // codec's 3 natural feat slots. The identity trunk passes the first
+    // 4 union slots straight through; codec 0's output_range is [0, 2),
+    // so we should see slots 0 and 1 (= 10, 20) in the returned slice.
+    let out0 = p
+        .predict_multi_codec(0, &[10.0, 20.0, 30.0], 0, 0.0, 0.0)
+        .unwrap();
+    assert_eq!(out0, &[10.0, 20.0]);
+
+    // Codec 1 (zenwebp): natural features map to union slots [3, 1].
+    // With identity trunk, output_range [2, 4) reads union slots 2 and
+    // 3. Codec 1 doesn't write slot 2, so it remains 0.0 from the zero-
+    // initialized scatter; slot 3 is the FIRST codec_1 feat (= 100).
+    let out1 = p
+        .predict_multi_codec(1, &[100.0, 200.0], 1, 1.0, 0.5)
+        .unwrap();
+    assert_eq!(out1, &[0.0, 100.0]);
+}
+
 fn tempdir() -> std::path::PathBuf {
     let base = std::env::temp_dir();
     let pid = std::process::id();
