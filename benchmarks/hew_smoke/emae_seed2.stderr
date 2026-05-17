@@ -1,0 +1,98 @@
+  seed override: SEED=0x2
+  CLI override: OUT_JSON=/home/lilith/work/zen/zenanalyze/.claude/worktrees/agent-a73cf35e086642d83/benchmarks/hew_smoke/emae_seed2.json
+  CLI override: OUT_LOG=/home/lilith/work/zen/zenanalyze/.claude/worktrees/agent-a73cf35e086642d83/benchmarks/hew_smoke/emae_seed2.log
+Training objective: size_optimal
+  bytes head loss: mean (squared error)
+  reach gate: none (any reachable cell allowed)
+  output JSON: /home/lilith/work/zen/zenanalyze/.claude/worktrees/agent-a73cf35e086642d83/benchmarks/hew_smoke/emae_seed2.json
+Loading benchmarks/zq_pareto_2026-04-29.tsv...
+FEATURE_TRANSFORMS active on 11/51 columns: [('feat_variance', 'log1p'), ('feat_laplacian_variance', 'log1p'), ('feat_variance_spread', 'log1p'), ('feat_edge_slope_stdev', 'log1p'), ('feat_pixel_count', 'log'), ('feat_aq_map_p99', 'log1p'), ('feat_laplacian_variance_p50', 'log1p'), ('feat_laplacian_variance_p75', 'log1p'), ('feat_laplacian_variance_p90', 'log1p'), ('feat_laplacian_variance_p99', 'log1p'), ('feat_laplacian_variance_peak', 'log1p')]
+Dropped 347 (image, size) keys with NaN feature values (tiny images skipping percentile features — handled by OOD fallback at inference).
+  metric column: zensim (higher_better)
+  time column:   encode_ms (present)
+Loaded 1388 cells × 51 features  (sweep TSV has NO effective_max_zensim column — see imazen/zenanalyze#51)
+
+Categorical cells: 12
+   0: xyb_420_noT                     (5 configs)
+   1: xyb_420_trellis                 (15 configs)
+   2: xyb_444_noT                     (5 configs)
+   3: xyb_444_trellis                 (15 configs)
+   4: ycbcr_420_noT                   (5 configs)
+   5: ycbcr_420_noT_sa                (5 configs)
+   6: ycbcr_420_trellis               (15 configs)
+   7: ycbcr_420_trellis_sa            (15 configs)
+   8: ycbcr_444_noT                   (5 configs)
+   9: ycbcr_444_noT_sa                (5 configs)
+  10: ycbcr_444_trellis               (15 configs)
+  11: ycbcr_444_trellis_sa            (15 configs)
+
+Decision rows: 29185; Xs=57, Xe=112, n_cells=12 (+ time_log)
+Train rows: 23376, val rows: 5809
+/home/lilith/work/zen/zenanalyze/.claude/worktrees/agent-a73cf35e086642d83/zentrain/tools/train_hybrid.py:1796: RuntimeWarning: Mean of empty slice
+  scalar_means[axis] = np.nanmean(np.where(arr > sentinel, arr, np.nan), axis=0)
+[bytes] training 12 per-cell HistGB models in parallel (n_jobs=-1, max_iter=400, max_depth=8)
+[bytes] 12/12 models trained
+[chroma_scale] training 12 per-cell HistGB models in parallel (n_jobs=-1, max_iter=400, max_depth=8)
+[chroma_scale] 12/12 models trained
+[lambda] training 12 per-cell HistGB models in parallel (n_jobs=-1, max_iter=400, max_depth=8)
+[lambda] 6/12 models trained
+[time] training 12 per-cell HistGB models in parallel (n_jobs=-1, max_iter=400, max_depth=8)
+[time] 12/12 models trained
+
+Generating teacher soft targets (val + train)...
+
+Teacher metrics: argmin mean overhead 2.48% argmin_acc 52.1%
+  scalar RMSE: chroma_scale 0.2077  lambda 2.8800
+  per-head norm: scalar block 'chroma_scale' μ=0.9065 σ=0.2910 (standardized for fit)
+  per-head norm: scalar block 'lambda' μ=7.5477 σ=8.0787 (standardized for fit)
+
+Training MLP student (hidden=128x128, output_dim=48)...
+  using PyTorch backend (LeakyReLU(0.01))
+  hard-example weighting: mode=emae α=1.0 ema_window=5 clip=[0.100,10.000]
+  trained, final loss=0.0181, n_iter=207
+
+Student metrics: argmin mean overhead 1.84% argmin_acc 58.1%
+  scalar RMSE: chroma_scale 0.2173  lambda 2.9759
+  train: mean overhead 1.46% argmin_acc 60.8% (gap to val: +0.38pp)
+
+======================================================================
+  ⚠ SAFETY VIOLATIONS DETECTED — picker may produce dangerous results
+======================================================================
+  • PER_ZQ_TAIL: zq=94 p99 overhead 100.6% > threshold 80.0%
+  • DATA_STARVED_SIZE: 36 (size_class, zq) cell(s) have train rows < 50: tiny/zq0=0, tiny/zq5=0, tiny/zq10=0, tiny/zq15=0, tiny/zq20=0, tiny/zq25=0 (+30 more)
+  • UNCAPPED_ZQ_GRID: ZQ_TARGETS includes zq=100 > 85 but Pareto TSV has no `effective_max_zensim` column. Trainer can't tell physically-unreachable cells apart from sweep gaps; DATA_STARVED_SIZE warnings cannot be diagnosed honestly. Either lower max(ZQ_TARGETS) below 86 or have the codec sweep harness emit `effective_max_zensim` per (image, size_class). See imazen/zenanalyze#51.
+======================================================================
+
+Wrote /home/lilith/work/zen/zenanalyze/.claude/worktrees/agent-a73cf35e086642d83/benchmarks/hew_smoke/emae_seed2.json (37168 weights, 72.6 KB f16)
+
+# Hybrid-heads picker — categorical bytes + scalar (chroma_scale, lambda)
+Safety profile: size_optimal
+  bytes head: mean (squared error)
+  reach gate: none — any reachable cell allowed at inference
+Train rows: 23376, val rows: 5809
+n_cells: 12, output_dim: 48
+Student: MLP 112 -> 128 -> 128 -> 48, 37168 params (~72.6 KB f16)
+
+## Categorical cells
+   0: xyb_420_noT                     (5 member configs)
+   1: xyb_420_trellis                 (15 member configs)
+   2: xyb_444_noT                     (5 member configs)
+   3: xyb_444_trellis                 (15 member configs)
+   4: ycbcr_420_noT                   (5 member configs)
+   5: ycbcr_420_noT_sa                (5 member configs)
+   6: ycbcr_420_trellis               (15 member configs)
+   7: ycbcr_420_trellis_sa            (15 member configs)
+   8: ycbcr_444_noT                   (5 member configs)
+   9: ycbcr_444_noT_sa                (5 member configs)
+  10: ycbcr_444_trellis               (15 member configs)
+  11: ycbcr_444_trellis_sa            (15 member configs)
+
+## Argmin (categorical) — vs reachable per-row optimal
+  Teacher: mean 2.48%  argmin_acc 52.1%
+  Student: mean 1.84%  argmin_acc 58.1%
+
+## Scalar regression RMSE
+  Teacher chroma_scale RMSE: 0.2077  (MAE 0.1395, range 0.6..1.5)
+  Student chroma_scale RMSE: 0.2173  (MAE 0.1490)
+  Teacher lambda RMSE: 2.8800  (MAE 1.7538, range 8.0..25.0)
+  Student lambda RMSE: 2.9759  (MAE 2.0318)
