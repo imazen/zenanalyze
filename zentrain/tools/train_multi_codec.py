@@ -597,10 +597,23 @@ def train_shared_trunk(
         Y_tr = torch.from_numpy(p["soft_tr"].astype(np.float32))
         X_va = torch.from_numpy(p["X_va"].astype(np.float32))
         Y_va = torch.from_numpy(p["soft_va"].astype(np.float32))
+        # Per-codec label variance — divides MSE so each codec's loss
+        # contributes proportionally regardless of output scale. The
+        # bytes_log head dominates raw variance (zenwebp bytes range
+        # ~10..18 ~~ var 16; standardized scalar heads have var ~1).
+        # Without this normalization, codecs whose bytes_log spans a
+        # wider range get gradient priority and the rest collapse —
+        # exactly what we saw on the 2-codec v0 run (zenwebp loss
+        # 800+, zenjpeg 35). Variance is computed over train labels
+        # only (no leak from val).
+        loss_scale = float(Y_tr.var().item())
+        if not (loss_scale > 1e-9):
+            loss_scale = 1.0
         train_tensors.append({
             "codec": p["codec"],
             "X_tr": X_tr, "Y_tr": Y_tr, "X_va": X_va, "Y_va": Y_va,
             "n_tr": X_tr.shape[0],
+            "loss_scale": loss_scale,
         })
 
     optimizer = torch.optim.AdamW(model._all_params, lr=lr, weight_decay=weight_decay)
@@ -664,20 +677,27 @@ def train_shared_trunk(
                 Xb = t["X_tr"].index_select(0, idx_t)
                 Yb = t["Y_tr"].index_select(0, idx_t)
                 pred = model.forward(Xb, t["codec"])
-                loss = loss_fn(pred, Yb)
+                loss = loss_fn(pred, Yb) / t["loss_scale"]
                 total_loss = total_loss + loss
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(model._all_params, max_norm=5.0)
             optimizer.step()
             step += 1
 
-        # Val MSE per codec.
-        val_losses = []
+        # Val MSE per codec. Use the same variance-normalized loss for
+        # the aggregate so early-stop tracks the joint objective the
+        # optimizer minimizes (not a raw-scale sum that the wide-range
+        # codec would dominate).
+        val_losses_raw = []
+        val_losses_norm = []
         with torch.no_grad():
             for t in train_tensors:
                 pred_va = model.forward(t["X_va"], t["codec"])
-                val_losses.append(loss_fn(pred_va, t["Y_va"]).item())
-        val_total = sum(val_losses) / len(val_losses)
+                raw = loss_fn(pred_va, t["Y_va"]).item()
+                val_losses_raw.append(raw)
+                val_losses_norm.append(raw / t["loss_scale"])
+        val_losses = val_losses_norm
+        val_total = sum(val_losses_norm) / len(val_losses_norm)
         if val_total < best_val - 1e-6:
             best_val = val_total
             best_epoch = ep
@@ -783,6 +803,7 @@ def write_codec_json(
     union: dict,
     n_codecs: int,
     codec_idx: int,
+    all_codec_names: list[str],
     scaler_mean: np.ndarray,
     scaler_scale: np.ndarray,
     out_path: Path,
@@ -865,6 +886,20 @@ def write_codec_json(
         for axis in cd["scalar_axes"] if axis in cd["scalar_sentinels"]
     }
 
+    # Build extra_axes list so bake_picker can name the engineered
+    # input slots. Layout per `build_trunk_input`:
+    #   [union_feats (n_union)] -> covered by feat_cols (above)
+    #   [presence_mask (n_union)] -> presence_<feat_name>
+    #   [size_oh (4)]            -> size_tiny / small / medium / large
+    #   [log_pixels, zq_norm]    -> log_pixels, zq_norm
+    #   [codec_onehot (n_codecs)] -> codec_<name>
+    extra_axes = (
+        [f"presence_{c}" for c in union["feat_cols"]]
+        + ["size_tiny", "size_small", "size_medium", "size_large"]
+        + ["log_pixels", "zq_norm"]
+        + [f"codec_{n}" for n in all_codec_names]
+    )
+
     out = {
         "n_inputs": int(n_inputs),
         "n_outputs": int(output_dim),
@@ -877,6 +912,7 @@ def write_codec_json(
         # schema_hash derivation. Runtime parity requires a matching
         # union-layout adapter (see TODO above + bench writeup).
         "feat_cols": list(union["feat_cols"]),
+        "extra_axes": extra_axes,
         "feature_transforms": feat_transform_list,
         "output_specs": output_specs_array,
         "sparse_overrides": list(bundle.sparse_overrides),
@@ -1073,7 +1109,9 @@ def main() -> int:
         out_path = args.out_dir / f"{args.out_name}_{cd['codec_name']}_picker.json"
         write_codec_json(
             cd, soft, model, union, n_codecs=len(codec_data),
-            codec_idx=i, scaler_mean=scaler.mean_,
+            codec_idx=i,
+            all_codec_names=[c["codec_name"] for c in codec_data],
+            scaler_mean=scaler.mean_,
             scaler_scale=scaler.scale_, out_path=out_path,
             train_metrics={"argmin": train_eval["argmin"]},
             val_metrics={"argmin": val_eval["argmin"],
