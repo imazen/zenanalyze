@@ -351,6 +351,284 @@ def train_teachers_parallel(
     return teachers
 
 
+# ---------- Warm-start / distillation LOO teachers ----------
+#
+# Motivation: leave-one-feature-out ablation retrains 36 HistGB teachers
+# per LOO variant; with ~50 features and ~5 seeds the wall is hours. The
+# delta between "full features" and "drop one feature" is small — most
+# of the teacher's tree structure transfers if we can shortcut the
+# extra boosting rounds.
+#
+# sklearn's `warm_start=True` only continues from a *same-schema* fit
+# (the saved trees reference fixed feature indices), so it is NOT usable
+# directly for LOO. Two paths that ARE usable, both implemented below:
+#
+# 1. Distillation (`fit_distilled_teacher`): train a small GBM on
+#    `(X_loo, full_teacher.predict(X_full))` — soft labels from the
+#    full teacher become the regression target for a model that only
+#    sees the reduced feature schema. Fewer iterations, smaller depth.
+#
+# 2. Residual (`fit_residual_teacher`): predict `prior = full_teacher
+#    .predict(X_full_imputed)` then fit a small GBM on
+#    `(X_loo, y - prior)`. Final LOO prediction is
+#    `prior(X_full_imputed) + correction(X_loo)`. Requires the caller
+#    to keep the full teacher around at LOO evaluation time and to
+#    impute the dropped column with its training mean.
+#
+# Same-schema `warm_start=True` is exposed via
+# `fit_warm_continue_teacher` for hyperparameter sweeps where the
+# feature matrix doesn't change between fits.
+#
+# All three return a small wrapper estimator-like object with a
+# `.predict()` method so they slot into `teacher_predict_all` and
+# friends without API changes.
+
+
+def _safe_fit_get_iters(gbm: HistGradientBoostingRegressor) -> int:
+    """Return the number of boosting iterations actually performed.
+
+    With early stopping disabled (`early_stopping=False`, which is our
+    default) this equals `max_iter`. With early stopping it can be
+    smaller. Used so a residual / distilled follow-up can size its
+    `max_iter` relative to the prior fit.
+    """
+    return getattr(gbm, "n_iter_", getattr(gbm, "max_iter", 0))
+
+
+class _ResidualTeacher:
+    """Wrapper: `predict(X_loo)` returns `prior_pred + correction.predict(X_loo)`.
+
+    `prior_pred_for_X_loo` is captured at construction so callers can
+    pass arbitrary precomputed prior predictions (e.g. predictions on
+    a *different* matrix than the residual was fit against, like the
+    val set). At predict time the wrapper resolves the prior via a
+    callable that maps a `(n_rows, n_loo_feats)` matrix into the
+    prior teacher's prediction.
+    """
+
+    def __init__(
+        self,
+        correction: HistGradientBoostingRegressor,
+        prior_predict: Any,  # callable: X_loo (np.ndarray) -> np.ndarray
+    ) -> None:
+        self.correction = correction
+        self.prior_predict = prior_predict
+
+    def predict(self, X_loo: np.ndarray) -> np.ndarray:
+        prior = self.prior_predict(X_loo)
+        return prior + self.correction.predict(X_loo)
+
+
+def fit_distilled_teacher(
+    full_teacher: HistGradientBoostingRegressor,
+    X_full: np.ndarray,
+    X_loo: np.ndarray,
+    params: dict | None = None,
+    sample_mask: np.ndarray | None = None,
+) -> HistGradientBoostingRegressor:
+    """Distill `full_teacher` into a smaller GBM that consumes `X_loo`.
+
+    Trains a fresh `HistGradientBoostingRegressor(**params)` on
+    `(X_loo[sample_mask], full_teacher.predict(X_full[sample_mask]))`.
+    The soft labels (the full teacher's predictions) carry the
+    information the dropped feature contributed, so the LOO model
+    can recover most of the accuracy with fewer iterations than a
+    cold retrain.
+
+    Args:
+        full_teacher: A fitted HistGB teacher trained on the full
+            feature schema.
+        X_full: Training matrix with the FULL feature schema (used to
+            generate soft labels via `full_teacher.predict`).
+        X_loo: Same rows as `X_full` but with the LOO schema (dropped
+            column removed or mean-imputed).
+        params: HistGB kwargs for the distilled model. Defaults to
+            `HISTGB_FAST` — short, shallow trees are fine when the
+            target is a smooth GBM prediction. Pass a custom dict for
+            full-strength distillation.
+        sample_mask: Optional boolean row mask (e.g., reachable +
+            valid-target rows for a given cell). If None, all rows are
+            used.
+
+    Returns:
+        Fitted HistGB regressor that takes `X_loo`-shaped inputs.
+
+    See `benchmarks/loo_warmstart_bench_2026-05-17.md` for measured
+    wall-time vs argmin-accuracy tradeoffs on synthetic data.
+    """
+    if params is None:
+        params = HISTGB_FAST
+    if sample_mask is None:
+        sample_mask = np.ones(X_full.shape[0], dtype=bool)
+    soft_labels = full_teacher.predict(X_full[sample_mask])
+    distilled = _make_teacher(params)
+    distilled.fit(X_loo[sample_mask], soft_labels)
+    return distilled
+
+
+def fit_residual_teacher(
+    full_teacher: HistGradientBoostingRegressor,
+    X_full_imputed: np.ndarray,
+    X_loo: np.ndarray,
+    y: np.ndarray,
+    params: dict | None = None,
+    sample_mask: np.ndarray | None = None,
+) -> _ResidualTeacher:
+    """Fit a residual correction GBM that consumes `X_loo`.
+
+    Computes `prior = full_teacher.predict(X_full_imputed)` then
+    fits a small HistGB on `(X_loo, y - prior)`. The returned wrapper's
+    `.predict(X_loo_new)` reapplies the prior teacher on an imputed
+    matrix obtained via `prior_predict(X_loo_new)`.
+
+    `X_full_imputed` must have the FULL schema but with the dropped
+    feature filled (e.g., with the training mean of that column)
+    rather than its true value. This simulates what the prior teacher
+    "would have said" if it had never observed the dropped feature.
+
+    Args:
+        full_teacher: Fitted full-schema teacher.
+        X_full_imputed: (n_rows, n_full_feats) — full schema with
+            dropped column mean-imputed.
+        X_loo: (n_rows, n_loo_feats) — reduced schema.
+        y: (n_rows,) — true regression targets.
+        params: HistGB kwargs for the residual fit. Defaults to
+            `HISTGB_FAST`.
+        sample_mask: Optional row mask (default: all rows).
+
+    Returns:
+        `_ResidualTeacher` wrapper whose `.predict(X_loo_eval)` returns
+        `full_teacher.predict(impute(X_loo_eval)) + correction.predict(X_loo_eval)`.
+        The caller must wire `prior_predict` via the returned wrapper's
+        `prior_predict` field if `X_loo_eval` shape differs.
+
+    Note: the residual path is more accurate per-iter than distillation
+    but requires keeping the full teacher in memory at LOO evaluation
+    time and provisioning the imputed matrix. For pure ablation (where
+    we only need val metrics) distillation is usually the better
+    tradeoff.
+    """
+    if params is None:
+        params = HISTGB_FAST
+    if sample_mask is None:
+        sample_mask = np.ones(X_full_imputed.shape[0], dtype=bool)
+    prior_tr = full_teacher.predict(X_full_imputed[sample_mask])
+    residual = y[sample_mask] - prior_tr
+    correction = _make_teacher(params)
+    correction.fit(X_loo[sample_mask], residual)
+
+    # Capture column indices implicitly via the impute function passed
+    # at construction time by the caller; here we provide a closure
+    # over the captured full teacher + a sentinel that errors if the
+    # caller doesn't override prior_predict.
+    def _default_prior_predict(_: np.ndarray) -> np.ndarray:
+        raise RuntimeError(
+            "fit_residual_teacher: prior_predict was not set on the "
+            "_ResidualTeacher wrapper. Set wrapper.prior_predict to a "
+            "callable that maps X_loo → full_teacher.predict(impute(X_loo)) "
+            "before calling .predict()."
+        )
+
+    return _ResidualTeacher(correction, _default_prior_predict)
+
+
+def fit_warm_continue_teacher(
+    prior: HistGradientBoostingRegressor,
+    X: np.ndarray,
+    y: np.ndarray,
+    extra_iter: int,
+    sample_mask: np.ndarray | None = None,
+) -> HistGradientBoostingRegressor:
+    """Continue boosting `prior` for `extra_iter` more rounds.
+
+    Uses sklearn's native `warm_start=True` — REQUIRES identical
+    feature schema between the prior fit and this call. Intended for
+    hyperparameter sweeps (e.g., "what if I'd run 100 more
+    iterations?") rather than LOO ablation (where the schema changes).
+
+    The function mutates a *copy* of `prior` and returns the copy; the
+    original is untouched.
+    """
+    if sample_mask is None:
+        sample_mask = np.ones(X.shape[0], dtype=bool)
+    import copy
+
+    cont = copy.deepcopy(prior)
+    cont.max_iter = _safe_fit_get_iters(prior) + extra_iter
+    cont.warm_start = True
+    cont.fit(X[sample_mask], y[sample_mask])
+    return cont
+
+
+def _fit_one_loo_distilled(
+    cell: int,
+    full_teacher: Any,
+    X_full_tr: np.ndarray,
+    X_loo_tr: np.ndarray,
+    mask: np.ndarray,
+    params: dict,
+) -> tuple[int, Any]:
+    """Worker for `train_loo_teachers_distilled_parallel`."""
+    if full_teacher is None or mask.sum() < 50:
+        return cell, None
+    distilled = fit_distilled_teacher(
+        full_teacher, X_full_tr, X_loo_tr, params=params, sample_mask=mask
+    )
+    return cell, distilled
+
+
+def train_loo_teachers_distilled_parallel(
+    full_teachers: list[Any],
+    X_full_tr: np.ndarray,
+    X_loo_tr: np.ndarray,
+    reach_tr: np.ndarray,
+    Y_tr: np.ndarray,
+    extra_mask: np.ndarray | None = None,
+    params: dict | None = None,
+    n_jobs: int = -1,
+    label: str = "loo-distilled",
+) -> list[Any]:
+    """Train one distilled LOO teacher per cell in parallel.
+
+    Drop-in replacement for `train_teachers_per_cell_parallel` when
+    the caller already has a list of full-schema teachers and wants
+    to evaluate a LOO variant cheaply. Wall-time win comes from a
+    smaller HistGB preset (default `HISTGB_FAST`) and the fact that
+    soft labels are smoother than the noisy raw targets, so fewer
+    iterations suffice.
+
+    Returns a list of distilled estimators (or None for cells with
+    no full teacher or too few rows).
+    """
+    if params is None:
+        params = HISTGB_FAST
+    n_cells = Y_tr.shape[1]
+    sys.stderr.write(
+        f"[{label}] distilling {n_cells} LOO teachers in parallel "
+        f"(n_jobs={n_jobs}, max_iter={params['max_iter']}, "
+        f"max_depth={params['max_depth']})\n"
+    )
+
+    def cell_mask(c: int) -> np.ndarray:
+        m = reach_tr[:, c] & ~np.isnan(Y_tr[:, c])
+        if extra_mask is not None:
+            m = m & extra_mask[:, c]
+        return m
+
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(_fit_one_loo_distilled)(
+            c, full_teachers[c], X_full_tr, X_loo_tr, cell_mask(c), params
+        )
+        for c in range(n_cells)
+    )
+    distilled: list[Any] = [None] * n_cells
+    for cell, model in results:
+        distilled[cell] = model
+    n_trained = sum(1 for t in distilled if t is not None)
+    sys.stderr.write(f"[{label}] {n_trained}/{n_cells} models trained\n")
+    return distilled
+
+
 def teacher_predict_all(
     teachers: list[Any], X: np.ndarray, fallback_means: np.ndarray
 ) -> np.ndarray:
