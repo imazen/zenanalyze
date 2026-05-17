@@ -138,6 +138,25 @@ def t_quantile_bins(x: np.ndarray, params: list[float]) -> np.ndarray:
     return idx / len(edges)
 
 
+def _make_stack(inner_fn, outer_fn, inner_n_params: int):
+    """Factory used by both TRANSFORMS (runtime-supported stacks
+    promoted to singles) and the research-only STACKS dict below."""
+    def stacked(x: np.ndarray, params: list[float]) -> np.ndarray:
+        inner_p = list(params[:inner_n_params])
+        outer_p = list(params[inner_n_params:])
+        y = inner_fn(x, inner_p)
+        if np.issubdtype(y.dtype, np.floating):
+            y = np.where(np.isfinite(y), y, np.nan)
+        return outer_fn(y, outer_p)
+    return stacked
+
+
+# Runtime-supported single transforms. Includes the 5 stack variants
+# promoted into the zenpredict::FeatureTransform enum in 0.2.1
+# (winsor_then_log, winsor_then_log1p, winsor_then_signed_cbrt,
+# signed_cbrt_then_winsor, clip_then_log1p_then_winsor) — these are
+# bakeable + dispatched by the runtime as if they were single
+# transforms.
 TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
     "identity": t_identity,
     "log": t_log,
@@ -148,6 +167,12 @@ TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
     "clip_then_log1p": t_clip_then_log1p,
     "winsor_p99": t_winsor_p99,
     "quantile_bins": t_quantile_bins,
+    # Stacked variants — runtime-supported since zenpredict 0.2.1.
+    "winsor_then_log":              _make_stack(t_winsor_p99, t_log, 2),
+    "winsor_then_log1p":            _make_stack(t_winsor_p99, t_log1p, 2),
+    "winsor_then_signed_cbrt":      _make_stack(t_winsor_p99, t_signed_cbrt, 2),
+    "signed_cbrt_then_winsor":      _make_stack(t_signed_cbrt, t_winsor_p99, 0),
+    "clip_then_log1p_then_winsor":  _make_stack(t_clip_then_log1p, t_winsor_p99, 1),
 }
 
 
@@ -178,46 +203,24 @@ TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
 # split documented per-stack in `STACK_PARAM_SPLITS`.
 
 
-def _make_stack(inner_fn, outer_fn, inner_n_params: int):
-    """Factory: returns a transform fn that applies `inner_fn` then
-    `outer_fn`, splitting the param list at `inner_n_params`."""
-    def stacked(x: np.ndarray, params: list[float]) -> np.ndarray:
-        inner_p = list(params[:inner_n_params])
-        outer_p = list(params[inner_n_params:])
-        y = inner_fn(x, inner_p)
-        # Convert any NaN from the inner stage to a sane default so the
-        # outer transform's percentile-based params (computed at sweep
-        # time) don't choke on NaN inputs.
-        if np.issubdtype(y.dtype, np.floating):
-            y = np.where(np.isfinite(y), y, np.nan)
-        return outer_fn(y, outer_p)
-    return stacked
-
-
+# Research-only stacks (not currently runtime-supported by
+# zenpredict::FeatureTransform). Including under --enable-stacks lets
+# the screen surface them; they CANNOT be baked. To promote one of
+# these to a runtime variant, add it to zenpredict::FeatureTransform
+# and migrate it up to TRANSFORMS.
 STACKS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
-    # (inner, outer, inner_n_params)
-    "winsor_then_log1p":            _make_stack(t_winsor_p99, t_log1p, 2),
-    "winsor_then_log":              _make_stack(t_winsor_p99, t_log, 2),
-    "winsor_then_signed_cbrt":      _make_stack(t_winsor_p99, t_signed_cbrt, 2),
     "winsor_then_signed_log1p":     _make_stack(t_winsor_p99, t_signed_log1p, 2),
     "log1p_then_winsor":            _make_stack(t_log1p, t_winsor_p99, 0),
     "log_then_winsor":              _make_stack(t_log, t_winsor_p99, 0),
     "signed_log1p_then_winsor":     _make_stack(t_signed_log1p, t_winsor_p99, 0),
-    "signed_cbrt_then_winsor":      _make_stack(t_signed_cbrt, t_winsor_p99, 0),
-    "clip_then_log1p_then_winsor":  _make_stack(t_clip_then_log1p, t_winsor_p99, 1),
 }
 
 # How many parameters the inner stage consumes; the rest go to the outer.
 STACK_INNER_NPARAMS: dict[str, int] = {
-    "winsor_then_log1p": 2,
-    "winsor_then_log": 2,
-    "winsor_then_signed_cbrt": 2,
     "winsor_then_signed_log1p": 2,
     "log1p_then_winsor": 0,
     "log_then_winsor": 0,
     "signed_log1p_then_winsor": 0,
-    "signed_cbrt_then_winsor": 0,
-    "clip_then_log1p_then_winsor": 1,
 }
 
 
@@ -246,10 +249,13 @@ def sweep_for(name: str, col: np.ndarray) -> list[list[float]]:
             for p in [12.5, 25, 37.5, 50, 62.5, 75, 87.5]
         ]
         return [edges]
-    # Stacked variants: enumerate inner × outer param sweeps. Recompute
-    # the OUTER winsor's percentiles on the inner-transformed column
-    # so the clip bounds are in the right space (e.g. log-domain).
-    if name in STACKS:
+    # Stacked variants — handled by the same generator regardless of
+    # whether they're now in TRANSFORMS (runtime-supported) or still in
+    # the research-only STACKS dict.
+    if name in STACKS or name in {
+        "winsor_then_log", "winsor_then_log1p", "winsor_then_signed_cbrt",
+        "signed_cbrt_then_winsor", "clip_then_log1p_then_winsor",
+    }:
         return _stack_sweep_for(name, col)
     return [[]]
 

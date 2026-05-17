@@ -784,6 +784,12 @@ _VALID_FEATURE_TRANSFORMS = {
     "clip_then_log1p",
     "winsor_p99",
     "quantile_bins",
+    # Stacked variants (zenpredict 0.2.1+).
+    "winsor_then_log",
+    "winsor_then_log1p",
+    "winsor_then_signed_cbrt",
+    "signed_cbrt_then_winsor",
+    "clip_then_log1p_then_winsor",
 }
 
 
@@ -860,6 +866,61 @@ def _apply_feature_transform(
             if value >= edge:
                 idx += 1.0
         return idx / len(params)
+    if transform == "winsor_then_log":
+        # 2 params [p1, p99]; p1 must be > 0 (validated at bake time).
+        if not params or len(params) < 2:
+            return value
+        lo, hi = params[0], params[1]
+        y = lo if value < lo else (hi if value > hi else value)
+        return math.log(y) if y > 0.0 else math.log(1e-12)
+    if transform == "winsor_then_log1p":
+        # 2 params [p1, p99]; p1 > -1.
+        if not params or len(params) < 2:
+            return value
+        lo, hi = params[0], params[1]
+        y = lo if value < lo else (hi if value > hi else value)
+        return math.log1p(max(y, -0.9999))
+    if transform == "winsor_then_signed_cbrt":
+        if not params or len(params) < 2:
+            return value
+        lo, hi = params[0], params[1]
+        y = lo if value < lo else (hi if value > hi else value)
+        s = 1.0 if y >= 0.0 else -1.0
+        try:
+            return s * (abs(y) ** (1.0 / 3.0))
+        except (OverflowError, ValueError):
+            return 0.0
+    if transform == "signed_cbrt_then_winsor":
+        # signed_cbrt first, then winsor in cbrt-space (q1, q99).
+        if not params or len(params) < 2:
+            return value
+        s = 1.0 if value >= 0.0 else -1.0
+        try:
+            y = s * (abs(value) ** (1.0 / 3.0))
+        except (OverflowError, ValueError):
+            y = 0.0
+        q1, q99 = params[0], params[1]
+        if y < q1:
+            return q1
+        if y > q99:
+            return q99
+        return y
+    if transform == "clip_then_log1p_then_winsor":
+        # 3 params [eps, q1, q99]. clip_then_log1p produces non-negative
+        # output; winsor in that log1p-space.
+        if not params or len(params) < 3:
+            return value
+        eps = params[0]
+        y = value - eps
+        if y < 0.0:
+            y = 0.0
+        z = math.log1p(y)
+        q1, q99 = params[1], params[2]
+        if z < q1:
+            return q1
+        if z > q99:
+            return q99
+        return z
     raise ValueError(
         f"unknown FEATURE_TRANSFORMS['{name}'] = {transform!r}; "
         f"valid values: {sorted(_VALID_FEATURE_TRANSFORMS)}"
@@ -883,6 +944,11 @@ def load_features(path):
         "clip_then_log1p": (1, None),  # exactly 1 param
         "winsor_p99": (2, 2),          # exactly 2 params
         "quantile_bins": (1, None),    # ≥ 1 edge
+        "winsor_then_log": (2, 2),
+        "winsor_then_log1p": (2, 2),
+        "winsor_then_signed_cbrt": (2, 2),
+        "signed_cbrt_then_winsor": (2, 2),
+        "clip_then_log1p_then_winsor": (3, 3),
     }
     for c in cols:
         t = FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"

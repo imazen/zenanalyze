@@ -447,6 +447,10 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
         "identity", "log", "log1p", "signed_log1p",
         "signed_sqrt", "signed_cbrt",
         "clip_then_log1p", "winsor_p99", "quantile_bins",
+        # Stacked variants (zenpredict 0.2.1+).
+        "winsor_then_log", "winsor_then_log1p",
+        "winsor_then_signed_cbrt", "signed_cbrt_then_winsor",
+        "clip_then_log1p_then_winsor",
     }
     if (
         isinstance(feat_transforms, list)
@@ -493,6 +497,11 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             "clip_then_log1p": (1, 1),
             "winsor_p99": (2, 2),
             "quantile_bins": (1, None),
+            "winsor_then_log": (2, 2),
+            "winsor_then_log1p": (2, 2),
+            "winsor_then_signed_cbrt": (2, 2),
+            "signed_cbrt_then_winsor": (2, 2),
+            "clip_then_log1p_then_winsor": (3, 3),
         }
         lines = []
         for i, params in enumerate(feat_transform_params):
