@@ -74,6 +74,14 @@ name = "grayscale_perf"
 [[example]]
 name = "extract_features_for_picker"
 
+[[example]]
+name = "hvs_feature_smoke"
+required-features = ["experimental"]
+
+[[example]]
+name = "hvs_marginal_cost"
+required-features = ["experimental"]
+
 [lints.rust]
 # zenanalyze ships zero `unsafe` blocks; SIMD goes through the
 # safe-token wrappers in archmage / magetypes. Forbidding here
