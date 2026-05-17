@@ -83,6 +83,92 @@ pub enum FeatureTransform {
     /// [`crate::keys::FEATURE_TRANSFORM_PARAMS`]. With `params = []`
     /// falls back to `Identity`. Added 2026-05-14.
     QuantileBins,
+    /// `ln(clip(x, p1, p99))` — winsorize first, then natural log.
+    /// The dominant high-win stack across zenjpeg / zenwebp / zenavif
+    /// in the 2026-05-17 stacks sweep (12+10+13 wins). Use for
+    /// strictly positive features with heavy upper tails: winsor
+    /// caps both tails, the log compresses what's left.
+    ///
+    /// Requires **2 parameters** (`p1`, `p99`) in
+    /// [`crate::keys::FEATURE_TRANSFORM_PARAMS`]. The bake-side
+    /// validator MUST reject `p1 <= 0` since `ln(0)` is undefined;
+    /// see `zenpredict-bake`'s composer validation. With
+    /// `params = []` falls back to plain `Log` on `x` (caller error
+    /// — model expects params to be present at bake time).
+    /// Added 2026-05-17.
+    WinsorThenLog,
+    /// `ln(1 + clip(x, p1, p99))` — winsorize first, then log1p.
+    /// Secondary stack winner. Use for non-negative-with-zero features
+    /// (counts, densities) where the upper tail dominates: winsor
+    /// caps the high end, log1p compresses without barfing at zero.
+    ///
+    /// Requires **2 parameters** (`p1`, `p99`). The bake-side
+    /// validator MUST reject `p1 < -1` since `ln(1 + (-1)) = ln(0)`
+    /// is undefined. With `params = []` falls back to plain `Log1p`.
+    /// Added 2026-05-17.
+    WinsorThenLog1p,
+    /// `sign(y) · cbrt(|y|)` where `y = clip(x, p1, p99)` —
+    /// winsorize, then signed-cbrt. Scattered wins (0+1+1) but
+    /// included for completeness of the WinsorThen* family. Use
+    /// for centered-zero features that benefit from both
+    /// outlier-clipping and mild tail compression.
+    ///
+    /// Requires **2 parameters** (`p1`, `p99`). With `params = []`
+    /// falls back to plain `SignedCbrt` on `x`. Added 2026-05-17.
+    WinsorThenSignedCbrt,
+    /// `clip(sign(x) · cbrt(|x|), q1, q99)` — signed-cbrt first,
+    /// then winsorize the cbrt-domain result. Scattered wins.
+    /// `q1` / `q99` are bounds in cbrt-transformed space, not raw
+    /// feature space — different semantics from `WinsorThenSignedCbrt`.
+    ///
+    /// Requires **2 parameters** (`q1`, `q99` — cbrt-domain bounds).
+    /// With `params = []` falls back to plain `SignedCbrt`.
+    /// Added 2026-05-17.
+    SignedCbrtThenWinsor,
+    /// `clip(ln(1 + max(0, x − ε)), q1, q99)` — clip-then-log1p
+    /// first, then winsorize the log-domain result. Second most
+    /// common stack winner (7+8+8). Use for noise-floor-bounded
+    /// features whose log-domain distribution still has heavy
+    /// upper tails.
+    ///
+    /// Requires **3 parameters** (`ε`, `q1`, `q99`). Bake-side
+    /// validator SHOULD reject `ε < 0` (negative noise floor
+    /// doesn't subtract anything below zero), `q1 > q99` (inverted
+    /// bounds), and may warn on `q1 < 0` since the inner stage
+    /// produces non-negative output for `ε ≥ 0`. With `params = []`
+    /// falls back to plain `Log1p` on `max(0, x)`. Added 2026-05-17.
+    ClipThenLog1pThenWinsor,
+}
+
+/// Branchless inclusive clamp that tolerates `lo > hi` (returns `lo`)
+/// and `NaN` (returns `NaN`). Mirrors the WinsorP99 arm's behaviour
+/// exactly so the new stacked variants stay byte-identical to a
+/// `winsor → outer` composition.
+#[inline]
+fn clamp_inclusive(x: f32, lo: f32, hi: f32) -> f32 {
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    }
+}
+
+/// `sign(x) · cbrt(|x|)` — shared helper for the cbrt-family
+/// variants. Bit-equivalent across std and no_std builds because
+/// both go through `cbrtf`'s monotone f32 path.
+#[inline]
+fn signed_cbrt(x: f32) -> f32 {
+    let s = if x >= 0.0 { 1.0 } else { -1.0 };
+    #[cfg(feature = "std")]
+    {
+        s * x.abs().cbrt()
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        s * libm::cbrtf(libm::fabsf(x))
+    }
 }
 
 impl FeatureTransform {
@@ -144,6 +230,51 @@ impl FeatureTransform {
                 let y = if x > 0.0 { x } else { 0.0 };
                 libm::log1pf(y)
             }
+            // Stacked variants without params degrade to their outer
+            // step's no-param behaviour (the inner winsor/clip has
+            // no clamp range, so it's an identity pass). The signed
+            // variants apply the unparameterized signed transform.
+            // `WinsorThenLog` falls back to plain `Log` only when x
+            // is strictly positive — `ln(0)` / `ln(-)` produce NaN /
+            // -Inf which matches the Python `t_log` semantics (NaN
+            // for non-positive inputs).
+            #[cfg(feature = "std")]
+            Self::WinsorThenLog => x.ln(),
+            #[cfg(not(feature = "std"))]
+            Self::WinsorThenLog => libm::logf(x),
+            #[cfg(feature = "std")]
+            Self::WinsorThenLog1p => x.ln_1p(),
+            #[cfg(not(feature = "std"))]
+            Self::WinsorThenLog1p => libm::log1pf(x),
+            #[cfg(feature = "std")]
+            Self::WinsorThenSignedCbrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().cbrt()
+            }
+            #[cfg(not(feature = "std"))]
+            Self::WinsorThenSignedCbrt => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * libm::cbrtf(libm::fabsf(x))
+            }
+            #[cfg(feature = "std")]
+            Self::SignedCbrtThenWinsor => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * x.abs().cbrt()
+            }
+            #[cfg(not(feature = "std"))]
+            Self::SignedCbrtThenWinsor => {
+                let s = if x >= 0.0 { 1.0 } else { -1.0 };
+                s * libm::cbrtf(libm::fabsf(x))
+            }
+            // `ClipThenLog1pThenWinsor` with no params: ε = 0, no
+            // outer clamp → reduces to `log1p(max(0, x))`.
+            #[cfg(feature = "std")]
+            Self::ClipThenLog1pThenWinsor => x.max(0.0).ln_1p(),
+            #[cfg(not(feature = "std"))]
+            Self::ClipThenLog1pThenWinsor => {
+                let y = if x > 0.0 { x } else { 0.0 };
+                libm::log1pf(y)
+            }
             Self::WinsorP99 | Self::QuantileBins => x,
         }
     }
@@ -159,6 +290,20 @@ impl FeatureTransform {
     /// - `QuantileBins`: `params = [e0, e1, …, e_{N-1}]` (edges, sorted
     ///   ascending) → number of edges `x ≥ ei` divided by `N`. Empty
     ///   params reduces to `Identity`.
+    /// - `WinsorThenLog`: `params = [p1, p99]` → `ln(clamp(x, p1, p99))`.
+    ///   Empty / single-element params fall back to plain `Log`.
+    /// - `WinsorThenLog1p`: `params = [p1, p99]` →
+    ///   `ln(1 + clamp(x, p1, p99))`. Empty / single-element params
+    ///   fall back to plain `Log1p`.
+    /// - `WinsorThenSignedCbrt`: `params = [p1, p99]` →
+    ///   `signed_cbrt(clamp(x, p1, p99))`. Falls back to plain
+    ///   `SignedCbrt`.
+    /// - `SignedCbrtThenWinsor`: `params = [q1, q99]` →
+    ///   `clamp(signed_cbrt(x), q1, q99)` (`q1`, `q99` are bounds in
+    ///   cbrt-space). Falls back to plain `SignedCbrt`.
+    /// - `ClipThenLog1pThenWinsor`: `params = [ε, q1, q99]` →
+    ///   `clamp(ln(1 + max(0, x − ε)), q1, q99)`. Falls back to
+    ///   `Log1p` on `max(0, x)` when fewer than 3 params are given.
     ///
     /// Edges for `QuantileBins` are sorted at training time; the
     /// runtime walks them linearly (N ≤ 32 in practice, so a
@@ -203,6 +348,74 @@ impl FeatureTransform {
                 }
                 idx / (n as f32)
             }
+            // Stacked variants. Math mirrors
+            // `zentrain/tools/feature_transform_sweep.py` exactly:
+            // inner first (clip/winsor), then outer (log family).
+            Self::WinsorThenLog => {
+                if params.len() < 2 {
+                    return self.apply(x);
+                }
+                let lo = params[0];
+                let hi = params[1];
+                let y = clamp_inclusive(x, lo, hi);
+                #[cfg(feature = "std")]
+                {
+                    y.ln()
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    libm::logf(y)
+                }
+            }
+            Self::WinsorThenLog1p => {
+                if params.len() < 2 {
+                    return self.apply(x);
+                }
+                let lo = params[0];
+                let hi = params[1];
+                let y = clamp_inclusive(x, lo, hi);
+                #[cfg(feature = "std")]
+                {
+                    y.ln_1p()
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    libm::log1pf(y)
+                }
+            }
+            Self::WinsorThenSignedCbrt => {
+                if params.len() < 2 {
+                    return self.apply(x);
+                }
+                let lo = params[0];
+                let hi = params[1];
+                let y = clamp_inclusive(x, lo, hi);
+                signed_cbrt(y)
+            }
+            Self::SignedCbrtThenWinsor => {
+                if params.len() < 2 {
+                    return self.apply(x);
+                }
+                let q_lo = params[0];
+                let q_hi = params[1];
+                let y = signed_cbrt(x);
+                clamp_inclusive(y, q_lo, q_hi)
+            }
+            Self::ClipThenLog1pThenWinsor => {
+                if params.len() < 3 {
+                    return self.apply(x);
+                }
+                let eps = params[0];
+                let q_lo = params[1];
+                let q_hi = params[2];
+                let shifted = x - eps;
+                let clipped = if shifted > 0.0 { shifted } else { 0.0 };
+                #[cfg(feature = "std")]
+                let y = clipped.ln_1p();
+                #[cfg(not(feature = "std"))]
+                let y = libm::log1pf(clipped);
+                clamp_inclusive(y, q_lo, q_hi)
+            }
             _ => self.apply(x),
         }
     }
@@ -216,7 +429,14 @@ impl FeatureTransform {
     pub fn requires_params(self) -> bool {
         matches!(
             self,
-            Self::ClipThenLog1p | Self::WinsorP99 | Self::QuantileBins
+            Self::ClipThenLog1p
+                | Self::WinsorP99
+                | Self::QuantileBins
+                | Self::WinsorThenLog
+                | Self::WinsorThenLog1p
+                | Self::WinsorThenSignedCbrt
+                | Self::SignedCbrtThenWinsor
+                | Self::ClipThenLog1pThenWinsor
         )
     }
 
@@ -240,6 +460,11 @@ impl FeatureTransform {
             "clip_then_log1p" => Ok(Self::ClipThenLog1p),
             "winsor_p99" => Ok(Self::WinsorP99),
             "quantile_bins" => Ok(Self::QuantileBins),
+            "winsor_then_log" => Ok(Self::WinsorThenLog),
+            "winsor_then_log1p" => Ok(Self::WinsorThenLog1p),
+            "winsor_then_signed_cbrt" => Ok(Self::WinsorThenSignedCbrt),
+            "signed_cbrt_then_winsor" => Ok(Self::SignedCbrtThenWinsor),
+            "clip_then_log1p_then_winsor" => Ok(Self::ClipThenLog1pThenWinsor),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -256,6 +481,11 @@ impl FeatureTransform {
             Self::ClipThenLog1p => "clip_then_log1p",
             Self::WinsorP99 => "winsor_p99",
             Self::QuantileBins => "quantile_bins",
+            Self::WinsorThenLog => "winsor_then_log",
+            Self::WinsorThenLog1p => "winsor_then_log1p",
+            Self::WinsorThenSignedCbrt => "winsor_then_signed_cbrt",
+            Self::SignedCbrtThenWinsor => "signed_cbrt_then_winsor",
+            Self::ClipThenLog1pThenWinsor => "clip_then_log1p_then_winsor",
         }
     }
 }
@@ -426,7 +656,16 @@ mod tests {
 
     #[test]
     fn from_token_round_trips_parameterized_variants() {
-        for tok in ["clip_then_log1p", "winsor_p99", "quantile_bins"] {
+        for tok in [
+            "clip_then_log1p",
+            "winsor_p99",
+            "quantile_bins",
+            "winsor_then_log",
+            "winsor_then_log1p",
+            "winsor_then_signed_cbrt",
+            "signed_cbrt_then_winsor",
+            "clip_then_log1p_then_winsor",
+        ] {
             let v = FeatureTransform::from_token(tok).expect("parse");
             assert_eq!(v.as_token(), tok);
             assert!(v.requires_params(), "{tok} should require params");
@@ -494,5 +733,141 @@ mod tests {
         // ClipThenLog1p with no ε reduces to log1p(max(0, x))
         let y = FeatureTransform::ClipThenLog1p.apply(3.0);
         assert!((y - 3f32.ln_1p()).abs() < 1e-6);
+    }
+
+    // ───── Stacked-variant tests (2026-05-17) ─────
+
+    #[test]
+    fn winsor_then_log_applies_winsor_then_log() {
+        let t = FeatureTransform::WinsorThenLog;
+        // In-range: clip noop, log applies.
+        let y = t.apply_with_params(10.0, &[1.0, 99.0]);
+        assert!((y - 10f32.ln()).abs() < 1e-6);
+        // Below p1: clip up, then log.
+        let y_lo = t.apply_with_params(0.5, &[1.0, 99.0]);
+        assert!((y_lo - 1f32.ln()).abs() < 1e-6);
+        assert_eq!(y_lo, 0.0);
+        // Above p99: clip down, then log.
+        let y_hi = t.apply_with_params(500.0, &[1.0, 99.0]);
+        assert!((y_hi - 99f32.ln()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn winsor_then_log_no_params_falls_back_to_plain_log() {
+        // apply() is the no-params path. Plain Log on strictly
+        // positive input.
+        let y = FeatureTransform::WinsorThenLog.apply(7.0);
+        assert!((y - 7f32.ln()).abs() < 1e-6);
+        // apply_with_params with empty params also falls back.
+        let y2 = FeatureTransform::WinsorThenLog.apply_with_params(7.0, &[]);
+        assert!((y2 - 7f32.ln()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn winsor_then_log1p_applies_winsor_then_log1p() {
+        let t = FeatureTransform::WinsorThenLog1p;
+        // In-range: clip noop, log1p applies.
+        let y = t.apply_with_params(10.0, &[0.0, 99.0]);
+        assert!((y - 10f32.ln_1p()).abs() < 1e-6);
+        // Below p1=0 (winsor allows non-negative lower bound): clip to 0.
+        let y_lo = t.apply_with_params(-5.0, &[0.0, 99.0]);
+        assert_eq!(y_lo, 0.0); // ln_1p(0) = 0
+        // Above p99: clip down.
+        let y_hi = t.apply_with_params(200.0, &[0.0, 99.0]);
+        assert!((y_hi - 99f32.ln_1p()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn winsor_then_signed_cbrt_applies_in_order() {
+        let t = FeatureTransform::WinsorThenSignedCbrt;
+        // Inside range: signed_cbrt of the value.
+        let y = t.apply_with_params(8.0, &[-100.0, 100.0]);
+        assert!((y - 8f32.cbrt()).abs() < 1e-6);
+        // Below p1=-100: clip to -100, then signed_cbrt(-100) = -cbrt(100).
+        let y_lo = t.apply_with_params(-500.0, &[-100.0, 100.0]);
+        assert!((y_lo - (-100f32).abs().cbrt() * -1.0).abs() < 1e-5);
+        // Above p99=100: clip to 100, then cbrt(100).
+        let y_hi = t.apply_with_params(500.0, &[-100.0, 100.0]);
+        assert!((y_hi - 100f32.cbrt()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn signed_cbrt_then_winsor_clips_in_cbrt_space() {
+        let t = FeatureTransform::SignedCbrtThenWinsor;
+        // signed_cbrt(8) = 2; bounds [-1.5, 1.5] → clip to 1.5.
+        let y = t.apply_with_params(8.0, &[-1.5, 1.5]);
+        assert!((y - 1.5).abs() < 1e-6);
+        // signed_cbrt(-8) = -2; clip up to -1.5.
+        let y_neg = t.apply_with_params(-8.0, &[-1.5, 1.5]);
+        assert!((y_neg - (-1.5)).abs() < 1e-6);
+        // signed_cbrt(0.001) ≈ 0.1, within range → unchanged.
+        let y_in = t.apply_with_params(0.001, &[-1.5, 1.5]);
+        let expected = 0.001f32.cbrt();
+        assert!((y_in - expected).abs() < 1e-5);
+    }
+
+    #[test]
+    fn signed_cbrt_then_winsor_no_params_falls_back() {
+        // No params → plain signed_cbrt.
+        let y = FeatureTransform::SignedCbrtThenWinsor.apply_with_params(8.0, &[]);
+        assert!((y - 8f32.cbrt()).abs() < 1e-6);
+        let y_neg = FeatureTransform::SignedCbrtThenWinsor.apply_with_params(-27.0, &[]);
+        assert!((y_neg - -3.0f32).abs() < 1e-5);
+    }
+
+    #[test]
+    fn clip_then_log1p_then_winsor_full_pipeline() {
+        let t = FeatureTransform::ClipThenLog1pThenWinsor;
+        // ε=2, q range [0.0, 3.0] (log-domain bounds).
+        // For x=10: shifted=8, log1p(8) ≈ 2.197 — within [0, 3] → unchanged.
+        let y = t.apply_with_params(10.0, &[2.0, 0.0, 3.0]);
+        assert!((y - 8f32.ln_1p()).abs() < 1e-5);
+        // For x=1000: shifted=998, log1p(998) ≈ 6.906 — clipped to 3.0.
+        let y_hi = t.apply_with_params(1000.0, &[2.0, 0.0, 3.0]);
+        assert!((y_hi - 3.0).abs() < 1e-6);
+        // For x=1: shifted=-1 → max(0, -1)=0 → log1p(0)=0 — within range.
+        let y_lo = t.apply_with_params(1.0, &[2.0, 0.0, 3.0]);
+        assert_eq!(y_lo, 0.0);
+    }
+
+    #[test]
+    fn clip_then_log1p_then_winsor_partial_params_falls_back() {
+        // Fewer than 3 params → fall back to apply() (log1p of max(0, x)).
+        let t = FeatureTransform::ClipThenLog1pThenWinsor;
+        let y_no = t.apply_with_params(5.0, &[]);
+        assert!((y_no - 5f32.ln_1p()).abs() < 1e-6);
+        let y_one = t.apply_with_params(5.0, &[1.0]);
+        assert!((y_one - 5f32.ln_1p()).abs() < 1e-6);
+        let y_two = t.apply_with_params(5.0, &[1.0, 0.0]);
+        assert!((y_two - 5f32.ln_1p()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stacked_variants_no_params_fallback_is_documented() {
+        // apply(x) on each stacked variant: ensure each maps to its
+        // documented degenerate behaviour and doesn't panic.
+        let x = 4.0f32;
+        assert!((FeatureTransform::WinsorThenLog.apply(x) - x.ln()).abs() < 1e-6);
+        assert!((FeatureTransform::WinsorThenLog1p.apply(x) - x.ln_1p()).abs() < 1e-6);
+        assert!((FeatureTransform::WinsorThenSignedCbrt.apply(x) - x.cbrt()).abs() < 1e-6);
+        assert!((FeatureTransform::SignedCbrtThenWinsor.apply(x) - x.cbrt()).abs() < 1e-6);
+        assert!((FeatureTransform::ClipThenLog1pThenWinsor.apply(x) - x.ln_1p()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stacked_variants_round_trip_through_tokens() {
+        let variants = [
+            FeatureTransform::WinsorThenLog,
+            FeatureTransform::WinsorThenLog1p,
+            FeatureTransform::WinsorThenSignedCbrt,
+            FeatureTransform::SignedCbrtThenWinsor,
+            FeatureTransform::ClipThenLog1pThenWinsor,
+        ];
+        for v in variants {
+            let tok = v.as_token();
+            let parsed = FeatureTransform::from_token(tok).expect("parse");
+            assert_eq!(parsed, v);
+            assert!(parsed.requires_params(), "{tok} should require params");
+        }
     }
 }
