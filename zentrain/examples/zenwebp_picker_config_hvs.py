@@ -15,10 +15,10 @@ from pathlib import Path
 
 # Inherit everything from the production config.
 from zenwebp_picker_config import (  # noqa: F401
-    PARETO, OUT_JSON, OUT_LOG,
+    PARETO,
     ZQ_TARGETS, CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS,
     SCALAR_DISPLAY_RANGES, FEATURE_GROUPS, FEATURE_TRANSFORMS,
-    METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN,
+    TIME_COLUMN,
     OUTPUT_SPECS, SPARSE_OVERRIDES,
     parse_config_name,
 )
