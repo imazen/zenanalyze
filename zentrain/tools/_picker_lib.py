@@ -73,9 +73,18 @@ def _make_teacher(params: dict):
     training matrices, but the picker's per-cell decomposition keeps
     each individual fit tiny — exactly where sklearn HistGB excels.
 
+    Also benchmarked vs XGBoost 3.2 (`device="cuda"` and `device="cpu"`,
+    `tree_method="hist"`) on 2026-05-17 — both lose by 10-20× at
+    every scale tested, including 100K rows × 50 feats × 36 cells.
+    GPU GBDT pays back on million-row single fits, not on the picker's
+    many-small-fits regime. Multi-output (`multi_strategy=
+    multi_output_tree`) was 10× slower than `joblib`-parallel HistGB and
+    is upstream-marked experimental. Full numbers + reproduction in
+    `benchmarks/teacher_backend_bench_2026-05-17.md`.
+
     Wrapper kept so the dispatch can flip if a future workload (e.g.
-    a single-shot cross-cell fit) makes lightgbm a win. Today: always
-    sklearn HistGB.
+    a single-shot cross-cell fit with > 1 M rows) makes a different
+    backend a win. Today: always sklearn HistGB.
     """
     return HistGradientBoostingRegressor(**params)
 
