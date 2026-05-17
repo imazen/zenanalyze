@@ -337,6 +337,13 @@ TIME_COLUMN: str = "encode_ms"
 # it empty) train identically to pre-#52 behaviour.
 FEATURE_TRANSFORMS: dict = {}
 
+# Per-feature parameter vectors for parameterized variants. Keyed by
+# feat name. Required when FEATURE_TRANSFORMS uses `clip_then_log1p`
+# (1 param ε), `winsor_p99` (2 params [p1, p99]), or `quantile_bins`
+# (N params [edges asc]). Codec configs that only use non-parameterized
+# variants (identity / log / log1p / signed_*) leave this empty.
+FEATURE_TRANSFORM_PARAMS: dict = {}
+
 # Per-output OutputSpec metadata, keyed by head name (e.g. "bytes_log",
 # or any SCALAR_AXES name). Threaded verbatim into the model JSON so
 # downstream `inject_v3_specs.py` / `bake_picker.py` can expand them
@@ -379,7 +386,7 @@ def load_codec_config(name: str):
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
     global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN
-    global FEATURE_TRANSFORMS, OUTPUT_SPECS, SPARSE_OVERRIDES
+    global FEATURE_TRANSFORMS, FEATURE_TRANSFORM_PARAMS, OUTPUT_SPECS, SPARSE_OVERRIDES
     mod = importlib.import_module(name)
     PARETO = Path(mod.PARETO)
     FEATURES = Path(mod.FEATURES)
@@ -434,6 +441,14 @@ def load_codec_config(name: str):
         FEATURE_TRANSFORMS = dict(mod.FEATURE_TRANSFORMS)
     else:
         FEATURE_TRANSFORMS = {}
+    # Optional — per-feature parameter vectors for parameterized
+    # transforms (clip_then_log1p / winsor_p99 / quantile_bins).
+    # Validated at feature-load time (wrong arity / missing for
+    # parameterized variant raises).
+    if hasattr(mod, "FEATURE_TRANSFORM_PARAMS"):
+        FEATURE_TRANSFORM_PARAMS = dict(mod.FEATURE_TRANSFORM_PARAMS)
+    else:
+        FEATURE_TRANSFORM_PARAMS = {}
     # Optional — per-output OutputSpec metadata + sparse overrides.
     # Threaded straight through to the bake artifact.
     if hasattr(mod, "OUTPUT_SPECS"):
@@ -759,27 +774,49 @@ def load_pareto(path):
     return rows, ceilings, has_ceiling_column, has_time_column
 
 
-_VALID_FEATURE_TRANSFORMS = {"identity", "log", "log1p"}
+_VALID_FEATURE_TRANSFORMS = {
+    "identity",
+    "log",
+    "log1p",
+    "signed_log1p",
+    "signed_sqrt",
+    "signed_cbrt",
+    "clip_then_log1p",
+    "winsor_p99",
+    "quantile_bins",
+}
 
 
-def _apply_feature_transform(name: str, transform: str, value: float) -> float:
-    """Apply a per-feature pre-standardize transform.
+def _apply_feature_transform(
+    name: str,
+    transform: str,
+    value: float,
+    params: list[float] | None = None,
+) -> float:
+    """Apply a per-feature pre-standardize transform. Matches the
+    runtime variants in [`zenpredict::FeatureTransform`] verbatim.
 
-    Supported:
-      - "identity" (no-op; default for absent / unknown columns)
-      - "log"     — natural log; clamps to log(eps) for non-positive
-                    values so a 0-row doesn't return -inf and tank the
-                    StandardScaler.
-      - "log1p"   — log(1+x); valid for non-negative inputs. Negatives
-                    clip to 0 (better than -inf NaN propagation).
+    Non-parameterized variants:
+      - "identity"      — no-op.
+      - "log"           — natural log; non-positive values clamp to
+                          log(1e-12).
+      - "log1p"         — log(1+x); negatives clip to 0.
+      - "signed_log1p"  — sign(x) · log1p(|x|).
+      - "signed_sqrt"   — sign(x) · sqrt(|x|).
+      - "signed_cbrt"   — sign(x) · cbrt(|x|).
 
-    Unknown transform names raise — codec configs are authoritative,
-    a typo silently breaking training is worse than crashing the run.
+    Parameterized variants (`params` required):
+      - "clip_then_log1p" — 1 param [ε]: log1p(max(0, x − ε)).
+      - "winsor_p99"     — 2 params [p1, p99]: clamp x to [p1, p99].
+      - "quantile_bins"  — N params [edges sorted asc]: bin index / N.
+
+    Unknown transform names or wrong param counts raise — codec
+    configs are authoritative, a typo silently breaking training is
+    worse than crashing the run.
     """
     if transform == "identity":
         return value
     if transform == "log":
-        # log(0) = -inf; clamp to log(1e-12) ≈ -27.6 to keep std finite.
         if value <= 0.0:
             return math.log(1e-12)
         return math.log(value)
@@ -787,6 +824,42 @@ def _apply_feature_transform(name: str, transform: str, value: float) -> float:
         if value < 0.0:
             return 0.0
         return math.log1p(value)
+    if transform == "signed_log1p":
+        s = 1.0 if value >= 0.0 else -1.0
+        return s * math.log1p(abs(value))
+    if transform == "signed_sqrt":
+        s = 1.0 if value >= 0.0 else -1.0
+        return s * math.sqrt(abs(value))
+    if transform == "signed_cbrt":
+        s = 1.0 if value >= 0.0 else -1.0
+        # math.cbrt available 3.11+; fall back to copysign(abs**(1/3), x).
+        try:
+            return s * (abs(value) ** (1.0 / 3.0))
+        except (OverflowError, ValueError):
+            return 0.0
+    if transform == "clip_then_log1p":
+        eps = (params[0] if params else 0.0)
+        y = value - eps
+        if y < 0.0:
+            y = 0.0
+        return math.log1p(y)
+    if transform == "winsor_p99":
+        if not params or len(params) < 2:
+            return value
+        lo, hi = params[0], params[1]
+        if value < lo:
+            return lo
+        if value > hi:
+            return hi
+        return value
+    if transform == "quantile_bins":
+        if not params:
+            return value
+        idx = 0.0
+        for edge in params:
+            if value >= edge:
+                idx += 1.0
+        return idx / len(params)
     raise ValueError(
         f"unknown FEATURE_TRANSFORMS['{name}'] = {transform!r}; "
         f"valid values: {sorted(_VALID_FEATURE_TRANSFORMS)}"
@@ -798,9 +871,19 @@ def load_features(path):
     fieldnames, columns = _read_table_columns(Path(path))
     all_cols = [c for c in fieldnames if c.startswith("feat_")]
     cols = [c for c in KEEP_FEATURES if c in all_cols]
-    # Resolve per-column transforms ahead of the row loop. Unknown
-    # transform names crash here, before any rows are processed.
+    # Per-column transforms and (optional) params from the codec
+    # config. Params come from FEATURE_TRANSFORM_PARAMS — a
+    # {feat_name: [param0, param1, ...]} dict on the codec config
+    # module. Missing params for a parameterized transform raise:
+    # a typo there silently turning winsor_p99 into a no-op is
+    # worse than crashing.
     transforms = []
+    transform_params = []
+    PARAM_REQUIREMENTS = {
+        "clip_then_log1p": (1, None),  # exactly 1 param
+        "winsor_p99": (2, 2),          # exactly 2 params
+        "quantile_bins": (1, None),    # ≥ 1 edge
+    }
     for c in cols:
         t = FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"
         if t not in _VALID_FEATURE_TRANSFORMS:
@@ -808,12 +891,30 @@ def load_features(path):
                 f"FEATURE_TRANSFORMS[{c!r}] = {t!r} not in "
                 f"{sorted(_VALID_FEATURE_TRANSFORMS)}"
             )
+        params = list(FEATURE_TRANSFORM_PARAMS.get(c, [])) \
+            if FEATURE_TRANSFORM_PARAMS else []
+        req = PARAM_REQUIREMENTS.get(t)
+        if req is not None:
+            min_p, max_p = req
+            if len(params) < min_p or (max_p is not None and len(params) > max_p):
+                raise ValueError(
+                    f"FEATURE_TRANSFORM_PARAMS[{c!r}] = {params!r} but "
+                    f"transform {t!r} requires "
+                    f"{'exactly ' + str(min_p) if max_p == min_p else 'at least ' + str(min_p)} param(s)"
+                )
+        elif params:
+            raise ValueError(
+                f"FEATURE_TRANSFORM_PARAMS[{c!r}] = {params!r} but "
+                f"transform {t!r} takes no params"
+            )
         transforms.append(t)
+        transform_params.append(params)
     n_transformed = sum(1 for t in transforms if t != "identity")
     if n_transformed:
+        n_with_params = sum(1 for p in transform_params if p)
         sys.stderr.write(
             f"FEATURE_TRANSFORMS active on {n_transformed}/{len(cols)} "
-            f"columns: "
+            f"columns ({n_with_params} with params): "
             f"{[(c, t) for c, t in zip(cols, transforms) if t != 'identity']}\n"
         )
     image_path = columns["image_path"]
@@ -823,7 +924,7 @@ def load_features(path):
     for i in range(n):
         vals = []
         has_nan = False
-        for c, t in zip(cols, transforms):
+        for c, t, p in zip(cols, transforms, transform_params):
             v = columns[c][i]
             if v == "" or v is None:
                 has_nan = True
@@ -838,7 +939,7 @@ def load_features(path):
                 if fv != fv:
                     has_nan = True
                 if t != "identity" and fv == fv:
-                    fv = _apply_feature_transform(c, t, fv)
+                    fv = _apply_feature_transform(c, t, fv, p)
                 vals.append(fv)
         if has_nan:
             # Percentile features emit "" / NaN when the image is too
@@ -859,6 +960,10 @@ def load_features(path):
             f"feature values (tiny images skipping percentile "
             f"features — handled by OOD fallback at inference).\n"
         )
+    # Stash the resolved params alongside the transform names so
+    # main() can emit them in the bake JSON without re-reading the
+    # codec config. Mirrors `cols` / `transforms`.
+    load_features._last_transform_params = transform_params  # type: ignore[attr-defined]
     return feats, cols, transforms
 
 
@@ -2788,6 +2893,18 @@ def main():
         FEATURE_TRANSFORMS.get(c, "identity") if FEATURE_TRANSFORMS else "identity"
         for c in feat_cols
     ] + ["identity"] * (n_inputs_total - len(feat_cols))
+    # Parallel array of per-input parameter vectors. Engineered axes
+    # (size_oh / log_px / zq_norm / interactions / icc) take an empty
+    # param list — they're always Identity-transformed. Only the
+    # codec's natural feat_cols can carry params.
+    feat_transform_params_list: list[list[float]] = []
+    for c in feat_cols:
+        params = list(FEATURE_TRANSFORM_PARAMS.get(c, [])) \
+            if FEATURE_TRANSFORM_PARAMS else []
+        feat_transform_params_list.append(params)
+    feat_transform_params_list.extend(
+        [] for _ in range(n_inputs_total - len(feat_cols))
+    )
     # Expand OUTPUT_SPECS (keyed by head name) to a per-output-index
     # array of length n_outputs, in `output_layout` order. Codecs that
     # define every head in OUTPUT_SPECS get a full per-output array;
@@ -2843,6 +2960,14 @@ def main():
         # the codec runtime applies the same transform pre-scaler. See
         # imazen/zenanalyze#52.
         "feature_transforms": feat_transform_list,
+        # Per-input parameter vector for the parameterized transforms
+        # (clip_then_log1p / winsor_p99 / quantile_bins). Parallel
+        # array to feature_transforms. Length = n_inputs. Empty list
+        # for non-parameterized variants and engineered axes.
+        # bake_picker.py forwards into the runtime's
+        # `zentrain.feature_transform_params` metadata key when any
+        # entry is non-empty.
+        "feature_transform_params": feat_transform_params_list,
         # Per-output OutputSpec metadata in n_outputs order. Empty when
         # OUTPUT_SPECS is unset on the codec config.
         "output_specs": output_specs_array,

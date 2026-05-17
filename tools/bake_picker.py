@@ -443,27 +443,79 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # distribution, so skipping the transform at inference produces
     # silently-wrong predictions.
     feat_transforms = model.get("feature_transforms")
+    _VALID_RUNTIME_TRANSFORMS = {
+        "identity", "log", "log1p", "signed_log1p",
+        "signed_sqrt", "signed_cbrt",
+        "clip_then_log1p", "winsor_p99", "quantile_bins",
+    }
     if (
         isinstance(feat_transforms, list)
         and feat_transforms
         and any(t != "identity" for t in feat_transforms)
     ):
-        # Validate length matches feat_cols.
-        if isinstance(feat_cols, list) and len(feat_transforms) != len(feat_cols):
-            raise SystemExit(
-                f"feature_transforms has {len(feat_transforms)} entries, "
-                f"feat_cols has {len(feat_cols)}"
-            )
+        # feature_transforms is parallel to ALL inputs (feat_cols +
+        # extra_axes), not just feat_cols. Length is validated against
+        # n_inputs further down via the runtime's strict parse.
         for t in feat_transforms:
-            if not isinstance(t, str) or t not in ("identity", "log", "log1p"):
+            if not isinstance(t, str) or t not in _VALID_RUNTIME_TRANSFORMS:
                 raise SystemExit(
                     f"feature_transforms entry {t!r} is not one of "
-                    f"identity / log / log1p"
+                    f"{sorted(_VALID_RUNTIME_TRANSFORMS)}"
                 )
         entries.append({
             "key": "zentrain.feature_transforms",
             "type": "utf8",
             "text": "\n".join(feat_transforms),
+        })
+
+    # feature_transform_params — parallel-array to feature_transforms.
+    # Newline-separated; each line is comma-separated f32 params for
+    # that transform. Empty line = no params for that input (identity,
+    # log, log1p, signed_*). Required when any transform is one of
+    # clip_then_log1p (1 param), winsor_p99 (2 params), quantile_bins
+    # (≥1 edge). Omit the metadata entry entirely when every line is
+    # empty.
+    feat_transform_params = model.get("feature_transform_params")
+    if (
+        isinstance(feat_transform_params, list)
+        and feat_transform_params
+        and any(bool(p) for p in feat_transform_params)
+    ):
+        if isinstance(feat_transforms, list) and \
+                len(feat_transform_params) != len(feat_transforms):
+            raise SystemExit(
+                f"feature_transform_params has "
+                f"{len(feat_transform_params)} entries, "
+                f"feature_transforms has {len(feat_transforms)}"
+            )
+        # Validate param arity per transform variant.
+        ARITY = {
+            "clip_then_log1p": (1, 1),
+            "winsor_p99": (2, 2),
+            "quantile_bins": (1, None),
+        }
+        lines = []
+        for i, params in enumerate(feat_transform_params):
+            t = feat_transforms[i] if feat_transforms else "identity"
+            req = ARITY.get(t)
+            if req is not None:
+                lo, hi = req
+                if len(params) < lo or (hi is not None and len(params) > hi):
+                    raise SystemExit(
+                        f"feature_transform_params[{i}] = {params!r} but "
+                        f"feature_transforms[{i}] = {t!r} requires "
+                        f"{lo}..{hi if hi is not None else '∞'} params"
+                    )
+            elif params:
+                raise SystemExit(
+                    f"feature_transform_params[{i}] = {params!r} but "
+                    f"feature_transforms[{i}] = {t!r} takes no params"
+                )
+            lines.append(",".join(f"{float(p):.9g}" for p in params))
+        entries.append({
+            "key": "zentrain.feature_transform_params",
+            "type": "utf8",
+            "text": "\n".join(lines),
         })
 
     # hybrid_heads_manifest → packed [n_cells: u32, n_heads: u32, head_kinds: u8[n_heads]].
