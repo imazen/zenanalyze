@@ -216,7 +216,17 @@ STACKS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
 }
 
 # How many parameters the inner stage consumes; the rest go to the outer.
+# Includes both runtime-supported (in TRANSFORMS) and research-only
+# (in STACKS) stacks — the screen needs to know the split for any
+# parameterized stack, regardless of which dict it lives in.
 STACK_INNER_NPARAMS: dict[str, int] = {
+    # Runtime-supported (promoted to TRANSFORMS).
+    "winsor_then_log": 2,
+    "winsor_then_log1p": 2,
+    "winsor_then_signed_cbrt": 2,
+    "signed_cbrt_then_winsor": 0,
+    "clip_then_log1p_then_winsor": 1,
+    # Research-only (still in STACKS).
     "winsor_then_signed_log1p": 2,
     "log1p_then_winsor": 0,
     "log_then_winsor": 0,
