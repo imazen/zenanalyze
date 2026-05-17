@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- New unified `zenpredict` CLI binary with three subcommands:
+  - `zenpredict bake <input.json> <output.bin>` — delegates to the
+    same code path as the legacy `zenpredict-bake` binary.
+  - `zenpredict inspect <bake.bin> [--weights]` — delegates to the
+    same code path as the legacy `zenpredict-inspect` binary.
+  - `zenpredict repack <in.bin> <out.bin> [--dtype f32|f16|i8]
+    [--zerobias <tau>] [--compress] [--optimize]` — front-end for
+    the logic previously only exposed as the `rebake_v3_1` example.
+    Useful for re-quantizing an existing F32 bake to I8 + LZ4 +
+    zero-bias for size-sensitive deployments (e.g. 200 KB → 14 KB
+    on the V_22-IW v2 bake at CID22 SROCC delta < 0.001).
+- `zenpredict_bake::cli` module exposing the three subcommand
+  bodies as `pub fn run_{bake,inspect,repack}_cli(argv: &[String]) ->
+  ExitCode`, shared between the unified `zenpredict` binary and the
+  legacy single-purpose binaries.
+
+The legacy `zenpredict-bake` and `zenpredict-inspect` binaries
+remain present and produce byte-for-byte identical stdout/stderr
+output, exit codes, and arg semantics.
+
 ## [0.1.0] - 2026-05-13
 
 Initial release. Extracted from `zenpredict 0.1.x`'s `bake` feature.
