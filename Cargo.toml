@@ -82,6 +82,10 @@ required-features = ["experimental"]
 name = "hvs_marginal_cost"
 required-features = ["experimental"]
 
+[[example]]
+name = "augment_features_with_hvs"
+required-features = ["experimental"]
+
 [lints.rust]
 # zenanalyze ships zero `unsafe` blocks; SIMD goes through the
 # safe-token wrappers in archmage / magetypes. Forbidding here
