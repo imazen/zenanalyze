@@ -35,6 +35,8 @@
 extern crate alloc;
 
 pub mod composer;
+#[cfg(feature = "std")]
+pub mod cli;
 pub(crate) mod hu_reorder;
 pub mod json;
 pub mod optimize;

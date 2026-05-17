@@ -28,6 +28,10 @@ path = "src/bin/zenpredict_bake.rs"
 name = "zenpredict-inspect"
 path = "src/bin/zenpredict_inspect.rs"
 
+[[bin]]
+name = "zenpredict"
+path = "src/bin/zenpredict.rs"
+
 [dependencies]
 # The reader side: zenpredict-bake round-trips against the parser
 # in its own tests, and the JSON-bake CLI parses + verifies the bake

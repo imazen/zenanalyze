@@ -1,27 +1,45 @@
 # zenanalyze — Claude project guide
 
-## API stability — non-negotiable
+## API stability — 0.2.x policy (revised 2026-05-17)
 
-**There will never be a 0.2.x.** The crate ships under 0.1.x forever
-(or until a 1.0). Every change must fit within the additive contract:
+**zenanalyze is now on 0.2.x — breaking changes to library APIs are
+permitted.** The earlier "0.1.x forever" rule was retired when the
+crate's pre-1.0 surface needed to evolve.
 
-- New `pub fn` / `pub struct` / `pub mod`: OK.
-- New variant on a `#[non_exhaustive]` enum (`AnalysisFeature`,
-  `FeatureValue`, `AnalyzeError`, etc.): OK.
-- New field on a struct that's already private or `#[non_exhaustive]`:
-  OK if the existing public constructors stay valid.
-- Renaming, removing, or changing the signature of any existing public
-  item: **NOT OK.** Even small changes ("rename a parameter for
-  clarity", "tighten a return type") are forbidden once the item has
-  shipped. Add a parallel item if you need different shape — see
-  `try_analyze_features_rgb8` next to `analyze_features_rgb8`.
-- Numeric / behavioural drift on existing features in 0.1.x patches is
-  expected (the crate-level threshold contract spells it out) — but the
-  *signatures* don't move.
+### Rust library surface (semver-governed)
 
-If a future need can't be solved additively under 0.1.x, pause and
-flag it to the user. Do not propose "ship it in the next major" —
-there is no next major.
+Standard 0.x semver applies:
+- Breaking changes (renames, signature changes, removed items) bump
+  the **minor** (0.2 → 0.3).
+- Additive changes (new pub items, new enum variants on
+  `#[non_exhaustive]` types) bump the **patch** (0.2.0 → 0.2.1).
+- Behavioural / numeric drift is allowed within a minor.
+
+Before any breaking change: run `cargo semver-checks` and document
+the break in CHANGELOG.md's `[Unreleased]` section under
+`### QUEUED BREAKING CHANGES`. Batch breaks into the next minor bump.
+
+### Binaries — NOT part of the semver surface
+
+The `zenpredict-bake`, `zenpredict-inspect`, `zenpredict` (and
+future) command-line binaries are **tools, not API**. Their CLI
+flags, subcommand names, output format, and even binary names may
+be renamed, restructured, or removed at will. Downstream scripts
+that pin to a specific CLI invocation are responsible for their own
+pinning (commit-sha or version-tag); the crate makes no stability
+promise on binary surfaces.
+
+When restructuring binaries: update docstrings + any benchmarks /
+examples / scripts that invoke them; note the change in
+CHANGELOG.md but don't gate it on a major bump.
+
+### Historical migration: 0.1 → 0.2
+
+Pre-0.2, the crate enforced "additive only" — see `try_*` parallel
+constructors like `try_analyze_features_rgb8` next to
+`analyze_features_rgb8`. Those parallel pairs may now be collapsed
+in the next breaking pass; flag for the user before removing
+either side.
 
 ## Allocation contract
 

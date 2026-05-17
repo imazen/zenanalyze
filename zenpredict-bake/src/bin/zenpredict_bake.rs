@@ -19,78 +19,16 @@
 //! On success, prints a one-line summary of `(n_inputs, n_outputs,
 //! n_layers, schema_hash, n_metadata_entries, output bytes)` to
 //! stderr.
+//!
+//! The body of this binary delegates to
+//! [`zenpredict_bake::cli::run_bake_cli`] so the unified `zenpredict`
+//! binary (subcommand `zenpredict bake ...`) shares the same code
+//! path and behaviour. Argument order, exit codes, and stderr output
+//! are identical.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use zenpredict_bake::{BakeJsonError, BakeRequestJson, bake_from_json};
-
 fn main() -> ExitCode {
-    let mut args = std::env::args_os().skip(1);
-    let input = match args.next() {
-        Some(p) => PathBuf::from(p),
-        None => {
-            eprintln!("usage: zenpredict-bake <input.json> <output.bin>");
-            return ExitCode::from(1);
-        }
-    };
-    let output = match args.next() {
-        Some(p) => PathBuf::from(p),
-        None => {
-            eprintln!("usage: zenpredict-bake <input.json> <output.bin>");
-            return ExitCode::from(1);
-        }
-    };
-    if args.next().is_some() {
-        eprintln!("zenpredict-bake: too many arguments");
-        return ExitCode::from(1);
-    }
-
-    let json_bytes = match std::fs::read(&input) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("zenpredict-bake: failed to read {}: {e}", input.display());
-            return ExitCode::from(1);
-        }
-    };
-
-    let req: BakeRequestJson = match serde_json::from_slice(&json_bytes) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!(
-                "zenpredict-bake: JSON parse error in {}: {e}",
-                input.display()
-            );
-            return ExitCode::from(2);
-        }
-    };
-
-    let bytes = match bake_from_json(&req) {
-        Ok(b) => b,
-        Err(BakeJsonError::Bake(e)) => {
-            eprintln!("zenpredict-bake: bake error: {e}");
-            return ExitCode::from(3);
-        }
-        Err(e) => {
-            eprintln!("zenpredict-bake: input error: {e}");
-            return ExitCode::from(3);
-        }
-    };
-
-    if let Err(e) = std::fs::write(&output, &bytes) {
-        eprintln!("zenpredict-bake: failed to write {}: {e}", output.display());
-        return ExitCode::from(1);
-    }
-
-    eprintln!(
-        "zenpredict-bake: wrote {} ({} bytes) — n_inputs={} n_outputs={} n_layers={} schema_hash=0x{:016x} metadata_entries={}",
-        output.display(),
-        bytes.len(),
-        req.scaler_mean.len(),
-        req.layers.last().map(|l| l.out_dim).unwrap_or(0),
-        req.layers.len(),
-        req.schema_hash,
-        req.metadata.len(),
-    );
-    ExitCode::SUCCESS
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    zenpredict_bake::cli::run_bake_cli(&argv)
 }
