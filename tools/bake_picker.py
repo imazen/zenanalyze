@@ -612,7 +612,7 @@ def build_bake_request_json(
         })
         prev_out = out_dim
 
-    return {
+    out = {
         "schema_hash": sh,
         "flags": 0,
         "scaler_mean": f32_array(model["scaler_mean"]),
@@ -628,6 +628,88 @@ def build_bake_request_json(
         # SparseOverrideJson.
         "output_specs": encode_output_specs(model, n_outputs),
         "sparse_overrides": encode_sparse_overrides(model, n_outputs),
+    }
+    # ZNPR v3.2 — multi-codec joint-picker schema. Present only when
+    # the trainer was a joint shared-trunk run. The trainer must dump
+    # `multi_codec_schema` with the per-codec map array; we forward it
+    # verbatim to zenpredict-bake which encodes the wire bytes.
+    # Schema lives at zenpredict_bake::MultiCodecSchemaJson.
+    mc = encode_multi_codec_schema(model, n_outputs)
+    if mc is not None:
+        out["multi_codec_schema"] = mc
+    return out
+
+
+def encode_multi_codec_schema(model: dict, n_outputs: int) -> dict | None:
+    """Forward the trainer-supplied multi_codec_schema dict.
+
+    The trainer JSON should contain a top-level `multi_codec_schema`
+    block in this shape (matching `MultiCodecSchemaJson` in
+    `zenpredict-bake/src/json.rs`):
+
+        {
+          "union_feat_count": <int>,
+          "per_codec": [
+            {
+              "codec_name": "zenjpeg",
+              "union_slot_for_codec_feat": [0, 1, 4, ...],
+              "output_range": [0, 48],
+              "head_n_cells": 12,
+              "head_n_heads": 4
+            },
+            ...
+          ]
+        }
+
+    Returns `None` when the trainer didn't emit the block (single-codec
+    bake). Validates the per-codec entries minimally — type coercion to
+    int / list — and lets the Rust bake layer do the cross-field
+    consistency checks (slot range, output range, dim mismatch).
+    """
+    mc = model.get("multi_codec_schema")
+    if not mc:
+        return None
+    if not isinstance(mc, dict):
+        raise SystemExit(
+            f"model.multi_codec_schema must be a dict, got {type(mc).__name__}"
+        )
+    union_feat_count = int(mc["union_feat_count"])
+    per_codec_in = mc.get("per_codec") or []
+    if not per_codec_in:
+        raise SystemExit(
+            "model.multi_codec_schema.per_codec is empty — drop the "
+            "section entirely if this is a single-codec bake"
+        )
+    per_codec_out = []
+    for i, entry in enumerate(per_codec_in):
+        if not isinstance(entry, dict):
+            raise SystemExit(
+                f"multi_codec_schema.per_codec[{i}] must be a dict"
+            )
+        name = str(entry["codec_name"])
+        slots = [int(s) for s in entry["union_slot_for_codec_feat"]]
+        out_range = entry["output_range"]
+        if len(out_range) != 2:
+            raise SystemExit(
+                f"multi_codec_schema.per_codec[{i}].output_range must be "
+                f"[lo, hi], got {out_range!r}"
+            )
+        lo, hi = int(out_range[0]), int(out_range[1])
+        if not (0 <= lo <= hi <= n_outputs):
+            raise SystemExit(
+                f"multi_codec_schema.per_codec[{i}].output_range "
+                f"[{lo}, {hi}] outside [0, n_outputs={n_outputs}]"
+            )
+        per_codec_out.append({
+            "codec_name": name,
+            "union_slot_for_codec_feat": slots,
+            "output_range": [lo, hi],
+            "head_n_cells": int(entry.get("head_n_cells", 0)),
+            "head_n_heads": int(entry.get("head_n_heads", 0)),
+        })
+    return {
+        "union_feat_count": union_feat_count,
+        "per_codec": per_codec_out,
     }
 
 

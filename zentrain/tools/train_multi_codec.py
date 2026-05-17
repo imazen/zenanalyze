@@ -960,6 +960,203 @@ def write_codec_json(
     sys.stderr.write(f"  wrote {out_path} ({len(json.dumps(out)) / 1024:.1f} KB)\n")
 
 
+def write_joint_bake_json(
+    codec_data: list[dict],
+    soft_targets: list[dict],
+    model: SharedTrunkMLP,
+    union: dict,
+    scaler_mean: np.ndarray,
+    scaler_scale: np.ndarray,
+    out_path: Path,
+    per_codec_metrics: dict | None = None,
+) -> dict:
+    """Emit ONE joint bake JSON encapsulating the whole multi-codec
+    model — shared trunk + every codec's head concatenated into one
+    MLP — with the ZNPR v3.2 `multi_codec_schema` block populated.
+
+    The bake artifact is consumed by an external caller via
+    `Picker::predict_multi_codec(codec_id, codec_features, size_class,
+    log_pixels, zq_norm)`. Codec crates don't depend on this bake;
+    only the external orchestrator does.
+
+    Joint output layout — codec heads concatenated in input order:
+
+        [codec_0 head outputs (n_out_0) | codec_1 head outputs (n_out_1) | ...]
+
+    Per-codec `output_range = (offset_i, offset_i + n_out_i)`.
+
+    Returns the JSON dict (also written to `out_path`).
+    """
+    torch = model._torch
+    nn = model._nn
+
+    # Walk the shared trunk collecting Linear weight + bias.
+    trunk_coefs: list[np.ndarray] = []
+    trunk_intercepts: list[np.ndarray] = []
+    for m in model.trunk:
+        if isinstance(m, nn.Linear):
+            W = m.weight.detach().cpu().numpy().T.astype(np.float64)  # (in, out)
+            b = m.bias.detach().cpu().numpy().astype(np.float64)
+            trunk_coefs.append(W)
+            trunk_intercepts.append(b)
+    if not trunk_coefs:
+        raise SystemExit("joint bake: trunk has no Linear layers — refusing to write")
+
+    h_last = trunk_coefs[-1].shape[1]
+
+    # Concatenate per-codec heads horizontally into a single Linear
+    # (h_last → sum(n_out_i)). Absorb each codec's per-block scalar
+    # standardization (μ, σ) into its head columns so the joint bake
+    # produces natural-unit outputs — identical to what the per-codec
+    # bake does today.
+    head_W_blocks: list[np.ndarray] = []
+    head_b_blocks: list[np.ndarray] = []
+    per_codec_output_ranges: list[tuple[int, int]] = []
+    offset = 0
+    for cd, soft in zip(codec_data, soft_targets):
+        codec_name = cd["codec_name"]
+        head = model.heads[codec_name]
+        Wh = head.weight.detach().cpu().numpy().T.astype(np.float64)  # (h_last, n_out_codec)
+        bh = head.bias.detach().cpu().numpy().astype(np.float64)
+        # Inverse-standardize scalar blocks within this codec's outputs.
+        for start, end, axis, mu, sigma in soft["scalar_block_starts"]:
+            if sigma == 0.0 and mu == 0.0:
+                continue
+            Wh[:, start:end] *= sigma
+            bh[start:end] = bh[start:end] * sigma + mu
+        n_out_codec = Wh.shape[1]
+        head_W_blocks.append(Wh)
+        head_b_blocks.append(bh)
+        per_codec_output_ranges.append((offset, offset + n_out_codec))
+        offset += n_out_codec
+    joint_head_W = np.concatenate(head_W_blocks, axis=1)  # (h_last, sum_n_out)
+    joint_head_b = np.concatenate(head_b_blocks)
+    assert joint_head_W.shape[0] == h_last, (
+        f"joint head row count {joint_head_W.shape[0]} != trunk out {h_last}"
+    )
+
+    coefs = list(trunk_coefs) + [joint_head_W]
+    intercepts = list(trunk_intercepts) + [joint_head_b]
+
+    n_inputs = coefs[0].shape[0]
+    output_dim = coefs[-1].shape[1]
+    n_union = len(union["feat_cols"])
+    n_codecs = len(codec_data)
+
+    # extra_axes: presence_<feat>, size_oh, log_pixels, zq_norm, codec_<name>.
+    extra_axes = (
+        [f"presence_{c}" for c in union["feat_cols"]]
+        + ["size_tiny", "size_small", "size_medium", "size_large"]
+        + ["log_pixels", "zq_norm"]
+        + [f"codec_{cd['codec_name']}" for cd in codec_data]
+    )
+
+    # multi_codec_schema block — per-codec map + union_feat_count.
+    per_codec_block = []
+    for ci, cd in enumerate(codec_data):
+        codec_name = cd["codec_name"]
+        # Map this codec's feat_cols to its union slot index.
+        union_slots = [int(union["idx"][c]) for c in cd["feat_cols"]]
+        lo, hi = per_codec_output_ranges[ci]
+        n_cells = cd["n_cells"]
+        n_heads = 1 + len(cd["scalar_axes"])  # bytes + scalar axes
+        per_codec_block.append({
+            "codec_name": codec_name,
+            "union_slot_for_codec_feat": union_slots,
+            "output_range": [lo, hi],
+            "head_n_cells": int(n_cells),
+            "head_n_heads": int(n_heads),
+        })
+
+    # Build per-codec hybrid_heads_manifest summary so the bake artifact
+    # carries the cell layout for each codec (consumer must demux by
+    # codec_id and pick the relevant slice).
+    codec_manifests: list[dict] = []
+    for ci, (cd, soft) in enumerate(zip(codec_data, soft_targets)):
+        lo, hi = per_codec_output_ranges[ci]
+        n_cells = cd["n_cells"]
+        cells_dump = []
+        for c in cd["cells"]:
+            cells_dump.append({
+                k: (list(v) if isinstance(v, (list, tuple)) else v)
+                for k, v in c.items()
+            })
+        # output_layout within this codec's output_range — relative
+        # offsets (consumer adds `lo` to get the absolute index).
+        within = {"bytes_log": [0, n_cells]}
+        next_block = 1
+        for axis in cd["scalar_axes"]:
+            within[axis] = [next_block * n_cells, (next_block + 1) * n_cells]
+            next_block += 1
+        codec_manifests.append({
+            "codec_name": cd["codec_name"],
+            "codec_index": int(ci),
+            "output_range": [int(lo), int(hi)],
+            "n_cells": int(n_cells),
+            "categorical_axes": list(cd["bundle"].categorical_axes),
+            "scalar_axes": list(cd["scalar_axes"]),
+            "cells": cells_dump,
+            "output_layout_relative": within,
+            "config_names": {int(k): v for k, v in cd["config_names"].items()},
+            "codec_feat_cols": list(cd["feat_cols"]),
+        })
+
+    # n_inputs == 2*U + 6 + n_codecs (per the trunk-input layout).
+    expected = 2 * n_union + 6 + n_codecs
+    if n_inputs != expected:
+        raise SystemExit(
+            f"joint bake: trunk in_dim {n_inputs} != expected "
+            f"{expected} = 2*n_union({n_union}) + 6 + n_codecs({n_codecs})"
+        )
+
+    out = {
+        "n_inputs": int(n_inputs),
+        "n_outputs": int(output_dim),
+        "safety_profile": "size_optimal",
+        "feat_cols": list(union["feat_cols"]),
+        "extra_axes": extra_axes,
+        "feature_transforms": ["identity"] * n_inputs,
+        "output_specs": [],     # see TODO in write_codec_json on per-codec specs
+        "sparse_overrides": [],
+        "scaler_mean": [float(x) for x in scaler_mean],
+        "scaler_scale": [float(x) for x in scaler_scale],
+        "layers": [
+            {"W": w.tolist(), "b": b.tolist()}
+            for w, b in zip(coefs, intercepts)
+        ],
+        "activation": "leakyrelu",
+        # ZNPR v3.2 multi-codec section — forwarded verbatim by
+        # bake_picker.py → zenpredict_bake::MultiCodecSchemaJson →
+        # the runtime's `multi_codec_schema` header section.
+        "multi_codec_schema": {
+            "union_feat_count": int(n_union),
+            "per_codec": per_codec_block,
+        },
+        # Joint-bake-specific bookkeeping (additive; bake_picker
+        # ignores unknown keys at the top level).
+        "joint_multi_codec": {
+            "n_codecs": int(n_codecs),
+            "n_union_features": int(n_union),
+            "trunk_hidden": list(model.hidden_sizes),
+            "codec_order": [cd["codec_name"] for cd in codec_data],
+            "per_codec_manifests": codec_manifests,
+        },
+        "training_objective": {
+            "name": "multi_codec_shared_trunk_joint",
+        },
+    }
+    if per_codec_metrics is not None:
+        out["per_codec_metrics"] = per_codec_metrics
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, indent=2))
+    sys.stderr.write(
+        f"  wrote JOINT bake JSON {out_path} "
+        f"({len(json.dumps(out)) / 1024:.1f} KB, n_inputs={n_inputs}, "
+        f"output_dim={output_dim}, n_codecs={n_codecs})\n"
+    )
+    return out
+
+
 # ----------------------------------------------------------------------
 # CLI driver
 # ----------------------------------------------------------------------
@@ -1019,6 +1216,14 @@ def main() -> int:
     parser.add_argument(
         "--out-name", type=str, default="multi_codec",
         help="Filename prefix for the per-codec bake JSONs.",
+    )
+    parser.add_argument(
+        "--joint-bake", type=Path, default=None,
+        help="Optional path to write the joint bake JSON (single file "
+             "encapsulating the shared trunk + every codec's head, with "
+             "the ZNPR v3.2 multi_codec_schema block populated). "
+             "Consumed by bake_picker.py to emit one .bin that an "
+             "external caller invokes via Picker::predict_multi_codec.",
     )
     args = parser.parse_args()
 
@@ -1129,6 +1334,20 @@ def main() -> int:
     summary_path = args.out_dir / f"{args.out_name}_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2))
     sys.stderr.write(f"\nWrote summary → {summary_path}\n")
+
+    # Joint bake JSON — one model encapsulating the whole multi-codec
+    # picker (trunk + all codec heads concatenated) with the v3.2
+    # multi_codec_schema block. External callers consume the resulting
+    # .bin via Picker::predict_multi_codec; codec crates stay
+    # zenanalyze/zenpredict-free.
+    if args.joint_bake is not None:
+        write_joint_bake_json(
+            codec_data, soft_targets, model, union,
+            scaler_mean=scaler.mean_,
+            scaler_scale=scaler.scale_,
+            out_path=args.joint_bake,
+            per_codec_metrics=all_val_metrics,
+        )
     return 0
 
 
