@@ -151,10 +151,83 @@ TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Stacked transforms (two-step compositions)
+# ---------------------------------------------------------------------------
+#
+# `clip_then_log1p` is effectively a single-sided stack already (subtract
+# noise floor → clip non-negative → log1p). The compositions below are
+# genuinely different:
+#
+# - `winsor_p99 → log1p`: clip BOTH tails to [p1, p99], then log1p. Distinct
+#   from `clip_then_log1p` (which only subtracts a lower bound and doesn't
+#   clip the upper tail).
+# - `signed_log1p → winsor_p99`: compress with sign-preserving log1p first,
+#   then clip the log-domain outliers. Useful when the post-log distribution
+#   still has fat tails.
+# - `clip_then_log1p → winsor_p99`: noise-floor + log compress, then clip
+#   remaining log-domain outliers. Three-step.
+# - `signed_cbrt → winsor_p99`: mild variance stabilization then clip.
+#
+# Stacks involving `quantile_bins` are excluded — bin index is rank-only,
+# so any monotonic outer transform is a no-op on the rank order. Stacks
+# with `identity` on either side reduce to a single transform.
+#
+# Each stack accepts (outer_params, inner_params). For simplicity the
+# concatenated params list is `inner_params + outer_params`, with the
+# split documented per-stack in `STACK_PARAM_SPLITS`.
+
+
+def _make_stack(inner_fn, outer_fn, inner_n_params: int):
+    """Factory: returns a transform fn that applies `inner_fn` then
+    `outer_fn`, splitting the param list at `inner_n_params`."""
+    def stacked(x: np.ndarray, params: list[float]) -> np.ndarray:
+        inner_p = list(params[:inner_n_params])
+        outer_p = list(params[inner_n_params:])
+        y = inner_fn(x, inner_p)
+        # Convert any NaN from the inner stage to a sane default so the
+        # outer transform's percentile-based params (computed at sweep
+        # time) don't choke on NaN inputs.
+        if np.issubdtype(y.dtype, np.floating):
+            y = np.where(np.isfinite(y), y, np.nan)
+        return outer_fn(y, outer_p)
+    return stacked
+
+
+STACKS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
+    # (inner, outer, inner_n_params)
+    "winsor_then_log1p":            _make_stack(t_winsor_p99, t_log1p, 2),
+    "winsor_then_log":              _make_stack(t_winsor_p99, t_log, 2),
+    "winsor_then_signed_cbrt":      _make_stack(t_winsor_p99, t_signed_cbrt, 2),
+    "winsor_then_signed_log1p":     _make_stack(t_winsor_p99, t_signed_log1p, 2),
+    "log1p_then_winsor":            _make_stack(t_log1p, t_winsor_p99, 0),
+    "log_then_winsor":              _make_stack(t_log, t_winsor_p99, 0),
+    "signed_log1p_then_winsor":     _make_stack(t_signed_log1p, t_winsor_p99, 0),
+    "signed_cbrt_then_winsor":      _make_stack(t_signed_cbrt, t_winsor_p99, 0),
+    "clip_then_log1p_then_winsor":  _make_stack(t_clip_then_log1p, t_winsor_p99, 1),
+}
+
+# How many parameters the inner stage consumes; the rest go to the outer.
+STACK_INNER_NPARAMS: dict[str, int] = {
+    "winsor_then_log1p": 2,
+    "winsor_then_log": 2,
+    "winsor_then_signed_cbrt": 2,
+    "winsor_then_signed_log1p": 2,
+    "log1p_then_winsor": 0,
+    "log_then_winsor": 0,
+    "signed_log1p_then_winsor": 0,
+    "signed_cbrt_then_winsor": 0,
+    "clip_then_log1p_then_winsor": 1,
+}
+
+
 def sweep_for(name: str, col: np.ndarray) -> list[list[float]]:
     """Param-vector candidates for a given transform + feature column.
     Single empty list for non-parameterized variants. Matches the
-    zensim v0_20 screen's sweep schedules verbatim."""
+    zensim v0_20 screen's sweep schedules verbatim. Stacks combine
+    inner + outer param sweeps; for the outer (winsor) step we
+    recompute percentiles on the inner-transformed column at sweep
+    time."""
     valid = col[np.isfinite(col)]
     if valid.size == 0:
         return [[]]
@@ -173,7 +246,87 @@ def sweep_for(name: str, col: np.ndarray) -> list[list[float]]:
             for p in [12.5, 25, 37.5, 50, 62.5, 75, 87.5]
         ]
         return [edges]
+    # Stacked variants: enumerate inner × outer param sweeps. Recompute
+    # the OUTER winsor's percentiles on the inner-transformed column
+    # so the clip bounds are in the right space (e.g. log-domain).
+    if name in STACKS:
+        return _stack_sweep_for(name, col)
     return [[]]
+
+
+def _stack_sweep_for(name: str, col: np.ndarray) -> list[list[float]]:
+    """Build the combinatorial param sweep for a stacked transform.
+
+    For each inner-param config: compute the inner output, derive the
+    outer winsor's percentile-based bounds on THAT distribution, then
+    yield the concatenated `[inner_params..., outer_p1, outer_p99]`
+    list. The outer winsor's bounds are picked from the standard
+    (1,99) / (5,95) / (10,90) / (25,75) grid in the inner-transformed
+    space.
+
+    Stacks whose outer is non-winsor (winsor_then_*) sweep just the
+    inner's params; the outer (log / signed_cbrt / log1p / signed_log1p)
+    is unparameterized.
+    """
+    inner_n = STACK_INNER_NPARAMS[name]
+    # Decide inner sweep based on inner identity.
+    if name.startswith("winsor_then_"):
+        # Inner = winsor_p99 (2 params); outer is unparameterized.
+        valid = col[np.isfinite(col)]
+        bounds = [(1, 99), (5, 95), (10, 90), (25, 75)]
+        return [
+            [float(np.percentile(valid, lo)), float(np.percentile(valid, hi))]
+            for (lo, hi) in bounds
+        ]
+    if name == "clip_then_log1p_then_winsor":
+        # Inner = clip_then_log1p (1 param ε), outer = winsor (2 params on
+        # the log-transformed distribution).
+        valid = col[np.isfinite(col)]
+        eps_candidates = [
+            float(np.percentile(valid, p)) for p in [5, 10, 25, 50, 75]
+        ]
+        out: list[list[float]] = []
+        for eps in eps_candidates:
+            # Apply inner once at this ε, compute outer percentiles on the
+            # result. Outer sweep is the same (1,99) / (5,95) grid.
+            y = t_clip_then_log1p(col, [eps])
+            y_valid = y[np.isfinite(y)]
+            if y_valid.size == 0:
+                continue
+            for (lo, hi) in [(1, 99), (5, 95), (10, 90)]:
+                out.append([
+                    eps,
+                    float(np.percentile(y_valid, lo)),
+                    float(np.percentile(y_valid, hi)),
+                ])
+        return out
+    # log1p_then_winsor, log_then_winsor, signed_*_then_winsor:
+    # inner unparameterized; outer winsor sweeps percentiles on the
+    # inner-transformed distribution.
+    valid = col[np.isfinite(col)]
+    inner_fn_map = {
+        "log1p_then_winsor": t_log1p,
+        "log_then_winsor": t_log,
+        "signed_log1p_then_winsor": t_signed_log1p,
+        "signed_cbrt_then_winsor": t_signed_cbrt,
+    }
+    inner_fn = inner_fn_map[name]
+    y = inner_fn(col, [])
+    y_valid = y[np.isfinite(y)]
+    if y_valid.size == 0:
+        return [[]]
+    bounds = [(1, 99), (5, 95), (10, 90), (25, 75)]
+    return [
+        [float(np.percentile(y_valid, lo)), float(np.percentile(y_valid, hi))]
+        for (lo, hi) in bounds
+    ]
+
+
+# Merged transform vocabulary — singles + stacks. Screen iterates this.
+ALL_TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
+    **TRANSFORMS,
+    **STACKS,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -246,11 +399,18 @@ def screen_one_feature(
     if math.isnan(baseline):
         return best
 
-    for token, fn in TRANSFORMS.items():
-        # Training-safety gates (same as zensim's screen).
+    for token, fn in ALL_TRANSFORMS.items():
+        # Training-safety gates for raw-input log/log1p (single-step
+        # variants). Stacks whose inner is log/log1p inherit the same
+        # gate; stacks whose inner is winsor/signed_*/clip_then_log1p
+        # are safe across the full real line by construction.
         if token == "log" and feat_min <= 0.0:
             continue
         if token == "log1p" and feat_min <= -1.0:
+            continue
+        if token == "log_then_winsor" and feat_min <= 0.0:
+            continue
+        if token == "log1p_then_winsor" and feat_min <= -1.0:
             continue
         for params in sweep_for(token, feat_col):
             tx = fn(feat_col, params)
@@ -440,7 +600,7 @@ def apply_transforms_to_features(
             continue
         token = transforms_map[name]
         params = params_map.get(name, [])
-        fn = TRANSFORMS[token]
+        fn = ALL_TRANSFORMS[token]
         new_col = fn(Xs[:, i].astype(np.float64), params).astype(np.float32)
         # NaN guard — replace any NaN with the mean of the finite
         # entries so the scaler doesn't blow up.
