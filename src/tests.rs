@@ -3656,3 +3656,296 @@ mod sample_count_floor {
         }
     }
 }
+
+/// HVS-derived feature tests (proposal `benchmarks/hvs_feature_proposals_2026-05-17.md`).
+///
+/// Tests use synthetic patterns whose true response we know analytically:
+/// flat gray (isotropic, zero chroma), horizontal stripes (Y-direction
+/// energy ≫ X), a luma↔chroma ramp (high Pearson by construction).
+#[cfg(feature = "experimental")]
+mod hvs {
+    use super::*;
+
+    fn rgb_query(features: &[AnalysisFeature]) -> AnalysisQuery {
+        let mut s = FeatureSet::new();
+        for f in features {
+            s = s.with(*f);
+        }
+        AnalysisQuery::new(s)
+    }
+
+    fn make_slice<'a>(rgb: &'a [u8], w: u32, h: u32) -> PixelSlice<'a> {
+        PixelSlice::new(rgb, w, h, (w as usize) * 3, PixelDescriptor::RGB8_SRGB).unwrap()
+    }
+
+    /// Flat-gray image: every pixel `(128, 128, 128)`. Chroma channels
+    /// have zero variance → Pearson denominator vanishes → covariance
+    /// must fall back to `0.0` (the documented degenerate case).
+    /// Orientation ratio should land at the bias-free baseline (~1.0).
+    #[test]
+    fn flat_gray_chroma_luma_covariance_is_zero() {
+        let w = 128;
+        let h = 128;
+        let rgb = vec![128u8; (w * h * 3) as usize];
+        let q = rgb_query(&[
+            AnalysisFeature::ChromaLumaCovarianceCb,
+            AnalysisFeature::ChromaLumaCovarianceCr,
+            AnalysisFeature::OrientationEnergyRatio,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let cov_cb = r
+            .get_f32(AnalysisFeature::ChromaLumaCovarianceCb)
+            .expect("Cb cov requested");
+        let cov_cr = r
+            .get_f32(AnalysisFeature::ChromaLumaCovarianceCr)
+            .expect("Cr cov requested");
+        let ori = r
+            .get_f32(AnalysisFeature::OrientationEnergyRatio)
+            .expect("orient requested");
+        assert!(
+            cov_cb.abs() < 1e-3,
+            "flat-gray Cb covariance should be ~0 (degenerate variance), got {cov_cb}"
+        );
+        assert!(
+            cov_cr.abs() < 1e-3,
+            "flat-gray Cr covariance should be ~0 (degenerate variance), got {cov_cr}"
+        );
+        // Flat content has zero gradients in every orientation; the
+        // implementation returns the bias-free baseline 1.0.
+        assert!(
+            (ori - 1.0).abs() < 1e-3,
+            "flat image should yield isotropy ratio ≈ 1.0, got {ori}"
+        );
+    }
+
+    /// Linear luma↔Cb ramp: every column has the SAME luma but the B
+    /// channel varies (so Cb = (B − Y)/255 covaries perfectly with x).
+    /// Construction: R = G = 128 constant; B varies 0..255 across x.
+    /// Then Y is a positive linear function of B (slope 0.114), and
+    /// Cb = (B − Y)/255 is also a positive linear function of B —
+    /// strong positive Pearson.
+    ///
+    /// Picks the bottom-band edge case: positive correlation between
+    /// Y and Cb. The exact value depends on stripe sampling, so the
+    /// test asserts a wide band, not a single number.
+    #[test]
+    fn luma_b_ramp_yields_high_y_cb_correlation() {
+        let w = 256u32;
+        let h = 64u32;
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 3) as usize;
+                rgb[i] = 128; // R
+                rgb[i + 1] = 128; // G
+                rgb[i + 2] = (x.min(255)) as u8; // B varies
+            }
+        }
+        let q = rgb_query(&[
+            AnalysisFeature::ChromaLumaCovarianceCb,
+            AnalysisFeature::ChromaLumaCovarianceCr,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let cov_cb = r
+            .get_f32(AnalysisFeature::ChromaLumaCovarianceCb)
+            .expect("requested");
+        let cov_cr = r
+            .get_f32(AnalysisFeature::ChromaLumaCovarianceCr)
+            .expect("requested");
+        // Y and B are perfectly linearly related; (B − Y) is also a
+        // linear function of B. Correlation should be very near +1.
+        assert!(
+            cov_cb > 0.95,
+            "B-ramp should yield Pearson(Y, Cb) > 0.95, got {cov_cb}"
+        );
+        // R is constant, so (R − Y) varies as −0.114·B, i.e. perfectly
+        // anti-correlated with Y. Pearson(Y, Cr) ≈ −1.
+        assert!(
+            cov_cr < -0.95,
+            "B-ramp should yield Pearson(Y, Cr) < −0.95, got {cov_cr}"
+        );
+    }
+
+    /// Horizontal stripes (alternating bright/dark rows): vertical
+    /// gradient `Gy` is huge, horizontal gradient `Gx` is ~0. The
+    /// orientation-energy ratio must be `> 1` (one orientation
+    /// dominates).
+    #[test]
+    fn horizontal_stripes_have_anisotropic_orientation() {
+        let w = 128u32;
+        let h = 128u32;
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            // Alternate every other row: even rows dark, odd rows bright.
+            let v = if y % 2 == 0 { 32u8 } else { 224u8 };
+            for x in 0..w {
+                let i = ((y * w + x) * 3) as usize;
+                rgb[i] = v;
+                rgb[i + 1] = v;
+                rgb[i + 2] = v;
+            }
+        }
+        let q = rgb_query(&[AnalysisFeature::OrientationEnergyRatio]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let ori = r
+            .get_f32(AnalysisFeature::OrientationEnergyRatio)
+            .expect("requested");
+        assert!(
+            ori > 1.5,
+            "horizontal-stripe pattern should be strongly anisotropic, got {ori}"
+        );
+    }
+
+    /// Diagonal-checker pattern: large Gx AND large Gy → 45° / 135°
+    /// kernels respond more than 0° / 90°. Mostly verifies orientation
+    /// distinguishes axis-aligned from diagonal energy.
+    #[test]
+    fn checkerboard_orientation_well_defined() {
+        let w = 64u32;
+        let h = 64u32;
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if (x + y) % 2 == 0 { 32u8 } else { 224u8 };
+                let i = ((y * w + x) * 3) as usize;
+                rgb[i] = v;
+                rgb[i + 1] = v;
+                rgb[i + 2] = v;
+            }
+        }
+        let q = rgb_query(&[AnalysisFeature::OrientationEnergyRatio]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let ori = r
+            .get_f32(AnalysisFeature::OrientationEnergyRatio)
+            .expect("requested");
+        // The 1-pixel checker has Gx and Gy both at maximum amplitude
+        // every pixel, so 45°/135° projections (|Gx + Gy|/√2 and
+        // |Gx − Gy|/√2) read either the sum or the difference. With
+        // opposite-sign neighbors the diagonal channels dominate.
+        // Ratio > 1 ⇒ anisotropic; finite and well-formed.
+        assert!(ori.is_finite(), "ratio must be finite, got {ori}");
+        assert!(ori >= 1.0, "ratio is bounded below by 1, got {ori}");
+    }
+
+    /// Flat content: per-block luma variance is ~0 → `log2(1 + 0/25) = 0`.
+    /// Both mean and (when above the percentile floor) p90 should be ~0.
+    #[test]
+    fn flat_image_info_weight_is_zero() {
+        let w = 256u32;
+        let h = 256u32;
+        let rgb = vec![128u8; (w * h * 3) as usize];
+        let q = rgb_query(&[
+            AnalysisFeature::InfoWeightMean,
+            AnalysisFeature::InfoWeightP90,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let mean = r
+            .get_f32(AnalysisFeature::InfoWeightMean)
+            .expect("requested");
+        // p90 will be present (256×256 has > 100 sampled blocks).
+        let p90 = r
+            .get_f32(AnalysisFeature::InfoWeightP90)
+            .expect("p90 should clear MIN_BLOCKS_FOR_PERCENTILE on 256×256");
+        assert!(
+            mean.abs() < 1e-3,
+            "flat image info_weight_mean should be ~0, got {mean}"
+        );
+        assert!(
+            p90.abs() < 1e-3,
+            "flat image info_weight_p90 should be ~0, got {p90}"
+        );
+    }
+
+    /// High-contrast random noise: every 8×8 block has σ² ≫ σ²_e=25,
+    /// so per-block weight `log2(1 + var/25)` should be large
+    /// (typically ≥ 4 on uniform-noise content). Verifies the
+    /// formula's positive-signal end.
+    #[test]
+    fn high_contrast_image_info_weight_is_large() {
+        let w = 256u32;
+        let h = 256u32;
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        // High-contrast bimodal content: alternate every pixel between
+        // (0, 0, 0) and (255, 255, 255). Per-block luma variance for an
+        // 8×8 block of this pattern ≈ 16384 ⇒ log2(1 + 16384/25) ≈ 9.4.
+        for y in 0..h {
+            for x in 0..w {
+                let v: u8 = if (x + y) % 2 == 0 { 0 } else { 255 };
+                let i = ((y * w + x) * 3) as usize;
+                rgb[i] = v;
+                rgb[i + 1] = v;
+                rgb[i + 2] = v;
+            }
+        }
+        let q = rgb_query(&[AnalysisFeature::InfoWeightMean]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let mean = r
+            .get_f32(AnalysisFeature::InfoWeightMean)
+            .expect("requested");
+        // Lower bound 4 is intentionally loose to cover any future
+        // sampling-budget shifts; expected value is ~9.4 on this
+        // exact pattern.
+        assert!(
+            mean > 4.0,
+            "high-contrast checkerboard info_weight_mean should be ≫ 0, got {mean}"
+        );
+        assert!(
+            mean.is_finite(),
+            "info_weight_mean must always be finite, got {mean}"
+        );
+    }
+
+    /// Synth photo content: every output value is finite and in the
+    /// documented range. Catches accidental NaN / inf propagation
+    /// (e.g. div-by-zero on degenerate denominators).
+    #[test]
+    fn synthetic_photo_outputs_are_finite_and_in_range() {
+        let rgb = synth_rgb(256, 256, 0xC0FFEE);
+        let q = rgb_query(&[
+            AnalysisFeature::ChromaLumaCovarianceCb,
+            AnalysisFeature::ChromaLumaCovarianceCr,
+            AnalysisFeature::InfoWeightMean,
+            AnalysisFeature::InfoWeightP90,
+            AnalysisFeature::OrientationEnergyRatio,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, 256, 256), &q).unwrap();
+        let cov_cb = r.get_f32(AnalysisFeature::ChromaLumaCovarianceCb).unwrap();
+        let cov_cr = r.get_f32(AnalysisFeature::ChromaLumaCovarianceCr).unwrap();
+        let iw_m = r.get_f32(AnalysisFeature::InfoWeightMean).unwrap();
+        let iw_p = r.get_f32(AnalysisFeature::InfoWeightP90).unwrap();
+        let ori = r.get_f32(AnalysisFeature::OrientationEnergyRatio).unwrap();
+        assert!(cov_cb.is_finite() && (-1.0..=1.0).contains(&cov_cb));
+        assert!(cov_cr.is_finite() && (-1.0..=1.0).contains(&cov_cr));
+        assert!(iw_m.is_finite() && iw_m >= 0.0);
+        assert!(iw_p.is_finite() && iw_p >= 0.0);
+        assert!(ori.is_finite() && ori >= 1.0);
+    }
+
+    /// Below the Tier-3 minimum-sample floor, `info_weight_p90` is
+    /// statistically meaningless — the writer emits `f32::NAN` and
+    /// `AnalysisResults::set` drops it from the result, so `get`
+    /// returns `None`. The mean stays meaningful.
+    #[test]
+    fn tiny_image_drops_info_weight_p90_keeps_mean() {
+        // 32×32 → 16 blocks, well under the MIN_BLOCKS_FOR_PERCENTILE
+        // floor that gates the Tier-3 percentile reads.
+        let rgb = synth_rgb(32, 32, 0xDEAD);
+        let q = rgb_query(&[
+            AnalysisFeature::InfoWeightMean,
+            AnalysisFeature::InfoWeightP90,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, 32, 32), &q).unwrap();
+        // Mean survives (no minimum-block floor on it).
+        assert!(
+            r.get_f32(AnalysisFeature::InfoWeightMean)
+                .is_some_and(|x| x.is_finite()),
+            "info_weight_mean must survive on tiny image"
+        );
+        // p90 drops — the floor's NaN sentinel makes `set` skip it,
+        // so `get` returns None.
+        assert!(
+            r.get(AnalysisFeature::InfoWeightP90).is_none(),
+            "info_weight_p90 should be filtered out on tiny image"
+        );
+    }
+}

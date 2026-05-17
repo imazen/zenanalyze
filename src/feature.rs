@@ -1120,6 +1120,85 @@ features_table! {
     /// That id is reserved retired.
     #[cfg(feature = "experimental")]
     PaletteLog2Size = 121 : u32 => palette_log2_size,
+
+    // ---------------- HVS-derived features (proposal 2026-05-17) ----
+    // Top-3 candidates from `benchmarks/hvs_feature_proposals_2026-05-17.md`,
+    // implemented behind `experimental` for ablation. All piggyback on
+    // existing tier passes — no new full-image walks.
+
+    /// `f32`. Pearson correlation between BT.601 luma `Y` and the
+    /// stripe-sampled chroma channel `Cb = (B − Y) / 255` over the
+    /// Tier-1 sweep. Range `[−1, 1]`; `0.0` means uncorrelated; a
+    /// strongly negative or positive value means chroma tracks luma
+    /// (or its inverse) and a chroma-from-luma prediction mode pays
+    /// off.
+    ///
+    /// **Why:** AVIF / AV1 CfL and JXL XYB exploit Y↔Cb / Y↔Cr
+    /// covariance; baseline JPEG cannot. A picker that sees high
+    /// `|covariance|` should bias toward those codecs.
+    ///
+    /// **Edge cases:** returns `0.0` when either Y or Cb has zero
+    /// variance (constant-colour or grayscale images) — undefined
+    /// Pearson, but `0.0` ("no exploitable signal") is the right
+    /// fallback for the picker.
+    ///
+    /// **Cost:** ~0.1 ms/MP — adds `ΣY·Cb` to the existing Tier-1
+    /// SIMD accumulators; one FMA per chunk inside the already-AVX2
+    /// region.
+    ///
+    /// Cite: Bross et al., AV1 CfL design, IEEE TIP 2018.
+    #[cfg(feature = "experimental")]
+    ChromaLumaCovarianceCb = 132 : f32 => chroma_luma_covariance_cb,
+
+    /// `f32`. Pearson correlation between luma `Y` and `Cr = (R − Y) /
+    /// 255` — same construction as
+    /// [`Self::ChromaLumaCovarianceCb`].
+    #[cfg(feature = "experimental")]
+    ChromaLumaCovarianceCr = 133 : f32 => chroma_luma_covariance_cr,
+
+    /// `f32`. Mean of the Wang-Li 2011 IW-SSIM local-information
+    /// weight `w(x) = log2(1 + σ²_p(x) / σ²_e)` over sampled 8×8 luma
+    /// blocks. `σ²_p` is the per-block luma variance; `σ²_e` is a
+    /// noise-floor reference (uses the existing
+    /// [`Self::NoiseFloorY`] scaled to the 0-255 luma variance scale
+    /// when that feature is requested, else a constant `25.0` on the
+    /// 0-255 luma scale).
+    ///
+    /// **Why:** measures where the eye attends; high spread between
+    /// mean and p90 predicts AVIF / JXL adaptive-quant wins.
+    /// zensim's `iw_pool.rs` runs the same formula internally.
+    ///
+    /// **Cost:** ~1.5 ms/MP — piggybacks on the Tier-3 sampled-block
+    /// DCT pass that already computes per-block luma values.
+    /// Cite: Wang & Li, IEEE TIP 2011.
+    #[cfg(feature = "experimental")]
+    InfoWeightMean = 134 : f32 => info_weight_mean,
+
+    /// `f32`. 90th-percentile of the same per-block IW-SSIM weight as
+    /// [`Self::InfoWeightMean`]. High p90 with low mean ⇒ heterogeneous
+    /// content (a few highly-informative blocks among many flat ones)
+    /// — AQ pays off. Returns `f32::NAN` below the Tier-3
+    /// minimum-blocks-for-percentile floor.
+    #[cfg(feature = "experimental")]
+    InfoWeightP90 = 135 : f32 => info_weight_p90,
+
+    /// `f32`. Anisotropy of the luma gradient field, computed as
+    /// `max(Σ |G_θ|) / mean(Σ |G_θ|)` over `θ ∈ {0°, 45°, 90°,
+    /// 135°}`. Axis-aligned content (text / UI / charts) ⇒ values
+    /// `≫ 1` (one orientation dominates); isotropic photographic
+    /// content ⇒ `≈ 1.0`.
+    ///
+    /// **Why:** AV1 / JXL have directional transforms that pay off
+    /// on axis-aligned content; JPEG's separable 8×8 DCT doesn't.
+    /// Existing [`Self::EdgeSlopeStdev`] measures magnitude spread,
+    /// not direction; this is the missing axis.
+    ///
+    /// **Cost:** ~1.0 ms/MP — reuses the Tier-1 stripe-sampled
+    /// gradient sweep. Discrete kernels: `0°: L_right − L_left`,
+    /// `90°: L_down − L_up`, `45°: L_dr − L_ul`, `135°: L_dl − L_ur`.
+    /// Cite: Freeman & Adelson, IEEE TPAMI 1991.
+    #[cfg(feature = "experimental")]
+    OrientationEnergyRatio = 136 : f32 => orientation_energy_ratio,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1541,6 +1620,14 @@ pub(crate) const TIER1_EXTRAS_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::LaplacianVariance);
         s = s.with(AnalysisFeature::SkinToneFraction);
         s = s.with(AnalysisFeature::EdgeSlopeStdev);
+        // HVS 2026-05-17: Pearson cross-products need luma sums →
+        // gate the Tier-1 FULL kernel on.
+        s = s.with(AnalysisFeature::ChromaLumaCovarianceCb);
+        s = s.with(AnalysisFeature::ChromaLumaCovarianceCr);
+        // HVS 2026-05-17: orientation kernels piggyback the edge
+        // sweep — gated through `wants_full_kernel` for the per-axis
+        // sums + their writeback in `extract_tier1_into_dispatch`.
+        s = s.with(AnalysisFeature::OrientationEnergyRatio);
     }
     s
 };
@@ -1561,6 +1648,11 @@ pub(crate) const TIER1_FULL_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::Colourfulness);
         s = s.with(AnalysisFeature::LaplacianVariance);
         s = s.with(AnalysisFeature::EdgeSlopeStdev);
+        // HVS 2026-05-17: Y·Cb / Y·Cr cross-product accumulators
+        // and orientation-energy kernels both ride the FULL pass.
+        s = s.with(AnalysisFeature::ChromaLumaCovarianceCb);
+        s = s.with(AnalysisFeature::ChromaLumaCovarianceCr);
+        s = s.with(AnalysisFeature::OrientationEnergyRatio);
     }
     s
 };
@@ -1633,6 +1725,11 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP25);
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
+        // HVS info-weight (2026-05-17). Driven by per-block luma
+        // variance computed alongside the existing Tier-3 DCT block
+        // pass.
+        s = s.with(AnalysisFeature::InfoWeightMean);
+        s = s.with(AnalysisFeature::InfoWeightP90);
     }
     s
 };
@@ -1689,6 +1786,10 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         s = s.with(AnalysisFeature::QuantSurvivalUvP25);
         s = s.with(AnalysisFeature::QuantSurvivalUvP50);
         s = s.with(AnalysisFeature::QuantSurvivalUvP75);
+        // HVS info-weight (2026-05-17) — needs the per-block luma
+        // 8×8 array, which is only built inside `dct_stats`.
+        s = s.with(AnalysisFeature::InfoWeightMean);
+        s = s.with(AnalysisFeature::InfoWeightP90);
     }
     s
 };
@@ -2126,9 +2227,12 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the palette redefinition (id 121
-        // is now `PaletteLog2Size`).
+        // First unused id past the HVS-feature block added 2026-05-17
+        // (ids 132..136). Bump when new ids land beyond 136.
         assert!(AnalysisFeature::from_u16(122).is_none());
+        assert!(AnalysisFeature::from_u16(123).is_none());
+        assert!(AnalysisFeature::from_u16(124).is_none());
+        assert!(AnalysisFeature::from_u16(137).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -2184,11 +2288,11 @@ mod tests {
         // returns `None` for both kinds of holes, so a single
         // `if let Some(f) = …` walk handles them uniformly.
         let mut active = 0u32;
-        // Iterate past the dimension features (max id 67 today). Bump
-        // the upper bound when new ids land — `assert_eq!` below
-        // catches drift between SUPPORTED.len() and this loop's
-        // walked range.
-        for id in 0..128u16 {
+        // Iterate past the HVS-feature block (max id 136 as of
+        // 2026-05-17). Bump the upper bound when new ids land —
+        // `assert_eq!` below catches drift between SUPPORTED.len() and
+        // this loop's walked range.
+        for id in 0..160u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }

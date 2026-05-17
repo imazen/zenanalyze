@@ -135,6 +135,8 @@ pub fn populate_tier3(
             out.quant_survival_uv_p25 = dct.quant_survival_uv_p25;
             out.quant_survival_uv_p50 = dct.quant_survival_uv_p50;
             out.quant_survival_uv_p75 = dct.quant_survival_uv_p75;
+            out.info_weight_mean = dct.info_weight_mean;
+            out.info_weight_p90 = dct.info_weight_p90;
         }
         #[cfg(not(feature = "experimental"))]
         {
@@ -150,6 +152,8 @@ pub fn populate_tier3(
                 dct.patch_fraction_fast,
                 dct.quant_survival_y,
                 dct.quant_survival_uv,
+                dct.info_weight_mean,
+                dct.info_weight_p90,
             );
         }
     }
@@ -260,6 +264,16 @@ struct Tier3DctStats {
     quant_survival_uv_p25: f32,
     quant_survival_uv_p50: f32,
     quant_survival_uv_p75: f32,
+    /// HVS info-weight (Wang-Li 2011 IW-SSIM) mean over sampled
+    /// luma 8×8 blocks: `w(x) = log2(1 + σ²_p / σ²_e)` with
+    /// `σ²_e = 25.0` (matches the `Uniformity` flat-block threshold
+    /// on the 0-255 luma scale). Mean across blocks_sampled blocks.
+    /// 0 in non-experimental builds.
+    info_weight_mean: f32,
+    /// HVS info-weight 90th percentile. `f32::NAN` below
+    /// `MIN_BLOCKS_FOR_PERCENTILE` (the same gating as
+    /// `aq_map_pN`); 0 in non-experimental builds.
+    info_weight_p90: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -910,6 +924,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             quant_survival_uv_p25: 0.0,
             quant_survival_uv_p50: 0.0,
             quant_survival_uv_p75: 0.0,
+            info_weight_mean: 0.0,
+            info_weight_p90: 0.0,
         };
     }
     // Per-primaries luma weights — used in the per-block fixed-point
@@ -968,6 +984,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             quant_survival_uv_p25: 0.0,
             quant_survival_uv_p50: 0.0,
             quant_survival_uv_p75: 0.0,
+            info_weight_mean: 0.0,
+            info_weight_p90: 0.0,
         };
     }
     let stride = (total_blocks / max_blocks).max(1);
@@ -1017,6 +1035,14 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let mut quant_y_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
     #[cfg(feature = "experimental")]
     let mut quant_uv_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
+    // HVS info-weight (Wang-Li 2011): per-block
+    // `w = log2(1 + σ²_p / σ²_e)` where σ²_p is the 8×8 luma variance
+    // and σ²_e is a fixed noise reference. The reference 25.0 (≈ σ=5
+    // luma units on the 0-255 scale) matches the `Uniformity` flat-
+    // block threshold — a block at the noise floor reads `w ≈ 1.0`,
+    // a busy block lifts toward `log2(σ²_p/25)`.
+    #[cfg(feature = "experimental")]
+    let mut info_weight_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
     let row_bytes = width * 3;
     let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
     let mut block_idx = 0usize;
@@ -1179,6 +1205,29 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                 let q_uv = q_cb.max(q_cr);
                 quant_uv_sum += q_uv as f64;
                 quant_uv_blocks.push(q_uv);
+                // HVS info-weight: per-block 8×8 luma variance over
+                // the already-extracted `blk_y` array. `blk_y` is
+                // stored shifted by −128 (zero-mean centering for
+                // DCT input); variance is shift-invariant so the
+                // centering doesn't affect the result. Reference
+                // `σ²_e = 25.0` (5-luma noise floor) is fixed; the
+                // log2(1+.) compresses the variance range across
+                // flat (~25) and busy (~5000) blocks onto a useful
+                // 1-8 scale.
+                const SIGMA_E_SQ: f32 = 25.0;
+                let mut sum = 0.0f32;
+                let mut sq = 0.0f32;
+                for row in &blk_y {
+                    for &v in row {
+                        sum += v;
+                        sq += v * v;
+                    }
+                }
+                let n = 64.0f32;
+                let mean = sum / n;
+                let var = (sq / n - mean * mean).max(0.0);
+                let w = (1.0 + var / SIGMA_E_SQ).log2();
+                info_weight_blocks.push(w);
             }
         }
     }
@@ -1420,6 +1469,34 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         0.0
     };
 
+    // HVS info-weight reductions: mean + p90 over per-block weights.
+    // The p90 takes the same `MIN_BLOCKS_FOR_PERCENTILE` floor (#49)
+    // as the other Tier-3 percentile features — small block counts
+    // make the high-tail read meaningless.
+    #[cfg(feature = "experimental")]
+    let (info_weight_mean, info_weight_p90) = {
+        if info_weight_blocks.is_empty() {
+            (0.0f32, 0.0f32)
+        } else {
+            let n = info_weight_blocks.len() as f32;
+            let sum: f32 = info_weight_blocks.iter().sum();
+            let mean = sum / n;
+            let p90 = if blocks_sampled >= MIN_BLOCKS_FOR_PERCENTILE {
+                let mut sorted = info_weight_blocks.clone();
+                sorted.sort_unstable_by(|a, b| {
+                    a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal)
+                });
+                let idx = ((sorted.len() as f32 * 0.90) as usize).min(sorted.len() - 1);
+                sorted[idx]
+            } else {
+                f32::NAN
+            };
+            (mean, p90)
+        }
+    };
+    #[cfg(not(feature = "experimental"))]
+    let (info_weight_mean, info_weight_p90) = (0.0f32, 0.0f32);
+
     #[cfg(not(feature = "experimental"))]
     let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
     #[cfg(not(feature = "experimental"))]
@@ -1478,6 +1555,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p25,
         quant_survival_uv_p50,
         quant_survival_uv_p75,
+        info_weight_mean,
+        info_weight_p90,
     }
 }
 

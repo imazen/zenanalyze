@@ -171,6 +171,27 @@ struct PixelStats {
     edge_grad_sum: f64,
     edge_grad_sq_sum: f64,
     edge_grad_count: u64,
+    /// Cross-product sums `Σ Y·Cb` and `Σ Y·Cr` for HVS feature
+    /// `ChromaLumaCovariance{Cb,Cr}` (proposal 2026-05-17, ids 132/133).
+    /// Y is BT.601 luma in `[0, 255]`; Cb / Cr are the normalized
+    /// `(B−Y)/255` and `(R−Y)/255` already accumulated lane-wise.
+    /// Combined with `luma_sum/sq` and `cb_sum/sq`, `cr_sum/sq` to
+    /// form Pearson coefficients at row close. Always-on accumulators
+    /// — the SIMD path const-folds away on `!FULL` builds via the
+    /// outer dispatcher, but they ride the same flush as `cb_sum`.
+    y_cb_sum: f64,
+    y_cr_sum: f64,
+    /// Per-orientation absolute-gradient sums for HVS feature
+    /// `OrientationEnergyRatio` (proposal 2026-05-17, id 136). Each
+    /// holds `Σ |G_θ|` over interior stripe pixels for one of the four
+    /// discrete kernels (0°, 45°, 90°, 135°). Computed inside the
+    /// existing edge inner loop using neighbours already loaded for
+    /// the `edge_count` / `edge_grad_*` accumulators.
+    orient_sum_0: f64,
+    orient_sum_45: f64,
+    orient_sum_90: f64,
+    orient_sum_135: f64,
+    orient_count: u64,
 }
 
 impl Default for PixelStats {
@@ -200,6 +221,13 @@ impl Default for PixelStats {
             edge_grad_sum: 0.0,
             edge_grad_sq_sum: 0.0,
             edge_grad_count: 0,
+            y_cb_sum: 0.0,
+            y_cr_sum: 0.0,
+            orient_sum_0: 0.0,
+            orient_sum_45: 0.0,
+            orient_sum_90: 0.0,
+            orient_sum_135: 0.0,
+            orient_count: 0,
         }
     }
 }
@@ -230,6 +258,13 @@ impl PixelStats {
         self.edge_grad_sum += o.edge_grad_sum;
         self.edge_grad_sq_sum += o.edge_grad_sq_sum;
         self.edge_grad_count += o.edge_grad_count;
+        self.y_cb_sum += o.y_cb_sum;
+        self.y_cr_sum += o.y_cr_sum;
+        self.orient_sum_0 += o.orient_sum_0;
+        self.orient_sum_45 += o.orient_sum_45;
+        self.orient_sum_90 += o.orient_sum_90;
+        self.orient_sum_135 += o.orient_sum_135;
+        self.orient_count += o.orient_count;
     }
 }
 
@@ -761,6 +796,81 @@ pub(crate) fn extract_tier1_into_dispatch(
             0.0
         };
     }
+    // HVS chroma-luma covariance: Pearson(Y, Cb) and Pearson(Y, Cr)
+    // over Tier-1 stripe samples. Uses the FULL-gated `luma_sum/sq`
+    // accumulators that drive `Variance`, plus the cross-products
+    // `y_cb_sum` / `y_cr_sum` folded into the FULL SIMD path.
+    //
+    // Pearson(X, Y) = (n·ΣXY − ΣX·ΣY) / sqrt((n·ΣX² − (ΣX)²) · (n·ΣY² − (ΣY)²))
+    //
+    // Returns 0.0 when either marginal variance is degenerate
+    // (grayscale → Cb=Cr=0 → zero Cb variance → undefined Pearson;
+    // 0.0 is the right fallback for the picker — "no exploitable
+    // chroma-luma signal").
+    #[cfg(feature = "experimental")]
+    {
+        if n >= 2.0 && dispatch.wants_full_kernel {
+            let lc = stats.luma_sum;
+            let lsq = stats.luma_sq_sum;
+            let l_var_term = (n * lsq - lc * lc).max(0.0);
+            let cb_term = stats.cb_sum;
+            let cb_sq_term = stats.cb_sq_sum;
+            let cb_var_term = (n * cb_sq_term - cb_term * cb_term).max(0.0);
+            let cr_term = stats.cr_sum;
+            let cr_sq_term = stats.cr_sq_sum;
+            let cr_var_term = (n * cr_sq_term - cr_term * cr_term).max(0.0);
+            let cov_cb_num = n * stats.y_cb_sum - lc * cb_term;
+            let cov_cr_num = n * stats.y_cr_sum - lc * cr_term;
+            let denom_cb = (l_var_term * cb_var_term).sqrt();
+            let denom_cr = (l_var_term * cr_var_term).sqrt();
+            // Threshold below which the denominator is numerically
+            // indistinguishable from zero — protects against the
+            // catastrophic-cancellation case on constant-colour
+            // patches. Picked so a `Pearson` value emitted here is
+            // accurate to ≥ 3 decimal digits.
+            const PEARSON_DENOM_FLOOR: f64 = 1e-6;
+            out.chroma_luma_covariance_cb = if denom_cb > PEARSON_DENOM_FLOOR {
+                (cov_cb_num / denom_cb).clamp(-1.0, 1.0) as f32
+            } else {
+                0.0
+            };
+            out.chroma_luma_covariance_cr = if denom_cr > PEARSON_DENOM_FLOOR {
+                (cov_cr_num / denom_cr).clamp(-1.0, 1.0) as f32
+            } else {
+                0.0
+            };
+        } else {
+            out.chroma_luma_covariance_cb = 0.0;
+            out.chroma_luma_covariance_cr = 0.0;
+        }
+    }
+    // HVS orientation-energy ratio: max(Σ |G_θ|) / mean(Σ |G_θ|)
+    // over θ ∈ {0°, 45°, 90°, 135°}. Bias-free baseline = 1.0
+    // (isotropic). Axis-aligned content (text / charts) lifts the
+    // max well above the mean. Mean instead of min avoids the
+    // degenerate "min = 0" case on perfectly axis-aligned synthetic
+    // patterns (horizontal stripes have G_90 ≫ 0 but G_0 ≈ 0).
+    #[cfg(feature = "experimental")]
+    {
+        out.orientation_energy_ratio = if stats.orient_count > 0 && dispatch.wants_full_kernel {
+            let s0 = stats.orient_sum_0;
+            let s45 = stats.orient_sum_45;
+            let s90 = stats.orient_sum_90;
+            let s135 = stats.orient_sum_135;
+            let mean_sum = (s0 + s45 + s90 + s135) * 0.25;
+            let max_sum = s0.max(s45).max(s90).max(s135);
+            if mean_sum > 1e-6 {
+                (max_sum / mean_sum) as f32
+            } else {
+                // All four sums are ~0 → totally flat content;
+                // isotropic by definition.
+                1.0
+            }
+        } else {
+            // Defaulted-empty; no edge pixels sampled.
+            1.0
+        };
+    }
     // Suppress "unused variable" warnings on the always-computed
     // accumulators when the experimental writes are gated out.
     #[cfg(not(feature = "experimental"))]
@@ -1128,6 +1238,12 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let mut rg_sq_sum: f64 = 0.0;
     let mut yb_sum: f64 = 0.0;
     let mut yb_sq_sum: f64 = 0.0;
+    // HVS chroma-luma covariance accumulators (FULL-gated; ride the
+    // same flush as `luma_sum`). Cross-products `Σ Y·Cb` and
+    // `Σ Y·Cr` over stripe samples; combined with luma + cb/cr sums
+    // and sums-of-squares to form Pearson at row close.
+    let mut y_cb_sum: f64 = 0.0;
+    let mut y_cr_sum: f64 = 0.0;
 
     let row = &rgb[row_off..row_off + width * 3];
     let next_row = next_row_off.map(|nr| &rgb[nr..nr + width * 3]);
@@ -1182,6 +1298,11 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let mut yb_sum_v = f32x8::zero(token);
     let mut yb_sq_v = f32x8::zero(token);
     let mut skin_count_v = f32x8::zero(token);
+    // HVS cross-product lane accumulators (FULL-gated): `Σ l·cb` /
+    // `Σ l·cr` per chunk. One FMA each per 8-pixel chunk on top of
+    // the FULL kernel.
+    let mut y_cb_sum_v = f32x8::zero(token);
+    let mut y_cr_sum_v = f32x8::zero(token);
 
     const FLUSH: usize = 32;
     let mut iters_since_flush = 0usize;
@@ -1223,6 +1344,11 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             rg_sq_v = rg.mul_add(rg, rg_sq_v);
             yb_sum_v += yb;
             yb_sq_v = yb.mul_add(yb, yb_sq_v);
+            // HVS chroma-luma cross-products: `l·cb`, `l·cr`. Two
+            // additional FMAs per chunk; cb/cr are already in lane
+            // registers from the always-on chroma path above.
+            y_cb_sum_v = l.mul_add(cb, y_cb_sum_v);
+            y_cr_sum_v = l.mul_add(cr, y_cr_sum_v);
         }
         // SKIN-only accumulators: BT.601 chroma matrix in [0, 255]
         // for the Chai-Ngan skin-tone gate. Const-folds away on
@@ -1260,12 +1386,16 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 rg_sq_sum += rg_sq_v.reduce_add() as f64;
                 yb_sum += yb_sum_v.reduce_add() as f64;
                 yb_sq_sum += yb_sq_v.reduce_add() as f64;
+                y_cb_sum += y_cb_sum_v.reduce_add() as f64;
+                y_cr_sum += y_cr_sum_v.reduce_add() as f64;
                 luma_sum_v = f32x8::zero(token);
                 luma_sq_v = f32x8::zero(token);
                 rg_sum_v = f32x8::zero(token);
                 rg_sq_v = f32x8::zero(token);
                 yb_sum_v = f32x8::zero(token);
                 yb_sq_v = f32x8::zero(token);
+                y_cb_sum_v = f32x8::zero(token);
+                y_cr_sum_v = f32x8::zero(token);
             }
             if SKIN {
                 skin_count += skin_count_v.reduce_add() as u64;
@@ -1286,6 +1416,8 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         rg_sq_sum += rg_sq_v.reduce_add() as f64;
         yb_sum += yb_sum_v.reduce_add() as f64;
         yb_sq_sum += yb_sq_v.reduce_add() as f64;
+        y_cb_sum += y_cb_sum_v.reduce_add() as f64;
+        y_cr_sum += y_cr_sum_v.reduce_add() as f64;
     }
     if SKIN {
         skin_count += skin_count_v.reduce_add() as u64;
@@ -1314,6 +1446,8 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             rg_sq_sum += (rg * rg) as f64;
             yb_sum += yb as f64;
             yb_sq_sum += (yb * yb) as f64;
+            y_cb_sum += (l * cb) as f64;
+            y_cr_sum += (l * cr) as f64;
         }
         if SKIN {
             // BT.601 chroma in u8 representation for the skin gate.
@@ -1333,6 +1467,23 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let mut cb_grad_sum: f64 = 0.0;
     let mut cr_grad_sum: f64 = 0.0;
     let mut chroma_grad_count: u64 = 0;
+    // HVS orientation-energy accumulators (FULL-gated). Per pixel:
+    //   Gx = L_right − L_cur, Gy = L_down − L_cur
+    //   |G_0|   = |Gx|
+    //   |G_45|  = |Gx + Gy| · (1 / √2)
+    //   |G_90|  = |Gy|
+    //   |G_135| = |Gx − Gy| · (1 / √2)
+    // These are the steerable-basis projections of the discrete
+    // gradient on the four cardinal+diagonal orientations. Sum is
+    // taken over edge-loop interior pixels (each row has W−1 such
+    // pixels). The ratio `max(sum_θ) / mean(sum_θ)` is the published
+    // anisotropy metric.
+    let mut orient_sum_0: f64 = 0.0;
+    let mut orient_sum_45: f64 = 0.0;
+    let mut orient_sum_90: f64 = 0.0;
+    let mut orient_sum_135: f64 = 0.0;
+    let mut orient_count: u64 = 0;
+    const INV_SQRT2: f32 = 0.707_106_77_f32;
 
     if width > 1 {
         let edge_end = (width - 1) * 3;
@@ -1378,11 +1529,13 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 cr_grad_sum += cr_g;
                 chroma_grad_count += 1;
 
+                let mut gy: f32 = 0.0;
                 if has_next {
                     let ld = kr * d_chunk[i * 3] as f32
                         + kg * d_chunk[i * 3 + 1] as f32
                         + kb * d_chunk[i * 3 + 2] as f32;
-                    grad_sq += (ld - l) * (ld - l);
+                    gy = ld - l;
+                    grad_sq += gy * gy;
                 }
                 let crossed = grad_sq > EDGE_THRESH_SQ;
                 edge_count += crossed as u64;
@@ -1390,6 +1543,19 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                     edge_grad_count += crossed as u64;
                     grad_sq_arr[i] = grad_sq;
                     mask_arr[i] = crossed as u32 as f32;
+                    // HVS orientation kernels: steerable projections
+                    // of `Gx = gx` (= `lr - l`) and `Gy = gy`
+                    // (= `ld - l`, 0 when no `has_next`). Only count
+                    // pixels where both neighbours existed so
+                    // `mean(Σ_θ)` isn't biased by the bottom row
+                    // contributing 0 to two of four sums.
+                    if has_next {
+                        orient_sum_0 += gx.abs() as f64;
+                        orient_sum_90 += gy.abs() as f64;
+                        orient_sum_45 += ((gx + gy).abs() * INV_SQRT2) as f64;
+                        orient_sum_135 += ((gx - gy).abs() * INV_SQRT2) as f64;
+                        orient_count += 1;
+                    }
                 }
             }
             if FULL {
@@ -1444,11 +1610,13 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             cb_grad_sum += cb_g;
             cr_grad_sum += cr_g;
             chroma_grad_count += 1;
+            let mut gy: f32 = 0.0;
             if has_next {
                 let doff = next_row_off.unwrap() + x * 3;
                 let ld =
                     kr * rgb[doff] as f32 + kg * rgb[doff + 1] as f32 + kb * rgb[doff + 2] as f32;
-                grad_sq += (ld - l) * (ld - l);
+                gy = ld - l;
+                grad_sq += gy * gy;
             }
             let crossed = grad_sq > EDGE_THRESH_SQ;
             edge_count += crossed as u64;
@@ -1458,6 +1626,13 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 let g_mag = grad_sq.sqrt();
                 edge_grad_sum += (g_mag * mask) as f64;
                 edge_grad_sq_sum += (grad_sq * mask) as f64;
+                if has_next {
+                    orient_sum_0 += gx.abs() as f64;
+                    orient_sum_90 += gy.abs() as f64;
+                    orient_sum_45 += ((gx + gy).abs() * INV_SQRT2) as f64;
+                    orient_sum_135 += ((gx - gy).abs() * INV_SQRT2) as f64;
+                    orient_count += 1;
+                }
             }
         }
     }
@@ -1481,6 +1656,13 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         rg_sq_sum,
         yb_sum,
         yb_sq_sum,
+        y_cb_sum,
+        y_cr_sum,
+        orient_sum_0,
+        orient_sum_45,
+        orient_sum_90,
+        orient_sum_135,
+        orient_count,
         // Laplacian fields are populated by `accumulate_laplacian_row`
         // below — accumulate_row only sees a 2-row window so it can't
         // compute a 4-neighbour Laplacian.
