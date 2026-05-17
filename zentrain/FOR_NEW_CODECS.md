@@ -178,29 +178,28 @@ Then run from your codec's repo:
 ```bash
 PYTHONPATH=<zenanalyze>/zentrain/examples:<zenanalyze>/zentrain/tools \
     python3 <zenanalyze>/zentrain/tools/train_hybrid.py \
-        --codec-config zenwidget_picker_config \
-        --activation leakyrelu
+        --codec-config zenwidget_picker_config
 ```
 
-**Use `--activation leakyrelu` for fast training.** The default
-`--activation relu` routes the student MLP fit through sklearn's
-single-threaded `MLPRegressor.fit`, which takes **~5–15 minutes** on
-this workload (each Adam matmul is too small for BLAS to extract
-parallelism, and sklearn has no batch-level parallelism). The
-`leakyrelu` path uses a PyTorch student with the same hidden shape,
-init, optimizer, and early-stopping — but runs in **~30 seconds to a
-few minutes** depending on capacity. Same numerics-class output JSON
-either way; the bake + runtime are activation-agnostic. Keep
-`--activation relu` only when you need bit-identical reproduction of
-a pre-leakyrelu sklearn-trained baseline.
+`--activation leakyrelu` is the default. It routes the student MLP
+fit through a PyTorch student with negative_slope=0.01 (same hidden
+shape, init, Adam optimizer, lr/batch schedule, early-stopping as
+the legacy sklearn path) and finishes in **~30 seconds to a few
+minutes** depending on capacity. Pass `--activation relu` only when
+you need bit-identical reproduction of a pre-leakyrelu
+sklearn-trained baseline — that path routes through sklearn's
+single-threaded `MLPRegressor.fit`, takes **~5–15 minutes** on this
+workload (each Adam matmul is too small for BLAS to extract
+parallelism, and sklearn has no batch-level parallelism), and is
+kept around only as a comparison baseline.
 
-End-to-end on a 16-core box with `--activation leakyrelu`: ~30 seconds
+End-to-end on a 16-core box with the default leakyrelu: ~30 seconds
 of MLP fit + ~30 seconds of HistGB teachers ≈ ~1 minute wall-clock
 total. With `--activation relu` it can stretch to ~10 minutes wall.
 
 | Flag | When |
 |---|---|
-| `--activation leakyrelu` | **Strongly recommended for new codecs.** Fast PyTorch student. Default is sklearn-relu and 10–20× slower at the same shape. |
+| `--activation leakyrelu` | **Default.** Fast PyTorch student. Pass `--activation relu` only for sklearn-baseline reproduction (10–20× slower). |
 | `--objective {size_optimal, zensim_strict}` | size_optimal (default) trains mean log-bytes; zensim_strict trains pinball-q99 + per-zq reach gate. Ship both side-by-side |
 | `--bytes-quantile 0.99` | quantile for zensim_strict bytes head |
 | `--reach-threshold 0.99` | per-cell reach-rate floor for zensim_strict gate |

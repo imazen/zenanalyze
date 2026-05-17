@@ -1942,19 +1942,18 @@ def main():
     parser.add_argument(
         "--activation",
         choices=["relu", "leakyrelu"],
-        default="relu",
-        help="Hidden-layer activation. relu (default) trains via "
-        "sklearn `MLPRegressor.fit`, which is single-threaded for "
-        "our matmul size and TYPICALLY 10–20× SLOWER than the "
-        "leakyrelu path. **Use `--activation leakyrelu` for new "
-        "bakes** — it falls through to a PyTorch student with "
-        "negative_slope=0.01 (same MLP shape, same Adam/lr/batch/"
-        "early-stopping schedule) and finishes in seconds-to-minutes "
-        "instead of minutes-to-hours. Both produce a "
-        "`student.coefs_/intercepts_` surface so safety_check, "
-        "diagnostics, and JSON serialization work the same way. "
-        "Keep `relu` only when you need bit-identical reproduction "
-        "of a pre-leakyrelu sklearn-trained baseline.",
+        default="leakyrelu",
+        help="Hidden-layer activation. leakyrelu (default) routes to "
+        "a PyTorch student with negative_slope=0.01 (same MLP shape, "
+        "same Adam/lr/batch/early-stopping schedule as the legacy "
+        "sklearn path) and finishes in seconds-to-minutes. relu falls "
+        "through to sklearn `MLPRegressor.fit`, which is "
+        "single-threaded for our matmul size and TYPICALLY 10–20× "
+        "SLOWER. Keep `relu` only when you need bit-identical "
+        "reproduction of a pre-leakyrelu sklearn-trained baseline. "
+        "Both produce a `student.coefs_/intercepts_` surface so "
+        "safety_check, diagnostics, and JSON serialization work the "
+        "same way.",
     )
     parser.add_argument(
         "--seed",
