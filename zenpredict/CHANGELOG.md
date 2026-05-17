@@ -16,6 +16,30 @@
 
 ### Added
 
+## [0.2.1] - 2026-05-17
+
+### Added
+
+- **5 new stacked `FeatureTransform` variants** identified as universal
+  high-win stacks across zenjpeg / zenwebp / zenavif by the
+  2026-05-17 stacks sweep:
+  - `WinsorThenLog` (params `[p1, p99]`) — `ln(clamp(x, p1, p99))`.
+    The dominant stack winner (12+10+13 wins across codecs).
+  - `WinsorThenLog1p` (params `[p1, p99]`) —
+    `ln(1 + clamp(x, p1, p99))`. Secondary winner.
+  - `WinsorThenSignedCbrt` (params `[p1, p99]`) —
+    `signed_cbrt(clamp(x, p1, p99))`. Scattered wins.
+  - `SignedCbrtThenWinsor` (params `[q1, q99]`) —
+    `clamp(signed_cbrt(x), q1, q99)`. `q1`, `q99` are bounds in
+    cbrt-domain, distinct semantics from `WinsorThenSignedCbrt`.
+  - `ClipThenLog1pThenWinsor` (params `[ε, q1, q99]`) —
+    `clamp(ln(1 + max(0, x − ε)), q1, q99)`. Second most common
+    stack winner (7+8+8).
+  Math mirrors `zentrain/tools/feature_transform_sweep.py`'s
+  `_make_stack` helper byte-identically so bake round-trips match.
+  All five are additive on the `#[non_exhaustive]` enum (no
+  semver break).
+
 - **Multi-codec shared-trunk picker runtime (ZNPR v3.2).** New
   optional `multi_codec_schema` header section (offset 116..124)
   carrying the per-codec scatter map for joint-trained pickers.

@@ -4,6 +4,27 @@
 
 ### Added
 
+- **Bake-side validation for the 5 new stacked `FeatureTransform`
+  variants** (added in `zenpredict` 0.2.1). The composer now parses
+  the optional `zentrain.feature_transforms` /
+  `zentrain.feature_transform_params` metadata pair and rejects
+  before write:
+  - Unknown transform tokens (`UnknownFeatureTransformToken`).
+  - Per-variant param arity mismatches
+    (`FeatureTransformParamArityMismatch`): 1 for `ClipThenLog1p`,
+    2 for `WinsorP99` / `WinsorThenLog` / `WinsorThenLog1p` /
+    `WinsorThenSignedCbrt` / `SignedCbrtThenWinsor`, 3 for
+    `ClipThenLog1pThenWinsor`.
+  - Per-variant domain violations (`FeatureTransformParamInvalid`):
+    `WinsorThenLog` with `p1 ≤ 0`, `WinsorThenLog1p` with `p1 ≤ -1`,
+    inverted bounds, negative `ε` for `ClipThenLog1pThenWinsor`, etc.
+  Catches misspelled tokens and out-of-domain bounds that would
+  produce `NaN` / `-Inf` at runtime. The runtime parser still
+  validates as a second line of defense for hand-constructed bytes.
+  Two existing tests (`unknown_token_rejected_at_load`,
+  `length_mismatch_rejected_at_load`) renamed to `*_at_bake` to
+  reflect the new gate's earlier reject point.
+
 - New unified `zenpredict` CLI binary with three subcommands:
   - `zenpredict bake <input.json> <output.bin>` — delegates to the
     same code path as the legacy `zenpredict-bake` binary.
