@@ -369,11 +369,115 @@ def aggregate_cell_pearson(
             cell_corrs.append(corr)
     if not cell_corrs:
         return float("nan")
-    # Aggregate via mean (each cell weighs equally — codec cells already
-    # represent meaningful encoder-config buckets, so per-cell signal is
-    # the natural unit). Max-aggregate alternative tracked as a future
-    # diagnostic axis.
     return float(np.mean(cell_corrs))
+
+
+def safe_spearman(a: np.ndarray, b: np.ndarray) -> float:
+    """|Spearman rank correlation| over rows where both `a` and `b`
+    are finite. Returns NaN with too few samples or zero-variance
+    rank vectors. Spearman is invariant to MONOTONIC transforms, so
+    single monotone-ish transforms (log, log1p, signed_sqrt/cbrt,
+    signed_log1p, clip_then_log1p) score IDENTICALLY to identity on
+    this metric. Non-monotonic transforms (winsor_p99, quantile_bins,
+    most stacks) can change Spearman by altering the rank order in
+    the saturated regions."""
+    finite = np.isfinite(a) & np.isfinite(b)
+    n = int(finite.sum())
+    if n < 5:
+        return float("nan")
+    aa = a[finite]
+    bb = b[finite]
+    ra = np.argsort(np.argsort(aa)).astype(np.float64)
+    rb = np.argsort(np.argsort(bb)).astype(np.float64)
+    if ra.std() < 1e-12 or rb.std() < 1e-12:
+        return 0.0
+    c = float(np.corrcoef(ra, rb)[0, 1])
+    return abs(c) if math.isfinite(c) else float("nan")
+
+
+def safe_z_rmse_score(a: np.ndarray, b: np.ndarray) -> float:
+    """z-RMSE between z-normalized `a` and `b`, mapped to a
+    higher-is-better score.
+
+    z-RMSE² = mean((a_z - b_z)²) where a_z, b_z are the per-vector
+    z-normalizations (mean 0, std 1). For finite, non-constant inputs:
+
+        z-RMSE² = 2 - 2·Pearson_signed(a, b)
+        score   = 1 - z-RMSE² / 2 = Pearson_signed(a, b)
+
+    So z-RMSE is monotone with SIGNED Pearson. We return signed
+    Pearson here (range [-1, 1], higher = better). Distinct from
+    `safe_pearson` which returns |Pearson| — signed treats
+    anti-correlation as bad, |·| treats it as good. For picker
+    transforms, signed is the stricter test: only reward transforms
+    that make the feature LINE UP with bytes_log, not just track
+    or anti-track.
+
+    Returns NaN on too few samples or zero variance."""
+    finite = np.isfinite(a) & np.isfinite(b)
+    n = int(finite.sum())
+    if n < 5:
+        return float("nan")
+    aa = a[finite]
+    bb = b[finite]
+    if aa.std() < 1e-12 or bb.std() < 1e-12:
+        return float("nan")
+    c = float(np.corrcoef(aa, bb)[0, 1])
+    if not math.isfinite(c):
+        return float("nan")
+    # Signed Pearson; higher = better fit in z-RMSE sense.
+    return c
+
+
+def aggregate_cell_spearman(
+    feat_col: np.ndarray,
+    bytes_log: np.ndarray,
+    reach: np.ndarray,
+) -> float:
+    """Average |Spearman| per cell. Higher = better."""
+    n_cells = bytes_log.shape[1]
+    cell_corrs: list[float] = []
+    for c in range(n_cells):
+        mask = reach[:, c]
+        if mask.sum() < 5:
+            continue
+        corr = safe_spearman(feat_col[mask], bytes_log[mask, c])
+        if not math.isnan(corr):
+            cell_corrs.append(corr)
+    if not cell_corrs:
+        return float("nan")
+    return float(np.mean(cell_corrs))
+
+
+def aggregate_cell_z_rmse(
+    feat_col: np.ndarray,
+    bytes_log: np.ndarray,
+    reach: np.ndarray,
+) -> float:
+    """Average signed-Pearson per cell (z-RMSE-derived score).
+    Higher = better. Distinct from `aggregate_cell_pearson` because
+    SIGNED treats anti-correlation as bad whereas |Pearson| treats
+    it as good. For picker transforms, signed is the stricter test."""
+    n_cells = bytes_log.shape[1]
+    cell_scores: list[float] = []
+    for c in range(n_cells):
+        mask = reach[:, c]
+        if mask.sum() < 5:
+            continue
+        score = safe_z_rmse_score(feat_col[mask], bytes_log[mask, c])
+        if not math.isnan(score):
+            cell_scores.append(score)
+    if not cell_scores:
+        return float("nan")
+    return float(np.mean(cell_scores))
+
+
+# Dispatch table — selected by --screen-metric.
+SCREEN_METRICS = {
+    "pearson": aggregate_cell_pearson,
+    "spearman": aggregate_cell_spearman,
+    "z_rmse": aggregate_cell_z_rmse,
+}
 
 
 def screen_one_feature(
@@ -381,13 +485,18 @@ def screen_one_feature(
     feat_col: np.ndarray,
     bytes_log: np.ndarray,
     reach: np.ndarray,
+    agg_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], float] = aggregate_cell_pearson,
 ) -> dict:
     """Sweep every transform × param config on one feature column and
     return the per-feature winner — a record with the transform token,
-    params, baseline (identity) score, transformed score, and lift."""
+    params, baseline (identity) score, transformed score, and lift.
+
+    `agg_fn` is the per-cell aggregate (Pearson / Spearman / z-RMSE
+    score). All three return higher-is-better in roughly [0, 1].
+    """
     finite = feat_col[np.isfinite(feat_col)]
     feat_min = float(finite.min()) if finite.size else 0.0
-    baseline = aggregate_cell_pearson(feat_col, bytes_log, reach)
+    baseline = agg_fn(feat_col, bytes_log, reach)
     best = {
         "feat_name": feat_name,
         "best_transform": "identity",
@@ -414,7 +523,7 @@ def screen_one_feature(
             continue
         for params in sweep_for(token, feat_col):
             tx = fn(feat_col, params)
-            score = aggregate_cell_pearson(tx, bytes_log, reach)
+            score = agg_fn(tx, bytes_log, reach)
             if math.isnan(score):
                 continue
             lift = score - baseline
@@ -482,7 +591,7 @@ def load_codec_dataset(args) -> tuple[dict, dict, dict, dict, dict, list, dict, 
 # ---------------------------------------------------------------------------
 
 
-def run_screen(data: dict) -> list[dict]:
+def run_screen(data: dict, agg_fn=aggregate_cell_pearson) -> list[dict]:
     """Per-feature Pearson lift screen over all TRANSFORMS × param
     configs. Returns one record per feature, sorted by lift desc."""
     feat_cols = data["feat_cols"]
@@ -496,7 +605,8 @@ def run_screen(data: dict) -> list[dict]:
     t0 = time.monotonic()
     for i, name in enumerate(feat_cols):
         col = Xs_tr[:, i].astype(np.float64)
-        rec = screen_one_feature(name, col, bytes_log_tr, reach_tr)
+        rec = screen_one_feature(name, col, bytes_log_tr, reach_tr,
+                                   agg_fn=agg_fn)
         rec["feat_idx"] = i
         rows.append(rec)
     sys.stderr.write(
@@ -759,6 +869,15 @@ def main() -> int:
                     help="Codec config module (e.g. zenjpeg_picker_config)")
     ap.add_argument("--out", type=Path, required=True,
                     help="Output directory")
+    ap.add_argument("--screen-metric", choices=list(SCREEN_METRICS),
+                    default="pearson",
+                    help="Per-cell aggregate score: pearson (default; "
+                    "|Pearson|), spearman (|rank|), or z_rmse (signed "
+                    "Pearson). Pearson and Spearman accept anti-"
+                    "correlation as good; z_rmse penalizes it. Spearman "
+                    "is rank-invariant — monotone transforms score "
+                    "identically. Use to validate that the per-feature "
+                    "winner doesn't depend on a single metric's noise.")
     ap.add_argument("--min-lift", type=float, default=0.005,
                     help="Emit recommendation rows with lift >= this "
                     "(default 0.005, matches zensim's screen)")
@@ -776,7 +895,9 @@ def main() -> int:
 
     # Phase 1: load + screen.
     data = load_codec_dataset(args)
-    rows = run_screen(data)
+    agg_fn = SCREEN_METRICS[args.screen_metric]
+    sys.stderr.write(f"[screen] metric: {args.screen_metric}\n")
+    rows = run_screen(data, agg_fn=agg_fn)
 
     screen_path = args.out / "screen_results.tsv"
     write_screen_tsv(rows, screen_path)
