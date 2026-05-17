@@ -1,0 +1,34 @@
+{
+  "codec_config": "zenjpeg_picker_config",
+  "k_heads": 8,
+  "hidden": [
+    192,
+    192,
+    192
+  ],
+  "n_cells": 12,
+  "n_train_rows": 23383,
+  "n_val_rows": 5802,
+  "teacher_argmin_acc": 0.5649775939331265,
+  "teacher_mean_overhead_pct": 1.809260090221659,
+  "tabm_argmin_acc": 0.42209582902447434,
+  "tabm_mean_overhead_pct": 7.655554088304517,
+  "tabm_p99_overhead_pct": 51.850831508636475,
+  "tabm_val_mse": 0.48644450306892395,
+  "tabm_fit_seconds": 3.7667805290038814,
+  "tabm_epochs_ran": 150,
+  "tabm_params": 120560,
+  "tabm_per_head_argmin_acc_mean": 0.2963633229920717,
+  "tabm_per_head_argmin_acc_std": 0.02637458198922813,
+  "tabm_per_head_argmin_acc_list": [
+    0.2776628748707342,
+    0.31402964495001723,
+    0.26559806963116167,
+    0.33746983798690106,
+    0.2890382626680455,
+    0.3081695966907963,
+    0.2580144777662875,
+    0.32092381937263015
+  ],
+  "device": "cuda"
+}

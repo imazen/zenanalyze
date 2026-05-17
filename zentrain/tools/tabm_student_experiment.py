@@ -365,7 +365,10 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
     images = sorted({m[0] for m in meta})
     rng.shuffle(images)
-    n_val = max(1, int(len(images) * TH.HOLDOUT_FRAC_DEFAULT))
+    # train_hybrid exposes HOLDOUT_FRAC at module level (default 0.20);
+    # _picker_lib also has HOLDOUT_FRAC_DEFAULT — accept either.
+    holdout_frac = getattr(TH, "HOLDOUT_FRAC", None) or getattr(TH, "HOLDOUT_FRAC_DEFAULT", 0.20)
+    n_val = max(1, int(len(images) * holdout_frac))
     val_set = set(images[:n_val])
     tr = np.array([i for i, m in enumerate(meta) if m[0] not in val_set])
     va = np.array([i for i, m in enumerate(meta) if m[0] in val_set])
