@@ -80,11 +80,29 @@ def _train_torch_leakyrelu_student(
     n_iter_no_change: int = 30,
     tol: float = 1e-6,
     leaky_slope: float = 0.01,
+    hard_example_mode: str = "none",
+    hard_example_alpha: float = 1.0,
+    hard_example_ema_window: int = 5,
+    hard_example_clip: float = 10.0,
 ):
     """Drop-in for `MLPRegressor.fit` returning an object that exposes
     `.coefs_`, `.intercepts_`, `.predict`, `.loss_`, `.n_iter_`. The
     network shape, init, loss (MSE), optimizer (Adam), and early-stopping
     schedule mirror sklearn's defaults so the comparison stays apples-to-apples.
+
+    Hard-example weighting (when `hard_example_mode != "none"`):
+      After each epoch's parameter updates, compute the per-row squared
+      disagreement `mean_j (student_pred_j - Y_tr_j)²` over the FULL
+      internal training slice (one extra O(n) forward pass per epoch).
+      Maintain an EMA across the last N epochs with α_ema = 1 / N. Per-
+      row weight =
+          clip(1 + α · ema[i] / median(ema), 1/clip, clip)
+      For the first `hard_example_ema_window` epochs the row weights stay
+      uniform (no signal yet to weight by). Loss is
+      `mean(weight_b · mean_j (pred_bj − target_bj)²)`. Weighting is
+      internal-only — the val-loss used for early stopping is the
+      unweighted MSE so the stopping criterion stays comparable to the
+      uniform run.
     """
     import torch  # lazy import — only needed when --activation leakyrelu
     import torch.nn as nn
@@ -125,19 +143,61 @@ def _train_torch_leakyrelu_student(
     best_state: dict | None = None
     bad_epochs = 0
     last_loss = float("inf")
+
+    # Hard-example weighting state — uniform until activated (after N
+    # epochs of EMA warmup). When `hard_example_mode == "none"`, this
+    # state is allocated but never touched.
+    use_hew = hard_example_mode == "emae"
+    n_tr = Xt.shape[0]
+    row_weights = torch.ones(n_tr, dtype=torch.float32)
+    # EMA of per-row squared disagreement. NaN = "no observation yet";
+    # flipped to real values after the first full-train forward pass.
+    disagree_ema = torch.full((n_tr,), float("nan"), dtype=torch.float32)
+    ema_alpha = 1.0 / max(1, hard_example_ema_window)
+    w_min = 1.0 / max(hard_example_clip, 1e-6)
+    w_max = hard_example_clip
+
     for epoch in range(max_iter):
         net.train()
-        perm_e = torch.randperm(Xt.shape[0])
-        for i in range(0, Xt.shape[0], batch_size):
+        perm_e = torch.randperm(n_tr)
+        for i in range(0, n_tr, batch_size):
             idx = perm_e[i : i + batch_size]
             xb, yb = Xt[idx], Yt[idx]
             opt.zero_grad()
-            loss = loss_fn(net(xb), yb)
+            if use_hew:
+                pred = net(xb)
+                # mean over output dims, then per-row reweight, then mean
+                # over batch. When row_weights == 1.0 everywhere this is
+                # exactly `MSELoss()(pred, yb)` to float roundoff.
+                per_row_mse = ((pred - yb) ** 2).mean(dim=1)
+                loss = (per_row_mse * row_weights[idx]).mean()
+            else:
+                loss = loss_fn(net(xb), yb)
             loss.backward()
             opt.step()
         net.eval()
         with torch.no_grad():
             v = loss_fn(net(Xv), Yv).item()
+            if use_hew:
+                # One full-train forward to update disagreement EMA.
+                # O(n_tr) per epoch — same order as one extra minibatch
+                # sweep — and dominates the weighting overhead vs the
+                # per-batch reweight. Still tiny vs total epoch cost.
+                pred_full = net(Xt)
+                d = ((pred_full - Yt) ** 2).mean(dim=1)
+                first = torch.isnan(disagree_ema)
+                disagree_ema = torch.where(
+                    first, d, (1.0 - ema_alpha) * disagree_ema + ema_alpha * d
+                )
+                # Warmup: first N epochs run uniform weights (the EMA
+                # has fewer than `window` samples blended in so its
+                # values are noisy / biased toward the very first
+                # observations). After `hard_example_ema_window` full-
+                # train passes, flip to weighted.
+                if epoch + 1 >= hard_example_ema_window:
+                    med = disagree_ema.median().clamp(min=1e-12)
+                    raw_w = 1.0 + hard_example_alpha * disagree_ema / med
+                    row_weights = raw_w.clamp(min=w_min, max=w_max)
         last_loss = v
         if v < best_val - tol:
             best_val = v
@@ -2057,6 +2117,65 @@ def main():
         "same way.",
     )
     parser.add_argument(
+        "--hard-example-weighting",
+        choices=["none", "emae"],
+        default="none",
+        help="Per-row reweighting of the distill MSE loss based on a "
+        "moving average of per-row student-vs-teacher squared "
+        "disagreement. `none` (default) leaves the loss unweighted. "
+        "`emae` (Exponential Moving Average + median normalisation) "
+        "maintains disagree_ema[i] across the last "
+        "--hard-example-ema-window epochs, then per-row weight = "
+        "clip(1 + α · ema[i] / median(ema), 1/clip, clip). The first "
+        "N epochs use uniform weights (no signal yet). LeakyReLU "
+        "backend only — the sklearn ReLU path ignores this. See "
+        "`benchmarks/hard_example_weighting_2026-05-17.md` for the "
+        "measurement that justifies the default.",
+    )
+    parser.add_argument(
+        "--hard-example-alpha",
+        type=float,
+        default=1.0,
+        help="Strength multiplier for the hard-example weight. "
+        "weight = clip(1 + α · ema / median(ema), 1/clip, clip). "
+        "α=0 → uniform; α=1 (default) → at the median disagreement "
+        "the weight is 2.0. Larger α biases harder toward hard rows.",
+    )
+    parser.add_argument(
+        "--hard-example-ema-window",
+        type=int,
+        default=5,
+        help="EMA window (in epochs) for the per-row disagreement "
+        "tracker. `α_ema = 1 / window`. Default 5. First `window` "
+        "epochs run uniform weights so the EMA can warm up.",
+    )
+    parser.add_argument(
+        "--hard-example-clip",
+        type=float,
+        default=10.0,
+        help="Per-row weight clip range = [1/clip, clip]. Default "
+        "10.0 → weights ∈ [0.1, 10.0]. Prevents one outlier row from "
+        "dominating the gradient.",
+    )
+    parser.add_argument(
+        "--out-json",
+        type=Path,
+        default=None,
+        help="Override OUT_JSON path entirely (codec-config OUT_JSON "
+        "ignored). Use when running the trainer from a directory "
+        "where the codec-config relative output paths would write "
+        "into the wrong repo (e.g. running the zenjpeg config from "
+        "the zenjpeg checkout but redirecting bench outputs to "
+        "zenanalyze).",
+    )
+    parser.add_argument(
+        "--out-log",
+        type=Path,
+        default=None,
+        help="Override OUT_LOG path entirely (codec-config OUT_LOG "
+        "ignored). See --out-json.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -2143,6 +2262,15 @@ def main():
     if suffix:
         OUT_JSON = OUT_JSON.with_name(OUT_JSON.stem + suffix + OUT_JSON.suffix)
         OUT_LOG = OUT_LOG.with_name(OUT_LOG.stem + suffix + OUT_LOG.suffix)
+    # --out-json / --out-log override entirely (applied AFTER suffix so
+    # a caller passing both gets the explicit path verbatim, not a
+    # suffix-mutated version).
+    if args.out_json is not None:
+        OUT_JSON = Path(args.out_json)
+        sys.stderr.write(f"  CLI override: OUT_JSON={OUT_JSON}\n")
+    if args.out_log is not None:
+        OUT_LOG = Path(args.out_log)
+        sys.stderr.write(f"  CLI override: OUT_LOG={OUT_LOG}\n")
     sys.stderr.write(
         f"Training objective: {args.objective}\n"
         f"  bytes head loss: "
@@ -2411,8 +2539,20 @@ def main():
     scaler = StandardScaler()
     Xe_tr_s = scaler.fit_transform(Xe_tr)
     Xe_va_s = scaler.transform(Xe_va)
+    if args.hard_example_weighting != "none" and args.activation != "leakyrelu":
+        sys.stderr.write(
+            "  WARNING: --hard-example-weighting is leakyrelu-only; "
+            f"ignored under --activation={args.activation}\n"
+        )
     if args.activation == "leakyrelu":
         sys.stderr.write("  using PyTorch backend (LeakyReLU(0.01))\n")
+        if args.hard_example_weighting != "none":
+            sys.stderr.write(
+                f"  hard-example weighting: mode={args.hard_example_weighting} "
+                f"α={args.hard_example_alpha} ema_window={args.hard_example_ema_window} "
+                f"clip=[{1.0/max(args.hard_example_clip,1e-6):.3f},"
+                f"{args.hard_example_clip:.3f}]\n"
+            )
         student = _train_torch_leakyrelu_student(
             X_tr=Xe_tr_s,
             Y_tr=soft_tr,
@@ -2423,6 +2563,10 @@ def main():
             seed=SEED,
             n_iter_no_change=30,
             tol=1e-6,
+            hard_example_mode=args.hard_example_weighting,
+            hard_example_alpha=args.hard_example_alpha,
+            hard_example_ema_window=args.hard_example_ema_window,
+            hard_example_clip=args.hard_example_clip,
         )
     else:
         student = MLPRegressor(
