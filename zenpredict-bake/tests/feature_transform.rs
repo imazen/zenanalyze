@@ -286,7 +286,10 @@ mod feature_transform_tests {
         })
         .unwrap_err();
         assert!(
-            matches!(err, BakeError::UnknownFeatureTransformToken { feature_index: 2 }),
+            matches!(
+                err,
+                BakeError::UnknownFeatureTransformToken { feature_index: 2 }
+            ),
             "got {err:?}"
         );
     }

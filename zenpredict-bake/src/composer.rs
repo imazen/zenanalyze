@@ -1366,15 +1366,19 @@ fn emit_multi_codec_section(
 /// formed, or when only `feature_transforms` is present (every
 /// transform is then non-parameterized — runtime fallback handles
 /// missing params).
+//
+// `collapsible_match` would have us hoist each `if` into a match
+// guard. Keeping them as `match arm + if` keeps the per-variant
+// reason strings co-located with the rule that produces them, which
+// outweighs the lint's terseness here.
+#[allow(clippy::collapsible_match, clippy::collapsible_if)]
 fn validate_feature_transforms(
     metadata: &[BakeMetadataEntry<'_>],
     n_inputs: usize,
 ) -> Result<(), BakeError> {
     use zenpredict::FeatureTransform;
     use zenpredict::keys;
-    let transforms_entry = metadata
-        .iter()
-        .find(|m| m.key == keys::FEATURE_TRANSFORMS);
+    let transforms_entry = metadata.iter().find(|m| m.key == keys::FEATURE_TRANSFORMS);
     let params_entry = metadata
         .iter()
         .find(|m| m.key == keys::FEATURE_TRANSFORM_PARAMS);

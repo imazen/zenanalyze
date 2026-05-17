@@ -785,7 +785,7 @@ mod tests {
         assert!((y - 8f32.cbrt()).abs() < 1e-6);
         // Below p1=-100: clip to -100, then signed_cbrt(-100) = -cbrt(100).
         let y_lo = t.apply_with_params(-500.0, &[-100.0, 100.0]);
-        assert!((y_lo - (-100f32).abs().cbrt() * -1.0).abs() < 1e-5);
+        assert!((y_lo + (-100f32).abs().cbrt()).abs() < 1e-5);
         // Above p99=100: clip to 100, then cbrt(100).
         let y_hi = t.apply_with_params(500.0, &[-100.0, 100.0]);
         assert!((y_hi - 100f32.cbrt()).abs() < 1e-5);
