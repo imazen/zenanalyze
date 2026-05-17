@@ -83,6 +83,23 @@ pub enum PredictError {
     /// `n_inputs` (or the runtime helper's `transforms` slice
     /// disagreed with `features.len()`).
     FeatureTransformsLenMismatch { expected: usize, got: usize },
+    /// [`crate::Predictor::predict_multi_codec`] was called on a bake
+    /// that lacks a `multi_codec_schema` section. Single-codec
+    /// pickers don't carry the per-codec scatter map and can't be
+    /// driven by the multi-codec entry — call
+    /// [`crate::Predictor::predict`] (or `argmin_masked`) instead.
+    MultiCodecNotSupported,
+    /// `codec_id` passed to [`crate::Predictor::predict_multi_codec`]
+    /// is `>= n_codecs` declared by the bake's schema.
+    UnknownCodecId { codec_id: u32, n_codecs: u32 },
+    /// `codec_features` length passed to
+    /// [`crate::Predictor::predict_multi_codec`] didn't match the
+    /// codec's `union_slot_for_codec_feat.len()` from the schema.
+    CodecFeatureLenMismatch {
+        codec_id: u32,
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl fmt::Display for PredictError {
@@ -175,6 +192,23 @@ impl fmt::Display for PredictError {
             Self::FeatureTransformsLenMismatch { expected, got } => write!(
                 f,
                 "zenpredict: feature_transforms length {got} != expected {expected}"
+            ),
+            Self::MultiCodecNotSupported => write!(
+                f,
+                "zenpredict: predict_multi_codec called on a bake without a \
+                 multi_codec_schema section (single-codec bake)"
+            ),
+            Self::UnknownCodecId { codec_id, n_codecs } => write!(
+                f,
+                "zenpredict: unknown codec_id {codec_id} (bake declares n_codecs={n_codecs})"
+            ),
+            Self::CodecFeatureLenMismatch {
+                codec_id,
+                expected,
+                got,
+            } => write!(
+                f,
+                "zenpredict: codec_features length {got} != expected {expected} for codec_id {codec_id}"
             ),
         }
     }

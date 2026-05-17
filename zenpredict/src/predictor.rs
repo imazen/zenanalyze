@@ -43,6 +43,12 @@ pub struct Predictor<'a> {
     /// to zero otherwise (the no-transform path forwards the input
     /// slice without copying). Reused across calls.
     feat_scratch: alloc::vec::Vec<f32>,
+    /// Scratch buffer for [`Self::predict_multi_codec`]. Sized to
+    /// `n_inputs` when the bake carries a `multi_codec_schema`
+    /// section, zero otherwise. Reused across calls; the active
+    /// prefix is zeroed each call so union slots from a prior
+    /// codec don't leak through.
+    multi_codec_scratch: alloc::vec::Vec<f32>,
 }
 
 impl<'a> Predictor<'a> {
@@ -77,6 +83,11 @@ impl<'a> Predictor<'a> {
         } else {
             0
         };
+        let multi_codec_scratch_len = if model.has_multi_codec_schema() {
+            n_in
+        } else {
+            0
+        };
         Self {
             model,
             scratch_a: alloc::vec![0.0; need],
@@ -85,6 +96,7 @@ impl<'a> Predictor<'a> {
             #[cfg(feature = "advanced")]
             spec_output: alloc::vec![OutputValue::Default; n_out],
             feat_scratch: alloc::vec![0.0; feat_scratch_len],
+            multi_codec_scratch: alloc::vec![0.0; multi_codec_scratch_len],
         }
     }
 
@@ -322,6 +334,135 @@ impl<'a> Predictor<'a> {
     /// [`Model::feature_transforms`]: crate::Model::feature_transforms
     pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
         self.model.feature_transforms()
+    }
+
+    /// Predict for a specific codec given that codec's NATURAL
+    /// feature vector (in the order declared by the per-codec
+    /// `union_slot_for_codec_feat` it was trained on — same shape
+    /// the single-codec path takes today, before union scattering).
+    ///
+    /// The runtime composes the trunk's input vector as:
+    ///
+    /// ```text
+    /// [ union_feat_values (U, 0.0 where this codec lacks the feat),
+    ///   presence_mask     (U, 1.0 in this codec's slots),
+    ///   size_onehot       (4, one-hot on size_class),
+    ///   log_pixels,
+    ///   zq_norm,
+    ///   codec_onehot      (C, one-hot on codec_id) ]
+    /// ```
+    ///
+    /// runs the trunk forward pass, then slices the output to this
+    /// codec's `output_range` (bytes head + scalar heads for the
+    /// requested codec only).
+    ///
+    /// `size_class` is `0..=3` for tiny/small/medium/large; out-of-
+    /// range values silently clamp to 3 (large) — caller bug, but
+    /// not worth a hard error.
+    ///
+    /// # Errors
+    ///
+    /// - [`PredictError::MultiCodecNotSupported`] if the bake has no
+    ///   `multi_codec_schema` section.
+    /// - [`PredictError::UnknownCodecId`] if `codec_id >= n_codecs`.
+    /// - [`PredictError::CodecFeatureLenMismatch`] if
+    ///   `codec_features.len() != schema.per_codec[codec_id].union_slot_for_codec_feat.len()`.
+    pub fn predict_multi_codec(
+        &mut self,
+        codec_id: u32,
+        codec_features: &[f32],
+        size_class: u32,
+        log_pixels: f32,
+        zq_norm: f32,
+    ) -> Result<&[f32], PredictError> {
+        // Step 1: copy everything we need out of the schema before
+        // any &mut borrow of `self`. The parsed schema borrows
+        // `self.model`'s bytes; we can't keep it live across the
+        // upcoming `&mut self.multi_codec_scratch` writes.
+        let (union_count, n_codecs, slots, output_range) = {
+            let schema = self
+                .model
+                .multi_codec_schema()
+                .ok_or(PredictError::MultiCodecNotSupported)?;
+            let n_codecs = schema.n_codecs;
+            if codec_id >= n_codecs {
+                return Err(PredictError::UnknownCodecId {
+                    codec_id,
+                    n_codecs,
+                });
+            }
+            let map = schema.per_codec(codec_id).expect("bounds-checked above");
+            let n_codec_feats = map.union_slot_for_codec_feat.len();
+            if codec_features.len() != n_codec_feats {
+                return Err(PredictError::CodecFeatureLenMismatch {
+                    codec_id,
+                    expected: n_codec_feats,
+                    got: codec_features.len(),
+                });
+            }
+            // The slot table is small (one u32 per per-codec feat,
+            // typically < 200 entries) — clone it onto the heap so
+            // we can drop the schema borrow.
+            let slots: alloc::vec::Vec<u32> = map.union_slot_for_codec_feat.to_vec();
+            (
+                schema.union_feat_count as usize,
+                n_codecs,
+                slots,
+                map.output_range,
+            )
+        };
+
+        let n_inputs = self.model.n_inputs();
+        debug_assert_eq!(
+            n_inputs,
+            2 * union_count + 6 + n_codecs as usize,
+            "load-time validation guarantees this; defended in depth"
+        );
+        if self.multi_codec_scratch.len() < n_inputs {
+            self.multi_codec_scratch.resize(n_inputs, 0.0);
+        }
+
+        // Step 2: compose the trunk input. Zero the active prefix
+        // first — prior calls left values in union slots for a
+        // different codec, and we don't want them to leak. Cheap
+        // since `n_inputs` is small (typically < 300).
+        for v in &mut self.multi_codec_scratch[..n_inputs] {
+            *v = 0.0;
+        }
+        for (i, &slot) in slots.iter().enumerate() {
+            let slot = slot as usize;
+            self.multi_codec_scratch[slot] = codec_features[i];
+            self.multi_codec_scratch[union_count + slot] = 1.0;
+        }
+        let size_off = 2 * union_count;
+        let size_idx = size_class.min(3) as usize;
+        self.multi_codec_scratch[size_off + size_idx] = 1.0;
+        self.multi_codec_scratch[size_off + 4] = log_pixels;
+        self.multi_codec_scratch[size_off + 5] = zq_norm;
+        let codec_off = size_off + 6;
+        self.multi_codec_scratch[codec_off + codec_id as usize] = 1.0;
+
+        // Step 3: run the trunk. Split-borrow self so `forward` can
+        // take disjoint &mut on scratch_a / scratch_b / output while
+        // reading from multi_codec_scratch.
+        let Self {
+            model,
+            scratch_a,
+            scratch_b,
+            output,
+            multi_codec_scratch,
+            ..
+        } = self;
+        let input_slice = &multi_codec_scratch[..n_inputs];
+        crate::inference::forward(model, input_slice, scratch_a, scratch_b, output)?;
+
+        // Step 4: slice to this codec's output head. Parse-time
+        // validates `lo <= hi`; defense-in-depth clamp against the
+        // trunk's actual output length in case of bake corruption.
+        let (lo, hi) = output_range;
+        let lo = (lo as usize).min(output.len());
+        let hi = (hi as usize).min(output.len()).max(lo);
+        Ok(&output[lo..hi])
     }
 
     /// Pick the argmin output index over the masked set.
