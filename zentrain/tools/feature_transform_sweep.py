@@ -869,6 +869,12 @@ def main() -> int:
                     help="Codec config module (e.g. zenjpeg_picker_config)")
     ap.add_argument("--out", type=Path, required=True,
                     help="Output directory")
+    ap.add_argument("--enable-stacks", action="store_true",
+                    help="Include 2-step stacks (winsor_then_log, ...) "
+                    "alongside the 9 single transforms. Stacks are NOT "
+                    "supported by the runtime (zenpredict::FeatureTransform "
+                    "only knows the 9 singles); leave off when generating "
+                    "recommended_transforms.py for an actual bake.")
     ap.add_argument("--screen-metric", choices=list(SCREEN_METRICS),
                     default="pearson",
                     help="Per-cell aggregate score: pearson (default; "
@@ -896,7 +902,17 @@ def main() -> int:
     # Phase 1: load + screen.
     data = load_codec_dataset(args)
     agg_fn = SCREEN_METRICS[args.screen_metric]
-    sys.stderr.write(f"[screen] metric: {args.screen_metric}\n")
+    # Per --enable-stacks: optionally restrict candidate set to singles
+    # only. The runtime supports only singles; stack-enabled runs are
+    # research-only.
+    global ALL_TRANSFORMS
+    if not args.enable_stacks:
+        ALL_TRANSFORMS = dict(TRANSFORMS)
+    sys.stderr.write(
+        f"[screen] metric: {args.screen_metric}; "
+        f"candidate set: {len(ALL_TRANSFORMS)} variants "
+        f"({'singles+stacks' if args.enable_stacks else 'singles only'})\n"
+    )
     rows = run_screen(data, agg_fn=agg_fn)
 
     screen_path = args.out / "screen_results.tsv"
