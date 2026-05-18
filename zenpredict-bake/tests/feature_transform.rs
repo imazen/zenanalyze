@@ -375,25 +375,153 @@ mod feature_transform_tests {
 
     #[test]
     fn sinusoidal_token_round_trips_through_bake() {
-        // Wire-format integration: bake a model declaring one feature
-        // as `sinusoidal`, load it, confirm the parser surfaces the
-        // variant in the right slot. `has_nontrivial_feature_transforms`
-        // must report `true` since Sinusoidal is not Identity.
-        let txt = b"identity\nsinusoidal\nidentity\nidentity";
-        let metadata = [BakeMetadataEntry {
-            key: keys::FEATURE_TRANSFORMS,
-            kind: MetadataType::Utf8,
-            value: txt,
-        }];
-        let bytes = make_identity_passthrough(&metadata);
+        // Wire-format integration: bake a 2-raw-input model with a
+        // Sinusoidal transform on input 1 (2 frequencies ⇒ 4
+        // outputs), plus a passthrough Identity on input 0. Total
+        // expanded input width = 1 + 4 = 5, so the first layer needs
+        // in_dim = 5. `make_expanded_passthrough` is parameterized on
+        // the expanded dim.
+        //
+        // Verifies (a) the parser surfaces both variants, (b) the
+        // Model loader's expander-aware length check passes, and
+        // (c) `has_expander_feature_transforms` reports correctly.
+        let transforms_txt = b"identity\nsinusoidal";
+        let params_txt = b"\n1,2";
+        let bytes = make_expanded_passthrough(5, transforms_txt, params_txt);
         let aligned = Aligned(bytes);
         let model = Model::from_bytes(&aligned.0).unwrap();
         let ts = model.feature_transforms().expect("present");
-        assert_eq!(ts.len(), 4);
+        assert_eq!(ts.len(), 2, "raw input count");
         assert_eq!(ts[0], FeatureTransform::Identity);
         assert_eq!(ts[1], FeatureTransform::Sinusoidal);
         assert!(ts[1].is_expander());
         assert!(ts[1].requires_params());
         assert!(model.has_nontrivial_feature_transforms());
+        assert!(model.has_expander_feature_transforms());
+        assert_eq!(model.expanded_input_dim(), 5);
+        // First layer in_dim is the post-expansion width.
+        assert_eq!(model.n_inputs(), 5);
+    }
+
+    // -----------------------------------------------------------------
+    // Sinusoidal end-to-end through Predictor::predict_transformed
+    // -----------------------------------------------------------------
+
+    /// Bake a single-layer identity-passthrough model whose first
+    /// layer takes `expanded_dim` inputs, with the supplied transform
+    /// + param metadata. Used to assert that
+    /// `Predictor::predict_transformed` runs the expanding pipeline
+    /// and forwards the expanded vector through the network.
+    fn make_expanded_passthrough(
+        expanded_dim: usize,
+        transforms_txt: &[u8],
+        params_txt: &[u8],
+    ) -> Vec<u8> {
+        let scaler_mean = vec![0.0f32; expanded_dim];
+        let scaler_scale = vec![1.0f32; expanded_dim];
+        // Identity weights: dst[i] = src[i] for the expanded vector.
+        let mut w0 = vec![0.0f32; expanded_dim * expanded_dim];
+        for i in 0..expanded_dim {
+            w0[i * expanded_dim + i] = 1.0;
+        }
+        let b0 = vec![0.0f32; expanded_dim];
+        let layers = [BakeLayer {
+            in_dim: expanded_dim,
+            out_dim: expanded_dim,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w0,
+            biases: &b0,
+        }];
+        let metadata = [
+            BakeMetadataEntry {
+                key: keys::FEATURE_TRANSFORMS,
+                kind: MetadataType::Utf8,
+                value: transforms_txt,
+            },
+            BakeMetadataEntry {
+                key: keys::FEATURE_TRANSFORM_PARAMS,
+                kind: MetadataType::Utf8,
+                value: params_txt,
+            },
+        ];
+        bake(&BakeRequest {
+            schema_hash: 0xfeed_face_dead_beef,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &metadata,
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn predictor_routes_sinusoidal_through_expanding_path() {
+        // One raw input, Sinusoidal transform with 2 frequencies →
+        // expanded dim 4: [sin(2π·1·x), cos(2π·1·x), sin(2π·2·x),
+        // cos(2π·2·x)]. Identity-passthrough model means the output
+        // equals the expanded vector.
+        let transforms_txt = b"sinusoidal";
+        let params_txt = b"1,2";
+        let bytes = make_expanded_passthrough(4, transforms_txt, params_txt);
+        let aligned = Aligned(bytes);
+        let model = Model::from_bytes(&aligned.0).unwrap();
+
+        // Bake-load invariants.
+        assert!(model.has_expander_feature_transforms());
+        assert_eq!(model.expanded_input_dim(), 4);
+
+        let mut predictor = Predictor::new(&model);
+
+        // x = 0 ⇒ all sins are 0, all cosines are 1.
+        let out_zero = predictor.predict_transformed(&[0.0]).unwrap().to_vec();
+        assert_eq!(out_zero.len(), 4);
+        assert!((out_zero[0] - 0.0).abs() < 1e-6, "sin(0)=0; got {}", out_zero[0]);
+        assert!((out_zero[1] - 1.0).abs() < 1e-6, "cos(0)=1; got {}", out_zero[1]);
+        assert!((out_zero[2] - 0.0).abs() < 1e-6, "sin(0)=0; got {}", out_zero[2]);
+        assert!((out_zero[3] - 1.0).abs() < 1e-6, "cos(0)=1; got {}", out_zero[3]);
+
+        // x = 0.5, freq=1 ⇒ theta=π ⇒ sin(π)=0, cos(π)=-1.
+        // freq=2 ⇒ theta=2π ⇒ sin(2π)=0, cos(2π)=1.
+        let out_half = predictor.predict_transformed(&[0.5]).unwrap().to_vec();
+        assert!(out_half[0].abs() < 1e-5);
+        assert!((out_half[1] - -1.0).abs() < 1e-5);
+        assert!(out_half[2].abs() < 1e-5);
+        assert!((out_half[3] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn predictor_scalar_path_still_byte_identical_when_no_expander() {
+        // Regression guard: routing through `predict_transformed` on a
+        // bake with only scalar transforms must produce the exact same
+        // output as before this commit. Bake [Identity, Log, Log1p,
+        // Identity] passthrough and confirm.
+        let transforms_txt = b"identity\nlog\nlog1p\nidentity";
+        let metadata = [BakeMetadataEntry {
+            key: keys::FEATURE_TRANSFORMS,
+            kind: MetadataType::Utf8,
+            value: transforms_txt,
+        }];
+        let bytes = make_identity_passthrough(&metadata);
+        let aligned = Aligned(bytes);
+        let model = Model::from_bytes(&aligned.0).unwrap();
+        assert!(!model.has_expander_feature_transforms());
+
+        let mut predictor = Predictor::new(&model);
+        let e = core::f32::consts::E;
+        let out = predictor.predict_transformed(&[1.0, e, 0.0, 7.0]).unwrap().to_vec();
+        assert!((out[0] - 1.0).abs() < 1e-6);
+        assert!((out[1] - 1.0).abs() < 1e-5);
+        assert_eq!(out[2], 0.0);
+        assert_eq!(out[3], 7.0);
     }
 }
