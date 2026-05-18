@@ -240,6 +240,35 @@ mod feature_transform_tests {
     }
 
     #[test]
+    fn predict_with_specs_transformed_routes_sinusoidal() {
+        // Spec-aware path must also auto-route to the expanding
+        // pipeline. Bake: 1 raw input, Sinusoidal at 2 frequencies
+        // ⇒ expanded dim 4 ⇒ identity passthrough emits the
+        // embedding directly. With no output_specs, each output
+        // wraps in OutputValue::Override.
+        let bytes = make_expanded_passthrough(4, b"sinusoidal", b"1,2");
+        let aligned = Aligned(bytes);
+        let model = Model::from_bytes(&aligned.0).unwrap();
+        assert!(model.has_expander_feature_transforms());
+        let mut predictor = Predictor::new(&model);
+
+        // x = 0 ⇒ sins are 0, cosines are 1.
+        let out = predictor.predict_with_specs_transformed(&[0.0]).unwrap();
+        assert_eq!(out.len(), 4);
+        for (i, expected) in [0.0, 1.0, 0.0, 1.0].iter().enumerate() {
+            match out[i] {
+                OutputValue::Override(v) => {
+                    assert!(
+                        (v - expected).abs() < 1e-6,
+                        "out[{i}] expected {expected}, got {v}"
+                    );
+                }
+                OutputValue::Default => panic!("expected Override at {i}"),
+            }
+        }
+    }
+
+    #[test]
     fn unknown_token_rejected_at_bake() {
         // 2026-05-17: bake-side validator now rejects unknown
         // tokens before they reach the wire format. Previously this
