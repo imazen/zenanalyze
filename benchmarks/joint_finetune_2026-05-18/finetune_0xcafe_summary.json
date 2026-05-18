@@ -4,25 +4,25 @@
       "best_val_mse": 35.41989517211914,
       "best_epoch": 7,
       "epochs_ran": 28,
-      "elapsed_s": 1.41399358700437
+      "elapsed_s": 41.195623251012876
     },
     "zenwebp": {
       "best_val_mse": 840.4608764648438,
       "best_epoch": 44,
       "epochs_ran": 65,
-      "elapsed_s": 1.4538527499971678
+      "elapsed_s": 1.774192997996579
     },
     "zenavif": {
       "best_val_mse": 0.041622355580329895,
       "best_epoch": 28,
       "epochs_ran": 49,
-      "elapsed_s": 0.42404124401218724
+      "elapsed_s": 0.40991302501061
     }
   },
   "training": {
     "best_val": 291.69019522642094,
     "best_epoch": 38,
-    "elapsed_s": 64.73564257800172
+    "elapsed_s": 5276.947250074998
   },
   "codecs": {
     "zenjpeg": {
