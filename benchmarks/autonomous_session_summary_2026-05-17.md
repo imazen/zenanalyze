@@ -74,34 +74,72 @@ are codec-sweep-harness gaps shared with the current shipped bakes.
 concerns — should not paper over with `--allow-unsafe` without
 investigation.
 
-## Cumulative SOTA per codec (final)
+## Cumulative SOTA per codec (final — 3-seed locked)
 
-| Codec | Sweep best metric | Recommended config | Δ argmin (single seed) | Confidence |
-|---|---|---|--:|---|
-| zenjpeg | singles + z_rmse | `zenjpeg_picker_config_v2.py` | +3.74 pp | 1-seed |
-| zenwebp | v14 + z_rmse | `zenwebp_picker_config_v2.py` | **+24.54 pp** | **3-seed locked** |
-| zenavif | v14 + z_rmse | `zenavif_picker_config_v2.py` | +2.57 pp | 1-seed |
+| Codec | Sweep best metric | Δ argmin (median, 3-seed) | stdev | range | Verdict |
+|---|---|--:|--:|---|---|
+| zenjpeg | v14 + z_rmse | **-6.81 pp** | 1.75 pp | -6.86..-3.81 | **regress** ❌ |
+| zenwebp | v14 + z_rmse | **+24.54 pp** | 5.41 pp | +16.80..+27.21 | **ship** ✅ |
+| zenavif | v14 + z_rmse | **+1.65 pp** | 5.48 pp | -1.14..+9.43 | **noise** ⚠️ |
+
+**Critical reversal**: the original single-seed sweep verdicts (+3.74 pp zenjpeg, +2.57 pp zenavif) were noise. The 3-seed multi-seed lock invalidated zenjpeg's and zenavif's v14+z_rmse recommendations:
+
+- **zenjpeg**: recommendations actively HURT — median -6.81 pp argmin / +2.17 pp mean overhead vs baseline transforms. Do NOT bake `zenjpeg_picker_config_v2`.
+- **zenavif**: recommendations indistinguishable from baseline within seed variance. No ship signal. Do NOT bake `zenavif_picker_config_v2`.
+- **zenwebp**: only codec where v14+z_rmse confirms across seeds. Bake `zenwebp_picker_config_v2`.
+
+The lesson: **single-seed sweep --confirm results MUST be multi-seed-locked before they touch production**. Two of three single-seed point estimates today were wrong. `multi_seed_confirm.py` exists for this reason.
+
+3-seed aggregates at:
+- `benchmarks/multiseed_zenwebp_v14_2026-05-17/`
+- `benchmarks/multiseed_zenjpeg_v14_2026-05-17/`
+- `benchmarks/multiseed_zenavif_v14_2026-05-17/`
 
 ## What's NOT in production-ready state
 
-- **zenjpeg and zenavif multi-seed confirmation** not run (only zenwebp). 1-seed point estimates only.
-- **Production .bin bakes** not produced — `bake_picker.py` needs `--allow-unsafe` to clear safety violations. Bake JSONs exist (`zen<codec>/benchmarks/zen<codec>_hybrid_v2_2026-05-17.json`).
-- **zenavif `LOW_ARGMIN`** — student 28.4% is the worst of the three codecs and below the 30% safety threshold; teacher is also weak at 31.7%. Needs investigation before shipping — possibly hard-example mining, capacity bump, or different effort-encoding.
-- **zenjpeg `PER_ZQ_TAIL`** — p99 overhead at zq=92/94 is 99.6%/114.7%. Picker is making catastrophic choices in the rare high-zq cells; investigate before bake.
+- **zenjpeg v2 transforms** — 3-seed regress, do not ship.
+- **zenavif v2 transforms** — 3-seed noise, do not ship.
+- **zenwebp .bin** not yet produced — `bake_picker.py` needs `--allow-unsafe` to clear pre-existing safety violations.
+- **zenavif `LOW_ARGMIN`** — student 28.4% < 30% safety threshold. Pre-existing capacity/data issue, not a transform regression.
+- **zenjpeg `PER_ZQ_TAIL`** — p99 99.6%/114.7% at zq=92/94. Pre-existing data-coverage issue at high-zq tail.
 - **HVS features in picker:** measured negative, do not ship. HVS features stay in zenanalyze 0.2.1+ (ids 132-136, 137 with spectral_slope) for non-picker consumers.
 
 ## Per-codec next steps (queued)
 
-1. Run `multi_seed_confirm.py` on zenjpeg + zenavif v2 configs to
-   3-seed-lock those too. ~10 min wall each.
-2. Address `DATA_STARVED_SIZE` / `UNCAPPED_ZQ_GRID` violations by
-   either (a) lowering `ZQ_TARGETS` max or (b) having the codec
-   sweep harness emit `effective_max_zensim`. Then `bake_picker.py`
-   without `--allow-unsafe`.
-3. zenwebp shipped: copy `zenwebp_hybrid_v2_2026-05-17.bin` into
-   `zenwebp` crate via `include_bytes!`. Codec runtime applies the
-   FEATURE_TRANSFORMS automatically — see
-   `zenpredict::Predictor::predict_transformed`.
+1. **zenwebp** — bake `.bin` from `zenwebp_picker_config_v2`:
+   - Multi-seed confirmed `+24.54 pp` argmin median (stdev 5.41 pp).
+   - Pre-existing `DATA_STARVED_SIZE` + `UNCAPPED_ZQ_GRID` safety
+     violations; pass `--allow-unsafe` to bake, document the same in
+     PR (these are shared with shipped v0.1).
+   - Copy resulting `zenwebp_hybrid_v2_2026-05-17.bin` into zenwebp
+     crate via `include_bytes!`; runtime applies FEATURE_TRANSFORMS
+     automatically via `zenpredict::Predictor::predict_transformed`.
+
+2. **zenjpeg + zenavif** — DO NOT BAKE v2:
+   - zenjpeg 3-seed verdict `regress` (-6.81 pp median); keep current
+     `zenjpeg_picker_config` (no transforms). Retract
+     `zenjpeg_picker_config_v2`.
+   - zenavif 3-seed verdict `noise` (+1.65 pp median, stdev 5.48 pp).
+     Keep current `zenavif_picker_config`. Retract
+     `zenavif_picker_config_v2`.
+
+3. **zenjpeg PER_ZQ_TAIL** at zq=92/94 (p99 99.6%/114.7%, threshold
+   80%): per-zq diagnostics show all 30 zq cells in val have n=207;
+   the catastrophes are NOT data-starved on the val side. Real picker
+   failure mode at high-zq cells. Likely cause: codec can't achieve
+   zq≥92 with reasonable bytes on many images; picker overshoots
+   massively. Fixes (not done in this session):
+   - Lower `ZQ_TARGETS` max from 100 to ≤90.
+   - Emit `effective_max_zensim` per (image, size_class) in the
+     codec sweep so trainer can mask unreachable cells.
+   - This is `imazen/zenanalyze#51`. Pre-existing in v0.1 too.
+
+4. **zenavif LOW_ARGMIN** (28.4% student): zenavif has the largest
+   config space (200 configs) and smallest val (218 rows). 218 val
+   rows / 200 configs ≈ 1.1 row/config — fundamental data-to-search-
+   space mismatch. Pre-existing. Investigation outcome: not fixable
+   via transform sweep; needs either larger sweep corpus or pruned
+   config grid.
 
 ## Test count + coverage
 
