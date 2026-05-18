@@ -1,0 +1,50 @@
+{
+  "codec_config": "zenjpeg_picker_config_aggprune20",
+  "screen_metric": "z_rmse",
+  "epochs": 60,
+  "n_seeds": 3,
+  "seeds_succeeded": [
+    51966,
+    48879,
+    64206
+  ],
+  "wall_seconds": 96.61509522800043,
+  "per_seed": [
+    {
+      "seed": 51966,
+      "baseline_argmin": 0.27473285074112375,
+      "baseline_mean_ov": 12.221190941916477,
+      "recommended_argmin": 0.3536711478800414,
+      "recommended_mean_ov": 11.89529326877552,
+      "delta_argmin_pp": 7.893829713891765,
+      "delta_mean_ov_pp": -0.3258976731409575
+    },
+    {
+      "seed": 48879,
+      "baseline_argmin": 0.3324715615305067,
+      "baseline_mean_ov": 11.86574399064672,
+      "recommended_argmin": 0.35970355049982766,
+      "recommended_mean_ov": 10.704017579286445,
+      "delta_argmin_pp": 2.723198896932094,
+      "delta_mean_ov_pp": -1.1617264113602754
+    },
+    {
+      "seed": 64206,
+      "baseline_argmin": 0.24737295434969853,
+      "baseline_mean_ov": 15.041523051801775,
+      "recommended_argmin": 0.23341946597760552,
+      "recommended_mean_ov": 18.81239153970892,
+      "delta_argmin_pp": -1.3953488372093008,
+      "delta_mean_ov_pp": 3.770868487907144
+    }
+  ],
+  "baseline_argmin_median": 0.27473285074112375,
+  "recommended_argmin_median": 0.3536711478800414,
+  "delta_argmin_pp_median": 2.723198896932094,
+  "delta_argmin_pp_min": -1.3953488372093008,
+  "delta_argmin_pp_max": 7.893829713891765,
+  "delta_argmin_pp_stdev": 4.654508506776527,
+  "delta_mean_ov_pp_median": -0.3258976731409575,
+  "delta_mean_ov_pp_stdev": 2.639842012262005,
+  "verdict": "noise"
+}

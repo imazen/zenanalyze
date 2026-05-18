@@ -1,0 +1,29 @@
+feat_idx	feat_name	best_transform	params_csv	baseline_score	transformed_score	lift
+25	feat_quant_survival_y_p10	winsor_then_log	0,0.174603	0.120219	0.215421	0.095202
+11	feat_gradient_fraction	clip_then_log1p	0.466797	-0.098763	-0.044332	0.054431
+15	feat_aq_map_p75	clip_then_log1p_then_winsor	3.86295,0,0.837557	0.049516	0.095377	0.045861
+21	feat_laplacian_variance_p75	winsor_then_log	0,4.70953	0.118355	0.158947	0.040592
+2	feat_luma_histogram_entropy	clip_then_log1p	3.65497	0.149719	0.187725	0.038006
+4	feat_dct_compressibility_uv	winsor_p99	3.21777,12.124	0.030340	0.066707	0.036367
+8	feat_aq_map_mean	clip_then_log1p	2.70604	0.108662	0.142167	0.033505
+5	feat_patch_fraction_fast	winsor_then_log	0,0.050781	-0.065902	-0.032810	0.033092
+9	feat_aq_map_std	winsor_then_log	0.814589,1.26388	-0.084818	-0.060571	0.024247
+0	feat_cr_vert_sharpness	winsor_p99	0.00818,0.06795	-0.039635	-0.018301	0.021334
+18	feat_noise_floor_y_p50	winsor_then_log	0,1	0.101333	0.115985	0.014651
+19	feat_noise_floor_y_p90	winsor_then_log	0.493982,1	0.051026	0.065665	0.014639
+22	feat_laplacian_variance_p90	clip_then_log1p	2.30259	0.095175	0.109314	0.014140
+27	feat_gradient_fraction_smooth	clip_then_log1p_then_winsor	0.835866,0,0.0405468	-0.046097	-0.033406	0.012691
+7	feat_quant_survival_uv	winsor_p99	0.005906,0.021531	0.062709	0.074534	0.011824
+14	feat_aspect_min_over_max	log		-0.264159	-0.254012	0.010147
+10	feat_edge_slope_stdev	log		0.028596	0.036568	0.007972
+26	feat_luma_kurtosis	clip_then_log1p_then_winsor	29.4435,0,3.20602	-0.088017	-0.082597	0.005421
+24	feat_laplacian_variance_peak	winsor_p99	4.49981,5.54518	0.100146	0.103306	0.003160
+12	feat_palette_density	clip_then_log1p	0.008453	0.372970	0.375749	0.002779
+23	feat_laplacian_variance_p99	log		0.075079	0.077667	0.002588
+17	feat_aq_map_p99	log		0.066443	0.067658	0.001215
+16	feat_aq_map_p95	log		0.087646	0.088703	0.001056
+6	feat_quant_survival_y	clip_then_log1p	0.027281	0.132509	0.133523	0.001013
+13	feat_pixel_count	winsor_p99	10.515,15.0259	0.708058	0.708308	0.000250
+1	feat_high_freq_energy_ratio	winsor_then_log	0.100531,0.237074	0.045209	0.045399	0.000190
+3	feat_dct_compressibility_y	identity		0.109844	0.109844	0.000000
+20	feat_laplacian_variance_p50	identity		0.179699	0.179699	0.000000

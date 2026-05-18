@@ -1,0 +1,146 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.5027595722662987,
+    "teacher_mean_overhead_pct": 2.6024796068210327,
+    "student_argmin_acc": 0.3157985512245602,
+    "student_mean_overhead_pct": 10.929244059309365,
+    "student_p99_overhead_pct": 64.67297494411459,
+    "fit_seconds": 0.9922399509960087,
+    "best_val_mse": 0.13088971376419067,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.501552259399793,
+    "teacher_mean_overhead_pct": 2.5002078667977665,
+    "student_argmin_acc": 0.33787512935495,
+    "student_mean_overhead_pct": 12.19900299300611,
+    "student_p99_overhead_pct": 92.62601721286731,
+    "fit_seconds": 0.6178403670055559,
+    "best_val_mse": 0.1601041704416275,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": 0.022076578130389823,
+    "mean_overhead_pp": 1.2697589336967443
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_p99": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_gradient_fraction": "clip_then_log1p",
+    "feat_quant_survival_y_p10": "winsor_then_log",
+    "feat_dct_compressibility_uv": "winsor_p99",
+    "feat_laplacian_variance_p75": "winsor_then_log",
+    "feat_quant_survival_uv": "winsor_p99",
+    "feat_aq_map_p75": "winsor_p99",
+    "feat_luma_histogram_entropy": "clip_then_log1p",
+    "feat_aq_map_mean": "clip_then_log1p",
+    "feat_gradient_fraction_smooth": "clip_then_log1p_then_winsor",
+    "feat_laplacian_variance_p90": "clip_then_log1p",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_noise_floor_y_p50": "winsor_then_log",
+    "feat_cr_vert_sharpness": "winsor_p99",
+    "feat_aq_map_std": "winsor_then_log",
+    "feat_luma_kurtosis": "clip_then_log1p_then_winsor",
+    "feat_aspect_min_over_max": "log",
+    "feat_edge_slope_stdev": "log",
+    "feat_dct_compressibility_y": "quantile_bins",
+    "feat_laplacian_variance_p50": "quantile_bins",
+    "feat_noise_floor_y_p90": "winsor_then_log",
+    "feat_laplacian_variance_p99": "log"
+  },
+  "recommended_params": {
+    "feat_gradient_fraction": [
+      0.4609380066394806
+    ],
+    "feat_quant_survival_y_p10": [
+      0.0,
+      0.03174600005149841
+    ],
+    "feat_dct_compressibility_uv": [
+      3.1677920818328857,
+      12.4677734375
+    ],
+    "feat_laplacian_variance_p75": [
+      0.0,
+      4.584967613220215
+    ],
+    "feat_quant_survival_uv": [
+      0.005704000126570463,
+      0.022771000862121582
+    ],
+    "feat_aq_map_p75": [
+      3.829946994781494,
+      4.640696048736572
+    ],
+    "feat_luma_histogram_entropy": [
+      3.652327060699463
+    ],
+    "feat_aq_map_mean": [
+      2.6862568855285645
+    ],
+    "feat_gradient_fraction_smooth": [
+      0.8358659744262695,
+      0.0,
+      0.037042392247043025
+    ],
+    "feat_laplacian_variance_p90": [
+      1.7917594909667969
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.053711000829935074
+    ],
+    "feat_noise_floor_y_p50": [
+      0.0,
+      1.0
+    ],
+    "feat_cr_vert_sharpness": [
+      0.008310000412166119,
+      0.06723000109195709
+    ],
+    "feat_aq_map_std": [
+      0.8054999709129333,
+      1.2898540496826172
+    ],
+    "feat_luma_kurtosis": [
+      4.768405914306641,
+      0.0,
+      3.871736514574587
+    ],
+    "feat_dct_compressibility_y": [
+      6.994141101837158,
+      11.19140625,
+      14.6923828125,
+      18.1064453125,
+      22.2646484375,
+      27.0439453125,
+      34.541015625
+    ],
+    "feat_laplacian_variance_p50": [
+      0.0,
+      1.0986123085021973,
+      1.0986123085021973,
+      1.6094379425048828,
+      1.945910096168518,
+      2.397895336151123,
+      2.7725887298583984
+    ],
+    "feat_noise_floor_y_p90": [
+      0.4726429879665375,
+      1.0
+    ]
+  }
+}

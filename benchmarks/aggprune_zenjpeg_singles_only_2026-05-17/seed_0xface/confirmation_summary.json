@@ -1,0 +1,138 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.4797588285960379,
+    "teacher_mean_overhead_pct": 3.0069346412170828,
+    "student_argmin_acc": 0.24737295434969853,
+    "student_mean_overhead_pct": 15.041523051801775,
+    "student_p99_overhead_pct": 124.14594411849981,
+    "fit_seconds": 0.7517195529944729,
+    "best_val_mse": 1.6843353509902954,
+    "epochs_ran": 26,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.48199827734711453,
+    "teacher_mean_overhead_pct": 2.7396304842885217,
+    "student_argmin_acc": 0.23341946597760552,
+    "student_mean_overhead_pct": 18.81239153970892,
+    "student_p99_overhead_pct": 148.06071615219116,
+    "fit_seconds": 0.25047079598880373,
+    "best_val_mse": 1.4673467874526978,
+    "epochs_ran": 26,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": -0.01395348837209301,
+    "mean_overhead_pp": 3.770868487907144
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_p99": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_quant_survival_y_p10": "winsor_then_log",
+    "feat_gradient_fraction": "clip_then_log1p_then_winsor",
+    "feat_aq_map_p75": "clip_then_log1p_then_winsor",
+    "feat_laplacian_variance_p75": "winsor_then_log",
+    "feat_luma_histogram_entropy": "clip_then_log1p",
+    "feat_aq_map_mean": "clip_then_log1p",
+    "feat_dct_compressibility_uv": "winsor_p99",
+    "feat_cr_vert_sharpness": "winsor_then_log",
+    "feat_aq_map_p90": "clip_then_log1p_then_winsor",
+    "feat_laplacian_variance_p90": "clip_then_log1p",
+    "feat_aq_map_std": "clip_then_log1p",
+    "feat_gradient_fraction_smooth": "clip_then_log1p_then_winsor",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_noise_floor_y_p90": "winsor_then_log",
+    "feat_edge_slope_stdev": "log",
+    "feat_aspect_min_over_max": "log",
+    "feat_variance": "clip_then_log1p_then_winsor",
+    "feat_noise_floor_y_p50": "winsor_then_log",
+    "feat_laplacian_variance_p50": "winsor_then_log",
+    "feat_laplacian_variance_peak": "winsor_p99"
+  },
+  "recommended_params": {
+    "feat_quant_survival_y_p10": [
+      0.0,
+      0.17460300028324127
+    ],
+    "feat_gradient_fraction": [
+      0.46875,
+      0.0,
+      0.18167050191919878
+    ],
+    "feat_aq_map_p75": [
+      3.7905580401420593,
+      0.0,
+      0.8605437384185912
+    ],
+    "feat_laplacian_variance_p75": [
+      0.0,
+      4.584967613220215
+    ],
+    "feat_luma_histogram_entropy": [
+      3.680891990661621
+    ],
+    "feat_aq_map_mean": [
+      2.6882269382476807
+    ],
+    "feat_dct_compressibility_uv": [
+      3.242187976837158,
+      11.9208984375
+    ],
+    "feat_cr_vert_sharpness": [
+      0.0026100000832229853,
+      0.14190000295639038
+    ],
+    "feat_aq_map_p90": [
+      4.4627790451049805,
+      0.0,
+      0.5422922867774568
+    ],
+    "feat_laplacian_variance_p90": [
+      2.3025851249694824
+    ],
+    "feat_aq_map_std": [
+      1.2925759553909302
+    ],
+    "feat_gradient_fraction_smooth": [
+      0.8343669772148132,
+      0.0,
+      0.03969465032213355
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.04882799834012985
+    ],
+    "feat_noise_floor_y_p90": [
+      0.7153649926185608,
+      1.0
+    ],
+    "feat_variance": [
+      6.725796699523926,
+      0.0,
+      1.111086737435854
+    ],
+    "feat_noise_floor_y_p50": [
+      0.0,
+      1.0
+    ],
+    "feat_laplacian_variance_p50": [
+      0.0,
+      3.9889841079711914
+    ],
+    "feat_laplacian_variance_peak": [
+      4.418840408325195,
+      5.545177459716797
+    ]
+  }
+}
