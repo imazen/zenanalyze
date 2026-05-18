@@ -1,0 +1,29 @@
+feat_idx	feat_name	best_transform	params_csv	baseline_score	transformed_score	lift
+15	feat_patch_fraction	winsor_then_signed_cbrt	0,0.018421	-0.212408	-0.045985	0.166423
+12	feat_cr_horiz_sharpness	winsor_then_log	0.00054,0.24749	-0.022016	0.116013	0.138029
+10	feat_noise_floor_uv_p50	winsor_then_signed_cbrt	0,0.41278	-0.057297	0.069837	0.127133
+27	feat_quant_survival_uv	winsor_then_log	0.000317,0.055308	-0.006078	0.112916	0.118994
+26	feat_colourfulness	clip_then_log1p	4.5015	0.220002	0.310222	0.090220
+24	feat_gradient_fraction	winsor_then_log	0.030382,0.725586	-0.147201	-0.060474	0.086727
+3	feat_quant_survival_y	clip_then_log1p	0.139683	0.028178	0.113496	0.085318
+22	feat_chroma_complexity	winsor_then_log	0.012833,0.243406	0.212098	0.297193	0.085095
+5	feat_distinct_color_bins	signed_cbrt		0.508580	0.589410	0.080830
+6	feat_edge_density	clip_then_log1p	0.307634	0.055880	0.132179	0.076300
+18	feat_aq_map_p75	winsor_then_signed_cbrt	0,5.23693	-0.031099	0.037508	0.068607
+9	feat_quant_survival_y_p50	clip_then_log1p	0.126984	0.012278	0.077996	0.065718
+23	feat_quant_survival_y_p75	clip_then_log1p	0.222222	-0.021909	0.041036	0.062945
+7	feat_noise_floor_y_p50	signed_cbrt		-0.070521	-0.011844	0.058677
+20	feat_noise_floor_y_p25	signed_cbrt		0.003267	0.056324	0.053058
+13	feat_edge_slope_stdev	signed_cbrt		0.026249	0.073222	0.046973
+25	feat_noise_floor_y_p75	signed_cbrt		-0.045165	-0.000572	0.044593
+1	feat_laplacian_variance_p75	signed_cbrt		0.058302	0.100858	0.042556
+16	feat_max_dim	clip_then_log1p	5.54518	0.630012	0.670507	0.040495
+2	feat_laplacian_variance	signed_cbrt		0.493479	0.532102	0.038622
+0	feat_laplacian_variance_p50	signed_cbrt		0.147765	0.185310	0.037545
+4	feat_pixel_count	clip_then_log1p	10.6868	0.633902	0.670022	0.036120
+14	feat_laplacian_variance_p90	clip_then_log1p	4.27667	-0.007076	0.028936	0.036012
+21	feat_noise_floor_uv	signed_cbrt		0.066112	0.101510	0.035398
+11	feat_aq_map_mean	log		0.050163	0.071270	0.021107
+17	feat_aspect_min_over_max	winsor_then_log	0.474609,1	-0.194810	-0.185273	0.009537
+19	feat_cb_horiz_sharpness	winsor_then_log	0.00013,0.0582	0.062888	0.070588	0.007700
+8	feat_luma_histogram_entropy	winsor_p99	1.2995,4.52752	0.376500	0.382623	0.006122

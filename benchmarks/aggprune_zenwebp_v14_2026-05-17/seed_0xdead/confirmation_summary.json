@@ -1,0 +1,134 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.32472727272727275,
+    "teacher_mean_overhead_pct": 3.4511441279830377,
+    "student_argmin_acc": 0.21927272727272729,
+    "student_mean_overhead_pct": 4.702858547432532,
+    "student_p99_overhead_pct": 24.471311435103242,
+    "fit_seconds": 0.9275287999917055,
+    "best_val_mse": 0.7716506719589233,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.35345454545454547,
+    "teacher_mean_overhead_pct": 3.676112922329098,
+    "student_argmin_acc": 0.3730909090909091,
+    "student_mean_overhead_pct": 3.5602397676465154,
+    "student_p99_overhead_pct": 20.14066936075686,
+    "fit_seconds": 0.2880690720048733,
+    "best_val_mse": 0.16552215814590454,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": 0.1538181818181818,
+    "mean_overhead_pp": -1.1426187797860168
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_edge_slope_stdev": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_patch_fraction": "winsor_then_signed_cbrt",
+    "feat_cr_horiz_sharpness": "winsor_then_log",
+    "feat_noise_floor_uv_p50": "winsor_then_signed_cbrt",
+    "feat_quant_survival_uv": "winsor_then_log",
+    "feat_colourfulness": "clip_then_log1p",
+    "feat_gradient_fraction": "winsor_then_log",
+    "feat_quant_survival_y": "clip_then_log1p",
+    "feat_chroma_complexity": "winsor_then_log",
+    "feat_distinct_color_bins": "signed_cbrt",
+    "feat_edge_density": "clip_then_log1p",
+    "feat_aq_map_p75": "winsor_then_signed_cbrt",
+    "feat_quant_survival_y_p50": "clip_then_log1p",
+    "feat_quant_survival_y_p75": "clip_then_log1p",
+    "feat_noise_floor_y_p50": "signed_cbrt",
+    "feat_noise_floor_y_p25": "signed_cbrt",
+    "feat_edge_slope_stdev": "signed_cbrt",
+    "feat_noise_floor_y_p75": "signed_cbrt",
+    "feat_laplacian_variance_p75": "signed_cbrt",
+    "feat_max_dim": "clip_then_log1p",
+    "feat_laplacian_variance": "signed_cbrt",
+    "feat_laplacian_variance_p50": "signed_cbrt",
+    "feat_pixel_count": "clip_then_log1p",
+    "feat_laplacian_variance_p90": "clip_then_log1p",
+    "feat_noise_floor_uv": "signed_cbrt",
+    "feat_aq_map_mean": "log",
+    "feat_aspect_min_over_max": "winsor_then_log",
+    "feat_cb_horiz_sharpness": "winsor_then_log",
+    "feat_luma_histogram_entropy": "winsor_p99"
+  },
+  "recommended_params": {
+    "feat_patch_fraction": [
+      0.0,
+      0.018420999869704247
+    ],
+    "feat_cr_horiz_sharpness": [
+      0.000539999979082495,
+      0.24749000370502472
+    ],
+    "feat_noise_floor_uv_p50": [
+      0.0,
+      0.4127799868583679
+    ],
+    "feat_quant_survival_uv": [
+      0.0003169999981764704,
+      0.05530799925327301
+    ],
+    "feat_colourfulness": [
+      4.501502990722656
+    ],
+    "feat_gradient_fraction": [
+      0.030381999909877777,
+      0.7255859971046448
+    ],
+    "feat_quant_survival_y": [
+      0.13968299329280853
+    ],
+    "feat_chroma_complexity": [
+      0.012833000160753727,
+      0.2434059977531433
+    ],
+    "feat_edge_density": [
+      0.30763399600982666
+    ],
+    "feat_aq_map_p75": [
+      0.0,
+      5.236926078796387
+    ],
+    "feat_quant_survival_y_p50": [
+      0.12698400020599365
+    ],
+    "feat_quant_survival_y_p75": [
+      0.2222220003604889
+    ],
+    "feat_max_dim": [
+      5.545177459716797
+    ],
+    "feat_pixel_count": [
+      10.686841011047363
+    ],
+    "feat_laplacian_variance_p90": [
+      4.276666164398193
+    ],
+    "feat_aspect_min_over_max": [
+      0.47460898756980896,
+      1.0
+    ],
+    "feat_cb_horiz_sharpness": [
+      0.00013000000035390258,
+      0.05820000171661377
+    ],
+    "feat_luma_histogram_entropy": [
+      1.2994970083236694,
+      4.527519226074219
+    ]
+  }
+}

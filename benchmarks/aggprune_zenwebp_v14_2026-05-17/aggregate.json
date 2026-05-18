@@ -1,0 +1,70 @@
+{
+  "codec_config": "zenwebp_picker_config_aggprune",
+  "screen_metric": "z_rmse",
+  "epochs": 60,
+  "n_seeds": 5,
+  "seeds_succeeded": [
+    51966,
+    48879,
+    64206,
+    57005,
+    47806
+  ],
+  "wall_seconds": 90.79755541800114,
+  "per_seed": [
+    {
+      "seed": 51966,
+      "baseline_argmin": 0.2873436350257542,
+      "baseline_mean_ov": 4.484132481468555,
+      "recommended_argmin": 0.3329654157468727,
+      "recommended_mean_ov": 3.851373652838143,
+      "delta_argmin_pp": 4.56217807211185,
+      "delta_mean_ov_pp": -0.6327588286304118
+    },
+    {
+      "seed": 48879,
+      "baseline_argmin": 0.244524236983842,
+      "baseline_mean_ov": 4.77286680432012,
+      "recommended_argmin": 0.4229802513464991,
+      "recommended_mean_ov": 2.5350334819295948,
+      "delta_argmin_pp": 17.845601436265706,
+      "delta_mean_ov_pp": -2.2378333223905256
+    },
+    {
+      "seed": 64206,
+      "baseline_argmin": 0.2286036036036036,
+      "baseline_mean_ov": 4.796165032774314,
+      "recommended_argmin": 0.43355855855855857,
+      "recommended_mean_ov": 2.8828741370746713,
+      "delta_argmin_pp": 20.495495495495497,
+      "delta_mean_ov_pp": -1.9132908956996428
+    },
+    {
+      "seed": 57005,
+      "baseline_argmin": 0.21927272727272729,
+      "baseline_mean_ov": 4.702858547432532,
+      "recommended_argmin": 0.3730909090909091,
+      "recommended_mean_ov": 3.5602397676465154,
+      "delta_argmin_pp": 15.38181818181818,
+      "delta_mean_ov_pp": -1.1426187797860168
+    },
+    {
+      "seed": 47806,
+      "baseline_argmin": 0.28937160589604344,
+      "baseline_mean_ov": 4.789135368872468,
+      "recommended_argmin": 0.3095422808378588,
+      "recommended_mean_ov": 3.929975166017235,
+      "delta_argmin_pp": 2.0170674941815347,
+      "delta_mean_ov_pp": -0.8591602028552328
+    }
+  ],
+  "baseline_argmin_median": 0.244524236983842,
+  "recommended_argmin_median": 0.3730909090909091,
+  "delta_argmin_pp_median": 15.38181818181818,
+  "delta_argmin_pp_min": 2.0170674941815347,
+  "delta_argmin_pp_max": 20.495495495495497,
+  "delta_argmin_pp_stdev": 8.257467382798742,
+  "delta_mean_ov_pp_median": -1.1426187797860168,
+  "delta_mean_ov_pp_stdev": 0.6898651789160763,
+  "verdict": "ship"
+}
