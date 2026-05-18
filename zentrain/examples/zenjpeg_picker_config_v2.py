@@ -1,4 +1,20 @@
-"""zenjpeg picker config v2 — adopts the 2026-05-17 sweep winners (singles+z_rmse, +3.74 pp argmin).
+"""zenjpeg picker config v2 — RETRACTED 2026-05-17. Do NOT bake into production.
+
+WARNING: 3-seed multi_seed_confirm.py verdict on these transforms is
+**regress** (median Δ argmin -6.81 pp, stdev 1.75 pp, range
+-6.86..-3.81; Δ mean overhead +2.17 pp). See
+`benchmarks/multiseed_zenjpeg_v14_2026-05-17/aggregate.json`.
+
+The original single-seed sweep --confirm result of +3.74 pp was noise.
+This file is kept only as a reproducibility artifact — to bake a
+production zenjpeg picker, use `zenjpeg_picker_config` (no transform
+overrides) until a future sweep produces multi-seed-locked winners.
+
+----
+
+Original docstring follows below:
+
+zenjpeg picker config v2 — adopts the 2026-05-17 sweep winners (singles+z_rmse, +3.74 pp argmin).
 
 Wraps zenjpeg_picker_config + overrides FEATURE_TRANSFORMS / FEATURE_TRANSFORM_PARAMS
 with the per-feature winners from the feature_transform_sweep.py

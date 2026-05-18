@@ -1,4 +1,27 @@
-"""zenavif picker config v2 — adopts the 2026-05-17 sweep winners (v14+z_rmse, +2.57 pp argmin).
+"""zenavif picker config v2 — RETRACTED 2026-05-17. Do NOT bake into production.
+
+WARNING: 3-seed multi_seed_confirm.py verdict on these transforms is
+**noise** (median Δ argmin +1.65 pp, stdev 5.48 pp, range
+-1.14..+9.43; Δ mean overhead -1.20 pp). See
+`benchmarks/multiseed_zenavif_v14_2026-05-17/aggregate.json`.
+
+The original single-seed sweep --confirm result of +2.57 pp was within
+seed-to-seed variance. This file is kept only as a reproducibility
+artifact — to bake a production zenavif picker, use
+`zenavif_picker_config` (no transform overrides) until a future sweep
+produces multi-seed-locked winners.
+
+Note: zenavif's val set is small (218 rows) relative to its config
+space (200 configs), giving ≈1.1 rows/config. This data-to-search-
+space ratio means seed-to-seed variance dominates any small transform
+effect; future sweeps will likely also fall in the noise regime unless
+the sweep corpus expands or the config grid is pruned.
+
+----
+
+Original docstring follows below:
+
+zenavif picker config v2 — adopts the 2026-05-17 sweep winners (v14+z_rmse, +2.57 pp argmin).
 
 Wraps zenavif_picker_config + overrides FEATURE_TRANSFORMS / FEATURE_TRANSFORM_PARAMS
 with the per-feature winners from the feature_transform_sweep.py
