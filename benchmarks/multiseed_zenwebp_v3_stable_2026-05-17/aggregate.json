@@ -1,0 +1,50 @@
+{
+  "codec_config": "zenwebp_picker_config_v3_stable",
+  "screen_metric": "z_rmse",
+  "epochs": 60,
+  "n_seeds": 3,
+  "seeds_succeeded": [
+    51966,
+    48879,
+    64206
+  ],
+  "wall_seconds": 81.69300849699357,
+  "per_seed": [
+    {
+      "seed": 51966,
+      "baseline_argmin": 0.48601913171449596,
+      "baseline_mean_ov": 2.563932003610149,
+      "recommended_argmin": 0.4374540103016924,
+      "recommended_mean_ov": 2.8437778362777055,
+      "delta_argmin_pp": -4.856512141280356,
+      "delta_mean_ov_pp": 0.2798458326675566
+    },
+    {
+      "seed": 48879,
+      "baseline_argmin": 0.400359066427289,
+      "baseline_mean_ov": 3.336929507722572,
+      "recommended_argmin": 0.41077199281867144,
+      "recommended_mean_ov": 2.9545977441037157,
+      "delta_argmin_pp": 1.0412926391382415,
+      "delta_mean_ov_pp": -0.38233176361885635
+    },
+    {
+      "seed": 64206,
+      "baseline_argmin": 0.5412912912912913,
+      "baseline_mean_ov": 1.81143025364842,
+      "recommended_argmin": 0.39602102102102105,
+      "recommended_mean_ov": 3.172615117818873,
+      "delta_argmin_pp": -14.527027027027023,
+      "delta_mean_ov_pp": 1.361184864170453
+    }
+  ],
+  "baseline_argmin_median": 0.48601913171449596,
+  "recommended_argmin_median": 0.41077199281867144,
+  "delta_argmin_pp_median": -4.856512141280356,
+  "delta_argmin_pp_min": -14.527027027027023,
+  "delta_argmin_pp_max": 1.0412926391382415,
+  "delta_argmin_pp_stdev": 7.859978123498865,
+  "delta_mean_ov_pp_median": 0.2798458326675566,
+  "delta_mean_ov_pp_stdev": 0.8801158542537717,
+  "verdict": "noise"
+}
