@@ -77,6 +77,43 @@
 //! any type and used for `bytes` payloads). Picking the right
 //! `type` is the caller's responsibility — the loader uses it as
 //! the wire byte without further interpretation.
+//!
+//! ## Feature transforms (incl. Sinusoidal expander)
+//!
+//! Per-feature transforms ride on two metadata entries:
+//!
+//! ```json
+//! [
+//!   { "key": "zentrain.feature_transforms",
+//!     "type": "utf8",
+//!     "text": "identity\nsinusoidal\nidentity\nidentity\nidentity" },
+//!   { "key": "zentrain.feature_transform_params",
+//!     "type": "utf8",
+//!     "text": "\n1,2,4,8,16,32,64,128,256,512,1024,2048\n\n\n" }
+//! ]
+//! ```
+//!
+//! The two strings are line-aligned: line `i` of `feature_transforms`
+//! declares the variant for raw input `i`, and line `i` of
+//! `feature_transform_params` is the comma-separated parameter list
+//! for that transform. Empty lines mean "no params".
+//!
+//! Scalar variants (everything but `sinusoidal`) preserve the one-input
+//! → one-output contract. The **`sinusoidal`** token marks a
+//! scalar-to-vector expander: each input feature is expanded to
+//! `2 * num_freqs` outputs (sin + cos at each frequency). In the
+//! example above, raw input 1 carries 12 frequencies, so it expands
+//! to 24 features. The total post-transform layer-1 input width is
+//! `sum(output_arity)` over all features, not the raw input count;
+//! the bake-side composer validates `layers[0].in_dim` matches.
+//!
+//! Frequencies are in cycles per unit input — i.e. the multiplier
+//! inside `sin(2π·f·x)` before `2π` scaling. NeRF-style `2^k`
+//! schedules and learned schedules are both fine.
+//!
+//! See `zenpredict::FeatureTransform::Sinusoidal` for the variant's
+//! full math + reference, and `apply_feature_pipeline_expanding` for
+//! the runtime that consumes the wire format.
 
 extern crate alloc;
 
