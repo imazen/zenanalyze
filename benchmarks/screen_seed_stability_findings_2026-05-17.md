@@ -135,6 +135,39 @@ pick is informative on average, and the cumulative effect generalizes.
    ships, but for zenavif neither approach beats the original
    no-transforms config.
 
+## Followup: feature pruning experiment
+
+To test whether the compound-overfit hypothesis is the cause, I built
+pruned configs by dropping features that the 2026-05-03 LOO multiseed
+analysis identified as actively harmful (mean Δargmin ≥ +0.5 pp when
+removed, with overhead trade ≤ +0.3 pp):
+
+- `zenjpeg_picker_config_pruned`: 51 features → 41 (-10)
+- `zenavif_picker_config_pruned`: 52 features → 39 (-13)
+
+Multi-seed (3 seeds × 60 epochs) measured the pruned baselines:
+
+| Codec | Original 3-seed baseline median | Pruned 3-seed baseline median | Δ |
+|---|--:|--:|--:|
+| zenjpeg | 30.7% | 30.5% | -0.2 pp (noise) |
+| zenavif | 19.2% | 22.7% | +3.5 pp (modest, within seed stdev) |
+
+**Pruning helps zenavif modestly, doesn't move zenjpeg.** Combined
+with the v3_stable result (transforms compound-overfit on full feature
+sets), this confirms feature-count is a factor but the LOO 2026-05-03
+data is also stale enough that the "obviously harmful" features it
+identified may not be the right pruning targets for the current
+trainer.
+
+**Production decision unchanged**: ship zenwebp v3_stable; keep
+zenjpeg / zenavif on their original (no-overrides) configs.
+
+A follow-up experiment (queued, not run): pruning + screen-derived
+transforms on the pruned feature set. If pruning fixes the
+compound-overfit issue, transforms on a 39-feature set should match
+zenwebp's pattern. But: zenavif's val-rows/config = 1.1 still bounds
+how much any methodology can help.
+
 ## Methodological recommendations going forward
 
 1. **Never bake on a 1-seed sweep result.** `multi_seed_confirm.py`
