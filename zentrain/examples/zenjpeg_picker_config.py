@@ -35,7 +35,7 @@ from pathlib import Path
 # step and stays at 2026-04-29; the v2.1 retrain reuses it but pulls
 # the wider analyzer feature set from the features-only
 # `..._v2_1.tsv` re-extraction.
-PARETO = Path("benchmarks/zq_pareto_2026-04-29.tsv")
+PARETO = Path("benchmarks/zq_pareto_2026-04-29.parquet")
 # v2.2 features: same pareto, but re-extracted with the post-#42
 # zenanalyze (12 dimension features + 26 percentile features added on
 # top of v2.1's 35 raw features). Total 73-feature TSV.

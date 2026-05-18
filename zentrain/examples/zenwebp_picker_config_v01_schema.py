@@ -26,7 +26,7 @@ from pathlib import Path
 
 # ---------- Paths ----------
 
-PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.tsv")
+PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.parquet")
 FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-04-30_combined.tsv")
 
 OUT_JSON = Path("benchmarks/zenwebp_hybrid_v0.3_v01schema.json")

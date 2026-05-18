@@ -47,7 +47,7 @@ from pathlib import Path
 # currently-shipped zenwebp_picker_v0.1.bin. 144-config grid (6 cells ×
 # 24 scalar combos) over the original 248-image CID22 corpus. ~8M
 # Pareto rows; 102 zenanalyze features per (image, size_class).
-PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.tsv")
+PARETO = Path("benchmarks/zenwebp_pareto_2026-04-30_combined.parquet")
 FEATURES = Path("benchmarks/zenwebp_pareto_features_2026-04-30_combined.tsv")
 
 OUT_JSON = Path("benchmarks/zenwebp_hybrid_v3.json")

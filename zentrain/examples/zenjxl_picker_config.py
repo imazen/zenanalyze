@@ -64,7 +64,7 @@ from pathlib import Path
 # Adapted oracle (synthesized, no re-encoding) — see
 # zentrain/tools/zenjxl_oracle_adapter.py.
 _ZENJXL = Path(os.path.expanduser("~/work/zen/zenjxl"))
-PARETO = _ZENJXL / "benchmarks" / "zenjxl_lossy_pareto_2026-05-01.tsv"
+PARETO = _ZENJXL / "benchmarks" / "zenjxl_lossy_pareto_2026-05-01.parquet"
 FEATURES = _ZENJXL / "benchmarks" / "zenjxl_lossy_features_2026-05-01.tsv"
 
 # Tier 0/1.5 outputs land under zenanalyze/benchmarks/ for the
