@@ -99,14 +99,14 @@ fn main() -> ExitCode {
     println!("{}", "-".repeat(82));
 
     let configs: &[(f32, bool, bool, &str)] = &[
-        (0.0, false, false, "tau=0.0 baseline"),
-        (0.005, false, false, "tau=0.005"),
-        (0.01, false, false, "tau=0.01"),
-        (0.02, false, false, "tau=0.02"),
-        (0.05, false, false, "tau=0.05"),
-        (0.1, false, false, "tau=0.1"),
+        (0.0, false, false, "tau=0 baseline"),
+        (0.0, true, true, "tau=0+cmp+opt"),
+        (0.0005, true, true, "tau=0.0005+cmp+opt"),
+        (0.001, true, true, "tau=0.001+cmp+opt"),
+        (0.002, true, true, "tau=0.002+cmp+opt"),
+        (0.003, true, true, "tau=0.003+cmp+opt"),
         (0.005, true, true, "tau=0.005+cmp+opt"),
-        (0.02, true, true, "tau=0.02+cmp+opt"),
+        (0.01, true, true, "tau=0.01+cmp+opt"),
     ];
 
     for &(tau, cmp, opt, label) in configs {
