@@ -625,6 +625,9 @@ def build_bake_request_json(
     model: dict,
     out_path: Path,
     dtype: str,
+    zerobias_tau: float = 0.0,
+    compressed: bool = False,
+    optimize: bool = False,
 ) -> dict:
     n_inputs = int(model["n_inputs"])
     layers = model["layers"]
@@ -698,6 +701,17 @@ def build_bake_request_json(
     mc = encode_multi_codec_schema(model, n_outputs)
     if mc is not None:
         out["multi_codec_schema"] = mc
+    # Bake-time compression knobs (zenpredict-bake 0.1.1+). All three
+    # are honored by `bake_from_json`; pre-0.1.1 baker binaries will
+    # ignore unknown keys silently (`#[serde(default)]`). Only emit
+    # the keys when they're non-default to keep the JSON small and
+    # diffable against older baker output.
+    if zerobias_tau > 0.0:
+        out["zerobias_tau"] = float(zerobias_tau)
+    if compressed:
+        out["compressed"] = True
+    if optimize:
+        out["optimize"] = True
     return out
 
 
@@ -947,6 +961,9 @@ def bake(
     allow_unsafe: bool,
     bake_bin: Path | None,
     bake_json_out: Path | None,
+    zerobias_tau: float = 0.0,
+    compressed: bool = False,
+    optimize: bool = False,
 ) -> None:
     model = json.loads(model_path.read_text())
 
@@ -975,7 +992,14 @@ def bake(
             raise SystemExit(2)
         sys.stderr.write("--allow-unsafe set — baking despite violations.\n")
 
-    bake_req = build_bake_request_json(model, out_path, dtype)
+    bake_req = build_bake_request_json(
+        model,
+        out_path,
+        dtype,
+        zerobias_tau=zerobias_tau,
+        compressed=compressed,
+        optimize=optimize,
+    )
 
     # Persist intermediate JSON (delete-on-success unless caller wants it).
     if bake_json_out is not None:
@@ -1012,13 +1036,22 @@ def bake(
             model, out_path, manifest_path, sh, feat_cols, extra_axes, n_inputs, n_outputs
         )
 
+    knob_summary = []
+    if zerobias_tau > 0.0:
+        knob_summary.append(f"zerobias_tau={zerobias_tau:.6g}")
+    if compressed:
+        knob_summary.append("compressed=true")
+    if optimize:
+        knob_summary.append("optimize=true")
+    knob_str = (", " + ", ".join(knob_summary)) if knob_summary else ""
     sys.stderr.write(
         f"baked {out_path} ({out_path.stat().st_size} bytes), "
         f"schema_hash=0x{bake_req['schema_hash']:016x}, dtype={dtype}, "
         f"n_inputs={len(bake_req['scaler_mean'])}, "
         f"n_outputs={bake_req['layers'][-1]['out_dim']}, "
         f"n_layers={len(bake_req['layers'])}, "
-        f"metadata_entries={len(bake_req['metadata'])}\n"
+        f"metadata_entries={len(bake_req['metadata'])}"
+        f"{knob_str}\n"
     )
 
 
@@ -1066,6 +1099,37 @@ def main(argv: list[str]) -> int:
         help="keep the intermediate BakeRequestJson on disk at this path "
              "(default: written to a tempfile and deleted after bake)",
     )
+    ap.add_argument(
+        "--zerobias-tau",
+        type=float,
+        default=0.0,
+        help="pre-quantization per-layer zero-bias threshold. Weights "
+             "with |w| < tau * max|W_layer| zero out before the layer's "
+             "declared dtype quantizer runs. Default 0.0 (disabled). "
+             "Calibrated value: 0.005 (87.5 %% i8 zero density, "
+             "-0.0001 SROCC on V0_18 per "
+             "zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md). "
+             "Pair with --compress to monetize the zeros.",
+    )
+    ap.add_argument(
+        "--compress",
+        action="store_true",
+        help="LZ4-block-compress the post-header payload at bake time. "
+             "Loader transparently decompresses at Model::from_bytes. "
+             "Pair with --zerobias-tau for the calibrated 75-80%% size "
+             "win on typical picker shapes.",
+    )
+    ap.add_argument(
+        "--optimize",
+        action="store_true",
+        help="route through bake_optimized (permutation + compressed-"
+             "flag search + bounded swap hillclimb). ~1-2 s budget on "
+             "V_X-shape models. Mathematically identical predict output "
+             "to the un-optimized path. When --compress is also set, "
+             "the optimizer will still pick the smaller of (compressed, "
+             "uncompressed); --compress just guarantees the optimizer "
+             "evaluates the compressed candidate.",
+    )
     args = ap.parse_args(argv)
     bake(
         model_path=args.model,
@@ -1076,6 +1140,9 @@ def main(argv: list[str]) -> int:
         allow_unsafe=args.allow_unsafe,
         bake_bin=args.bake_bin,
         bake_json_out=args.bake_json_out,
+        zerobias_tau=args.zerobias_tau,
+        compressed=args.compress,
+        optimize=args.optimize,
     )
     return 0
 

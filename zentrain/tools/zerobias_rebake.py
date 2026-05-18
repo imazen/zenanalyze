@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """Apply zerobias to a ZNPR bake's weights and re-quantize.
 
+**Soft-deprecated since zenpredict-bake 0.1.1.** New bakes should set
+`zerobias_tau` (and optionally `compressed`, `optimize`) directly in
+the BakeRequestJson — `bake_picker.py --zerobias-tau 0.005 --compress`
+or `--optimize` produces a zerobiased + compressed bake in one step,
+no post-process required. This script remains as the canonical "I
+have a baked `.bin` and want to apply zerobias to it without
+re-training" tool — useful for measuring τ sensitivity across an
+existing bake, or for rescuing shipped bakes whose source training
+config is gone. Prefer the JSON pipeline for new bakes.
+
 Reads any v2 or v3 ZNPR `.bin`, extracts each layer's weights as f32
 (dequantizing F16 / I8 as needed), applies per-output-column zerobias
 at threshold τ, then re-emits the bake using the **same layer dtypes**
