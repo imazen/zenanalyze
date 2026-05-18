@@ -149,7 +149,18 @@ impl From<BakeError> for BakeJsonError {
     }
 }
 
+/// Bake input deserialized from the language-agnostic JSON envelope.
+///
+/// **`#[non_exhaustive]` since 0.1.1.** Adding fields to this struct
+/// is non-breaking from the JSON side (every new field has
+/// `#[serde(default)]`) and now also non-breaking on the Rust side —
+/// callers cannot construct this via struct literal, so an
+/// `#[serde(default)]` field added in a future version doesn't break
+/// existing in-tree Rust code. Build one via
+/// `serde_json::from_str(json)` / `serde_json::from_slice(bytes)` /
+/// the `bake_from_json_str` convenience.
 #[derive(Deserialize, Debug)]
+#[non_exhaustive]
 pub struct BakeRequestJson {
     pub schema_hash: u64,
     #[serde(default)]

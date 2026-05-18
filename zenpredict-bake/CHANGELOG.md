@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`BakeRequestJson` is now `#[non_exhaustive]`** so future
+  `#[serde(default)]` field additions are non-breaking on the Rust
+  side. Direct struct-literal construction outside the crate is no
+  longer supported; callers must go through `serde_json::from_str` /
+  `serde_json::from_slice` / `bake_from_json_str`. In-tree consumers
+  (the CLI binaries, integration tests, the unified `zenpredict bake`
+  subcommand) only construct via deserialization and are unaffected.
+
 - **Three optional bake-time knobs on `BakeRequestJson` + `bake_from_json`**:
   `zerobias_tau` (f32, default 0.0), `compressed` (bool, default false),
   `optimize` (bool, default false). All three honor the same semantics
