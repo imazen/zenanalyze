@@ -70,21 +70,20 @@ The legacy `zenpredict-bake` and `zenpredict-inspect` binaries
 remain present and produce byte-for-byte identical stdout/stderr
 output, exit codes, and arg semantics.
 
-- **Multi-codec shared-trunk picker bake (ZNPR v3.2).** New
-  `BakeRequest.multi_codec_schema: Option<MultiCodecSchemaInput>`
-  field; when `Some(_)`, the composer emits the v3.2
-  `multi_codec_schema` section that
-  `zenpredict::Predictor::predict_multi_codec` reads at runtime.
-  New public types: `MultiCodecSchemaInput`, `PerCodecMapInput`.
-  New `BakeRequestBuilder::multi_codec_schema()` setter. New
-  `BakeError::MultiCodecSlotOutOfRange` /
-  `MultiCodecOutputRangeInvalid` / `MultiCodecEmpty` /
-  `MultiCodecInputDimMismatch` variants. The composer
-  cross-validates against `layers[0].in_dim` so a mis-shaped bake
-  fails at bake time, not load time. The Python emitter
-  (`zentrain/tools/bake_picker.py`) is not yet wired — follow-up
-  to flip joint-trained checkpoints from the per-codec distill
-  path to the joint-picker bake.
+### Reverted (pre-publish, 2026-05-17)
+
+- **Multi-codec shared-trunk picker bake (ZNPR v3.2).** Briefly
+  added earlier in the unreleased window (`BakeRequest.multi_codec_schema`,
+  `MultiCodecSchemaInput`, `PerCodecMapInput`, `BakeRequestBuilder::multi_codec_schema`,
+  `MultiCodec*` `BakeError` variants, `emit_multi_codec_section`).
+  Reverted before publish because the joint trainer's distillation
+  step regressed on zenjpeg by −7pp argmin, and no shipped codec
+  ever consumed the runtime path. Per-codec bins (which all live
+  consumers use) are unaffected. The transfer-learning value the
+  joint-trunk design was reaching for is recoverable as a training-
+  time trick (pretrain shared trunk on combined data → fine-tune
+  per-codec head → bake each as a normal v3 bin); see the
+  ecosystem review at `docs/ecosystem_cleanliness_review_2026-05-17.md`.
 
 ## [0.1.0] - 2026-05-13
 

@@ -40,22 +40,24 @@
   All five are additive on the `#[non_exhaustive]` enum (no
   semver break).
 
-- **Multi-codec shared-trunk picker runtime (ZNPR v3.2).** New
-  optional `multi_codec_schema` header section (offset 116..124)
-  carrying the per-codec scatter map for joint-trained pickers.
-  When present, `Predictor::predict_multi_codec(codec_id,
-  codec_features, size_class, log_pixels, zq_norm)` composes the
-  trunk's input vector (union features + presence mask + size
-  onehot + scalars + codec onehot) from a single codec's natural
-  feature vector and returns that codec's output range. Backwards
-  compatible — single-codec bakes leave the section empty and load
-  unchanged. New public types: `MultiCodecSchema`, `PerCodecMap`,
-  `HeadMeta`. New `Model::multi_codec_schema()` /
-  `has_multi_codec_schema()` accessors. New
-  `PredictError::MultiCodecNotSupported` /
-  `UnknownCodecId` / `CodecFeatureLenMismatch` variants on the
-  `#[non_exhaustive]` enum. Parse-time validation cross-checks the
-  schema against the trunk's `n_inputs` (must equal `2*U + 6 + C`).
+### Reverted (pre-publish, 2026-05-17)
+
+- **Multi-codec shared-trunk picker runtime (ZNPR v3.2).** Briefly
+  added earlier in the unreleased window (header section at offset
+  116..124, `Predictor::predict_multi_codec`, `MultiCodecSchema` /
+  `PerCodecMap` / `HeadMeta` public types, `Model::multi_codec_schema()`
+  / `has_multi_codec_schema()` accessors, three `PredictError`
+  variants, parse-time validation). Reverted before publish because
+  the joint trainer's distillation step regressed on zenjpeg by
+  −7pp argmin, and no shipped codec ever consumed the runtime path.
+  Per-codec bins (which all live consumers use) are unaffected —
+  they don't carry the section. Header bytes 116..124 returned to
+  `Header.reserved: [u32; 3]` (which now spans 116..128, 12 bytes
+  total reserved). The transfer-learning value the joint-trunk
+  design was reaching for is recoverable as a training-time trick
+  (pretrain shared trunk on combined data → fine-tune per-codec
+  head → bake each as a normal v3 bin); see the ecosystem review
+  at `docs/ecosystem_cleanliness_review_2026-05-17.md` in zenanalyze.
 
 ## [0.2.0] - 2026-05-13
 

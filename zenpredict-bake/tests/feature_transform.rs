@@ -62,7 +62,6 @@ mod feature_transform_tests {
             compressed: false,
             hu_permutations: None,
 
-            multi_codec_schema: None,
         })
         .unwrap()
     }
@@ -282,7 +281,6 @@ mod feature_transform_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-            multi_codec_schema: None,
         })
         .unwrap_err();
         assert!(
@@ -334,7 +332,6 @@ mod feature_transform_tests {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-            multi_codec_schema: None,
         })
         .unwrap_err();
         assert!(

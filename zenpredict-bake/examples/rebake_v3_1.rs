@@ -175,7 +175,6 @@ fn main() {
         compressed: compress,
         hu_permutations: None,
 
-        multi_codec_schema: None,
     };
 
     let new_bytes = if optimize {

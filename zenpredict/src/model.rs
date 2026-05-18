@@ -239,17 +239,12 @@ pub struct Header {
     /// sparse_overrides indices, and metadata-side output-indexed
     /// arrays (cell_rescue_hints, output_bounds).
     pub(crate) output_order: Section,
-    /// Optional multi-codec joint-picker schema (v3.2+). Empty
-    /// (`len == 0`) for single-codec bakes. When present, the bake
-    /// is a shared-trunk picker over the union of multiple codecs'
-    /// image features, with per-codec output heads. See
-    /// [`crate::wire::SECTION_OFF_MULTI_CODEC_SCHEMA`] for the
-    /// section's wire layout and
-    /// [`crate::Predictor::predict_multi_codec`] for the runtime
-    /// API that composes the input vector from a single codec's
-    /// natural features and slices out that codec's output head.
-    pub(crate) multi_codec_schema: Section,
-    pub(crate) reserved: [u32; 1],
+    /// Reserved for future header sections. Currently 12 bytes
+    /// (3 × u32) — header total stays at 128 bytes regardless of
+    /// reservation usage. Zero-initialized on write; zero-tolerated
+    /// on read (older bakes that happened to populate the legacy
+    /// `multi_codec_schema` slot decode as all-zero `reserved`).
+    pub(crate) reserved: [u32; 3],
 }
 
 const _: () = assert!(core::mem::size_of::<Header>() == HEADER_SIZE);
@@ -659,7 +654,6 @@ impl Model {
         validate_output_specs(header.output_specs, &bytes, n_outputs)?;
         validate_discrete_sets(header.discrete_sets, &bytes)?;
         validate_sparse_overrides(header.sparse_overrides, &bytes, n_outputs)?;
-        validate_multi_codec_schema(header.multi_codec_schema, &bytes, n_inputs)?;
 
         // ── Stage 4: load-time inverse permutations. ──
         //
@@ -859,35 +853,6 @@ impl Model {
             .expect("sparse_overrides validated at parse time");
         bytemuck::try_cast_slice::<u8, SparseOverride>(raw)
             .expect("sparse_overrides alignment validated at parse time")
-    }
-
-    /// Parsed multi-codec joint-picker schema, if present. Returns
-    /// `None` for single-codec bakes (the default — every existing
-    /// per-codec picker bake). When `Some(_)`, the bake's trunk
-    /// inputs are the union of all participating codecs' image
-    /// features plus a presence mask + size onehot + log_pixels +
-    /// zq_norm + codec onehot — call
-    /// [`crate::Predictor::predict_multi_codec`] to compose the
-    /// input vector for a specific codec.
-    pub fn multi_codec_schema(&self) -> Option<crate::multi_codec::MultiCodecSchema<'_>> {
-        if self.header.multi_codec_schema.is_empty() {
-            return None;
-        }
-        let raw = self
-            .header
-            .multi_codec_schema
-            .slice("multi_codec_schema", &self.bytes)
-            .expect("multi_codec_schema validated at parse time");
-        Some(
-            crate::multi_codec::parse(raw)
-                .expect("multi_codec_schema body validated at parse time"),
-        )
-    }
-
-    /// `true` iff the bake carries a `multi_codec_schema` section.
-    /// Cheap header-only check; doesn't reparse the section body.
-    pub fn has_multi_codec_schema(&self) -> bool {
-        !self.header.multi_codec_schema.is_empty()
     }
 
     #[cfg(feature = "advanced")]
@@ -1207,31 +1172,6 @@ fn validate_discrete_sets(section: Section, bytes: &[u8]) -> Result<(), PredictE
         offset: section.offset,
         required_align: core::mem::align_of::<f32>(),
     })?;
-    Ok(())
-}
-
-fn validate_multi_codec_schema(
-    section: Section,
-    bytes: &[u8],
-    n_inputs: usize,
-) -> Result<(), PredictError> {
-    if section.is_empty() {
-        return Ok(());
-    }
-    let raw = section.slice("multi_codec_schema", bytes)?;
-    let schema = crate::multi_codec::parse(raw)?;
-    // Cross-check against the trunk's declared n_inputs: it must
-    // equal `2 * U + 6 + C` for the predict_multi_codec path to be
-    // wireable. We refuse to load a bake where this invariant is
-    // violated so the runtime never silently composes a wrong-length
-    // feature vector.
-    let expected = crate::multi_codec::expected_n_inputs(schema.union_feat_count, schema.n_codecs);
-    if expected != n_inputs {
-        return Err(PredictError::OutputDimMismatch {
-            expected,
-            got: n_inputs,
-        });
-    }
     Ok(())
 }
 

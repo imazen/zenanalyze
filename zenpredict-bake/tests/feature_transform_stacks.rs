@@ -51,7 +51,6 @@ fn make_identity_passthrough(metadata: &[BakeMetadataEntry<'_>]) -> Result<Vec<u
         output_order: None,
         compressed: false,
         hu_permutations: None,
-        multi_codec_schema: None,
     })
 }
 

@@ -117,7 +117,6 @@ mod scorer_tests {
             compressed: false,
             hu_permutations: None,
 
-            multi_codec_schema: None,
         })
         .unwrap()
     }

@@ -50,33 +50,10 @@ pub const SECTION_OFF_FEATURE_ORDER: usize = 100;
 /// Empty (len=0) when the bake's outputs are in caller-natural order.
 pub const SECTION_OFF_OUTPUT_ORDER: usize = 108;
 
-/// Header byte offset of the `multi_codec_schema` [`crate::Section`]
-/// (v3.2+). Empty (`len == 0`) for single-codec bakes. When present,
-/// the bake is a multi-codec shared-trunk picker whose inputs are
-/// the union of all participating codecs' image features (scattered
-/// by per-codec maps), plus a presence mask, size onehot,
-/// log-pixels, zq_norm, and a codec onehot. The runtime composes
-/// the input vector via [`crate::Predictor::predict_multi_codec`].
-///
-/// Section payload layout (after section start, all little-endian):
-///
-/// ```text
-/// 0..4    union_feat_count: u32       n_union image features
-/// 4..8    n_codecs: u32
-/// 8..(8 + n_codecs*32)  PerCodecMapEntry[n_codecs]
-///   Each entry (32 bytes):
-///     0..4   name_offset: u32         offset relative to section start
-///     4..8   name_len: u32
-///     8..12  slots_offset: u32        offset relative to section start, 4-aligned
-///     12..16 slots_count: u32         number of u32 entries
-///     16..20 output_range_lo: u32     inclusive lo into the trunk output
-///     20..24 output_range_hi: u32     exclusive hi into the trunk output
-///     24..28 head_n_cells: u32        per-codec head metadata (informational)
-///     28..32 head_n_heads: u32        bytes-head + scalar-head count
-/// (then) name pool (utf8) + slot tables (u32 arrays), each
-///        padded to 4-byte alignment.
-/// ```
-pub const SECTION_OFF_MULTI_CODEC_SCHEMA: usize = 116;
+// Header bytes 116..124 are reserved for a future header section.
+// Previously housed `multi_codec_schema` (v3.2) which was reverted
+// pre-publish — see CHANGELOG. Header bytes 124..128 are further
+// reserved (`Header.reserved: [u32; 3]` spans 116..128).
 
 // ── Header flags bits (offset 6..8) ──────────────────────────────
 

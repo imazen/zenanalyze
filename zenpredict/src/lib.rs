@@ -135,7 +135,6 @@ mod inference;
 pub mod limits;
 mod metadata;
 mod model;
-pub mod multi_codec;
 pub mod output_spec;
 mod predictor;
 #[cfg(feature = "advanced")]
@@ -163,7 +162,6 @@ pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
 };
-pub use multi_codec::{HeadMeta, MultiCodecSchema, PerCodecMap};
 pub use output_spec::{OutputSpec, OutputTransform, SparseOverride};
 #[cfg(feature = "advanced")]
 pub use output_spec::{OutputValue, apply_spec};

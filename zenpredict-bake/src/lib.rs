@@ -43,8 +43,7 @@ pub mod optimize;
 pub mod zero_bias;
 
 pub use composer::{
-    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder,
-    MultiCodecSchemaInput, PerCodecMapInput, bake,
+    BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,

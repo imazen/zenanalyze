@@ -12,46 +12,6 @@ use zenpredict::{
 };
 
 /// Bake-side input for a single codec's slot in a multi-codec joint
-/// picker. Mirrors the parser-side `zenpredict::PerCodecMap` but
-/// borrows from the caller so the bake function can read out and
-/// emit the wire bytes without owning anything.
-///
-/// See [`zenpredict::multi_codec`] for the full ZNPR v3.2 section
-/// layout and the runtime contract.
-#[derive(Clone, Copy, Debug)]
-pub struct PerCodecMapInput<'a> {
-    /// Stable codec name — `"zenjpeg"` / `"zenwebp"` / `"zenavif"` /
-    /// `"zenjxl"`. Embedded into the bake's name pool.
-    pub codec_name: &'a str,
-    /// For each of this codec's natural feat_cols (length =
-    /// `n_codec_feats`), the union slot index `[0..union_feat_count)`
-    /// to scatter that value into.
-    pub union_slot_for_codec_feat: &'a [u32],
-    /// `(lo, hi)` — half-open range into the trunk's flat output
-    /// vector that belongs to this codec.
-    pub output_range: (u32, u32),
-    /// Number of config cells in this codec's argmin space (informational).
-    pub head_n_cells: u32,
-    /// Number of heads per cell (bytes head + scalar heads; informational).
-    pub head_n_heads: u32,
-}
-
-/// Bake-side input describing a multi-codec joint picker schema.
-/// Attach to [`BakeRequest::multi_codec_schema`] to emit the v3.2
-/// `multi_codec_schema` section. When `None`, the bake is a
-/// single-codec picker and no extra section bytes are written.
-///
-/// See [`zenpredict::multi_codec`] for the parser-side types this
-/// mirrors and the runtime entry [`zenpredict::Predictor::predict_multi_codec`].
-#[derive(Clone, Debug)]
-pub struct MultiCodecSchemaInput<'a> {
-    /// `n_union` image features across all codecs.
-    pub union_feat_count: u32,
-    /// Per-codec maps. `len()` is `n_codecs`; the codec id is the
-    /// vector index.
-    pub per_codec: &'a [PerCodecMapInput<'a>],
-}
-
 /// Errors raised by [`bake`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
 /// issues.
@@ -130,28 +90,6 @@ pub enum BakeError {
     /// A permutation index was out of range (`>= n`) or duplicate.
     InvalidPermutation {
         what: &'static str,
-    },
-    /// A multi-codec map's `union_slot_for_codec_feat` value was
-    /// `>= union_feat_count`.
-    MultiCodecSlotOutOfRange {
-        codec_index: usize,
-        slot: u32,
-        union_feat_count: u32,
-    },
-    /// A multi-codec map's `output_range_lo > output_range_hi`.
-    MultiCodecOutputRangeInvalid {
-        codec_index: usize,
-        lo: u32,
-        hi: u32,
-    },
-    /// `BakeRequest.multi_codec_schema` was `Some(_)` but
-    /// `per_codec` was empty (need at least 1 codec).
-    MultiCodecEmpty,
-    /// The bake's trunk `n_inputs` doesn't match the multi-codec
-    /// schema's expected `2 * union_feat_count + 6 + n_codecs`.
-    MultiCodecInputDimMismatch {
-        expected: usize,
-        got: usize,
     },
     /// Per-feature `FeatureTransform` declared in
     /// `zentrain.feature_transforms` metadata was unrecognized at
@@ -274,27 +212,6 @@ impl fmt::Display for BakeError {
                     "bake: {what} is not a valid permutation (out of range or duplicate)"
                 )
             }
-            Self::MultiCodecSlotOutOfRange {
-                codec_index,
-                slot,
-                union_feat_count,
-            } => write!(
-                f,
-                "bake: multi_codec_schema codec {codec_index}: slot {slot} >= union_feat_count {union_feat_count}"
-            ),
-            Self::MultiCodecOutputRangeInvalid {
-                codec_index,
-                lo,
-                hi,
-            } => write!(
-                f,
-                "bake: multi_codec_schema codec {codec_index}: output_range_lo {lo} > output_range_hi {hi}"
-            ),
-            Self::MultiCodecEmpty => write!(f, "bake: multi_codec_schema.per_codec is empty"),
-            Self::MultiCodecInputDimMismatch { expected, got } => write!(
-                f,
-                "bake: multi_codec_schema expects n_inputs {expected}, layers[0].in_dim is {got}"
-            ),
             Self::UnknownFeatureTransformToken { feature_index } => write!(
                 f,
                 "bake: feature_transforms[{feature_index}] is not a known token"
@@ -410,19 +327,6 @@ pub struct BakeRequest<'a> {
     /// resulting bake is byte-shape-identical to a default-HU one
     /// modulo the weight content.
     pub hu_permutations: Option<&'a [&'a [u32]]>,
-    /// Optional multi-codec joint-picker schema. When `Some(_)`,
-    /// the composer emits a `multi_codec_schema` section (ZNPR
-    /// v3.2) that the loader exposes via
-    /// [`zenpredict::Model::multi_codec_schema`]. The runtime entry
-    /// [`zenpredict::Predictor::predict_multi_codec`] then composes
-    /// the trunk's input vector per the schema. When `None` (the
-    /// default), the bake is a single-codec picker — exactly the
-    /// shape every existing per-codec bake has.
-    ///
-    /// Cross-validation: when `Some(_)`, the bake's
-    /// `layers[0].in_dim` must equal `2 * union_feat_count + 6 +
-    /// per_codec.len()`.
-    pub multi_codec_schema: Option<MultiCodecSchemaInput<'a>>,
 }
 
 impl<'a> BakeRequest<'a> {
@@ -459,7 +363,6 @@ impl<'a> BakeRequest<'a> {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-            multi_codec_schema: None,
         }
     }
 
@@ -557,16 +460,6 @@ impl<'a> BakeRequestBuilder<'a> {
         self
     }
 
-    /// Attach a multi-codec joint-picker schema. The composer will
-    /// emit a `multi_codec_schema` section (ZNPR v3.2) that
-    /// [`zenpredict::Predictor::predict_multi_codec`] reads at
-    /// runtime to compose the trunk input vector for a specific
-    /// codec.
-    pub fn multi_codec_schema(mut self, schema: MultiCodecSchemaInput<'a>) -> Self {
-        self.inner.multi_codec_schema = Some(schema);
-        self
-    }
-
     /// Finalize the builder and return the underlying `BakeRequest`.
     pub fn build(self) -> BakeRequest<'a> {
         self.inner
@@ -581,9 +474,8 @@ impl<'a> BakeRequestBuilder<'a> {
 
 use zenpredict::wire::{
     HEADER_SIZE, LAYER_ENTRY_SIZE, SECTION_OFF_DISCRETE_SETS, SECTION_OFF_FEATURE_BOUNDS,
-    SECTION_OFF_LAYER_TABLE, SECTION_OFF_METADATA, SECTION_OFF_MULTI_CODEC_SCHEMA,
-    SECTION_OFF_OUTPUT_SPECS, SECTION_OFF_SCALER_MEAN, SECTION_OFF_SCALER_SCALE,
-    SECTION_OFF_SPARSE_OVERRIDES,
+    SECTION_OFF_LAYER_TABLE, SECTION_OFF_METADATA, SECTION_OFF_OUTPUT_SPECS,
+    SECTION_OFF_SCALER_MEAN, SECTION_OFF_SCALER_SCALE, SECTION_OFF_SPARSE_OVERRIDES,
 };
 
 /// Compose a v3 ZNPR byte stream. Output round-trips through
@@ -900,19 +792,6 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         &mut buf,
         SECTION_OFF_SPARSE_OVERRIDES,
         sparse_overrides_section,
-    );
-
-    // Multi-codec schema (optional, ZNPR v3.2+). Single-codec bakes
-    // skip this entirely — the section is empty.
-    let multi_codec_section = if let Some(schema) = req.multi_codec_schema.as_ref() {
-        emit_multi_codec_section(&mut buf, schema, n_inputs)?
-    } else {
-        Section::empty()
-    };
-    write_section(
-        &mut buf,
-        SECTION_OFF_MULTI_CODEC_SCHEMA,
-        multi_codec_section,
     );
 
     // ─── Forward permutation + permutation-table emission ──────────
@@ -1232,125 +1111,6 @@ fn write_section(buf: &mut [u8], at: usize, s: Section) {
 fn write_section_inline(entry: &mut [u8], at: usize, s: Section) {
     entry[at..at + 4].copy_from_slice(&s.offset().to_le_bytes());
     entry[at + 4..at + 8].copy_from_slice(&s.len_bytes().to_le_bytes());
-}
-
-/// Emit the `multi_codec_schema` section bytes into `buf`. Returns
-/// the [`Section`] (absolute offset + length) for the section
-/// pointer written into the header.
-///
-/// Layout (matches the parser-side expectation in
-/// `zenpredict::multi_codec::parse`):
-///
-/// ```text
-/// 0..4    union_feat_count: u32
-/// 4..8    n_codecs: u32
-/// 8..8+n_codecs*32  PerCodecMapEntry[n_codecs] (32 bytes each)
-/// (then) name pool (utf8) + slot tables (u32), padded to 4
-/// ```
-///
-/// Offsets within the per-codec table point into the section
-/// (relative to its start), NOT into the whole bake.
-fn emit_multi_codec_section(
-    buf: &mut alloc::vec::Vec<u8>,
-    schema: &MultiCodecSchemaInput<'_>,
-    layer0_in_dim: usize,
-) -> Result<Section, BakeError> {
-    let per_codec = schema.per_codec;
-    if per_codec.is_empty() {
-        return Err(BakeError::MultiCodecEmpty);
-    }
-    let n_codecs = per_codec.len() as u32;
-    let union_feat_count = schema.union_feat_count;
-
-    // Cross-check the trunk's n_inputs against the multi-codec
-    // shape. The runtime validator does the same on load; we
-    // refuse at bake time too so the binary never ships in a
-    // state the loader will reject.
-    let expected = 2 * (union_feat_count as usize) + 6 + per_codec.len();
-    if expected != layer0_in_dim {
-        return Err(BakeError::MultiCodecInputDimMismatch {
-            expected,
-            got: layer0_in_dim,
-        });
-    }
-
-    // Per-codec validation (slot range, output_range invariants).
-    for (i, m) in per_codec.iter().enumerate() {
-        for &slot in m.union_slot_for_codec_feat {
-            if slot >= union_feat_count {
-                return Err(BakeError::MultiCodecSlotOutOfRange {
-                    codec_index: i,
-                    slot,
-                    union_feat_count,
-                });
-            }
-        }
-        let (lo, hi) = m.output_range;
-        if lo > hi {
-            return Err(BakeError::MultiCodecOutputRangeInvalid {
-                codec_index: i,
-                lo,
-                hi,
-            });
-        }
-    }
-
-    // Align the section start to 4 for the u32 fields.
-    pad_to(buf, 4);
-    let section_start_abs = buf.len() as u32;
-
-    // Reserve header + per-codec table; we'll fill in the table
-    // entries after we know the name-pool / slot-table offsets.
-    buf.extend_from_slice(&union_feat_count.to_le_bytes());
-    buf.extend_from_slice(&n_codecs.to_le_bytes());
-    let table_off_abs = buf.len();
-    let table_bytes = per_codec.len() * 32;
-    buf.resize(table_off_abs + table_bytes, 0);
-
-    // Plan name + slot pools. Names are emitted first (1-byte-
-    // aligned), then a 4-byte pad, then slot tables.
-    // To keep things simple, append both per-codec sequentially.
-    // We record relative offsets (relative to section_start_abs)
-    // because the parser uses section-relative offsets.
-    let mut entries: alloc::vec::Vec<[u8; 32]> = alloc::vec::Vec::with_capacity(per_codec.len());
-    for m in per_codec {
-        // Append name bytes (no padding required for utf8 read).
-        let name_rel = (buf.len() as u32).wrapping_sub(section_start_abs);
-        buf.extend_from_slice(m.codec_name.as_bytes());
-        let name_len = m.codec_name.len() as u32;
-
-        // Slot tables need 4-byte alignment within the section.
-        // The section start is 4-aligned (we padded the buffer
-        // before writing the header), so any abs offset that's
-        // 4-aligned yields a 4-aligned rel offset too.
-        pad_to(buf, 4);
-        let slots_rel = (buf.len() as u32).wrapping_sub(section_start_abs);
-        for &slot in m.union_slot_for_codec_feat {
-            buf.extend_from_slice(&slot.to_le_bytes());
-        }
-        let slots_count = m.union_slot_for_codec_feat.len() as u32;
-
-        let mut entry = [0u8; 32];
-        entry[0..4].copy_from_slice(&name_rel.to_le_bytes());
-        entry[4..8].copy_from_slice(&name_len.to_le_bytes());
-        entry[8..12].copy_from_slice(&slots_rel.to_le_bytes());
-        entry[12..16].copy_from_slice(&slots_count.to_le_bytes());
-        entry[16..20].copy_from_slice(&m.output_range.0.to_le_bytes());
-        entry[20..24].copy_from_slice(&m.output_range.1.to_le_bytes());
-        entry[24..28].copy_from_slice(&m.head_n_cells.to_le_bytes());
-        entry[28..32].copy_from_slice(&m.head_n_heads.to_le_bytes());
-        entries.push(entry);
-    }
-
-    // Write the per-codec table entries back into the reserved
-    // space.
-    for (i, entry_bytes) in entries.iter().enumerate() {
-        let off = table_off_abs + i * 32;
-        buf[off..off + 32].copy_from_slice(entry_bytes);
-    }
-
-    let section_len = buf.len() as u32 - section_start_abs;
-    Ok(Section::new(section_start_abs, section_len))
 }
 
 /// Validate the optional `zentrain.feature_transforms` and

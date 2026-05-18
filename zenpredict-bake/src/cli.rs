@@ -408,7 +408,6 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
         output_order: None,
         compressed: compress,
         hu_permutations: None,
-        multi_codec_schema: None,
     };
 
     let new_bytes = if optimize {
