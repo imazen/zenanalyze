@@ -95,6 +95,43 @@ The lesson: **single-seed sweep --confirm results MUST be multi-seed-locked befo
 - `benchmarks/multiseed_zenjpeg_v14_2026-05-17/`
 - `benchmarks/multiseed_zenavif_v14_2026-05-17/`
 
+## Follow-up: seed-stable methodology + pruning
+
+Two follow-up experiments ran after the 3-seed lock reversal:
+
+### 1. Seed-stable transforms (`seed_stable_screen.py`)
+
+Majority-vote per feature across the 3 sweep seed dirs; drop features
+without a clear majority. The intent: filter out the
+seed-dependent screen picks that drove the regress/noise verdicts.
+
+3-seed confirm of `<codec>_picker_config_v3_stable`:
+
+| Codec | v3_stable baseline argmin median | vs original config (orig 3-seed median) |
+|---|--:|--:|
+| zenjpeg | 8.1% | **-22.6 pp** (catastrophic regress) |
+| zenavif | 6.5% | -12.7 pp (regress) |
+| zenwebp | 48.6% | **+27.8 pp** (slightly better than v2's 45.3%) |
+
+**Root cause**: feature-count compounding overfit.
+`KEEP_FEATURES` count: zenwebp 33, zenjpeg 51, zenavif 52. The
+screen-based methodology requires pre-pruned feature sets to
+generalize. Full diagnosis at
+`benchmarks/screen_seed_stability_findings_2026-05-17.md`.
+
+### 2. LOO-based feature pruning (`build_pruned_config.py`)
+
+Drop features that the 2026-05-03 LOO multiseed analysis flagged as
+actively harmful (mean Δargmin ≥ +0.5 pp when removed):
+
+| Codec | Original features → pruned | 3-seed pruned baseline median | Δ vs no-pruning |
+|---|---|--:|--:|
+| zenjpeg | 51 → 41 | 30.5% | -0.2 pp (noise) |
+| zenavif | 52 → 39 | 22.7% | **+3.5 pp** (modest, within stdev) |
+
+Pruning helps zenavif modestly; doesn't move zenjpeg. The LOO data
+is 2 weeks old; current prune targets may be different.
+
 ## What's NOT in production-ready state
 
 - **zenjpeg v2 transforms** — 3-seed regress, do not ship.
@@ -106,22 +143,27 @@ The lesson: **single-seed sweep --confirm results MUST be multi-seed-locked befo
 
 ## Per-codec next steps (queued)
 
-1. **zenwebp** — bake `.bin` from `zenwebp_picker_config_v2`:
-   - Multi-seed confirmed `+24.54 pp` argmin median (stdev 5.41 pp).
+1. **zenwebp** — bake `.bin` from `zenwebp_picker_config_v3_stable`
+   (recommended; marginally better than v2):
+   - Multi-seed confirmed v3_stable baseline +27.8 pp argmin vs
+     original config (48.6% vs 20.8%). Marginal lift over v2's
+     +24.54 pp.
    - Pre-existing `DATA_STARVED_SIZE` + `UNCAPPED_ZQ_GRID` safety
      violations; pass `--allow-unsafe` to bake, document the same in
      PR (these are shared with shipped v0.1).
-   - Copy resulting `zenwebp_hybrid_v2_2026-05-17.bin` into zenwebp
-     crate via `include_bytes!`; runtime applies FEATURE_TRANSFORMS
-     automatically via `zenpredict::Predictor::predict_transformed`.
+   - Copy resulting `zenwebp_hybrid_v3_stable_2026-05-17.bin` into
+     zenwebp crate via `include_bytes!`; runtime applies
+     FEATURE_TRANSFORMS automatically via
+     `zenpredict::Predictor::predict_transformed`.
 
-2. **zenjpeg + zenavif** — DO NOT BAKE v2:
-   - zenjpeg 3-seed verdict `regress` (-6.81 pp median); keep current
-     `zenjpeg_picker_config` (no transforms). Retract
-     `zenjpeg_picker_config_v2`.
-   - zenavif 3-seed verdict `noise` (+1.65 pp median, stdev 5.48 pp).
-     Keep current `zenavif_picker_config`. Retract
-     `zenavif_picker_config_v2`.
+2. **zenjpeg + zenavif** — DO NOT BAKE v2 or v3_stable:
+   - zenjpeg 3-seed verdict `regress` for v14 (-6.81 pp median).
+     Pruning didn't help (30.7 → 30.5). Keep
+     `zenjpeg_picker_config` (no transforms).
+   - zenavif 3-seed verdict `noise` for v14 (+1.65 pp median).
+     Pruning helped modestly (+3.5 pp). Keep
+     `zenavif_picker_config`; LOO-based pruning is a real but
+     small win that requires fresh LOO data before shipping.
 
 3. **zenjpeg PER_ZQ_TAIL** at zq=92/94 (p99 99.6%/114.7%, threshold
    80%): per-zq diagnostics show all 30 zq cells in val have n=207;
