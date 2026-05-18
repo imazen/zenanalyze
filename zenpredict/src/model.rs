@@ -676,8 +676,40 @@ impl Model {
         // ── Stage 5: parse feature_transforms + transform_params metadata. ──
         let metadata_bytes = header.metadata.slice("metadata", &bytes)?;
         let metadata = Metadata::parse(metadata_bytes)?;
-        let feature_transforms = parse_feature_transforms(&metadata, n_inputs)?;
-        let feature_transform_params = parse_feature_transform_params(&metadata, n_inputs)?;
+        let feature_transforms = parse_feature_transforms(&metadata)?;
+        let feature_transform_params = parse_feature_transform_params(&metadata)?;
+
+        // ── Stage 6: cross-validate the feature pipeline. ──
+        //
+        // For scalar-only pipelines, `transforms.len() == n_inputs`
+        // (the first-layer in_dim). For pipelines that contain an
+        // expander variant (today: only Sinusoidal), `transforms.len()`
+        // is the **raw** input feature count, and the sum of
+        // per-feature output arities equals the first-layer in_dim.
+        // Both shapes must agree on the parallel transforms/params
+        // arrays.
+        if let Some(ref ts) = feature_transforms {
+            if let Some(ref ps) = feature_transform_params
+                && ts.len() != ps.len()
+            {
+                return Err(PredictError::FeatureTransformsLenMismatch {
+                    expected: ts.len(),
+                    got: ps.len(),
+                });
+            }
+            // Compute expanded dim: sum of per-feature arities.
+            // Missing params metadata ⇒ every feature uses `&[]`.
+            let expanded: usize = match &feature_transform_params {
+                Some(ps) => (0..ts.len()).map(|i| ts[i].output_arity(&ps[i])).sum(),
+                None => ts.iter().map(|t| t.output_arity(&[])).sum(),
+            };
+            if expanded != n_inputs {
+                return Err(PredictError::FeatureTransformsLenMismatch {
+                    expected: n_inputs,
+                    got: expanded,
+                });
+            }
+        }
 
         Ok(Self {
             bytes,
@@ -941,6 +973,44 @@ impl Model {
         self.feature_transforms
             .as_deref()
             .is_some_and(|ts| ts.iter().any(|t| *t != FeatureTransform::Identity))
+    }
+
+    /// True iff at least one declared transform is a scalar-to-vector
+    /// expander (today: only [`FeatureTransform::Sinusoidal`]). Used by
+    /// the Predictor to decide between the scalar fast path and the
+    /// variable-arity pipeline.
+    pub fn has_expander_feature_transforms(&self) -> bool {
+        self.feature_transforms
+            .as_deref()
+            .is_some_and(|ts| ts.iter().any(|t| t.is_expander()))
+    }
+
+    /// Sum of per-feature output arities under the loaded transforms +
+    /// params. For scalar-only bakes equals `n_inputs()`; for bakes
+    /// containing [`FeatureTransform::Sinusoidal`] equals the
+    /// post-expansion layer-1 input width. Returns `n_inputs()` when no
+    /// transforms metadata is present.
+    pub fn expanded_input_dim(&self) -> usize {
+        let Some(transforms) = self.feature_transforms.as_deref() else {
+            return self.n_inputs();
+        };
+        match self.feature_transform_params.as_deref() {
+            Some(all_params) => {
+                debug_assert_eq!(all_params.len(), transforms.len());
+                let mut total = 0usize;
+                for i in 0..transforms.len() {
+                    total += transforms[i].output_arity(&all_params[i]);
+                }
+                total
+            }
+            None => {
+                // No params metadata ⇒ every transform uses empty
+                // params ⇒ scalar variants have arity 1, Sinusoidal
+                // has arity 0 (degenerate; bake-side validator should
+                // reject this). Sum accordingly.
+                transforms.iter().map(|t| t.output_arity(&[])).sum()
+            }
+        }
     }
 
     pub fn scratch_len(&self) -> usize {

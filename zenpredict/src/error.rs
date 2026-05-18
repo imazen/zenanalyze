@@ -83,6 +83,12 @@ pub enum PredictError {
     /// `n_inputs` (or the runtime helper's `transforms` slice
     /// disagreed with `features.len()`).
     FeatureTransformsLenMismatch { expected: usize, got: usize },
+    /// A scalar-only pipeline (`apply_feature_transforms`) was called
+    /// with an expander variant (today: only `FeatureTransform::Sinusoidal`)
+    /// in the transforms list. Use `apply_feature_pipeline_expanding`,
+    /// or call the expander-aware Predictor entry point that routes
+    /// automatically.
+    UnexpectedExpanderInScalarPipeline { feature_index: usize },
 }
 
 impl fmt::Display for PredictError {
@@ -175,6 +181,13 @@ impl fmt::Display for PredictError {
             Self::FeatureTransformsLenMismatch { expected, got } => write!(
                 f,
                 "zenpredict: feature_transforms length {got} != expected {expected}"
+            ),
+            Self::UnexpectedExpanderInScalarPipeline { feature_index } => write!(
+                f,
+                "zenpredict: scalar feature-transform pipeline encountered an \
+                 expander variant at feature index {feature_index} \
+                 (use apply_feature_pipeline_expanding or the auto-routing \
+                 Predictor entry point)"
             ),
         }
     }

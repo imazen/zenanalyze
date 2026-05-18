@@ -1178,7 +1178,17 @@ fn validate_feature_transforms(
             }
         }
     }
-    if transforms.len() != n_inputs {
+    let has_expander = transforms.iter().any(|t| t.is_expander());
+
+    // For scalar-only pipelines the wire invariant is
+    // `transforms.len() == n_inputs` (n_inputs is the first layer's
+    // in_dim, which equals the raw input count). For pipelines
+    // containing an expander variant (today: only Sinusoidal),
+    // transforms.len() is the **raw** input count and the
+    // post-expansion sum must equal n_inputs. The expansion math
+    // needs the params, so the expander-path check happens below
+    // after we've parsed params.
+    if !has_expander && transforms.len() != n_inputs {
         return Err(BakeError::FeatureTransformsLenMismatch {
             expected: n_inputs,
             got: transforms.len(),
@@ -1190,8 +1200,15 @@ fn validate_feature_transforms(
     // error, not a bake-time hard failure (matches the runtime's
     // `Identity` / plain-Log degradation). We do NOT reject here
     // so the existing "feature_transforms only" workflow keeps
-    // baking.
+    // baking — UNLESS an expander variant is declared, in which
+    // case params are required (frequencies for Sinusoidal).
     let Some(p_entry) = params_entry else {
+        if has_expander {
+            return Err(BakeError::FeatureTransformsLenMismatch {
+                expected: transforms.len(),
+                got: 0,
+            });
+        }
         return Ok(());
     };
     let Ok(p_text) = core::str::from_utf8(p_entry.value) else {
@@ -1211,11 +1228,27 @@ fn validate_feature_transforms(
         }
         params.push(row);
     }
-    if params.len() != n_inputs {
+    if params.len() != transforms.len() {
         return Err(BakeError::FeatureTransformsLenMismatch {
-            expected: n_inputs,
+            expected: transforms.len(),
             got: params.len(),
         });
+    }
+
+    // Expander-aware length check: post-expansion sum must equal
+    // the first-layer in_dim (n_inputs).
+    if has_expander {
+        let expanded: usize = transforms
+            .iter()
+            .zip(params.iter())
+            .map(|(t, p)| t.output_arity(p))
+            .sum();
+        if expanded != n_inputs {
+            return Err(BakeError::FeatureTransformsLenMismatch {
+                expected: n_inputs,
+                got: expanded,
+            });
+        }
     }
 
     // Per-variant arity + domain checks.

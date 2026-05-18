@@ -9,7 +9,9 @@
 use crate::argmin::pick_confidence_from_top_k;
 use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform};
 use crate::error::PredictError;
-use crate::feature_transform::{FeatureTransform, apply_feature_transforms};
+use crate::feature_transform::{
+    FeatureTransform, apply_feature_pipeline_expanding, apply_feature_transforms,
+};
 use crate::inference::forward;
 use crate::model::Model;
 #[cfg(feature = "advanced")]
@@ -39,10 +41,17 @@ pub struct Predictor<'a> {
     #[cfg(feature = "advanced")]
     spec_output: alloc::vec::Vec<OutputValue>,
     /// Scratch buffer for the `_transformed` family. Sized to
-    /// `n_inputs` when the bake declared `feature_transforms`, and
-    /// to zero otherwise (the no-transform path forwards the input
-    /// slice without copying). Reused across calls.
+    /// `n_inputs` when the bake declared scalar-only
+    /// `feature_transforms`, to `model.expanded_input_dim()` when an
+    /// expander variant is present (resized lazily on first call),
+    /// and to zero otherwise (the no-transform path forwards the
+    /// input slice without copying). Reused across calls.
     feat_scratch: alloc::vec::Vec<f32>,
+    /// Scratch view of per-feature param slices, rebuilt on each
+    /// expander-path call. Stored on `Predictor` to avoid an
+    /// allocation per `predict_transformed` invocation; the underlying
+    /// storage lives in `Model::feature_transform_params()`.
+    feat_param_refs: alloc::vec::Vec<&'a [f32]>,
 }
 
 impl<'a> Predictor<'a> {
@@ -72,7 +81,14 @@ impl<'a> Predictor<'a> {
         let need = model.scratch_len();
         let n_out = model.n_outputs();
         let n_in = model.n_inputs();
-        let feat_scratch_len = if model.feature_transforms().is_some() {
+        let feat_scratch_len = if model.has_expander_feature_transforms() {
+            model.expanded_input_dim()
+        } else if model.feature_transforms().is_some() {
+            n_in
+        } else {
+            0
+        };
+        let feat_param_refs_cap = if model.has_expander_feature_transforms() {
             n_in
         } else {
             0
@@ -85,6 +101,7 @@ impl<'a> Predictor<'a> {
             #[cfg(feature = "advanced")]
             spec_output: alloc::vec![OutputValue::Default; n_out],
             feat_scratch: alloc::vec![0.0; feat_scratch_len],
+            feat_param_refs: alloc::vec::Vec::with_capacity(feat_param_refs_cap),
         }
     }
 
@@ -206,41 +223,27 @@ impl<'a> Predictor<'a> {
     pub fn predict_transformed(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
         // Apply transforms inline so the forward call can borrow
         // `scratch_a`/`scratch_b`/`output` mutably without aliasing
-        // through a helper that also borrows `self`. When the bake
-        // declares parameterized variants (V0_20 ClipThenLog1p /
-        // WinsorP99 / QuantileBins), `apply_with_params` is used
-        // per-feature with the matching slice from
-        // `feature_transform_params`. Non-parameterized features
-        // (Identity / Log* / Signed*) take the empty params path
-        // and behave identically to the no-params call.
-        if let Some(transforms) = self.model.feature_transforms() {
-            if features.len() != transforms.len() {
-                return Err(PredictError::FeatureLenMismatch {
-                    expected: transforms.len(),
-                    got: features.len(),
-                });
-            }
-            if self.feat_scratch.len() < features.len() {
-                self.feat_scratch.resize(features.len(), 0.0);
-            }
-            let dst = &mut self.feat_scratch[..features.len()];
-            match self.model.feature_transform_params() {
-                Some(params) => {
-                    debug_assert_eq!(params.len(), transforms.len());
-                    for i in 0..features.len() {
-                        dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
-                    }
-                }
-                None => apply_feature_transforms(transforms, features, dst)?,
-            }
-            forward(
-                self.model,
-                dst,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
-        } else {
+        // through a helper that also borrows `self`.
+        //
+        // Three cases, in priority order:
+        //
+        // 1. No transforms metadata ⇒ forward `features` unchanged.
+        //
+        // 2. All transforms are scalar (Identity / Log / Log1p /
+        //    Signed* / Clip* / Winsor* / QuantileBins) ⇒ apply
+        //    per-feature into `feat_scratch[..features.len()]`,
+        //    forward the (raw-length) scratch. Same allocation
+        //    profile as `predict`.
+        //
+        // 3. At least one transform is an expander
+        //    ([`FeatureTransform::Sinusoidal`]) ⇒ allocate
+        //    `feat_scratch` to `model.expanded_input_dim()` slots,
+        //    apply via `apply_feature_pipeline_expanding`, forward
+        //    the expanded scratch. The model's first layer
+        //    `in_dim` must equal `expanded_input_dim()` — this
+        //    is enforced at bake time by the composer, so the
+        //    runtime can trust it.
+        let Some(transforms) = self.model.feature_transforms() else {
             forward(
                 self.model,
                 features,
@@ -248,7 +251,69 @@ impl<'a> Predictor<'a> {
                 &mut self.scratch_b,
                 &mut self.output,
             )?;
+            return Ok(&self.output);
+        };
+        if features.len() != transforms.len() {
+            return Err(PredictError::FeatureLenMismatch {
+                expected: transforms.len(),
+                got: features.len(),
+            });
         }
+
+        let has_expander = self.model.has_expander_feature_transforms();
+        if has_expander {
+            // Expanding path. Per-feature params must be present —
+            // Sinusoidal requires its frequency list.
+            let params = self
+                .model
+                .feature_transform_params()
+                .ok_or(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 0 })?;
+            let expanded_dim = self.model.expanded_input_dim();
+            if self.feat_scratch.len() < expanded_dim {
+                self.feat_scratch.resize(expanded_dim, 0.0);
+            }
+            let dst = &mut self.feat_scratch[..expanded_dim];
+            // Build a `&[&[f32]]` view over the owned per-feature params.
+            // `feat_param_refs` is a stable scratch field on Predictor;
+            // re-fill it here rather than allocating a fresh Vec.
+            self.feat_param_refs.clear();
+            self.feat_param_refs
+                .extend(params.iter().map(|v| v.as_slice()));
+            apply_feature_pipeline_expanding(transforms, &self.feat_param_refs, features, dst)?;
+            forward(
+                self.model,
+                dst,
+                &mut self.scratch_a,
+                &mut self.scratch_b,
+                &mut self.output,
+            )?;
+            return Ok(&self.output);
+        }
+
+        // Scalar path.
+        if self.feat_scratch.len() < features.len() {
+            self.feat_scratch.resize(features.len(), 0.0);
+        }
+        let dst = &mut self.feat_scratch[..features.len()];
+        match self.model.feature_transform_params() {
+            Some(params) => {
+                debug_assert_eq!(params.len(), transforms.len());
+                for i in 0..features.len() {
+                    // Scalar contract — `apply_with_params` panics for
+                    // expander variants, but `has_expander` already
+                    // proved there aren't any in this branch.
+                    dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
+                }
+            }
+            None => apply_feature_transforms(transforms, features, dst)?,
+        }
+        forward(
+            self.model,
+            dst,
+            &mut self.scratch_a,
+            &mut self.scratch_b,
+            &mut self.output,
+        )?;
         Ok(&self.output)
     }
 

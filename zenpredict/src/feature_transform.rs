@@ -425,10 +425,18 @@ impl FeatureTransform {
             // invariant other variants follow).
             Self::YeoJohnson => x,
             Self::WinsorP99 | Self::QuantileBins => x,
-            // Scalar `apply` for the expander variant is a deliberate
-            // pass-through — see the variant docstring for why. Callers
-            // that want the embedding output must use `apply_expanding`.
-            Self::Sinusoidal => x,
+            // Scalar `apply` cannot represent an expander variant. The
+            // bake-load + runtime paths route through
+            // `apply_expanding` / `apply_feature_pipeline_expanding` /
+            // `Predictor::predict_transformed` (auto-routes); a panic
+            // here means the caller bypassed those layers, which is a
+            // programmer error. Loud failure is the contract — silent
+            // pass-through would let a Sinusoidal bake produce subtly
+            // wrong predictions in code that doesn't expect an expander.
+            Self::Sinusoidal => panic!(
+                "FeatureTransform::Sinusoidal cannot be applied via scalar `apply` — \
+                 use `apply_expanding` / `apply_feature_pipeline_expanding`"
+            ),
         }
     }
 
@@ -575,10 +583,12 @@ impl FeatureTransform {
                 };
                 yeo_johnson(x, lambda)
             }
-            // Sinusoidal cannot fit the scalar `f32 → f32` contract;
-            // fall through to `apply` which pass-throughs `x`. Callers
-            // that want the embedding must use `apply_expanding`.
-            Self::Sinusoidal => x,
+            // Sinusoidal is an expander — see `apply` for the rationale
+            // on why this panics instead of returning a degenerate scalar.
+            Self::Sinusoidal => panic!(
+                "FeatureTransform::Sinusoidal cannot be applied via scalar `apply_with_params` — \
+                 use `apply_expanding` / `apply_feature_pipeline_expanding`"
+            ),
             _ => self.apply(x),
         }
     }
@@ -737,18 +747,24 @@ impl FeatureTransform {
     }
 }
 
-/// Read the `zentrain.feature_transforms` metadata into a typed list
-/// of length `n_inputs`. Returns `Ok(None)` when the key is absent
-/// (consumers should then treat every feature as `Identity`); returns
-/// `Ok(Some(_))` with `len == n_inputs` when present and well-formed.
+/// Read the `zentrain.feature_transforms` metadata into a typed list.
+/// Returns `Ok(None)` when the key is absent (consumers should then
+/// treat every feature as `Identity`); returns `Ok(Some(_))` when
+/// present and well-formed.
+///
+/// Length validation lives in the Model loader, not here — for
+/// expander-containing bakes the transforms count equals the **raw**
+/// input feature count (which can differ from the first layer's
+/// `in_dim` after embedding). The loader cross-checks
+/// `transforms.len() == feature_transform_params.len()` and
+/// `total_output_arity(transforms, params) == first_layer.in_dim`.
 ///
 /// Error cases (all hard-fail):
 /// - The key is present but its value type is not UTF-8.
-/// - The value contains a token that isn't `identity`/`log`/`log1p`.
-/// - The line count doesn't equal `n_inputs`.
+/// - The value contains a token not registered in
+///   [`FeatureTransform::from_token`].
 pub(crate) fn parse_feature_transforms(
     metadata: &Metadata<'_>,
-    n_inputs: usize,
 ) -> Result<Option<alloc::vec::Vec<FeatureTransform>>, PredictError> {
     let Some(entry) = metadata.get(crate::keys::FEATURE_TRANSFORMS) else {
         return Ok(None);
@@ -760,8 +776,6 @@ pub(crate) fn parse_feature_transforms(
             got: entry.kind,
         });
     }
-    // Validated as UTF-8 at parse time, but go through `from_utf8`
-    // again so a future refactor can't regress the invariant.
     let text =
         core::str::from_utf8(entry.value).map_err(|_| PredictError::MetadataValueNotUtf8 {
             key_len: crate::keys::FEATURE_TRANSFORMS.len(),
@@ -770,15 +784,9 @@ pub(crate) fn parse_feature_transforms(
     // exactly. An empty trailing line (text ending with '\n') would
     // produce a stray empty entry; reject that as malformed rather
     // than silently dropping it.
-    let mut transforms = alloc::vec::Vec::with_capacity(n_inputs);
+    let mut transforms = alloc::vec::Vec::new();
     for token in text.split('\n') {
         transforms.push(FeatureTransform::from_token(token)?);
-    }
-    if transforms.len() != n_inputs {
-        return Err(PredictError::FeatureTransformsLenMismatch {
-            expected: n_inputs,
-            got: transforms.len(),
-        });
     }
     Ok(Some(transforms))
 }
@@ -799,7 +807,6 @@ pub(crate) fn parse_feature_transforms(
 /// [`FeatureTransform::WinsorP99`].
 pub(crate) fn parse_feature_transform_params(
     metadata: &Metadata<'_>,
-    n_inputs: usize,
 ) -> Result<Option<alloc::vec::Vec<alloc::vec::Vec<f32>>>, PredictError> {
     let Some(entry) = metadata.get(crate::keys::FEATURE_TRANSFORM_PARAMS) else {
         return Ok(None);
@@ -815,7 +822,7 @@ pub(crate) fn parse_feature_transform_params(
         core::str::from_utf8(entry.value).map_err(|_| PredictError::MetadataValueNotUtf8 {
             key_len: crate::keys::FEATURE_TRANSFORM_PARAMS.len(),
         })?;
-    let mut params = alloc::vec::Vec::with_capacity(n_inputs);
+    let mut params = alloc::vec::Vec::new();
     for line in text.split('\n') {
         let mut row: alloc::vec::Vec<f32> = alloc::vec::Vec::new();
         if !line.is_empty() {
@@ -831,18 +838,22 @@ pub(crate) fn parse_feature_transform_params(
         }
         params.push(row);
     }
-    if params.len() != n_inputs {
-        return Err(PredictError::FeatureTransformsLenMismatch {
-            expected: n_inputs,
-            got: params.len(),
-        });
-    }
     Ok(Some(params))
 }
 
 /// Apply each transform to the matching feature, writing into `dst`.
 /// `transforms.len()` must equal `src.len()`; `dst.len()` must equal
 /// `src.len()`.
+///
+/// **Scalar-only pipeline.** This helper enforces the
+/// one-input → one-output contract. If any transform in
+/// `transforms` is an expander variant (today: only
+/// [`FeatureTransform::Sinusoidal`]), returns
+/// [`PredictError::UnexpectedExpanderInScalarPipeline`] *before*
+/// processing — callers must route through
+/// [`apply_feature_pipeline_expanding`], or use the auto-routing
+/// `Predictor::predict_transformed` entry point that picks the right
+/// pipeline based on the bake's metadata.
 #[inline]
 pub fn apply_feature_transforms(
     transforms: &[FeatureTransform],
@@ -854,6 +865,9 @@ pub fn apply_feature_transforms(
             expected: src.len(),
             got: transforms.len(),
         });
+    }
+    if let Some(i) = transforms.iter().position(|t| t.is_expander()) {
+        return Err(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: i });
     }
     for (i, &t) in transforms.iter().enumerate() {
         dst[i] = t.apply(src[i]);
@@ -924,7 +938,8 @@ pub fn apply_feature_pipeline_expanding(
     let mut offset = 0usize;
     for i in 0..src.len() {
         let arity = transforms[i].output_arity(params[i]);
-        let written = transforms[i].apply_expanding(src[i], params[i], &mut dst[offset..offset + arity]);
+        let written =
+            transforms[i].apply_expanding(src[i], params[i], &mut dst[offset..offset + arity]);
         debug_assert_eq!(written, arity);
         offset += arity;
     }
@@ -960,6 +975,9 @@ pub fn apply_feature_transforms_with_params(
             expected: src.len(),
             got: transforms.len(),
         });
+    }
+    if let Some(i) = transforms.iter().position(|t| t.is_expander()) {
+        return Err(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: i });
     }
     for i in 0..src.len() {
         dst[i] = transforms[i].apply_with_params(src[i], params[i]);
@@ -1453,6 +1471,11 @@ mod tests {
             FeatureTransform::SignedCbrtThenWinsor => &[-2.0_f32, 2.0],
             FeatureTransform::ClipThenLog1pThenWinsor => &[0.1_f32, 0.0, 3.0],
             FeatureTransform::YeoJohnson => &[-50.0_f32],
+            // Sinusoidal is an expander (panics under scalar apply),
+            // so it is excluded from `all_variants()` and never reaches
+            // these scalar NaN-safety helpers. This arm only keeps the
+            // match exhaustive for the non_exhaustive enum.
+            FeatureTransform::Sinusoidal => &[1.0_f32, 2.0],
         }
     }
 
@@ -1577,6 +1600,8 @@ mod tests {
             let parsed = FeatureTransform::from_token(tok).expect("from_token");
             assert_eq!(parsed, t, "round-trip failed for {tok}");
         }
+    }
+
     // -----------------------------------------------------------------
     // Sinusoidal embedding (expander variant)
     // -----------------------------------------------------------------
@@ -1631,15 +1656,60 @@ mod tests {
     }
 
     #[test]
-    fn sinusoidal_scalar_apply_is_pass_through() {
-        // The variant docstring promises this: scalar `apply` /
-        // `apply_with_params` ignore the embedding entirely (returns
-        // `x` unchanged). This is a load-bearing degenerate fallback
-        // that keeps the old scalar pipeline safe when a Sinusoidal
-        // transform reaches code that doesn't expect an expander.
-        let t = FeatureTransform::Sinusoidal;
-        assert_eq!(t.apply(2.5), 2.5);
-        assert_eq!(t.apply_with_params(2.5, &[1.0, 2.0]), 2.5);
+    #[should_panic(expected = "FeatureTransform::Sinusoidal cannot be applied via scalar `apply`")]
+    fn sinusoidal_scalar_apply_panics() {
+        // The scalar path cannot represent an expander variant.
+        // Loud failure beats silent pass-through: a Sinusoidal bake
+        // routed through `apply` would otherwise produce subtly wrong
+        // predictions in callers that don't know about expanders.
+        let _ = FeatureTransform::Sinusoidal.apply(2.5);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "FeatureTransform::Sinusoidal cannot be applied via scalar `apply_with_params`"
+    )]
+    fn sinusoidal_scalar_apply_with_params_panics() {
+        let _ = FeatureTransform::Sinusoidal.apply_with_params(2.5, &[1.0, 2.0]);
+    }
+
+    #[test]
+    fn scalar_pipeline_errors_on_expander() {
+        // `apply_feature_transforms` enforces the scalar contract by
+        // rejecting expander variants up front — the alternative is
+        // `apply_feature_pipeline_expanding`. Callers that don't
+        // notice the difference get a hard error, not silent garbage.
+        let transforms = [
+            FeatureTransform::Identity,
+            FeatureTransform::Sinusoidal,
+            FeatureTransform::Log,
+        ];
+        let src = [1.0_f32, 2.0_f32, 3.0_f32];
+        let mut dst = [0.0_f32; 3];
+        let err = apply_feature_transforms(&transforms, &src, &mut dst)
+            .expect_err("scalar pipeline must reject Sinusoidal");
+        match err {
+            PredictError::UnexpectedExpanderInScalarPipeline { feature_index } => {
+                assert_eq!(feature_index, 1);
+            }
+            other => panic!("wrong error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scalar_pipeline_with_params_errors_on_expander() {
+        let transforms = [FeatureTransform::Identity, FeatureTransform::Sinusoidal];
+        let p_empty: &[f32] = &[];
+        let p_freqs: &[f32] = &[1.0, 2.0];
+        let params: alloc::vec::Vec<&[f32]> = alloc::vec![p_empty, p_freqs];
+        let src = [1.0_f32, 0.0_f32];
+        let mut dst = [0.0_f32; 2];
+        let err = apply_feature_transforms_with_params(&transforms, &params, &src, &mut dst)
+            .expect_err("scalar-with-params pipeline must reject Sinusoidal");
+        assert!(matches!(
+            err,
+            PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 1 }
+        ));
     }
 
     #[test]
@@ -1660,8 +1730,8 @@ mod tests {
 
         let src = [0.0_f32, 0.0_f32, core::f32::consts::E];
         let mut dst = [99.0f32; 6];
-        let n = apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst)
-            .expect("expand");
+        let n =
+            apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst).expect("expand");
         assert_eq!(n, 6);
         // Identity: 0
         assert_eq!(dst[0], 0.0);
