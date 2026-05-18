@@ -1,0 +1,166 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.5189589796621854,
+    "teacher_mean_overhead_pct": 2.2731837402413797,
+    "student_argmin_acc": 0.27473285074112375,
+    "student_mean_overhead_pct": 12.221190941916477,
+    "student_p99_overhead_pct": 108.13823938369751,
+    "fit_seconds": 0.7590791749971686,
+    "best_val_mse": 1.0577205419540405,
+    "epochs_ran": 27,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.4920716994139952,
+    "teacher_mean_overhead_pct": 2.4485990737923276,
+    "student_argmin_acc": 0.3536711478800414,
+    "student_mean_overhead_pct": 11.89529326877552,
+    "student_p99_overhead_pct": 95.61991691589355,
+    "fit_seconds": 1.5359332410007482,
+    "best_val_mse": 0.12780123949050903,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": 0.07893829713891765,
+    "mean_overhead_pp": -0.3258976731409575
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p50": "log1p",
+    "feat_laplacian_variance_p75": "log1p",
+    "feat_laplacian_variance_p90": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_p99": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_dct_compressibility_uv": "winsor_p99",
+    "feat_gradient_fraction": "clip_then_log1p",
+    "feat_quant_survival_y_p10": "winsor_then_log",
+    "feat_laplacian_variance_p75": "winsor_then_log",
+    "feat_quant_survival_uv": "winsor_p99",
+    "feat_aq_map_p75": "winsor_p99",
+    "feat_luma_histogram_entropy": "clip_then_log1p_then_winsor",
+    "feat_noise_floor_uv": "clip_then_log1p_then_winsor",
+    "feat_aq_map_mean": "clip_then_log1p",
+    "feat_noise_floor_y_p50": "winsor_then_log",
+    "feat_laplacian_variance_p50": "winsor_then_log",
+    "feat_laplacian_variance_p90": "clip_then_log1p",
+    "feat_luma_kurtosis": "clip_then_log1p_then_winsor",
+    "feat_gradient_fraction_smooth": "clip_then_log1p_then_winsor",
+    "feat_dct_compressibility_y": "quantile_bins",
+    "feat_aspect_min_over_max": "log",
+    "feat_edge_slope_stdev": "log",
+    "feat_noise_floor_y": "signed_cbrt",
+    "feat_aq_map_std": "clip_then_log1p",
+    "feat_aq_map_p90": "clip_then_log1p_then_winsor",
+    "feat_cr_vert_sharpness": "winsor_p99",
+    "feat_noise_floor_y_p90": "winsor_then_log",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_laplacian_variance_p99": "log",
+    "feat_variance": "log",
+    "feat_quant_survival_y": "quantile_bins"
+  },
+  "recommended_params": {
+    "feat_dct_compressibility_uv": [
+      3.097656011581421,
+      12.1240234375
+    ],
+    "feat_gradient_fraction": [
+      0.4677729904651642
+    ],
+    "feat_quant_survival_y_p10": [
+      0.0,
+      0.04761900007724762
+    ],
+    "feat_laplacian_variance_p75": [
+      0.0,
+      4.553876876831055
+    ],
+    "feat_quant_survival_uv": [
+      0.005673000123351812,
+      0.02153100073337555
+    ],
+    "feat_aq_map_p75": [
+      3.0021400451660156,
+      4.856903076171875
+    ],
+    "feat_luma_histogram_entropy": [
+      3.637645959854126,
+      0.0,
+      0.7209803302564467
+    ],
+    "feat_noise_floor_uv": [
+      0.03347799926996231,
+      0.0,
+      0.02632152891723364
+    ],
+    "feat_aq_map_mean": [
+      2.6754660606384277
+    ],
+    "feat_noise_floor_y_p50": [
+      0.0,
+      1.0
+    ],
+    "feat_laplacian_variance_p50": [
+      0.0,
+      2.8332133293151855
+    ],
+    "feat_laplacian_variance_p90": [
+      1.7917594909667969
+    ],
+    "feat_luma_kurtosis": [
+      4.989017009735107,
+      0.0,
+      3.8679809263365463
+    ],
+    "feat_gradient_fraction_smooth": [
+      0.8343669772148132,
+      0.0,
+      0.038485836583147054
+    ],
+    "feat_dct_compressibility_y": [
+      6.655272960662842,
+      10.85661792755127,
+      14.283203125,
+      17.6318359375,
+      21.265625,
+      26.60753631591797,
+      34.541015625
+    ],
+    "feat_aq_map_std": [
+      1.3102569580078125
+    ],
+    "feat_aq_map_p90": [
+      4.441326141357422,
+      0.0,
+      0.5576435532207825
+    ],
+    "feat_cr_vert_sharpness": [
+      0.008150000125169754,
+      0.06162000074982643
+    ],
+    "feat_noise_floor_y_p90": [
+      0.4726429879665375,
+      1.0
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.05078100040555
+    ],
+    "feat_quant_survival_y": [
+      0.029695000499486923,
+      0.049619000405073166,
+      0.06198799982666969,
+      0.0742340013384819,
+      0.0898279994726181,
+      0.11103399842977524,
+      0.1445930004119873
+    ]
+  }
+}
