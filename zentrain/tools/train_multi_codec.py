@@ -718,6 +718,121 @@ def train_shared_trunk(
     return {"best_val": best_val, "best_epoch": best_epoch, "elapsed_s": elapsed}
 
 
+def finetune_codec_heads(
+    model: SharedTrunkMLP,
+    codec_train_payloads: list[dict],
+    *,
+    epochs: int,
+    lr: float = 5e-4,
+    weight_decay: float = 1e-4,
+    batch_size: int = 512,
+    n_iter_no_change: int = 20,
+    seed: int = 0xCAFE,
+) -> dict:
+    """Phase 2: freeze the trunk, fine-tune each per-codec head independently.
+
+    The joint phase optimizes the trunk for cross-codec generalization but may
+    leave per-codec heads under-converged (each head trains on its codec's
+    slice of the joint batch). Freezing trunk + extending head training lets
+    each head fit the codec-specific patterns the joint trunk's embedding has
+    already encoded.
+
+    Returns `{codec_name: {best_val_mse, best_epoch, epochs_ran}}` per codec.
+    """
+    torch = model._torch
+    nn = model._nn
+    rng = np.random.default_rng(seed)
+
+    # Freeze trunk
+    for p in model.trunk.parameters():
+        p.requires_grad_(False)
+
+    results: dict[str, dict] = {}
+    loss_fn = nn.MSELoss()
+
+    for p in codec_train_payloads:
+        codec = p["codec"]
+        X_tr = torch.from_numpy(p["X_tr"].astype(np.float32))
+        Y_tr = torch.from_numpy(p["soft_tr"].astype(np.float32))
+        X_va = torch.from_numpy(p["X_va"].astype(np.float32))
+        Y_va = torch.from_numpy(p["soft_va"].astype(np.float32))
+        n_tr = X_tr.shape[0]
+
+        head = model.heads[codec]
+        # Pre-compute frozen trunk embedding once — saves repeated forward
+        # through the trunk on every batch.
+        with torch.no_grad():
+            Z_tr = model.trunk(X_tr)
+            Z_va = model.trunk(X_va)
+
+        optimizer = torch.optim.AdamW(
+            head.parameters(), lr=lr, weight_decay=weight_decay,
+        )
+
+        steps_per_epoch = max(1, n_tr // batch_size)
+        best_val = float("inf")
+        best_epoch = -1
+        best_state = {k: v.detach().clone() for k, v in head.state_dict().items()}
+        no_improve = 0
+
+        sys.stderr.write(
+            f"\n[head-finetune {codec}] frozen trunk, lr={lr}, "
+            f"epochs={epochs}, steps/epoch={steps_per_epoch}, n_tr={n_tr}\n"
+        )
+
+        t0 = time.monotonic()
+        for ep in range(epochs):
+            perm = rng.permutation(n_tr)
+            for s in range(steps_per_epoch):
+                idx = perm[s * batch_size:(s + 1) * batch_size]
+                if len(idx) == 0:
+                    continue
+                idx_t = torch.from_numpy(idx.astype(np.int64))
+                Zb = Z_tr.index_select(0, idx_t)
+                Yb = Y_tr.index_select(0, idx_t)
+                optimizer.zero_grad()
+                pred = head(Zb)
+                loss = loss_fn(pred, Yb)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(head.parameters(), max_norm=5.0)
+                optimizer.step()
+            with torch.no_grad():
+                val_pred = head(Z_va)
+                val_loss = loss_fn(val_pred, Y_va).item()
+            if val_loss < best_val - 1e-6:
+                best_val = val_loss
+                best_epoch = ep
+                best_state = {k: v.detach().clone() for k, v in head.state_dict().items()}
+                no_improve = 0
+            else:
+                no_improve += 1
+            if ep % 20 == 0 or ep == epochs - 1:
+                sys.stderr.write(
+                    f"  [{codec}] ep {ep:3d} val={val_loss:.4f} "
+                    f"(best ep={best_epoch} val={best_val:.4f})\n"
+                )
+            if no_improve >= n_iter_no_change:
+                sys.stderr.write(
+                    f"  [{codec}] early stop at ep {ep} (best ep {best_epoch})\n"
+                )
+                break
+
+        head.load_state_dict(best_state)
+        elapsed = time.monotonic() - t0
+        results[codec] = {
+            "best_val_mse": best_val, "best_epoch": best_epoch,
+            "epochs_ran": ep + 1, "elapsed_s": elapsed,
+        }
+        sys.stderr.write(
+            f"[head-finetune {codec}] done in {elapsed:.1f}s, best val={best_val:.4f}\n"
+        )
+
+    # Unfreeze trunk for cleanliness (downstream code may want gradients).
+    for p in model.trunk.parameters():
+        p.requires_grad_(True)
+    return results
+
+
 # ----------------------------------------------------------------------
 # Per-codec eval + JSON emission
 # ----------------------------------------------------------------------
@@ -981,6 +1096,19 @@ def main() -> int:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=lambda x: int(x, 0), default=0xCAFE)
     parser.add_argument(
+        "--head-finetune-epochs", type=int, default=0,
+        help="After joint trunk training, freeze the trunk and fine-tune "
+        "each per-codec head for N more epochs in isolation. 0 = no "
+        "fine-tune phase. Recommended: 50-100 to refine per-codec heads "
+        "that may be under-converged at joint-phase early-stop.",
+    )
+    parser.add_argument(
+        "--head-finetune-lr", type=float, default=5e-4,
+        help="Learning rate for the head-finetune phase. Lower than joint "
+        "phase (default 2e-3) since the trunk is frozen and only the head "
+        "is being refined.",
+    )
+    parser.add_argument(
         "--out-name", type=str, default="multi_codec",
         help="Filename prefix for the per-codec bake JSONs.",
     )
@@ -1048,6 +1176,18 @@ def main() -> int:
         seed=args.seed,
     )
 
+    # --- Phase 5b: optional per-codec head fine-tune with frozen trunk
+    finetune_summary: dict = {}
+    if args.head_finetune_epochs > 0:
+        finetune_summary = finetune_codec_heads(
+            model, payloads,
+            epochs=args.head_finetune_epochs,
+            lr=args.head_finetune_lr,
+            weight_decay=args.weight_decay,
+            batch_size=args.batch_size,
+            seed=args.seed,
+        )
+
     # --- Phase 6: per-codec eval + JSON emission
     all_val_metrics: dict[str, dict] = {}
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -1081,6 +1221,7 @@ def main() -> int:
         )
 
     summary = {
+        "head_finetune": finetune_summary,
         "training": train_summary,
         "codecs": all_val_metrics,
         "trunk_hidden": list(hidden),
