@@ -372,4 +372,28 @@ mod feature_transform_tests {
             assert_eq!(parsed, &[t; 4]);
         }
     }
+
+    #[test]
+    fn sinusoidal_token_round_trips_through_bake() {
+        // Wire-format integration: bake a model declaring one feature
+        // as `sinusoidal`, load it, confirm the parser surfaces the
+        // variant in the right slot. `has_nontrivial_feature_transforms`
+        // must report `true` since Sinusoidal is not Identity.
+        let txt = b"identity\nsinusoidal\nidentity\nidentity";
+        let metadata = [BakeMetadataEntry {
+            key: keys::FEATURE_TRANSFORMS,
+            kind: MetadataType::Utf8,
+            value: txt,
+        }];
+        let bytes = make_identity_passthrough(&metadata);
+        let aligned = Aligned(bytes);
+        let model = Model::from_bytes(&aligned.0).unwrap();
+        let ts = model.feature_transforms().expect("present");
+        assert_eq!(ts.len(), 4);
+        assert_eq!(ts[0], FeatureTransform::Identity);
+        assert_eq!(ts[1], FeatureTransform::Sinusoidal);
+        assert!(ts[1].is_expander());
+        assert!(ts[1].requires_params());
+        assert!(model.has_nontrivial_feature_transforms());
+    }
 }

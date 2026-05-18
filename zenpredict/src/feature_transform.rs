@@ -138,7 +138,44 @@ pub enum FeatureTransform {
     /// produces non-negative output for `ε ≥ 0`. With `params = []`
     /// falls back to plain `Log1p` on `max(0, x)`. Added 2026-05-17.
     ClipThenLog1pThenWinsor,
+    /// Sinusoidal positional embedding — `[sin(2π·f₀·x), cos(2π·f₀·x),
+    /// sin(2π·f₁·x), cos(2π·f₁·x), …]` for `N` frequencies, expanding
+    /// one input feature to `2·N` output features. Unlike every other
+    /// variant in this enum, Sinusoidal is **scalar-to-vector**: it
+    /// cannot be applied via the per-feature [`Self::apply`] /
+    /// [`Self::apply_with_params`] path, which assume `f32 → f32`.
+    ///
+    /// Callers MUST route through [`Self::output_arity`] +
+    /// [`Self::apply_expanding`] (and for whole-vector input, through
+    /// [`apply_feature_pipeline_expanding`]). The scalar `apply` /
+    /// `apply_with_params` paths return `x` unchanged for Sinusoidal
+    /// — a deliberate no-op that keeps the existing scalar pipeline
+    /// safe when a Sinusoidal transform sneaks into a context that
+    /// doesn't understand expanders (catastrophic-fail-loud is worse
+    /// than degenerate-pass-through here, since `apply` is called
+    /// from many call sites that pre-date the variant).
+    ///
+    /// Requires **N parameters** (the frequencies `f₀ … f_{N-1}` in
+    /// cycles per unit input — i.e. the multiplier inside `sin(2π·f·x)`
+    /// before `2π` scaling). Typical NeRF-style schedules use
+    /// `f_k = 2^k` for `k = 0..N-1`. With `params = []` the variant
+    /// produces no output (arity 0); a bake-side validator SHOULD
+    /// reject this since it leaves the downstream layer width
+    /// undefined.
+    ///
+    /// **Wire format:** the `feature_transforms` line uses token
+    /// `"sinusoidal"`; the parallel `feature_transform_params` line
+    /// lists the frequencies comma-separated. Both sin and cos are
+    /// always emitted (no sin-only / cos-only switch in this variant
+    /// — add a sibling variant if a one-phase-only embedding is ever
+    /// needed). Added 2026-05-18 for Gain-MLP-style per-pixel MLPs
+    /// (Canham et al. 2025).
+    Sinusoidal,
 }
+
+/// Two-pi constant for sinusoidal embedding. Mirrors `core::f32::consts::TAU`
+/// without pulling it in directly (keeps `no_std` builds identical to std).
+const TWO_PI: f32 = 6.283_185_5_f32;
 
 /// Branchless inclusive clamp that tolerates `lo > hi` (returns `lo`)
 /// and `NaN` (returns `NaN`). Mirrors the WinsorP99 arm's behaviour
@@ -276,6 +313,10 @@ impl FeatureTransform {
                 libm::log1pf(y)
             }
             Self::WinsorP99 | Self::QuantileBins => x,
+            // Scalar `apply` for the expander variant is a deliberate
+            // pass-through — see the variant docstring for why. Callers
+            // that want the embedding output must use `apply_expanding`.
+            Self::Sinusoidal => x,
         }
     }
 
@@ -416,6 +457,10 @@ impl FeatureTransform {
                 let y = libm::log1pf(clipped);
                 clamp_inclusive(y, q_lo, q_hi)
             }
+            // Sinusoidal cannot fit the scalar `f32 → f32` contract;
+            // fall through to `apply` which pass-throughs `x`. Callers
+            // that want the embedding must use `apply_expanding`.
+            Self::Sinusoidal => x,
             _ => self.apply(x),
         }
     }
@@ -437,7 +482,86 @@ impl FeatureTransform {
                 | Self::WinsorThenSignedCbrt
                 | Self::SignedCbrtThenWinsor
                 | Self::ClipThenLog1pThenWinsor
+                | Self::Sinusoidal
         )
+    }
+
+    /// Returns true if this transform is **scalar-to-vector** — i.e. it
+    /// expands one input feature into multiple output features. Today
+    /// only [`Self::Sinusoidal`] is an expander; every other variant
+    /// returns `false`.
+    ///
+    /// Use this on the bake-load path to decide whether the simple
+    /// scalar [`apply_feature_transforms`] pipeline is safe, or
+    /// whether the model needs the [`apply_feature_pipeline_expanding`]
+    /// path (which sums per-feature arities into the layer width).
+    #[inline]
+    pub fn is_expander(self) -> bool {
+        matches!(self, Self::Sinusoidal)
+    }
+
+    /// How many output values this transform produces from one input
+    /// given a `params` slice. Scalar variants always return `1`. The
+    /// expander variant [`Self::Sinusoidal`] returns `2 * params.len()`
+    /// — sin and cos at each frequency. Empty params produce arity
+    /// `0` (degenerate; the bake-side validator should reject this).
+    #[inline]
+    pub fn output_arity(self, params: &[f32]) -> usize {
+        match self {
+            Self::Sinusoidal => 2 * params.len(),
+            _ => 1,
+        }
+    }
+
+    /// Apply this transform writing `output_arity(params)` values into
+    /// `dst`. For scalar variants this is `dst[0] = apply_with_params(x, params)`
+    /// and `dst.len()` must be `>= 1`. For [`Self::Sinusoidal`] the
+    /// output is `[sin(2π·f₀·x), cos(2π·f₀·x), sin(2π·f₁·x),
+    /// cos(2π·f₁·x), …]`; `dst.len()` must be `>= 2 * params.len()`.
+    ///
+    /// Returns the number of values written. Panics in debug if `dst`
+    /// is too short; releases silently truncate to `dst.len()` (the
+    /// bake-side validator is the right place to catch undersized
+    /// allocations).
+    #[inline]
+    pub fn apply_expanding(self, x: f32, params: &[f32], dst: &mut [f32]) -> usize {
+        match self {
+            Self::Sinusoidal => {
+                let n = params.len();
+                debug_assert!(
+                    dst.len() >= 2 * n,
+                    "Sinusoidal dst too short: {} < {}",
+                    dst.len(),
+                    2 * n
+                );
+                let mut written = 0;
+                for &freq in params {
+                    if written + 2 > dst.len() {
+                        break;
+                    }
+                    let theta = TWO_PI * freq * x;
+                    #[cfg(feature = "std")]
+                    {
+                        dst[written] = theta.sin();
+                        dst[written + 1] = theta.cos();
+                    }
+                    #[cfg(not(feature = "std"))]
+                    {
+                        dst[written] = libm::sinf(theta);
+                        dst[written + 1] = libm::cosf(theta);
+                    }
+                    written += 2;
+                }
+                written
+            }
+            _ => {
+                if dst.is_empty() {
+                    return 0;
+                }
+                dst[0] = self.apply_with_params(x, params);
+                1
+            }
+        }
     }
 
     /// Parse one of the wire-format token strings. Unknown tokens
@@ -465,6 +589,7 @@ impl FeatureTransform {
             "winsor_then_signed_cbrt" => Ok(Self::WinsorThenSignedCbrt),
             "signed_cbrt_then_winsor" => Ok(Self::SignedCbrtThenWinsor),
             "clip_then_log1p_then_winsor" => Ok(Self::ClipThenLog1pThenWinsor),
+            "sinusoidal" => Ok(Self::Sinusoidal),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -486,6 +611,7 @@ impl FeatureTransform {
             Self::WinsorThenSignedCbrt => "winsor_then_signed_cbrt",
             Self::SignedCbrtThenWinsor => "signed_cbrt_then_winsor",
             Self::ClipThenLog1pThenWinsor => "clip_then_log1p_then_winsor",
+            Self::Sinusoidal => "sinusoidal",
         }
     }
 }
@@ -612,6 +738,76 @@ pub fn apply_feature_transforms(
         dst[i] = t.apply(src[i]);
     }
     Ok(())
+}
+
+/// Sum the per-feature output arities under a (`transforms`, `params`)
+/// pair. For all-scalar pipelines this equals `transforms.len()`; for
+/// pipelines containing [`FeatureTransform::Sinusoidal`] it equals the
+/// post-expansion layer-1 input width.
+///
+/// Used by the bake-load path to allocate the expanded feature buffer
+/// and verify the model's `layers[0].in_dim` matches.
+#[inline]
+pub fn total_output_arity(transforms: &[FeatureTransform], params: &[&[f32]]) -> usize {
+    debug_assert_eq!(transforms.len(), params.len());
+    let mut total = 0usize;
+    for i in 0..transforms.len() {
+        total += transforms[i].output_arity(params[i]);
+    }
+    total
+}
+
+/// Apply each transform with per-feature params, writing into `dst`
+/// using the variable-arity contract. `transforms.len()` must equal
+/// `params.len()` must equal `src.len()`. `dst.len()` must equal
+/// [`total_output_arity`] of the same `(transforms, params)`.
+///
+/// Differs from [`apply_feature_transforms_with_params`] in that it
+/// honours scalar-to-vector variants ([`FeatureTransform::Sinusoidal`]):
+/// each input may produce one or more output values, packed
+/// consecutively into `dst`. Scalar-only pipelines produce identical
+/// results to `apply_feature_transforms_with_params`.
+///
+/// Returns the number of values written to `dst` (equal to `dst.len()`
+/// on success). Returns [`PredictError::FeatureTransformsLenMismatch`]
+/// if the input lengths disagree or the output buffer is wrong-sized.
+///
+/// **API-stability note:** currently unused inside zenpredict — the
+/// `Predictor::predict_transformed` fast path takes the scalar
+/// [`apply_feature_transforms`] route, which is correct for every
+/// shipped bake. Wiring the expanding path into `Predictor` is the
+/// follow-up commit that activates Sinusoidal in production. Kept
+/// public so downstream consumers (e.g., `zentone::gainmap_mlp`)
+/// can drive the expansion themselves while the integration lands.
+#[allow(dead_code)]
+#[inline]
+pub fn apply_feature_pipeline_expanding(
+    transforms: &[FeatureTransform],
+    params: &[&[f32]],
+    src: &[f32],
+    dst: &mut [f32],
+) -> Result<usize, PredictError> {
+    if transforms.len() != src.len() || params.len() != src.len() {
+        return Err(PredictError::FeatureTransformsLenMismatch {
+            expected: src.len(),
+            got: transforms.len(),
+        });
+    }
+    let expected_dst = total_output_arity(transforms, params);
+    if dst.len() != expected_dst {
+        return Err(PredictError::FeatureTransformsLenMismatch {
+            expected: expected_dst,
+            got: dst.len(),
+        });
+    }
+    let mut offset = 0usize;
+    for i in 0..src.len() {
+        let arity = transforms[i].output_arity(params[i]);
+        let written = transforms[i].apply_expanding(src[i], params[i], &mut dst[offset..offset + arity]);
+        debug_assert_eq!(written, arity);
+        offset += arity;
+    }
+    Ok(offset)
 }
 
 /// Apply each transform with optional per-feature params, writing into
@@ -869,5 +1065,139 @@ mod tests {
             assert_eq!(parsed, v);
             assert!(parsed.requires_params(), "{tok} should require params");
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Sinusoidal embedding (expander variant)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn sinusoidal_token_round_trip() {
+        let t = FeatureTransform::from_token("sinusoidal").expect("parse");
+        assert_eq!(t, FeatureTransform::Sinusoidal);
+        assert_eq!(t.as_token(), "sinusoidal");
+        assert!(t.requires_params());
+        assert!(t.is_expander());
+    }
+
+    #[test]
+    fn sinusoidal_output_arity_doubles_param_count() {
+        let t = FeatureTransform::Sinusoidal;
+        assert_eq!(t.output_arity(&[]), 0);
+        assert_eq!(t.output_arity(&[1.0]), 2);
+        assert_eq!(t.output_arity(&[1.0, 2.0, 4.0]), 6);
+        // 24 frequencies × (sin + cos) = 48 outputs per input feature,
+        // matching the Gain-MLP paper's 24-D per-input embedding when
+        // counted as 12 frequencies × 2 phases.
+        let freqs: alloc::vec::Vec<f32> = (0..12).map(|k| (1u32 << k) as f32).collect();
+        assert_eq!(t.output_arity(&freqs), 24);
+    }
+
+    #[test]
+    fn sinusoidal_apply_expanding_writes_sin_cos_pairs() {
+        let t = FeatureTransform::Sinusoidal;
+        // freq=0 → sin(0)=0, cos(0)=1 for any x
+        let mut dst = [99.0f32; 2];
+        let n = t.apply_expanding(core::f32::consts::PI, &[0.0], &mut dst);
+        assert_eq!(n, 2);
+        assert!(dst[0].abs() < 1e-6);
+        assert!((dst[1] - 1.0).abs() < 1e-6);
+
+        // freq=0.5, x=1 → theta = 2π · 0.5 · 1 = π → sin(π)=0, cos(π)=-1
+        let mut dst = [99.0f32; 2];
+        let n = t.apply_expanding(1.0, &[0.5], &mut dst);
+        assert_eq!(n, 2);
+        assert!(dst[0].abs() < 1e-5);
+        assert!((dst[1] - -1.0).abs() < 1e-5);
+
+        // Two freqs, x=0 → all sins are 0, all cosines are 1.
+        let mut dst = [99.0f32; 4];
+        let n = t.apply_expanding(0.0, &[1.0, 2.0], &mut dst);
+        assert_eq!(n, 4);
+        assert_eq!(dst[0], 0.0);
+        assert_eq!(dst[1], 1.0);
+        assert_eq!(dst[2], 0.0);
+        assert_eq!(dst[3], 1.0);
+    }
+
+    #[test]
+    fn sinusoidal_scalar_apply_is_pass_through() {
+        // The variant docstring promises this: scalar `apply` /
+        // `apply_with_params` ignore the embedding entirely (returns
+        // `x` unchanged). This is a load-bearing degenerate fallback
+        // that keeps the old scalar pipeline safe when a Sinusoidal
+        // transform reaches code that doesn't expect an expander.
+        let t = FeatureTransform::Sinusoidal;
+        assert_eq!(t.apply(2.5), 2.5);
+        assert_eq!(t.apply_with_params(2.5, &[1.0, 2.0]), 2.5);
+    }
+
+    #[test]
+    fn expanding_pipeline_packs_mixed_arities() {
+        // 3 input features: [Identity, Sinusoidal(2 freqs), Log] → 5 outputs
+        // ([x0, sin(2π·1·x1), cos(2π·1·x1), sin(2π·2·x1), cos(2π·2·x1), ln(x2)])
+        let transforms = [
+            FeatureTransform::Identity,
+            FeatureTransform::Sinusoidal,
+            FeatureTransform::Log,
+        ];
+        let p_id: &[f32] = &[];
+        let p_sin: &[f32] = &[1.0, 2.0];
+        let p_log: &[f32] = &[];
+        let params: alloc::vec::Vec<&[f32]> = alloc::vec![p_id, p_sin, p_log];
+
+        assert_eq!(total_output_arity(&transforms, &params), 6);
+
+        let src = [0.0_f32, 0.0_f32, core::f32::consts::E];
+        let mut dst = [99.0f32; 6];
+        let n = apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst)
+            .expect("expand");
+        assert_eq!(n, 6);
+        // Identity: 0
+        assert_eq!(dst[0], 0.0);
+        // Sinusoidal at x=0: every sin=0, every cos=1
+        assert_eq!(dst[1], 0.0);
+        assert_eq!(dst[2], 1.0);
+        assert_eq!(dst[3], 0.0);
+        assert_eq!(dst[4], 1.0);
+        // Log(e) ≈ 1
+        assert!((dst[5] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn expanding_pipeline_rejects_wrong_dst_size() {
+        let transforms = [FeatureTransform::Sinusoidal];
+        let p_sin: &[f32] = &[1.0];
+        let params: alloc::vec::Vec<&[f32]> = alloc::vec![p_sin];
+        let src = [0.0f32];
+        // Expected dst length is 2 (2 * 1 freq). 0-length and 3-length
+        // both error.
+        let mut dst0: [f32; 0] = [];
+        let mut dst3 = [0.0f32; 3];
+        assert!(apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst0).is_err());
+        assert!(apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst3).is_err());
+    }
+
+    #[test]
+    fn expanding_pipeline_matches_scalar_pipeline_when_no_expanders() {
+        // For an all-scalar input the expanding pipeline must produce
+        // byte-identical output to the existing scalar one — guarantees
+        // we can mix the two paths without changing bake behavior.
+        let transforms = [
+            FeatureTransform::Identity,
+            FeatureTransform::Log1p,
+            FeatureTransform::SignedSqrt,
+        ];
+        let src = [3.5_f32, 0.0_f32, -9.0_f32];
+        let p: &[f32] = &[];
+        let params: alloc::vec::Vec<&[f32]> = alloc::vec![p, p, p];
+
+        let mut dst_expand = [0.0f32; 3];
+        apply_feature_pipeline_expanding(&transforms, &params, &src, &mut dst_expand).unwrap();
+
+        let mut dst_scalar = [0.0f32; 3];
+        apply_feature_transforms(&transforms, &src, &mut dst_scalar).unwrap();
+
+        assert_eq!(dst_expand, dst_scalar);
     }
 }
