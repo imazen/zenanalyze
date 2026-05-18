@@ -3921,6 +3921,144 @@ mod hvs {
         assert!(ori.is_finite() && ori >= 1.0);
     }
 
+    /// Synthetic 1/f-noise pattern: build an image whose 8×8 DCT
+    /// magnitudes fall as |F(r)| ∝ r^(−1) by populating each radial
+    /// frequency bin with the right amplitude per AC coefficient.
+    /// Because the spectral slope is a property of the DCT magnitudes
+    /// directly, we construct the image by inverse-DCT'ing a target
+    /// AC pattern over many blocks (each block independently shaped).
+    /// β estimate should land near 1.0 with reasonable looseness.
+    #[test]
+    fn one_over_f_synthetic_spectral_slope_near_one() {
+        // 256×256 = 32×32 = 1024 8×8 blocks, well above MIN_BLOCKS.
+        let w = 256u32;
+        let h = 256u32;
+        // We synthesize directly in pixel space using a superposition
+        // of cosine basis functions weighted so the AC magnitudes
+        // follow |F(u,v)| ∝ 1/√(u² + v²). The pixel-space form is
+        //   L(x, y) = 128 + Σ_{(u,v)≠(0,0)} A(u,v) · cos(π(u(x+½)/8))
+        //                                          · cos(π(v(y+½)/8))
+        // applied tile-by-tile in 8×8 tiles. After 2D DCT-II, the
+        // (u,v) coefficient of the same tile recovers A(u,v) up to a
+        // constant of proportionality — exactly the spectrum we want.
+        use core::f32::consts::PI;
+        let mut rgb = vec![128u8; (w * h * 3) as usize];
+        let mut amp = [[0.0f32; 8]; 8];
+        for v in 0..8 {
+            for u in 0..8 {
+                if u == 0 && v == 0 {
+                    continue;
+                }
+                let r = ((u * u + v * v) as f32).sqrt();
+                // 1/f amplitude with a moderate scale so the rendered
+                // image fits comfortably in [0, 255].
+                amp[v][u] = 60.0 / r;
+            }
+        }
+        // Generate one 8×8 tile via inverse DCT-II of the amplitude
+        // pattern, then replicate. Replication is fine because the
+        // analyzer samples blocks aligned to the 8×8 grid.
+        let mut tile = [[0.0f32; 8]; 8];
+        for y in 0..8 {
+            for x in 0..8 {
+                let mut s = 0.0f32;
+                for v in 0..8 {
+                    for u in 0..8 {
+                        if u == 0 && v == 0 {
+                            continue;
+                        }
+                        let cx = ((PI * u as f32 * (x as f32 + 0.5)) / 8.0).cos();
+                        let cy = ((PI * v as f32 * (y as f32 + 0.5)) / 8.0).cos();
+                        s += amp[v][u] * cx * cy;
+                    }
+                }
+                tile[y][x] = s;
+            }
+        }
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let v = tile[y % 8][x % 8];
+                let pix = (128.0 + v).clamp(0.0, 255.0) as u8;
+                let i = (y * w as usize + x) * 3;
+                rgb[i] = pix;
+                rgb[i + 1] = pix;
+                rgb[i + 2] = pix;
+            }
+        }
+        let q = rgb_query(&[AnalysisFeature::SpectralSlopeY]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        let beta = r
+            .get_f32(AnalysisFeature::SpectralSlopeY)
+            .expect("slope requested");
+        assert!(beta.is_finite(), "β must be finite, got {beta}");
+        // Wide tolerance: the binning + 5-bin OLS fit + clamp of the
+        // rendered pixels introduces non-trivial bias. 1/f content
+        // should still land well above zero and below 2.
+        assert!(
+            (0.4..=1.8).contains(&beta),
+            "1/f synthetic should yield β ≈ 1.0 (tol 0.4–1.8), got {beta}"
+        );
+    }
+
+    /// Pure single-frequency tone: a single AC bin dominates so the
+    /// regression has at most one populated bin per block and the
+    /// fit is undefined. The implementation emits `f32::NAN`, which
+    /// `set` drops from the results — `get` returns `None`.
+    #[test]
+    fn pure_tone_spectral_slope_is_nan() {
+        // 256×256 image with a single horizontal-frequency tone at
+        // u=4 (cos(π·4·(x+½)/8) gives ±1 every other column inside
+        // an 8-pixel tile). All sampled blocks have nearly all AC
+        // energy in one radial bin → other bins drop below the
+        // ε-floor → only one valid bin → no slope fit.
+        use core::f32::consts::PI;
+        let w = 256u32;
+        let h = 256u32;
+        let mut rgb = vec![128u8; (w * h * 3) as usize];
+        let amplitude = 80.0f32;
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let u_freq = 4.0f32;
+                let cx = ((PI * u_freq * (x as f32 % 8.0 + 0.5)) / 8.0).cos();
+                let v = (128.0 + amplitude * cx).clamp(0.0, 255.0) as u8;
+                let i = (y * w as usize + x) * 3;
+                rgb[i] = v;
+                rgb[i + 1] = v;
+                rgb[i + 2] = v;
+            }
+        }
+        let q = rgb_query(&[AnalysisFeature::SpectralSlopeY]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        // Either the result is absent (NaN sentinel filtered by `set`)
+        // or it's present but NaN — both are acceptable "no fit"
+        // outcomes. The contract is just "not a poisoned numeric
+        // value masquerading as a real slope".
+        match r.get_f32(AnalysisFeature::SpectralSlopeY) {
+            None => { /* expected: NaN filtered by set */ }
+            Some(b) => {
+                assert!(b.is_nan(), "pure tone should yield NaN slope, got {b}");
+            }
+        }
+    }
+
+    /// Flat image: every AC coefficient is ε (numerical noise), no
+    /// radial bin clears the ε-floor → no fit → NaN sentinel →
+    /// absent from results. Verifies the degenerate-case fallback.
+    #[test]
+    fn flat_image_spectral_slope_is_absent() {
+        let w = 256u32;
+        let h = 256u32;
+        let rgb = vec![128u8; (w * h * 3) as usize];
+        let q = rgb_query(&[AnalysisFeature::SpectralSlopeY]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        assert!(
+            r.get(AnalysisFeature::SpectralSlopeY).is_none(),
+            "flat image should produce no spectral slope (NaN filtered), \
+             got {:?}",
+            r.get_f32(AnalysisFeature::SpectralSlopeY)
+        );
+    }
+
     /// Below the Tier-3 minimum-sample floor, `info_weight_p90` is
     /// statistically meaningless — the writer emits `f32::NAN` and
     /// `AnalysisResults::set` drops it from the result, so `get`

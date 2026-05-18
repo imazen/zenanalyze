@@ -1199,6 +1199,36 @@ features_table! {
     /// Cite: Freeman & Adelson, IEEE TPAMI 1991.
     #[cfg(feature = "experimental")]
     OrientationEnergyRatio = 136 : f32 => orientation_energy_ratio,
+
+    /// `f32`. Mean spectral-slope exponent β per sampled 8×8 luma DCT
+    /// block, where `|F(r)| ∝ r^(−β)` is the 1/f^β model fit across
+    /// radial frequency bins. For each AC coefficient `(u, v)` we
+    /// build `r = √(u² + v²)` and `log|F(r)| = log(|coef| + ε)`;
+    /// coefficients are averaged in 5 radial bins (`r ∈ [1, 2)`,
+    /// `[2, 3)`, `[3, 4.5)`, `[4.5, 6)`, `[6, √98]`) and a linear
+    /// regression `log|F| = a − β · log r` extracts β per block.
+    /// Returned value is the mean β across the sampled blocks
+    /// (blocks with <2 populated bins skip, contributing nothing).
+    ///
+    /// **Why:** natural-photo content has β ≈ 0.8–1.2 (1/f
+    /// roll-off); text / UI / screen captures sit far from that range
+    /// (typically flatter or with structured peaks). Photographic vs
+    /// screen-content distinction sharper than DCT-energy ratios
+    /// because the slope reads the *shape* of the AC spectrum, not
+    /// just one HF/LF split.
+    ///
+    /// **Edge cases:** returns `f32::NAN` when no sampled block had
+    /// at least 2 populated radial bins (flat content / tiny image).
+    /// Per-block contributions drop out cleanly when the block's
+    /// own AC energy is below `ε = 1e-6` in every bin.
+    ///
+    /// **Cost:** ~0.5 ms/MP — piggybacks on the Tier-3 sampled-block
+    /// DCT pass that already extracts per-block AC coefficients.
+    /// Cite: Field, "Relations between the statistics of natural
+    /// images and the response properties of cortical cells",
+    /// J. Opt. Soc. Am. A 1987.
+    #[cfg(feature = "experimental")]
+    SpectralSlopeY = 137 : f32 => spectral_slope_y,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -1730,6 +1760,9 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
         // pass.
         s = s.with(AnalysisFeature::InfoWeightMean);
         s = s.with(AnalysisFeature::InfoWeightP90);
+        // Spectral slope β (Field 1987 1/f^β fit) — reads the same
+        // per-block luma AC coefficients as `HighFreqEnergyRatio`.
+        s = s.with(AnalysisFeature::SpectralSlopeY);
     }
     s
 };
@@ -1790,6 +1823,9 @@ pub(crate) const DCT_NEEDED_BY: FeatureSet = {
         // 8×8 array, which is only built inside `dct_stats`.
         s = s.with(AnalysisFeature::InfoWeightMean);
         s = s.with(AnalysisFeature::InfoWeightP90);
+        // Spectral slope β needs the per-block luma DCT coefficients
+        // produced only inside `dct_stats`.
+        s = s.with(AnalysisFeature::SpectralSlopeY);
     }
     s
 };
@@ -2228,11 +2264,12 @@ mod tests {
             }
         }
         // First unused id past the HVS-feature block added 2026-05-17
-        // (ids 132..136). Bump when new ids land beyond 136.
+        // (ids 132..137; the SpectralSlopeY landing at 137). Bump
+        // when new ids land beyond 137.
         assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(123).is_none());
         assert!(AnalysisFeature::from_u16(124).is_none());
-        assert!(AnalysisFeature::from_u16(137).is_none());
+        assert!(AnalysisFeature::from_u16(138).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
@@ -2288,10 +2325,10 @@ mod tests {
         // returns `None` for both kinds of holes, so a single
         // `if let Some(f) = …` walk handles them uniformly.
         let mut active = 0u32;
-        // Iterate past the HVS-feature block (max id 136 as of
-        // 2026-05-17). Bump the upper bound when new ids land —
-        // `assert_eq!` below catches drift between SUPPORTED.len() and
-        // this loop's walked range.
+        // Iterate past the HVS-feature block (max id 137 as of
+        // 2026-05-17, SpectralSlopeY). Bump the upper bound when new
+        // ids land — `assert_eq!` below catches drift between
+        // SUPPORTED.len() and this loop's walked range.
         for id in 0..160u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;

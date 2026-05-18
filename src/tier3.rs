@@ -137,6 +137,7 @@ pub fn populate_tier3(
             out.quant_survival_uv_p75 = dct.quant_survival_uv_p75;
             out.info_weight_mean = dct.info_weight_mean;
             out.info_weight_p90 = dct.info_weight_p90;
+            out.spectral_slope_y = dct.spectral_slope_y;
         }
         #[cfg(not(feature = "experimental"))]
         {
@@ -154,6 +155,7 @@ pub fn populate_tier3(
                 dct.quant_survival_uv,
                 dct.info_weight_mean,
                 dct.info_weight_p90,
+                dct.spectral_slope_y,
             );
         }
     }
@@ -274,6 +276,12 @@ struct Tier3DctStats {
     /// `MIN_BLOCKS_FOR_PERCENTILE` (the same gating as
     /// `aq_map_pN`); 0 in non-experimental builds.
     info_weight_p90: f32,
+    /// Spectral-slope exponent β per sampled luma 8×8 block, averaged
+    /// across blocks. Fits `log|F(r)| = a − β · log r` over five
+    /// radial bins of the AC coefficients. `f32::NAN` when no sampled
+    /// block produced ≥ 2 populated bins (flat content / tiny image).
+    /// 0 in non-experimental builds.
+    spectral_slope_y: f32,
 }
 
 /// libwebp `GetAlpha`-style score on a single 8×8 DCT block. Higher
@@ -926,6 +934,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             quant_survival_uv_p75: 0.0,
             info_weight_mean: 0.0,
             info_weight_p90: 0.0,
+            spectral_slope_y: 0.0,
         };
     }
     // Per-primaries luma weights — used in the per-block fixed-point
@@ -986,6 +995,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             quant_survival_uv_p75: 0.0,
             info_weight_mean: 0.0,
             info_weight_p90: 0.0,
+            spectral_slope_y: 0.0,
         };
     }
     let stride = (total_blocks / max_blocks).max(1);
@@ -1043,6 +1053,15 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // a busy block lifts toward `log2(σ²_p/25)`.
     #[cfg(feature = "experimental")]
     let mut info_weight_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
+    // Spectral-slope β accumulator (Field 1987 1/f^β model): per
+    // sampled block, regress `log|F(r)| = a − β · log r` across 5
+    // radial bins of the AC coefficients. Blocks where < 2 bins are
+    // populated above the energy floor don't contribute. Reduced as
+    // `Σ β / count` at end-of-pass.
+    #[cfg(feature = "experimental")]
+    let mut spectral_slope_sum: f64 = 0.0;
+    #[cfg(feature = "experimental")]
+    let mut spectral_slope_count: u32 = 0;
     let row_bytes = width * 3;
     let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
     let mut block_idx = 0usize;
@@ -1228,6 +1247,103 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                 let var = (sq / n - mean * mean).max(0.0);
                 let w = (1.0 + var / SIGMA_E_SQ).log2();
                 info_weight_blocks.push(w);
+
+                // Spectral slope β (Field 1987) per block. Bin AC
+                // coefficients by radial frequency `r = √(u² + v²)`,
+                // accumulate `log|F|` per bin over the coefficients
+                // whose magnitude clears a robust floor (so a single
+                // strong coefficient surrounded by numerical noise
+                // doesn't lift its entire bin's mean), then
+                // linear-regress `log|F(r)| = a − β · log r` over the
+                // populated bins.
+                //
+                // Bin edges land ~equal-count samples per bin on the
+                // 8×8 grid:
+                //   [1, 2): (1,0),(0,1) plus the closer corner of (1,1)
+                //   [2, 3): mid-low frequencies
+                //   [3, 4.5): mid frequencies
+                //   [4.5, 6): mid-high
+                //   [6, √98]: high frequencies
+                const N_BINS: usize = 5;
+                // Per-coefficient magnitude floor. DCT AC magnitudes
+                // for active content typically run ≫ 1 (luma in
+                // [-128, 127]); coefficients below 1.0 are essentially
+                // quantisation / floating-point noise and should not
+                // contribute to the per-bin mean. This is what
+                // separates "broad-spectrum signal" (1/f photo
+                // content) from "single-tone with floor noise"
+                // (where only one bin has substantive energy).
+                const COEF_FLOOR: f32 = 1.0;
+                let mut bin_log_sum = [0.0f32; N_BINS];
+                let mut bin_count = [0u32; N_BINS];
+                for (v_idx, row) in coeffs_y.iter().enumerate() {
+                    for (u_idx, &c) in row.iter().enumerate() {
+                        if u_idx == 0 && v_idx == 0 {
+                            continue; // skip DC
+                        }
+                        let mag = c.abs();
+                        if mag < COEF_FLOOR {
+                            continue;
+                        }
+                        let rr = (u_idx * u_idx + v_idx * v_idx) as f32;
+                        let r = rr.sqrt();
+                        let bin = if r < 2.0 {
+                            0
+                        } else if r < 3.0 {
+                            1
+                        } else if r < 4.5 {
+                            2
+                        } else if r < 6.0 {
+                            3
+                        } else {
+                            4
+                        };
+                        bin_log_sum[bin] += mag.ln();
+                        bin_count[bin] += 1;
+                    }
+                }
+                // Bin representative r is the geometric centre of the
+                // edge range used for binning. Last bin's centre is
+                // the mid-point of [6, √98] ≈ 7.95; rounding to
+                // 8.66 = √75 keeps the numbers tidy and within the
+                // bin range.
+                const BIN_R_CENTRE: [f32; N_BINS] = [1.5, 2.5, 3.75, 5.25, 7.95];
+                let mut sum_x = 0.0f64;
+                let mut sum_y = 0.0f64;
+                let mut sum_xx = 0.0f64;
+                let mut sum_xy = 0.0f64;
+                let mut n_bins = 0u32;
+                for b in 0..N_BINS {
+                    if bin_count[b] == 0 {
+                        continue;
+                    }
+                    let mean_log_f = bin_log_sum[b] / (bin_count[b] as f32);
+                    let x = (BIN_R_CENTRE[b] as f64).ln();
+                    let y = mean_log_f as f64;
+                    sum_x += x;
+                    sum_y += y;
+                    sum_xx += x * x;
+                    sum_xy += x * y;
+                    n_bins += 1;
+                }
+                if n_bins >= 2 {
+                    let n = n_bins as f64;
+                    let denom = n * sum_xx - sum_x * sum_x;
+                    // Numerically robust guard: collinear bin centres
+                    // are impossible (BIN_R_CENTRE values are
+                    // distinct), but denom can underflow for n_bins=2
+                    // with extreme values. Guard against div-by-zero.
+                    if denom.abs() > 1.0e-12 {
+                        let slope = (n * sum_xy - sum_x * sum_y) / denom;
+                        // β = −slope (the model is log|F| = a − β·log r,
+                        // so negative slope ⇒ positive β).
+                        let beta = -slope;
+                        if beta.is_finite() {
+                            spectral_slope_sum += beta;
+                            spectral_slope_count += 1;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1497,6 +1613,19 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     #[cfg(not(feature = "experimental"))]
     let (info_weight_mean, info_weight_p90) = (0.0f32, 0.0f32);
 
+    // Spectral-slope mean β across populated blocks. Sentinel
+    // `f32::NAN` when no block produced a fit (flat content / tiny
+    // image / sub-block degenerate); `set` drops NaN from the result
+    // map so downstream callers see "absent" rather than a poisoned 0.
+    #[cfg(feature = "experimental")]
+    let spectral_slope_y = if spectral_slope_count > 0 {
+        (spectral_slope_sum / spectral_slope_count as f64) as f32
+    } else {
+        f32::NAN
+    };
+    #[cfg(not(feature = "experimental"))]
+    let spectral_slope_y = 0.0f32;
+
     #[cfg(not(feature = "experimental"))]
     let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
     #[cfg(not(feature = "experimental"))]
@@ -1557,6 +1686,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         quant_survival_uv_p75,
         info_weight_mean,
         info_weight_p90,
+        spectral_slope_y,
     }
 }
 
