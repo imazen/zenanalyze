@@ -332,6 +332,12 @@ impl<'a> Predictor<'a> {
         &mut self,
         features: &[f32],
     ) -> Result<&[OutputValue], PredictError> {
+        // Same dispatch as `predict_transformed`: scalar bakes use
+        // the fast path; expander bakes route through
+        // `apply_feature_pipeline_expanding` with an expanded scratch
+        // buffer. The output specs / discrete sets / sparse overrides
+        // post-processing runs once at the bottom regardless of
+        // which pipeline shape filled `self.output`.
         if let Some(transforms) = self.model.feature_transforms() {
             if features.len() != transforms.len() {
                 return Err(PredictError::FeatureLenMismatch {
@@ -339,18 +345,53 @@ impl<'a> Predictor<'a> {
                     got: features.len(),
                 });
             }
-            if self.feat_scratch.len() < features.len() {
-                self.feat_scratch.resize(features.len(), 0.0);
+            if self.model.has_expander_feature_transforms() {
+                let params = self.model.feature_transform_params().ok_or(
+                    PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 0 },
+                )?;
+                let expanded_dim = self.model.expanded_input_dim();
+                if self.feat_scratch.len() < expanded_dim {
+                    self.feat_scratch.resize(expanded_dim, 0.0);
+                }
+                let dst = &mut self.feat_scratch[..expanded_dim];
+                self.feat_param_refs.clear();
+                self.feat_param_refs
+                    .extend(params.iter().map(|v| v.as_slice()));
+                apply_feature_pipeline_expanding(
+                    transforms,
+                    &self.feat_param_refs,
+                    features,
+                    dst,
+                )?;
+                forward(
+                    self.model,
+                    dst,
+                    &mut self.scratch_a,
+                    &mut self.scratch_b,
+                    &mut self.output,
+                )?;
+            } else {
+                if self.feat_scratch.len() < features.len() {
+                    self.feat_scratch.resize(features.len(), 0.0);
+                }
+                let dst = &mut self.feat_scratch[..features.len()];
+                match self.model.feature_transform_params() {
+                    Some(params) => {
+                        debug_assert_eq!(params.len(), transforms.len());
+                        for i in 0..features.len() {
+                            dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
+                        }
+                    }
+                    None => apply_feature_transforms(transforms, features, dst)?,
+                }
+                forward(
+                    self.model,
+                    dst,
+                    &mut self.scratch_a,
+                    &mut self.scratch_b,
+                    &mut self.output,
+                )?;
             }
-            let dst = &mut self.feat_scratch[..features.len()];
-            apply_feature_transforms(transforms, features, dst)?;
-            forward(
-                self.model,
-                dst,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
         } else {
             forward(
                 self.model,
