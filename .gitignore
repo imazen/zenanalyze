@@ -20,3 +20,7 @@ __pycache__/
 benchmarks/*_hybrid_*.json
 benchmarks/**/distill_*_picker.json
 benchmarks/**/multi_codec_*_picker.json
+
+# Large per-codec bake JSON outputs from joint pretrain (reproducible via train_multi_codec.py)
+benchmarks/joint_pretrain*_2026-*/joint*_picker.json
+benchmarks/joint_pretrain*_2026-*/jointpre*_picker.json
