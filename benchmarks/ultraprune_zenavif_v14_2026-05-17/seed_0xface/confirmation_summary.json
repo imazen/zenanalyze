@@ -1,0 +1,148 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.30952380952380953,
+    "teacher_mean_overhead_pct": 3.9686324846306458,
+    "student_argmin_acc": 0.17333333333333334,
+    "student_mean_overhead_pct": 8.732210229408034,
+    "student_p99_overhead_pct": 56.96880221366879,
+    "fit_seconds": 0.4880979239969747,
+    "best_val_mse": 0.8466325998306274,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.24571428571428572,
+    "teacher_mean_overhead_pct": 4.550174212095348,
+    "student_argmin_acc": 0.16666666666666666,
+    "student_mean_overhead_pct": 8.801959223376581,
+    "student_p99_overhead_pct": 50.01675340533254,
+    "fit_seconds": 0.26574192800035235,
+    "best_val_mse": 1.052765965461731,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": -0.006666666666666682,
+    "mean_overhead_pp": 0.06974899396854717
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_std": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_log_aspect_abs": "winsor_then_log",
+    "feat_uniformity": "clip_then_log1p_then_winsor",
+    "feat_cr_peak_sharpness": "winsor_then_log",
+    "feat_aq_map_p90": "winsor_p99",
+    "feat_aq_map_p95": "winsor_p99",
+    "feat_laplacian_variance_p99": "clip_then_log1p_then_winsor",
+    "feat_quant_survival_y_p25": "winsor_then_log",
+    "feat_gradient_fraction": "clip_then_log1p",
+    "feat_grayscale_score": "winsor_then_log",
+    "feat_patch_fraction": "winsor_then_log",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_cb_horiz_sharpness": "winsor_then_signed_cbrt",
+    "feat_cb_peak_sharpness": "winsor_then_log",
+    "feat_dct_compressibility_y": "clip_then_log1p_then_winsor",
+    "feat_cb_vert_sharpness": "winsor_p99",
+    "feat_aspect_min_over_max": "winsor_then_log",
+    "feat_flat_color_block_ratio": "clip_then_log1p",
+    "feat_quant_survival_y": "clip_then_log1p",
+    "feat_luma_histogram_entropy": "clip_then_log1p",
+    "feat_min_dim": "clip_then_log1p",
+    "feat_variance": "clip_then_log1p_then_winsor"
+  },
+  "recommended_params": {
+    "feat_log_aspect_abs": [
+      0.0,
+      0.4093790054321289
+    ],
+    "feat_uniformity": [
+      0.5732420086860657,
+      0.0,
+      0.23968990981961547
+    ],
+    "feat_cr_peak_sharpness": [
+      0.0,
+      28.0
+    ],
+    "feat_aq_map_p90": [
+      4.559786796569824,
+      5.030539035797119
+    ],
+    "feat_aq_map_p95": [
+      4.814319133758545,
+      5.167220115661621
+    ],
+    "feat_laplacian_variance_p99": [
+      5.2983174324035645,
+      0.0,
+      0.14583380131492318
+    ],
+    "feat_quant_survival_y_p25": [
+      0.0,
+      0.12698400020599365
+    ],
+    "feat_gradient_fraction": [
+      0.43554699420928955
+    ],
+    "feat_grayscale_score": [
+      8.099999795376776e-06,
+      1.0
+    ],
+    "feat_patch_fraction": [
+      0.0,
+      0.009115000255405903
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.04296899959445
+    ],
+    "feat_cb_horiz_sharpness": [
+      0.0024900001008063555,
+      0.020589999854564667
+    ],
+    "feat_cb_peak_sharpness": [
+      0.0,
+      3.0
+    ],
+    "feat_dct_compressibility_y": [
+      20.51953125,
+      0.0,
+      3.9075792598857926
+    ],
+    "feat_cb_vert_sharpness": [
+      0.0028099999763071537,
+      0.021400000900030136
+    ],
+    "feat_aspect_min_over_max": [
+      0.75,
+      1.0
+    ],
+    "feat_flat_color_block_ratio": [
+      0.17382800579071045
+    ],
+    "feat_quant_survival_y": [
+      0.051215000450611115
+    ],
+    "feat_luma_histogram_entropy": [
+      3.7002110481262207
+    ],
+    "feat_min_dim": [
+      5.545177459716797
+    ],
+    "feat_variance": [
+      6.549366474151611,
+      0.0,
+      1.150362662099116
+    ]
+  }
+}

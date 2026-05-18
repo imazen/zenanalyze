@@ -105,3 +105,66 @@ universal "more prune = better" rule.
 - `benchmarks/aggprune_zenjpeg_singles_only_2026-05-17/aggregate.json`
 - `benchmarks/aggprune_zenjpeg_negative_result_2026-05-17.md` (full
   zenjpeg writeup)
+
+## Update: zenavif depth curve (added later)
+
+Same methodology applied to zenavif at three pruning depths:
+
+| Codec | n_features | Δargmin median | stdev | recommended | verdict |
+|---|--:|--:|--:|--:|---|
+| zenavif unpruned | 52 | +1.65 pp | 5.48 | 20.8% | noise (3-seed) |
+| zenavif lightprune (drop-10) | 43 | +9.13 pp | 10.22 | 24.3% | noise (5-seed) |
+| zenavif aggprune (drop-20) | 35 | +2.18 pp | 10.64 | 13.7% | noise (3-seed) |
+| zenavif ultraprune (drop-30) | **27** | **+9.33 pp** | **7.30** | 20.2% | **SHIP (5-seed)** |
+
+**Surprise win**: zenavif at 27 features ships (median > stdev,
++9.33 > 7.30). The methodology DOES generalize for zenavif at
+sufficient pruning depth.
+
+But the absolute recommended argmin is bounded by data scarcity:
+zenavif's 218 val rows / 200 configs = 1.1 rows/config means even
+the best methodology only gets the picker to ~20-25% argmin. By
+comparison, zenwebp at its sweet spot hits 45.3%.
+
+### What zenavif's variance is doing
+
+Across the 4 zenavif measurements, the lightprune (43 feat) recommended
+hit 24.3% — better than ultraprune's 20.2%. But with much wider seed
+variance (stdev 10.22 vs 7.30), the verdict couldn't lock down. This
+is the data-scarcity tax: zenavif can in principle reach 24% argmin
+with the right transforms, but the 218-row val set doesn't have
+enough samples per config to confirm it across seeds.
+
+Per-seed sample: lightprune saw seed_0xbabe baseline 7.1% → recommended
+28.2% (+21pp). One image-set fold catastrophically picks for that
+seed; another fold (0xcafe, -3.31pp) doesn't see the same lift. Until
+the val corpus grows, lightprune's 24% is a coin flip.
+
+**Conclusion for zenavif**: ship the ultraprune (27-feature) config.
+Lower absolute recommended (20.2% vs 24.3%) but verdict-locked across
+5 seeds. The lightprune result is "tantalizing but not statistically
+confirmed" — would need more val data to lock in.
+
+## Full cross-codec table
+
+| Codec | n_features | Δargmin median | stdev | recommended | ship-margin | verdict |
+|---|--:|--:|--:|--:|--:|---|
+| zenwebp | 33 (orig) | +24.54 | 5.41 | **45.3%** | +19.13 | **ship** |
+| zenwebp | 28 | +15.38 | 8.26 | 37.3% | +7.12 | **ship** |
+| zenwebp | 20 | −1.20 | 5.05 | 39.4% | −6.25 | noise |
+| zenjpeg | 51 (orig) | −6.81 | 1.75 | — | −8.56 | regress |
+| zenjpeg | 34 | −1.16 | 4.58 | 29.6% | −5.74 | noise |
+| zenjpeg | 28 | +1.03 | 3.44 | 33.8% | −2.41 | noise |
+| zenavif | 52 (orig) | +1.65 | 5.48 | 20.8% | −3.83 | noise |
+| zenavif | 43 | +9.13 | 10.22 | 24.3% | −1.09 | noise |
+| zenavif | 35 | +2.18 | 10.64 | 13.7% | −8.46 | noise |
+| zenavif | **27** | **+9.33** | **7.30** | 20.2% | **+2.03** | **ship** |
+
+Three codec sweet spots, three different feature counts:
+- zenwebp: 28-33 features (current 33 is optimal)
+- zenavif: 27 features (DROP from current 52!)
+- zenjpeg: no shipping depth (data + config space limit)
+
+**Promote zenavif to drop-30 (27 features) configuration.** This is
+the new SOTA for zenavif's picker methodology.
+

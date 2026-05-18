@@ -1,0 +1,146 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.2598714416896235,
+    "teacher_mean_overhead_pct": 4.186537962438703,
+    "student_argmin_acc": 0.16712580348943984,
+    "student_mean_overhead_pct": 8.236584861060274,
+    "student_p99_overhead_pct": 48.691236495971545,
+    "fit_seconds": 0.691748049997841,
+    "best_val_mse": 0.753233790397644,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.24150596877869604,
+    "teacher_mean_overhead_pct": 4.137751310307407,
+    "student_argmin_acc": 0.12304866850321396,
+    "student_mean_overhead_pct": 8.755918298689993,
+    "student_p99_overhead_pct": 53.65087366104115,
+    "fit_seconds": 0.22864478098927066,
+    "best_val_mse": 1.0810902118682861,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": -0.04407713498622588,
+    "mean_overhead_pp": 0.5193334376297187
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_std": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_uniformity": "clip_then_log1p",
+    "feat_quant_survival_y_p25": "winsor_then_log",
+    "feat_gradient_fraction": "clip_then_log1p_then_winsor",
+    "feat_aq_map_p90": "winsor_p99",
+    "feat_cb_peak_sharpness": "winsor_then_log",
+    "feat_aq_map_p95": "winsor_p99",
+    "feat_grayscale_score": "winsor_then_log",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_cr_peak_sharpness": "winsor_p99",
+    "feat_luma_histogram_entropy": "clip_then_log1p",
+    "feat_log_aspect_abs": "clip_then_log1p_then_winsor",
+    "feat_dct_compressibility_y": "clip_then_log1p_then_winsor",
+    "feat_flat_color_block_ratio": "clip_then_log1p",
+    "feat_laplacian_variance_p99": "clip_then_log1p_then_winsor",
+    "feat_cb_horiz_sharpness": "winsor_p99",
+    "feat_cb_vert_sharpness": "winsor_p99",
+    "feat_aspect_min_over_max": "winsor_then_log",
+    "feat_min_dim": "clip_then_log1p_then_winsor",
+    "feat_quant_survival_y": "clip_then_log1p",
+    "feat_quant_survival_y_p10": "signed_sqrt",
+    "feat_patch_fraction": "winsor_then_signed_cbrt"
+  },
+  "recommended_params": {
+    "feat_uniformity": [
+      0.5778805166482925
+    ],
+    "feat_quant_survival_y_p25": [
+      0.0,
+      0.14285700023174286
+    ],
+    "feat_gradient_fraction": [
+      0.4580892398953438,
+      0.0,
+      0.18971314556210758
+    ],
+    "feat_aq_map_p90": [
+      4.528707385063171,
+      5.040202736854553
+    ],
+    "feat_cb_peak_sharpness": [
+      0.0,
+      5.0
+    ],
+    "feat_aq_map_p95": [
+      4.794433236122131,
+      5.174576997756958
+    ],
+    "feat_grayscale_score": [
+      0.0006259999936446548,
+      0.9280850291252136
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.04394499957561493
+    ],
+    "feat_cr_peak_sharpness": [
+      2.0,
+      15.0
+    ],
+    "feat_luma_histogram_entropy": [
+      3.699504792690277
+    ],
+    "feat_log_aspect_abs": [
+      0.2876819968223572,
+      0.0,
+      0.11484272482922873
+    ],
+    "feat_dct_compressibility_y": [
+      20.25927734375,
+      0.0,
+      3.9741768572290024
+    ],
+    "feat_flat_color_block_ratio": [
+      0.1831662468612194
+    ],
+    "feat_laplacian_variance_p99": [
+      5.046640634536743,
+      0.0,
+      0.36336199215514203
+    ],
+    "feat_cb_horiz_sharpness": [
+      0.0019950000569224358,
+      0.02097999956458807
+    ],
+    "feat_cb_vert_sharpness": [
+      0.0020974999642930925,
+      0.021507500670850277
+    ],
+    "feat_aspect_min_over_max": [
+      0.75,
+      1.0
+    ],
+    "feat_min_dim": [
+      5.545177459716797,
+      0.0,
+      0.7714529868756527
+    ],
+    "feat_quant_survival_y": [
+      0.09224600344896317
+    ],
+    "feat_patch_fraction": [
+      0.0,
+      0.011718999594449997
+    ]
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.2594752186588921,
+    "teacher_mean_overhead_pct": 4.866876157819408,
+    "student_argmin_acc": 0.12244897959183673,
+    "student_mean_overhead_pct": 9.554403576497954,
+    "student_p99_overhead_pct": 63.264072656631484,
+    "fit_seconds": 0.6165432859997964,
+    "best_val_mse": 0.6523017883300781,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.25461613216715256,
+    "teacher_mean_overhead_pct": 4.445078532169255,
+    "student_argmin_acc": 0.21574344023323616,
+    "student_mean_overhead_pct": 8.522221745302591,
+    "student_p99_overhead_pct": 77.69150853157079,
+    "fit_seconds": 0.19849299399356823,
+    "best_val_mse": 0.7860843539237976,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": 0.09329446064139943,
+    "mean_overhead_pp": -1.0321818311953628
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_std": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_log_aspect_abs": "winsor_then_log",
+    "feat_quant_survival_y_p10": "winsor_then_log",
+    "feat_cb_peak_sharpness": "winsor_then_log",
+    "feat_aq_map_p90": "winsor_p99",
+    "feat_uniformity": "clip_then_log1p",
+    "feat_quant_survival_y_p25": "winsor_then_log",
+    "feat_aq_map_p95": "winsor_p99",
+    "feat_cr_peak_sharpness": "winsor_then_log",
+    "feat_grayscale_score": "winsor_then_log",
+    "feat_patch_fraction": "winsor_then_log",
+    "feat_gradient_fraction": "clip_then_log1p",
+    "feat_laplacian_variance_p99": "clip_then_log1p_then_winsor",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_quant_survival_y": "clip_then_log1p",
+    "feat_cb_vert_sharpness": "winsor_p99",
+    "feat_dct_compressibility_y": "clip_then_log1p_then_winsor",
+    "feat_aspect_min_over_max": "winsor_then_log",
+    "feat_flat_color_block_ratio": "clip_then_log1p",
+    "feat_cb_horiz_sharpness": "winsor_then_log1p",
+    "feat_luma_histogram_entropy": "quantile_bins"
+  },
+  "recommended_params": {
+    "feat_log_aspect_abs": [
+      0.0,
+      0.4093790054321289
+    ],
+    "feat_quant_survival_y_p10": [
+      0.0,
+      0.06349200010299683
+    ],
+    "feat_cb_peak_sharpness": [
+      0.0,
+      3.0
+    ],
+    "feat_aq_map_p90": [
+      4.548007965087891,
+      5.05773401260376
+    ],
+    "feat_uniformity": [
+      0.5771480202674866
+    ],
+    "feat_quant_survival_y_p25": [
+      0.0,
+      0.19444425031542778
+    ],
+    "feat_aq_map_p95": [
+      4.798034191131592,
+      5.19376277923584
+    ],
+    "feat_cr_peak_sharpness": [
+      0.0,
+      28.0
+    ],
+    "feat_grayscale_score": [
+      9.524999813947943e-05,
+      1.0
+    ],
+    "feat_patch_fraction": [
+      0.0,
+      0.01269499957561493
+    ],
+    "feat_gradient_fraction": [
+      0.4492189884185791
+    ],
+    "feat_laplacian_variance_p99": [
+      5.2983174324035645,
+      0.0,
+      0.15678371112324732
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.054687999188899994
+    ],
+    "feat_quant_survival_y": [
+      0.09444800019264221
+    ],
+    "feat_cb_vert_sharpness": [
+      0.002099999925121665,
+      0.02027999982237816
+    ],
+    "feat_dct_compressibility_y": [
+      20.4482421875,
+      0.0,
+      3.8758464525990246
+    ],
+    "feat_aspect_min_over_max": [
+      0.75,
+      1.0
+    ],
+    "feat_flat_color_block_ratio": [
+      0.19506800174713135
+    ],
+    "feat_cb_horiz_sharpness": [
+      0.0018500000005587935,
+      0.01816999912261963
+    ],
+    "feat_luma_histogram_entropy": [
+      2.995326578617096,
+      3.7051339149475098,
+      3.926110029220581,
+      4.1390252113342285,
+      4.249098777770996,
+      4.3925700187683105,
+      4.5287909507751465
+    ]
+  }
+}

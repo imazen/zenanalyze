@@ -1,0 +1,150 @@
+{
+  "baseline": {
+    "teacher_argmin_acc": 0.20116618075801748,
+    "teacher_mean_overhead_pct": 4.41466275294302,
+    "student_argmin_acc": 0.15743440233236153,
+    "student_mean_overhead_pct": 8.1786565629076,
+    "student_p99_overhead_pct": 112.75262737274205,
+    "fit_seconds": 0.46895688299264293,
+    "best_val_mse": 0.6367073059082031,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "recommended": {
+    "teacher_argmin_acc": 0.2857142857142857,
+    "teacher_mean_overhead_pct": 4.600822009386681,
+    "student_argmin_acc": 0.272108843537415,
+    "student_mean_overhead_pct": 6.1920102704498525,
+    "student_p99_overhead_pct": 49.92477428913134,
+    "fit_seconds": 0.20014728099340573,
+    "best_val_mse": 0.7399178147315979,
+    "epochs_ran": 60,
+    "device": "cuda"
+  },
+  "delta": {
+    "argmin_acc_pp": 0.11467444120505346,
+    "mean_overhead_pp": -1.9866462924577473
+  },
+  "baseline_transforms": {
+    "feat_pixel_count": "log",
+    "feat_min_dim": "log",
+    "feat_max_dim": "log",
+    "feat_variance": "log1p",
+    "feat_variance_spread": "log1p",
+    "feat_laplacian_variance": "log1p",
+    "feat_laplacian_variance_p99": "log1p",
+    "feat_laplacian_variance_peak": "log1p",
+    "feat_edge_slope_stdev": "log1p",
+    "feat_aq_map_std": "log1p"
+  },
+  "recommended_transforms": {
+    "feat_uniformity": "clip_then_log1p",
+    "feat_quant_survival_y_p25": "winsor_then_log",
+    "feat_aq_map_p90": "winsor_then_log",
+    "feat_grayscale_score": "winsor_then_log",
+    "feat_aq_map_p95": "winsor_then_log",
+    "feat_cr_peak_sharpness": "winsor_p99",
+    "feat_cb_peak_sharpness": "winsor_then_log",
+    "feat_gradient_fraction": "clip_then_log1p_then_winsor",
+    "feat_dct_compressibility_y": "winsor_p99",
+    "feat_quant_survival_y_p10": "winsor_then_signed_cbrt",
+    "feat_log_aspect_abs": "clip_then_log1p_then_winsor",
+    "feat_luma_histogram_entropy": "clip_then_log1p_then_winsor",
+    "feat_flat_color_block_ratio": "clip_then_log1p",
+    "feat_aspect_min_over_max": "winsor_then_log",
+    "feat_min_dim": "clip_then_log1p",
+    "feat_cb_vert_sharpness": "clip_then_log1p_then_winsor",
+    "feat_quant_survival_y": "clip_then_log1p_then_winsor",
+    "feat_laplacian_variance_p99": "clip_then_log1p_then_winsor",
+    "feat_patch_fraction_fast": "winsor_then_log",
+    "feat_cb_horiz_sharpness": "clip_then_log1p_then_winsor",
+    "feat_variance": "log",
+    "feat_distinct_color_bins": "signed_sqrt"
+  },
+  "recommended_params": {
+    "feat_uniformity": [
+      0.5818449854850769
+    ],
+    "feat_quant_survival_y_p25": [
+      0.0,
+      0.12698400020599365
+    ],
+    "feat_aq_map_p90": [
+      4.525024890899658,
+      5.019598007202148
+    ],
+    "feat_grayscale_score": [
+      0.0009360000258311629,
+      0.7690889835357666
+    ],
+    "feat_aq_map_p95": [
+      4.770698070526123,
+      5.15858793258667
+    ],
+    "feat_cr_peak_sharpness": [
+      2.0,
+      15.0
+    ],
+    "feat_cb_peak_sharpness": [
+      0.0,
+      6.0
+    ],
+    "feat_gradient_fraction": [
+      0.43229201436042786,
+      0.0,
+      0.26026364277237646
+    ],
+    "feat_dct_compressibility_y": [
+      11.5927734375,
+      29.002758026123047
+    ],
+    "feat_quant_survival_y_p10": [
+      0.0,
+      0.07936500012874603
+    ],
+    "feat_log_aspect_abs": [
+      0.2876819968223572,
+      0.0,
+      0.11484272482922873
+    ],
+    "feat_luma_histogram_entropy": [
+      3.655914068222046,
+      0.0,
+      0.6286006485260291
+    ],
+    "feat_flat_color_block_ratio": [
+      0.18481400609016418
+    ],
+    "feat_aspect_min_over_max": [
+      0.75,
+      1.0
+    ],
+    "feat_min_dim": [
+      5.545177459716797
+    ],
+    "feat_cb_vert_sharpness": [
+      0.0028099999763071537,
+      0.0,
+      0.05950399614019749
+    ],
+    "feat_quant_survival_y": [
+      0.08920799940824509,
+      0.0,
+      0.09898976081816034
+    ],
+    "feat_laplacian_variance_p99": [
+      5.0434250831604,
+      0.0,
+      0.3449336440121983
+    ],
+    "feat_patch_fraction_fast": [
+      0.0,
+      0.04296899959445
+    ],
+    "feat_cb_horiz_sharpness": [
+      0.0023499999660998583,
+      0.0,
+      0.047341495529584
+    ]
+  }
+}

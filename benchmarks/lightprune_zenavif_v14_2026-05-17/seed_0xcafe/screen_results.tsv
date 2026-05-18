@@ -1,0 +1,44 @@
+feat_idx	feat_name	best_transform	params_csv	baseline_score	transformed_score	lift
+6	feat_variance_spread	clip_then_log1p_then_winsor	0.85318,0,0.155778	-0.085180	0.086062	0.171242
+2	feat_uniformity	clip_then_log1p	0.577881	-0.198813	-0.038898	0.159915
+29	feat_quant_survival_y_p25	winsor_then_log	0,0.142857	0.253788	0.340192	0.086404
+31	feat_gradient_fraction	clip_then_log1p_then_winsor	0.458089,0,0.189713	-0.215575	-0.130105	0.085470
+21	feat_aq_map_p90	winsor_p99	4.52871,5.0402	0.091739	0.171491	0.079752
+23	feat_noise_floor_uv	winsor_then_log	0,0.111028	0.159783	0.231021	0.071238
+10	feat_cb_peak_sharpness	winsor_then_log	0,5	0.094733	0.164165	0.069431
+22	feat_aq_map_p95	winsor_p99	4.79443,5.17458	0.072174	0.137290	0.065116
+32	feat_grayscale_score	winsor_then_log	0.000626,0.928085	-0.065988	-0.005040	0.060949
+19	feat_patch_fraction_fast	winsor_then_log	0,0.043945	-0.150405	-0.097438	0.052967
+4	feat_colourfulness	winsor_then_log	0,146.992	0.071380	0.121615	0.050235
+1	feat_chroma_complexity	winsor_then_log	0,0.323435	0.087911	0.138030	0.050118
+27	feat_laplacian_variance_peak	quantile_bins	5.54518,5.54518,5.54518,5.54518,5.54518,5.54518,5.54518	0.145025	0.191041	0.046016
+13	feat_cr_peak_sharpness	winsor_p99	2,15	0.029536	0.073009	0.043473
+15	feat_luma_histogram_entropy	clip_then_log1p	3.6995	0.230373	0.273213	0.042840
+38	feat_log_aspect_abs	clip_then_log1p_then_winsor	0.287682,0,0.114843	0.074493	0.115496	0.041003
+25	feat_noise_floor_uv_p50	winsor_then_log	0,0.319658	0.174087	0.207340	0.033253
+16	feat_dct_compressibility_y	clip_then_log1p_then_winsor	20.2593,0,3.97418	0.169453	0.201868	0.032415
+3	feat_flat_color_block_ratio	clip_then_log1p	0.183166	-0.142080	-0.109947	0.032133
+17	feat_dct_compressibility_uv	clip_then_log1p_then_winsor	7.44889,0,2.81404	0.095637	0.127314	0.031677
+26	feat_laplacian_variance_p99	clip_then_log1p_then_winsor	5.04664,0,0.363362	0.135237	0.166352	0.031115
+12	feat_cr_vert_sharpness	clip_then_log1p_then_winsor	0.00965,0,0.189802	0.047294	0.077242	0.029948
+8	feat_cb_horiz_sharpness	winsor_p99	0.001995,0.02098	0.110073	0.138730	0.028657
+9	feat_cb_vert_sharpness	winsor_p99	0.0020975,0.0215075	0.129903	0.155017	0.025114
+37	feat_aspect_min_over_max	winsor_then_log	0.75,1	-0.070256	-0.047000	0.023256
+14	feat_high_freq_energy_ratio	winsor_then_log	0.121632,0.278718	0.172684	0.195288	0.022604
+11	feat_cr_horiz_sharpness	winsor_then_log	0.010295,0.0782075	0.047463	0.066547	0.019083
+33	feat_luma_kurtosis	clip_then_log1p	24.2712	-0.148975	-0.131980	0.016995
+35	feat_min_dim	clip_then_log1p_then_winsor	5.54518,0,0.771453	0.573979	0.589384	0.015405
+30	feat_quant_survival_y_p50	clip_then_log1p	0.047619	0.247814	0.260271	0.012457
+20	feat_quant_survival_y	clip_then_log1p	0.092246	0.248151	0.258569	0.010418
+28	feat_quant_survival_y_p10	signed_sqrt		0.225506	0.234192	0.008686
+18	feat_patch_fraction	winsor_then_signed_cbrt	0,0.011719	-0.121472	-0.114312	0.007160
+24	feat_noise_floor_y_p90	log_then_winsor	-0.897916,0	-0.029318	-0.024255	0.005063
+0	feat_variance	log		0.186837	0.190822	0.003984
+5	feat_laplacian_variance	winsor_p99	0.0221155,1.74198	0.461894	0.462500	0.000606
+34	feat_pixel_count	clip_then_log1p	11.0904	0.589089	0.589656	0.000567
+7	feat_distinct_color_bins	identity		0.401592	0.401592	0.000000
+36	feat_max_dim	identity		0.587490	0.587490	0.000000
+39	feat_channel_count	identity		nan	nan	0.000000
+40	feat_alpha_present	identity		nan	nan	0.000000
+41	feat_alpha_used_fraction	identity		nan	nan	0.000000
+42	feat_alpha_bimodal_score	identity		nan	nan	0.000000
