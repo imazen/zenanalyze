@@ -17,9 +17,26 @@
 //!   "scaler_scale": [1.0, 1.0, ...],             // f32[n_inputs]
 //!   "layers": [ /* BakeLayerJson, see below */ ],
 //!   "feature_bounds": [ {"low": -1.0, "high": 1.0}, ... ],  // optional
-//!   "metadata": [ /* MetadataEntryJson, see below */ ]      // optional
+//!   "metadata": [ /* MetadataEntryJson, see below */ ],     // optional
+//!   "zerobias_tau": 0.005,                       // optional, default 0.0
+//!   "compressed": true,                          // optional, default false
+//!   "optimize": true                             // optional, default false
 //! }
 //! ```
+//!
+//! ### Bake-time compression knobs
+//!
+//! - `zerobias_tau` — per-layer zero threshold (`τ * max|W_layer|`)
+//!   applied BEFORE i8/f16 quantization. `0.005` is the calibrated
+//!   sweet spot from `zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`
+//!   (87.5 % i8 zero density, -0.0001 SROCC on V0_18). Default `0.0`.
+//! - `compressed` — wrap post-header payload in LZ4 block compression;
+//!   loader transparently decompresses. Pair with `zerobias_tau` to
+//!   monetize the zeros. Default `false`.
+//! - `optimize` — run [`bake_optimized`] (permutation + compressed-flag
+//!   search + bounded hillclimb) instead of [`bake`]. ~1-2 s budget on
+//!   V_X-shape models, mathematically identical predict output.
+//!   Default `false`.
 //!
 //! ## `BakeLayerJson`
 //!
@@ -72,6 +89,8 @@ use crate::composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, MultiCodecSchemaInput, PerCodecMapInput,
     bake,
 };
+use crate::optimize::bake_optimized;
+use crate::zero_bias::apply_zero_bias_per_layer_in_place;
 use zenpredict::{
     Activation, FeatureBound, MetadataType, OutputSpec, OutputTransform, SparseOverride,
     WeightDtype,
@@ -193,6 +212,45 @@ pub struct BakeRequestJson {
     /// ```
     #[serde(default)]
     pub multi_codec_schema: Option<MultiCodecSchemaJson>,
+    /// Optional pre-quantization per-layer zero-bias threshold. When
+    /// `> 0.0`, weights whose magnitude is below `tau * max|W_layer|`
+    /// are zeroed BEFORE the layer's declared `dtype` quantization
+    /// runs. Per-layer (single threshold per layer) — matches the
+    /// 2026-05-13 `zensim/benchmarks/zenpredict_rle_zerobias_eval_*.md`
+    /// methodology and the `zenpredict repack --zerobias <τ>` CLI.
+    ///
+    /// Recommended value: `0.005` (87.5 % i8 zero density, SROCC cost
+    /// within sampling noise on V0_18 / CID22). Pair with `compressed:
+    /// true` to monetize the zeros; raw i8 streams alone are near
+    /// incompressible.
+    ///
+    /// Default `0.0` (disabled — bake bytes match the legacy JSON
+    /// behavior).
+    #[serde(default)]
+    pub zerobias_tau: f32,
+    /// When true, wrap the post-header payload in LZ4 block
+    /// compression at write time. Loader transparently decompresses
+    /// at `Model::from_bytes`. Equivalent to setting
+    /// `BakeRequest.compressed = true` in the Rust API or passing
+    /// `zenpredict repack --compress` on a pre-baked `.bin`. Default
+    /// `false`.
+    #[serde(default)]
+    pub compressed: bool,
+    /// When true, run [`bake_optimized`] instead of [`bake`]: sweep
+    /// candidate (`feature_order`, `output_order`, hidden-unit
+    /// permutation, compressed-flag) combinations + a bounded
+    /// pairwise-swap hillclimb, and return the smallest output. ~1-2
+    /// seconds per bake on V_X-shape models; mathematically identical
+    /// predict output to the un-optimized path (load-time permutation
+    /// inverses + decompression are lossless). Default `false`.
+    ///
+    /// When `compressed` is also set, the optimizer evaluates both
+    /// `compressed=true` and `compressed=false` variants and picks
+    /// whichever produces fewer total bytes — set `compressed: true`
+    /// only when you specifically want to force compression even if
+    /// the uncompressed variant happens to be smaller.
+    #[serde(default)]
+    pub optimize: bool,
 }
 
 /// Multi-codec joint-picker schema, JSON-side.
@@ -470,6 +528,13 @@ fn hex_nibble(b: u8) -> Option<u8> {
 /// Bake a `BakeRequestJson` into ZNPR v3 bytes. Performs all input
 /// validation that [`bake`] does plus the JSON-side type-vs-repr
 /// checks for metadata entries.
+///
+/// Honors the three optional bake-time knobs on `BakeRequestJson`:
+/// `zerobias_tau` (pre-quant per-layer thresholding), `compressed`
+/// (LZ4 payload wrap), and `optimize` (run [`bake_optimized`] to
+/// search permutation + compression candidates). All three default
+/// to off / 0.0 / false, so existing JSON callers see no behavior
+/// change.
 pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
     // Decode metadata values up front so the byte buffers outlive
     // the borrow into BakeMetadataEntry.
@@ -479,16 +544,39 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         .map(decode_metadata_value)
         .collect::<Result<_, _>>()?;
 
+    // Apply per-layer zero-bias when requested. We own the weight
+    // vectors only when zerobias is active; otherwise borrow from
+    // `req` directly to avoid the clone on the no-op path. Both
+    // branches yield `&[f32]` slices that outlive the BakeLayer set.
+    let zerobiased_weights: Option<Vec<Vec<f32>>> = if req.zerobias_tau > 0.0 {
+        Some(
+            req.layers
+                .iter()
+                .map(|l| {
+                    let mut w = l.weights.clone();
+                    apply_zero_bias_per_layer_in_place(&mut w, req.zerobias_tau);
+                    w
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
     // Convert layers (owned Vec<f32> → borrowed slices via reuse).
     let layers: Vec<BakeLayer<'_>> = req
         .layers
         .iter()
-        .map(|l| BakeLayer {
+        .enumerate()
+        .map(|(i, l)| BakeLayer {
             in_dim: l.in_dim,
             out_dim: l.out_dim,
             activation: l.activation.into(),
             dtype: l.dtype.into(),
-            weights: &l.weights,
+            weights: zerobiased_weights
+                .as_ref()
+                .map(|v| v[i].as_slice())
+                .unwrap_or(&l.weights),
             biases: &l.biases,
         })
         .collect();
@@ -589,11 +677,16 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         sparse_overrides: &sparse_overrides,
         feature_order: None,
         output_order: None,
-        compressed: false,
+        compressed: req.compressed,
         hu_permutations: None,
         multi_codec_schema: multi_codec_input,
     };
-    Ok(bake(&request)?)
+    let bytes = if req.optimize {
+        bake_optimized(&request)?
+    } else {
+        bake(&request)?
+    };
+    Ok(bytes)
 }
 
 /// Convenience: parse a JSON string and bake.

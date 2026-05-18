@@ -4,6 +4,23 @@
 
 ### Added
 
+- **Three optional bake-time knobs on `BakeRequestJson` + `bake_from_json`**:
+  `zerobias_tau` (f32, default 0.0), `compressed` (bool, default false),
+  `optimize` (bool, default false). All three honor the same semantics
+  as the corresponding Rust `BakeRequest` fields / `bake_optimized`
+  entry point. When `zerobias_tau > 0.0`, weights are zeroed in-place
+  via `apply_zero_bias_per_layer_in_place` BEFORE the layer's declared
+  `dtype` quantization runs; `compressed: true` sets `BakeRequest.compressed`;
+  `optimize: true` routes through `bake_optimized` (permutation +
+  hillclimb search). All three default to off, so existing JSON callers
+  see no behavior change. Lets Python wrappers (`zenanalyze/tools/bake_picker.py`,
+  `zensim/scripts/v_next/bake_to_znpr.py`, `zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`)
+  produce compressed bakes by adding three keys to their JSON dict —
+  no shell-out to `zenpredict repack` required. Calibrated `zerobias_tau`
+  = 0.005 per `zensim/benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md`
+  (87.5 % i8 zero density, -0.0001 SROCC on V0_18). README updated with
+  the new keys + a calibration pointer.
+
 - **Bake-side validation for the 5 new stacked `FeatureTransform`
   variants** (added in `zenpredict` 0.2.1). The composer now parses
   the optional `zentrain.feature_transforms` /

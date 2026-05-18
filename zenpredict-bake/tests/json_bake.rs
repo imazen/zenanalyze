@@ -450,6 +450,237 @@ fn json_round_trip_with_multi_codec_schema() {
     assert_eq!(out1, &[0.0, 100.0]);
 }
 
+/// `zerobias_tau` on the JSON layer zeros below-threshold weights
+/// before quantization. With `dtype: f32` the biased zeros survive to
+/// the wire; loading + predicting reflects the zeroed contribution.
+#[test]
+fn json_zerobias_tau_zeros_small_weights() {
+    // Two-output single-layer net: row-major weights are
+    // [w00, w01, w10, w11] = [100.0, 0.01, 50.0, 0.001].
+    // Layer max-abs = 100.0; τ=0.005 → cut = 0.5.
+    // Zerobiased: [100.0, 0.0, 50.0, 0.0] (the two tiny entries fall).
+    let json = r#"{
+        "schema_hash": 0,
+        "scaler_mean":  [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [{
+            "in_dim": 2,
+            "out_dim": 2,
+            "activation": "identity",
+            "dtype": "f32",
+            "weights": [100.0, 0.01, 50.0, 0.001],
+            "biases":  [0.0, 0.0]
+        }],
+        "zerobias_tau": 0.005
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    let mut p = Predictor::new(&model);
+    // With biased weights [100, 0, 50, 0], predict([1, 1]) =
+    //   [1*100 + 1*50, 1*0 + 1*0] = [150, 0].
+    let out = p.predict(&[1.0, 1.0]).unwrap();
+    assert_eq!(out, &[150.0, 0.0]);
+}
+
+/// `zerobias_tau: 0.0` (default) is a no-op — the bake matches the
+/// pre-knob behavior byte-for-byte.
+#[test]
+fn json_zerobias_default_is_noop() {
+    let base = r#"{
+        "schema_hash": 0,
+        "scaler_mean":  [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [{
+            "in_dim": 2,
+            "out_dim": 2,
+            "activation": "identity",
+            "dtype": "f32",
+            "weights": [1.0, 0.0, 0.0, 1.0],
+            "biases":  [0.0, 0.0]
+        }]
+    }"#;
+    let with_default = r#"{
+        "schema_hash": 0,
+        "scaler_mean":  [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [{
+            "in_dim": 2,
+            "out_dim": 2,
+            "activation": "identity",
+            "dtype": "f32",
+            "weights": [1.0, 0.0, 0.0, 1.0],
+            "biases":  [0.0, 0.0]
+        }],
+        "zerobias_tau": 0.0,
+        "compressed": false,
+        "optimize": false
+    }"#;
+    let a = bake_from_json_str(base).unwrap();
+    let b = bake_from_json_str(with_default).unwrap();
+    assert_eq!(a, b, "default knob values must produce identical bytes");
+}
+
+/// `compressed: true` on the JSON layer produces a bake with the
+/// compressed flag set; the loader transparently decompresses.
+#[test]
+fn json_compressed_roundtrip() {
+    // Larger zero-rich payload so LZ4 actually shrinks it.
+    let mut weights = vec![0.0_f32; 256 * 32];
+    weights[0] = 1.0;
+    weights[31] = 2.0;
+    let weights_json = serde_json::to_string(&weights).unwrap();
+    let biases_json = serde_json::to_string(&vec![0.0_f32; 32]).unwrap();
+    let scaler_mean = serde_json::to_string(&vec![0.0_f32; 256]).unwrap();
+    let scaler_scale = serde_json::to_string(&vec![1.0_f32; 256]).unwrap();
+
+    let json_uncompressed = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": [{{ \"in_dim\": 256, \"out_dim\": 32, \"activation\": \"identity\", \
+         \"dtype\": \"f32\", \"weights\": {weights_json}, \"biases\": {biases_json} }}] }}"
+    );
+    let json_compressed = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": [{{ \"in_dim\": 256, \"out_dim\": 32, \"activation\": \"identity\", \
+         \"dtype\": \"f32\", \"weights\": {weights_json}, \"biases\": {biases_json} }}], \
+         \"compressed\": true }}"
+    );
+    let uncompressed = bake_from_json_str(&json_uncompressed).unwrap();
+    let compressed = bake_from_json_str(&json_compressed).unwrap();
+    assert!(
+        compressed.len() < uncompressed.len(),
+        "compressed bake ({}) should be smaller than uncompressed ({})",
+        compressed.len(),
+        uncompressed.len(),
+    );
+    // Round-trip the compressed bytes through the loader.
+    let aligned = Aligned(compressed);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    let mut p = Predictor::new(&model);
+    let mut x = vec![0.0_f32; 256];
+    x[0] = 1.0;
+    x[31] = 1.0;
+    let out = p.predict(&x).unwrap();
+    // weights[0] = 1 maps input[0] → output[0]; weights[31] = 2 means
+    // row=0, col=31 (input 0 contributes 2 to output 31). With input
+    // x[31]=1, w[31*32+31]=0 → no contribution. So out[0]=1, others=0.
+    assert_eq!(out[0], 1.0);
+}
+
+/// `optimize: true` invokes `bake_optimized` and produces a bake that
+/// is no larger than the un-optimized version. On a zero-heavy payload
+/// the optimizer typically produces a strictly smaller bake.
+#[test]
+fn json_optimize_roundtrip_smaller_or_equal() {
+    let mut weights = vec![0.0_f32; 64 * 16];
+    weights[0] = 1.0;
+    weights[1] = 2.0;
+    let weights_json = serde_json::to_string(&weights).unwrap();
+    let biases_json = serde_json::to_string(&vec![0.0_f32; 16]).unwrap();
+    let scaler_mean = serde_json::to_string(&vec![0.0_f32; 64]).unwrap();
+    let scaler_scale = serde_json::to_string(&vec![1.0_f32; 64]).unwrap();
+
+    let json_plain = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": [{{ \"in_dim\": 64, \"out_dim\": 16, \"activation\": \"identity\", \
+         \"dtype\": \"f32\", \"weights\": {weights_json}, \"biases\": {biases_json} }}] }}"
+    );
+    let json_opt = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": [{{ \"in_dim\": 64, \"out_dim\": 16, \"activation\": \"identity\", \
+         \"dtype\": \"f32\", \"weights\": {weights_json}, \"biases\": {biases_json} }}], \
+         \"optimize\": true }}"
+    );
+    let plain = bake_from_json_str(&json_plain).unwrap();
+    let optimized = bake_from_json_str(&json_opt).unwrap();
+    assert!(
+        optimized.len() <= plain.len(),
+        "optimized bake ({}) must not exceed plain bake ({})",
+        optimized.len(),
+        plain.len(),
+    );
+    // Round-trip the optimized bytes — predict output must be lossless.
+    let aligned = Aligned(optimized);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    let mut p = Predictor::new(&model);
+    let mut x = vec![0.0_f32; 64];
+    x[0] = 1.0;
+    let out = p.predict(&x).unwrap();
+    // weights[0] = 1, weights[1] = 2 — these are row=0, col=0 / col=1.
+    // input[0]=1 → output[0] += 1, output[1] += 2. All other rows are
+    // zero.
+    assert_eq!(out[0], 1.0);
+    assert_eq!(out[1], 2.0);
+    for v in &out[2..] {
+        assert_eq!(*v, 0.0);
+    }
+}
+
+/// All three knobs composed: zerobias 0.005 + compressed + optimize.
+/// Verifies the pipeline works end-to-end on a realistic shape and
+/// produces a strictly smaller bake than the unoptimized baseline.
+#[test]
+fn json_zerobias_compressed_optimize_composed() {
+    // 64 → 32 → 1 net with mostly-small weights — zerobias should
+    // zero ~88 % at τ=0.005 (per the V0_18 eval), compression then
+    // collapses the zero runs.
+    let mut layer0_w = Vec::with_capacity(64 * 32);
+    for i in 0..64 * 32 {
+        layer0_w.push(if i % 16 == 0 { 1.0_f32 } else { 1e-6_f32 });
+    }
+    let layer0_b = vec![0.0_f32; 32];
+    let mut layer1_w = vec![0.0_f32; 32];
+    layer1_w[0] = 2.0;
+    let layer1_b = vec![1.0_f32];
+
+    let layer0_w_json = serde_json::to_string(&layer0_w).unwrap();
+    let layer0_b_json = serde_json::to_string(&layer0_b).unwrap();
+    let layer1_w_json = serde_json::to_string(&layer1_w).unwrap();
+    let layer1_b_json = serde_json::to_string(&layer1_b).unwrap();
+    let scaler_mean = serde_json::to_string(&vec![0.0_f32; 64]).unwrap();
+    let scaler_scale = serde_json::to_string(&vec![1.0_f32; 64]).unwrap();
+
+    let layers = format!(
+        "[\
+         {{ \"in_dim\": 64, \"out_dim\": 32, \"activation\": \"identity\", \
+            \"dtype\": \"f32\", \"weights\": {layer0_w_json}, \"biases\": {layer0_b_json} }},\
+         {{ \"in_dim\": 32, \"out_dim\": 1, \"activation\": \"identity\", \
+            \"dtype\": \"f32\", \"weights\": {layer1_w_json}, \"biases\": {layer1_b_json} }}\
+         ]"
+    );
+
+    let json_plain = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": {layers} }}"
+    );
+    let json_all = format!(
+        "{{ \"schema_hash\": 0, \"scaler_mean\": {scaler_mean}, \"scaler_scale\": {scaler_scale}, \
+         \"layers\": {layers}, \
+         \"zerobias_tau\": 0.005, \"compressed\": true, \"optimize\": true }}"
+    );
+
+    let plain = bake_from_json_str(&json_plain).unwrap();
+    let all = bake_from_json_str(&json_all).unwrap();
+    assert!(
+        all.len() < plain.len(),
+        "composed knobs ({}) should shrink vs plain ({})",
+        all.len(),
+        plain.len(),
+    );
+
+    // Load the all-knobs bake and confirm predict still works.
+    let aligned = Aligned(all);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    let mut p = Predictor::new(&model);
+    let mut x = vec![0.0_f32; 64];
+    x[0] = 1.0;
+    // Forward pass (post-zerobias, weights ≤ 1e-6 are 0):
+    //   layer0 out[0] = 1.0 * w[0]  = 1.0; all other out[j] = 0
+    //   layer1 out    = 2 * 1.0 + 1 = 3.0
+    let out = p.predict(&x).unwrap();
+    assert_eq!(out, &[3.0]);
+}
+
 fn tempdir() -> std::path::PathBuf {
     let base = std::env::temp_dir();
     let pid = std::process::id();

@@ -105,6 +105,36 @@ let bytes = bake(&BakeRequest::new(0, 0, &mean, &scale, &[layer])).unwrap();
 
 On the V0_17 → V0_18 shape (228 → 384 → 1) with τ=0.005 per-layer zerobias: bake shrinks from 93 KB to 38 KB (-59 %), per-predict cost +40 µs (decompress on every predict by design, no cache).
 
+## JSON pipeline knobs (since 0.1.1)
+
+The same three optimizations are reachable from the JSON layer without rebuilding the request in Rust. Add any of these top-level keys to your `BakeRequestJson` and `bake_from_json` honors them:
+
+```json
+{
+  "schema_hash": 0,
+  "scaler_mean":  [...],
+  "scaler_scale": [...],
+  "layers": [...],
+
+  "zerobias_tau": 0.005,
+  "compressed": true,
+  "optimize": true
+}
+```
+
+| Key | Default | Effect |
+|---|---|---|
+| `zerobias_tau` | `0.0` | Per-layer threshold: weights with `\|w\| < τ * max\|W_layer\|` zero out BEFORE the layer's declared `dtype` quantization. Calibrated `0.005` recommended. |
+| `compressed` | `false` | Wrap the post-header payload in LZ4 block compression. Loader transparently decompresses. |
+| `optimize` | `false` | Run [`bake_optimized`] (permutation + compressed-flag search + bounded hillclimb) instead of [`bake`]. ~1-2 s budget. Mathematically identical predict output. |
+
+All three are additive — JSON files that don't declare them get the legacy behavior unchanged. Pair `zerobias_tau` with `compressed: true` (or `optimize: true`, which decides per-bake) to realize the size win.
+
+[`bake_optimized`]: https://docs.rs/zenpredict-bake/latest/zenpredict_bake/fn.bake_optimized.html
+[`bake`]: https://docs.rs/zenpredict-bake/latest/zenpredict_bake/fn.bake.html
+
+Python wrappers (`zenanalyze/tools/bake_picker.py`, `zensim/scripts/v_next/bake_to_znpr.py`, `zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`) get this for free — set the keys in the dict they pass to `zenpredict-bake`, no Rust changes needed.
+
 ## License
 
 MIT OR Apache-2.0, at your option. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
