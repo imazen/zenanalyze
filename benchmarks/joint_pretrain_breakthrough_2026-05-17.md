@@ -132,3 +132,40 @@ For zenwebp:
   fine-tune layer-K weights)
 - Try different trunk depths (96-only vs 192-96 vs 256-128-64)
 - Try joint training with zenjxl included (4 codecs instead of 3)
+
+## Trunk capacity sweep (added)
+
+Compared the 192,96 trunk against a deeper / wider 256,128,64 trunk
+at 150 epochs to test whether more capacity helps:
+
+| Hidden | epochs | zenjpeg median | zenwebp median | zenavif median |
+|---|--:|--:|--:|--:|
+| **192, 96** | 100 | **52.7%** | **43.7%** | **31.0%** |
+| 256, 128, 64 | 150 | 44.5% | 33.6% | 26.5% |
+
+**The smaller trunk wins on every codec.** The bigger trunk has 2.5×
+the parameters and trains 50% longer but underperforms on all three.
+Reasons (hypotheses, not measured):
+
+1. The picker task isn't capacity-limited. With 47,750 decision rows
+   total and 139 trunk inputs, a 192-96 trunk has plenty of expressive
+   power.
+2. Deeper trunk → more places for the network to overfit cross-codec
+   patterns that don't transfer.
+3. Longer training with cosine LR schedule may past the point where
+   the trunk starts memorizing per-codec patterns at the expense of
+   the shared embedding.
+
+192,96 is the operating point. Don't increase capacity without
+adding regularization or data.
+
+## Final SOTA per codec
+
+| Codec | Methodology | Median argmin | Notes |
+|---|---|--:|---|
+| zenjpeg | joint pretrain 192,96 | **52.7%** | +22pp over per-codec |
+| zenwebp | per-codec v14+z_rmse | **45.3%** | joint slightly worse |
+| zenavif | joint pretrain 192,96 | **31.0%** | +11pp over per-codec |
+
+zenwebp's per-codec sweep stays as the production methodology;
+zenjpeg + zenavif should adopt joint pretrain.
