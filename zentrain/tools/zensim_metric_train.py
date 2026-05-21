@@ -810,6 +810,15 @@ def main() -> int:
                          "columns f0..fN-1 + a target column. WEIGHT "
                          "scales the per-row MSE (synthetic = 1.0, "
                          "KADID/TID human-MOS = 0.3 per V0_4 recipe).")
+    ap.add_argument("--corpus-target-scale", action="append", default=[],
+                    metavar="NAME:FACTOR",
+                    help="Recovery-champion port: multiply --target-col "
+                         "by FACTOR for the named training corpus before "
+                         "loss computation. Used to harmonize corpora "
+                         "carrying the same column on incompatible "
+                         "scales (e.g. konjnd's human_score is [-65, 96] "
+                         "while safesyn/kadid/tid are [0, 1]; passing "
+                         "konjnd:0.01 puts konjnd on a comparable scale).")
     ap.add_argument("--val", action="append", default=[],
                     metavar="NAME:PATH",
                     help="Validation corpus parquet/CSV. Selection "
@@ -887,13 +896,28 @@ def main() -> int:
     train_specs = [_parse_corpus_spec(s, with_weight=True) for s in args.train]
     val_specs = [_parse_corpus_spec(s, with_weight=False) for s in args.val]
 
+    # Parse --corpus-target-scale NAME:FACTOR entries.
+    corpus_scales: dict[str, float] = {}
+    for entry in args.corpus_target_scale:
+        if ":" not in entry:
+            raise SystemExit(f"--corpus-target-scale: bad spec {entry!r} "
+                             "(want NAME:FACTOR, e.g. konjnd:0.01)")
+        name, factor_str = entry.split(":", 1)
+        corpus_scales[name] = float(factor_str)
+
     print(f"Loading {len(train_specs)} train corpora + "
           f"{len(val_specs)} val corpora...", flush=True)
     train_dfs: dict[str, tuple[pd.DataFrame, float]] = {}
     for name, path, w in train_specs:
         df = load_corpus(path, args.target_col, args.n_features,
                           feature_prefix=args.feature_prefix)
-        print(f"  train/{name}: {len(df):,} rows, weight={w}", flush=True)
+        if name in corpus_scales:
+            scale = corpus_scales[name]
+            df["target"] = df["target"] * scale
+            print(f"  train/{name}: {len(df):,} rows, weight={w}, "
+                  f"target_scale={scale}", flush=True)
+        else:
+            print(f"  train/{name}: {len(df):,} rows, weight={w}", flush=True)
         train_dfs[name] = (df, w)
     val_dfs: dict[str, pd.DataFrame] = {}
     for name, path, _ in val_specs:
