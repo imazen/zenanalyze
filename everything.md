@@ -1,15 +1,110 @@
 # everything.md — zen training/picker/metric ecosystem
 
-**Compiled 2026-05-09. Latest substantive update: 2026-05-10 (zensim
-champion training cycle). Forensic reconstruction across `zenmetrics`,
-`zenanalyze` (zenpicker + zenpredict + zentrain), and `zensim`.
-Cross-references the `RECOVERY_PLAN_2026-05-08.md` /
-`RECOVERY_HANDOFF_2026-05-08.md` recovery cycle.**
+**Compiled 2026-05-09. Latest substantive update: 2026-05-20 (V11
+substrate retrospective + multi-codec sweep coverage audit). Forensic
+reconstruction across `zenmetrics`, `zenanalyze` (zenpicker +
+zenpredict + zentrain), and `zensim`. Cross-references the
+`RECOVERY_PLAN_2026-05-08.md` / `RECOVERY_HANDOFF_2026-05-08.md`
+recovery cycle.**
 
 This is the central tracking doc for what's shipping, what's in flight, what's
 parked, and what needs to happen next. Always cross-check `git log` and the
 per-repo `docs/RECOVERY_REGISTER_2026-05-08.md` files before acting on anything
 here — recovery cycles are still landing.
+
+---
+
+## 00. Latest state (2026-05-20) — V11 substrate retrospective + sweep coverage
+
+### zensim Balanced trail ship
+
+**`PreviewV0_5Balanced`** = V_22-mix-LARGE+iwssim s3 packed +
+**V10 BalancedV3 spline calibration** (V9 PCHIP mechanism, shipped
+2026-05-20). Bake at `zensim/weights/v_balanced_v3_2026-05-20.bin`.
+Verified `bake_verdict` metrics (2026-05-20 re-run):
+
+| Corpus | SROCC | PLCC | Z-RMSE |
+|---|---:|---:|---:|
+| CID22  | 0.8324 | 0.8256 | 0.564 |
+| KADID  | 0.9664 | 0.9562 | 0.293 |
+| TID    | 0.9712 | 0.9379 | 0.347 |
+| KonJND | 0.8927 | 0.9270 | 0.375 |
+| AIC-3  | 0.7845 | 0.7952 | 0.606 |
+| AIC-4  | 0.9016 | 0.8900 | 0.456 |
+
+See `zensim/zensim/SOTA_TRAILS.md` for the gate definition and the
+companion `PreviewV0_5Compression` + `PreviewV0_5Ensemble` ships.
+
+### V11-A' v2 retrain (task #190) — FALSIFIED
+
+Substrate (anchor + cross-codec-eq) rebuilt cleanly from the
+R2 `omni-multi-codec-2026-05-19` prefix; all 4 codecs have
+`score_ssim2_gpu` 100 % non-null (correcting V11-A' v1's false
+"ssim2 was never computed on non-jpeg codecs" claim). Substrate
+artifacts preserved at
+`/mnt/v/zen/zensim-training/2026-05-20-v11-substrate/`:
+
+- `unified_omni.parquet` — 754,756 rows × 305 cols
+- `anchors_ssim2_300col_v2.parquet` — 8,527 rows × 10 ssim2 bands × 4 codecs
+- `cross_codec_equivalence_ssim2_v2.parquet` — 1,739 cross-codec pairs
+
+Brief recipe (per-sample-α head + MSE-only + monotonicity-reg 1.0 +
+tanh-output-head-scale 20.0) FALSIFIED across 5 seeds (median CID22
+0.7519, −0.0805 below V10 BalancedV3). Brief hparams contraindicated
+vs V_24-per-sample-α defaults. Clean recipe (V_24-aligned + V11
+substrate) lifts CID22 +0.043 over V10 but collapses KonJND by
+−0.489 — a Compression-trail-shape candidate that fails the
+Balanced gate. V10 remains the defensible Balanced bake.
+
+Methodology at `zensim/benchmarks/v11_substrate_v2_methodology_2026-05-20.md`
+(in the `zensim--v11-substrate-v2` worktree's tree, committed on
+zensim main `84ce3390`).
+
+### R2 multi-codec sweep coverage map (2026-05-20)
+
+DATA_PROVENANCE.md was missing a third multi-codec R2 prefix that's
+useful as a denser zenwebp/zenavif metric-scores source:
+
+| Sweep | zenwebp cells | zenavif cells | zenjxl cells | features sibling | encoded preserved |
+|---|--:|--:|--:|---|---|
+| omni-multi-codec-2026-05-19 (unified-worker, the V11 substrate input) | 1,000 (5 q) | 4,000 (5 q) | 51,200 | ✓ 300-feat | ✓ |
+| **multi-codec-2026-05-18** (pre-unified-worker) | **4,000 (10 q)** | **14,400 (10 q)** | 6,400 | ✗ | ✗ |
+| cvvdp-v15rc-2026-05-18 | — | — | — | ✓ 300-feat | ✓ (zenjpeg, 513k rows) |
+
+`multi-codec-2026-05-18` has 4× the zenwebp coverage and 3.6× the
+zenavif coverage (both at 10 q levels, vs 5 q in 2026-05-19), but
+needs either a fresh feature-extraction pass (no preserved encoded
+variants on R2; would have to re-encode from input parquet) or
+consumers that only want the 7 metric scores. Documented at
+`zenmetrics/docs/DATA_PROVENANCE.md` "multi-codec-2026-05-18"
+section as of 2026-05-20.
+
+### zensim-gpu ↔ zensim CPU feature parity (2026-05-20 reverify)
+
+All 19 parity tests pass on RTX 5070 + CUDA 13.2:
+
+- `cpu_parity` (3/3) — basic + peak 228-slot per-slot
+- `extended_parity` (6/6) — extended 300-slot + WithIw 372-slot,
+  including the multi-strip 128² checkerboard case that's the
+  regression guard for the **strip-overlap / boundary-row activity
+  bug** fixed by the 2026-05-17 principled per-channel H-blur
+  redesign (zensim `2dab8f3` + zenmetrics `1b8ccab`). CPU and GPU
+  both compute `activity[c] = box_blur(|src[c] - H_blur(src[c])|)`
+  per channel at all strip rows; the prior cross-channel cascade is
+  gone.
+- `parity_lock` (8/8) — real-image corpus: dssim-cuda q70 cpu
+  80.9018 / gpu 80.8850 (rel 2.1e-4); q90 cpu 91.3509 / gpu
+  91.3486 (rel 2.5e-5).
+- `weights_parity` (1/1) — byte-for-byte CPU/GPU `WEIGHTS_PREVIEW_V0_2`.
+- `opaque` (1/1) — opaque-API srgb-u8 path.
+
+Caveat: sweep parquet data scored against the pre-2026-05-17
+masked/IW semantics still uses the old cascade values. Bound on
+shift is the 1.5-4 % rel residual the fix eliminated. Re-bake any
+V_X model whose training corpus consumed pre-2026-05-17 masked/IW
+feature values where slots 228..372 are load-bearing. See
+`zenmetrics/crates/zensim-gpu/PORT_STATUS.md` "Principled
+per-channel H-blur activity" section for details.
 
 ---
 
