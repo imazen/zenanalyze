@@ -1,10 +1,12 @@
 // zenpredict-viz entry. Loads WASM, wires UI panels, dispatches bake bytes.
 
-import init, { parse_bake, forward_with_taps } from './pkg/zenpredict_viz.js';
+import init, { parse_bake, forward_with_taps, layer_weights } from './pkg/zenpredict_viz.js';
 import { renderSummary } from './panels/summary.js';
 import { renderScaler } from './panels/scaler.js';
 import { renderImportance } from './panels/importance.js';
 import { renderForward } from './panels/forward.js';
+import { renderWeights } from './panels/weights.js';
+import { renderCalibration } from './panels/calibration.js';
 import { loadFeatureCatalog } from './feature_layout.js';
 
 const KNOWN_STAGES = [
@@ -125,6 +127,16 @@ function refreshActivePanel() {
     case 'summary': renderSummary(state.summary, document.getElementById('summary-body')); break;
     case 'scaler': renderScaler(state.summary, document.getElementById('scaler-body')); break;
     case 'importance': renderImportance(state.summary, document.getElementById('importance-body')); break;
+    case 'weights':
+      renderWeights(
+        state.summary,
+        (idx) => layer_weights(state.bakeBytes, idx),
+        document.getElementById('weights-body'),
+      );
+      break;
+    case 'calibration':
+      renderCalibration(state.summary, document.getElementById('calibration-body'));
+      break;
     case 'forward': /* user-driven */ break;
   }
 }
@@ -157,7 +169,7 @@ async function runForward() {
   } catch (err) {
     alert(`forward pass failed: ${err}`); return;
   }
-  renderForward(taps, document.getElementById('forward-body'));
+  renderForward(taps, document.getElementById('forward-body'), state.summary);
 }
 
 bootstrap();

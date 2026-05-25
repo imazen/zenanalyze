@@ -142,6 +142,8 @@ button.action:hover { filter: brightness(1.1); }
     <button class="active" data-panel="summary">summary</button>
     <button data-panel="scaler">scaler</button>
     <button data-panel="importance">importance</button>
+    <button data-panel="weights">weights</button>
+    <button data-panel="calibration">calibration</button>
     <button data-panel="forward">forward</button>
   </nav>
 </header>
@@ -185,9 +187,21 @@ button.action:hover { filter: brightness(1.1); }
     <div id="importance-body"><div class="empty">load a bake.</div></div>
   </section>
 
+  <section class="panel" data-panel="weights">
+    <h2>per-layer weights</h2>
+    <div class="hint">heatmap of the weight matrix W[in_dim, out_dim] for the selected layer. cells are dequantised to f32 if the layer is i8-stored. rows = inputs (with semantic labels on L0), cols = hidden units.</div>
+    <div id="weights-body"><div class="empty">load a bake.</div></div>
+  </section>
+
+  <section class="panel" data-panel="calibration">
+    <h2>post-MLP calibration</h2>
+    <div class="hint">stages applied after the raw MLP output: <code>tanh_output_head</code> (sigmoid pin), <code>output_calibration_spline</code> (PCHIP), <code>per_codec_calibration</code> (affine per codec), <code>per_sample_alpha_head</code> (rank/pool gate). only the stages present on the bake render here.</div>
+    <div id="calibration-body"><div class="empty">load a bake.</div></div>
+  </section>
+
   <section class="panel" data-panel="forward">
     <h2>live forward pass</h2>
-    <div class="hint">paste a feature vector (372 floats, comma- or whitespace-separated) or click "synthetic" for a sine-wave probe. waterfall shows each stage's output magnitude.</div>
+    <div class="hint">paste a feature vector (e.g. 372 floats, comma- or whitespace-separated) or click "synthetic" for a sine-wave probe. waterfall shows each stage's output magnitude AND the post-MLP calibration stages applied in pipeline order.</div>
     <div class="controls">
       <button class="action" id="synth-features">synthetic input</button>
       <button class="action" id="run-forward">forward</button>
