@@ -201,10 +201,31 @@ fn signed_cbrt(x: f32) -> f32 {
 /// match-arms transition smoothly rather than dividing by ~0.
 ///
 /// Defensive non-finite handling: NaN in → NaN out (matches the
-/// existing transforms). Inputs at ±∞ would produce ±∞ via `powf`
-/// — also matches the existing winsor-then-log behavior.
+/// existing transforms). The closed-form path can produce ±∞ via
+/// `powf` overflow at extreme λ (the zensim scipy MLE screen
+/// observed λ ∈ [-1062, +10] on canonical safesyn). When the
+/// arithmetic produces a non-finite result the function returns
+/// `x` (Identity) rather than letting Inf poison the trainer's
+/// gradient propagation. Added 2026-05-25 with the universal
+/// NaN-safety test suite.
 #[inline]
 fn yeo_johnson(x: f32, lambda: f32) -> f32 {
+    if x.is_nan() {
+        return x;
+    }
+    let y = yeo_johnson_inner(x, lambda);
+    // Overflow guard: extreme λ combined with x far from 0 can
+    // produce ±Inf via the powf branch (see e.g. λ = -1000, x = -10:
+    // `(11)^1002` overflows). Inf in standardize → Inf in
+    // L0 forward → NaN gradient — the trainer's all-bad outcome.
+    // Identity fallback gives the trainer a sane numeric value to
+    // train on, matching the "degenerate fallback" convention used
+    // by `WinsorP99` / `QuantileBins` when params are missing.
+    if y.is_finite() { y } else { x }
+}
+
+#[inline]
+fn yeo_johnson_inner(x: f32, lambda: f32) -> f32 {
     // 1e-7 chosen so a literal `0.0_f32` and `2.0_f32` exactly hit
     // the log branch (the limit is mathematically defined there);
     // ULPs around 0 and 2 are well below this threshold.
@@ -1119,5 +1140,237 @@ mod tests {
         let v = FeatureTransform::from_token(tok).expect("parse");
         assert_eq!(v, FeatureTransform::YeoJohnson);
         assert_eq!(v.as_token(), tok);
+    }
+
+    /// Extreme negative λ (as observed in the zensim scipy MLE screen
+    /// at task #214: λ ∈ [-1062, -1.7]) must NEVER produce NaN or Inf.
+    /// The implementation has an overflow guard that falls back to
+    /// Identity when the closed-form arithmetic produces non-finite.
+    #[test]
+    fn yeo_johnson_extreme_negative_lambda_never_non_finite() {
+        let t = FeatureTransform::YeoJohnson;
+        for &lambda in &[
+            -1100.0_f32, -1000.0, -500.0, -213.0, -100.0, -50.0, -10.0, -5.0,
+        ] {
+            for &x in &[
+                0.0_f32, 1e-10, 1e-6, 1e-3, 0.1, 1.0, 10.0, 100.0, 1000.0,
+                -1e-10, -1e-6, -1e-3, -0.1, -1.0, -10.0, -100.0, -1000.0,
+            ] {
+                let y = t.apply_with_params(x, &[lambda]);
+                assert!(
+                    y.is_finite(),
+                    "λ={lambda}, x={x}: f produced non-finite {y}"
+                );
+            }
+        }
+    }
+
+    /// Extreme positive λ also routed through the overflow guard.
+    #[test]
+    fn yeo_johnson_extreme_positive_lambda_never_non_finite() {
+        let t = FeatureTransform::YeoJohnson;
+        for &lambda in &[10.0_f32, 50.0, 100.0, 500.0, 1000.0] {
+            for &x in &[
+                0.0_f32, 1e-10, 0.1, 1.0, 10.0,
+                -1e-10, -0.1, -1.0, -10.0,
+            ] {
+                let y = t.apply_with_params(x, &[lambda]);
+                assert!(
+                    y.is_finite(),
+                    "λ={lambda}, x={x}: f produced non-finite {y}"
+                );
+            }
+        }
+    }
+
+    /// NaN input to YJ passes through as NaN (data-quality bug signal).
+    #[test]
+    fn yeo_johnson_nan_input_returns_nan() {
+        let t = FeatureTransform::YeoJohnson;
+        let y = t.apply_with_params(f32::NAN, &[1.5]);
+        assert!(y.is_nan());
+    }
+
+    // ───── Universal NaN-safety tests across ALL FeatureTransform variants ─────
+    //
+    // For every variant, exercise typical edge-case inputs and assert
+    // the output never carries ±Inf — that's the actually-bad outcome
+    // since Inf in the standardize step poisons the trainer's L0
+    // forward pass with NaN. NaN propagation from NaN input is fine.
+    // Added 2026-05-25 alongside the YJ overflow guard.
+
+    /// Returns every FeatureTransform variant currently in the enum.
+    /// Keep this in sync with the enum when adding new variants —
+    /// the universal tests below iterate this list.
+    fn all_variants() -> [FeatureTransform; 15] {
+        [
+            FeatureTransform::Identity,
+            FeatureTransform::Log,
+            FeatureTransform::Log1p,
+            FeatureTransform::SignedLog1p,
+            FeatureTransform::SignedSqrt,
+            FeatureTransform::SignedCbrt,
+            FeatureTransform::ClipThenLog1p,
+            FeatureTransform::WinsorP99,
+            FeatureTransform::QuantileBins,
+            FeatureTransform::WinsorThenLog,
+            FeatureTransform::WinsorThenLog1p,
+            FeatureTransform::WinsorThenSignedCbrt,
+            FeatureTransform::SignedCbrtThenWinsor,
+            FeatureTransform::ClipThenLog1pThenWinsor,
+            FeatureTransform::YeoJohnson,
+        ]
+    }
+
+    /// Sample params per variant — chosen as "reasonable" param sets
+    /// so each variant actually does its thing, not its no-param
+    /// fallback.
+    fn sample_params(t: FeatureTransform) -> &'static [f32] {
+        match t {
+            FeatureTransform::Identity
+            | FeatureTransform::Log
+            | FeatureTransform::Log1p
+            | FeatureTransform::SignedLog1p
+            | FeatureTransform::SignedSqrt
+            | FeatureTransform::SignedCbrt => &[],
+            FeatureTransform::ClipThenLog1p => &[0.1_f32],
+            FeatureTransform::WinsorP99 => &[0.01_f32, 0.99],
+            FeatureTransform::QuantileBins => &[0.1_f32, 0.3, 0.5, 0.7, 0.9],
+            FeatureTransform::WinsorThenLog => &[0.01_f32, 99.0],
+            FeatureTransform::WinsorThenLog1p => &[0.0_f32, 99.0],
+            FeatureTransform::WinsorThenSignedCbrt => &[-100.0_f32, 100.0],
+            FeatureTransform::SignedCbrtThenWinsor => &[-2.0_f32, 2.0],
+            FeatureTransform::ClipThenLog1pThenWinsor => &[0.1_f32, 0.0, 3.0],
+            FeatureTransform::YeoJohnson => &[-50.0_f32],
+        }
+    }
+
+    /// Standard finite test inputs covering common feature distributions
+    /// from the zensim training corpora (heavy positive tails, small
+    /// positives, signed-zero, and the negative range used by AIC-3/4
+    /// JND scores).
+    fn finite_test_inputs() -> [f32; 17] {
+        [
+            0.0,
+            1e-30, 1e-10, 1e-6, 1e-3, 0.5, 1.0,
+            10.0, 100.0, 1e5, 1e10,
+            -1e-10, -0.5, -1.0, -10.0, -100.0, -1e5,
+        ]
+    }
+
+    /// Every FeatureTransform applied via apply_with_params on every
+    /// finite input must produce a finite output, respecting each
+    /// variant's documented input-domain contract (Log: x > 0,
+    /// Log1p: x > -1). The trainer's `--auto-transforms` loader gates
+    /// these contracts at corpus-load time; this test verifies the
+    /// runtime side respects the contract too.
+    #[test]
+    fn all_transforms_no_nan_from_finite_input() {
+        for t in all_variants() {
+            let params = sample_params(t);
+            for &x in finite_test_inputs().iter() {
+                if matches!(t, FeatureTransform::Log) && x <= 0.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::Log1p) && x <= -1.0 {
+                    continue;
+                }
+                let y = t.apply_with_params(x, params);
+                assert!(
+                    y.is_finite(),
+                    "{:?} apply_with_params({x}, {params:?}) = {y} (non-finite)",
+                    t,
+                );
+            }
+        }
+    }
+
+    /// Same coverage for the no-param `apply()` fallback path. The
+    /// degenerate fallbacks (WinsorP99 → Identity, ClipThenLog1p →
+    /// log1p(max(0, x)), etc.) must all be safe on finite input.
+    #[test]
+    fn all_transforms_no_nan_from_finite_input_no_params() {
+        for t in all_variants() {
+            for &x in finite_test_inputs().iter() {
+                if matches!(t, FeatureTransform::Log) && x <= 0.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::Log1p) && x <= -1.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::WinsorThenLog) && x <= 0.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::WinsorThenLog1p) && x <= -1.0 {
+                    continue;
+                }
+                let y = t.apply(x);
+                assert!(
+                    y.is_finite(),
+                    "{:?} apply({x}) = {y} (non-finite)",
+                    t,
+                );
+            }
+        }
+    }
+
+    /// NaN input must NEVER produce ±Inf from any variant. NaN-to-NaN
+    /// or NaN-to-some-finite-mask (e.g., ClipThenLog1p's `x > 0`
+    /// comparison falling false on NaN, producing 0) are both
+    /// acceptable — the killer outcome we guard against is NaN → Inf
+    /// since Inf propagates through gradient computation.
+    #[test]
+    fn all_transforms_nan_input_never_produces_infinity() {
+        for t in all_variants() {
+            let params = sample_params(t);
+            let y = t.apply_with_params(f32::NAN, params);
+            assert!(
+                !y.is_infinite(),
+                "{:?} apply_with_params(NaN, {params:?}) = {y} — Inf from NaN input",
+                t,
+            );
+        }
+    }
+
+    /// All variants with empty params must produce a finite output
+    /// on finite input. Empty-params is the documented "caller error"
+    /// path — the runtime should degrade gracefully without panic,
+    /// Inf, or NaN.
+    #[test]
+    fn all_transforms_empty_params_are_safe() {
+        for t in all_variants() {
+            for &x in &[0.0_f32, 1.0, -1.0, 100.0, -100.0] {
+                if matches!(t, FeatureTransform::Log) && x <= 0.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::Log1p) && x <= -1.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::WinsorThenLog) && x <= 0.0 {
+                    continue;
+                }
+                if matches!(t, FeatureTransform::WinsorThenLog1p) && x <= -1.0 {
+                    continue;
+                }
+                let y = t.apply_with_params(x, &[]);
+                assert!(
+                    y.is_finite(),
+                    "{:?} apply_with_params({x}, []) = {y} (non-finite)",
+                    t,
+                );
+            }
+        }
+    }
+
+    /// Every variant must have a round-trippable token. Catches the
+    /// "added new variant + forgot to update from_token/as_token"
+    /// regression.
+    #[test]
+    fn all_variants_have_round_trippable_tokens() {
+        for t in all_variants() {
+            let tok = t.as_token();
+            let parsed = FeatureTransform::from_token(tok).expect("from_token");
+            assert_eq!(parsed, t, "round-trip failed for {tok}");
+        }
     }
 }
