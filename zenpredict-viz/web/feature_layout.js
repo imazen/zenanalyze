@@ -1,32 +1,51 @@
-// Zensim 372-feature schema layout — maps numeric f0..f371 to semantic names.
-// Mirrors `zensim/src/metric.rs` constants FEATURES_PER_CHANNEL_BASIC=13,
-// _WITH_PEAKS=19, _EXTENDED=25, _IW=6 across 4 scales × 3 channels.
+// Zensim 228 / 300 / 372-feature schema layout. Maps numeric f0..f_n
+// to semantic names `s<scale>.<channel>.<feature_name>` and block
+// tags. Names mirror `zensim/src/metric.rs`.
+//
+// Track B (2026-05-25): when `web/feature_catalog.json` is loaded
+// (via `loadFeatureCatalog()`), tooltips and search use the richer
+// math-summary + source-ref info from that file. The static layout
+// below is the lookup-of-last-resort.
 
 const CHANNELS = ['Y', 'Cb', 'Cr'];
 const N_SCALES = 4;
 
-// Per-block feature names. These mirror the zensim metric.rs source-of-truth
-// FeatureView block layouts. If the source ever rotates, regenerate from
-// metric.rs.
+// Per-block feature names. Source of truth: the doc comment table in
+// `zensim/src/metric.rs` around `FEATURES_PER_CHANNEL_BASIC` /
+// `_WITH_PEAKS` / `_EXTENDED` / `_IW`.
 const BASIC = [
   'ssim_mean',
-  'ssim_var',
+  'ssim_4th',
+  'ssim_2nd',
   'art_mean',
-  'art_var',
+  'art_4th',
+  'art_2nd',
   'det_mean',
-  'det_var',
-  'wssim_mean',
-  'wssim_var',
-  'asym_brt_mean',
-  'asym_brt_var',
-  'asym_drk_mean',
-  'asym_drk_var',
-  'csm_mean',
+  'det_4th',
+  'det_2nd',
+  'mse',
+  'hf_energy_loss',
+  'hf_mag_loss',
+  'hf_energy_gain',
 ];
 
-const PEAKS = ['ssim_max', 'art_max', 'det_max', 'ssim_p95', 'art_p95', 'det_p95'];
-const MASKED = ['mssim_mean', 'mssim_var', 'mart_mean', 'mart_var', 'mdet_mean', 'mdet_var'];
-const IWPOOL = ['iw_ssim_p25', 'iw_ssim_p50', 'iw_ssim_p75', 'iw_art_p50', 'iw_det_p50', 'iw_csm_p50'];
+const PEAKS = ['ssim_max', 'art_max', 'det_max', 'ssim_l8', 'art_l8', 'det_l8'];
+const MASKED = [
+  'masked_ssim_mean',
+  'masked_ssim_4th',
+  'masked_ssim_2nd',
+  'masked_art_4th',
+  'masked_det_4th',
+  'masked_mse',
+];
+const IWPOOL = [
+  'iw_ssim_mean',
+  'iw_ssim_4th',
+  'iw_ssim_2nd',
+  'iw_art_4th',
+  'iw_det_4th',
+  'iw_mse',
+];
 
 const N_BASIC = BASIC.length;       // 13
 const N_PEAKS = PEAKS.length;       // 6
@@ -39,9 +58,52 @@ const SIZES = {
   372: { layout: [N_BASIC, N_PEAKS, N_MASKED, N_IW],                 names: [BASIC, PEAKS, MASKED, IWPOOL] },
 };
 
-// Given a feature index and total feature count, return a string label
-// `s<scale>.<channel>.<feature_name>` and block tag.
+// Loaded asynchronously from web/feature_catalog.json (Track B).
+let CATALOG = null;
+let CATALOG_LOAD_PROMISE = null;
+
+export function loadFeatureCatalog() {
+  if (CATALOG_LOAD_PROMISE) return CATALOG_LOAD_PROMISE;
+  CATALOG_LOAD_PROMISE = fetch('./feature_catalog.json')
+    .then(resp => {
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    })
+    .then(j => { CATALOG = j; return j; })
+    .catch(err => {
+      console.warn('feature_catalog.json not found — falling back to static layout:', err.message);
+      return null;
+    });
+  return CATALOG_LOAD_PROMISE;
+}
+
+// Return the loaded catalog or null. Synchronous read of cached state.
+export function getCatalog() { return CATALOG; }
+
+// Lookup a feature's full entry from the catalog if loaded.
+export function catalogEntry(idx, n_features) {
+  if (!CATALOG) return null;
+  const schema = CATALOG.zensim_schemas?.[String(n_features)];
+  if (!schema) return null;
+  return schema.features?.[`f${idx}`] || null;
+}
+
+// Given a feature index and total feature count, return a label +
+// block tag. Prefers the catalog entry when available, falls back to
+// the static layout.
 export function featureLabel(idx, n_features) {
+  const cat = catalogEntry(idx, n_features);
+  if (cat) {
+    return {
+      label: cat.label,
+      block: cat.block,
+      scale: cat.scale,
+      channel: cat.channel,
+      feature: cat.feature_name,
+      math_summary: cat.math_summary,
+      source_ref: cat.source_ref,
+    };
+  }
   const spec = SIZES[n_features];
   if (!spec) return { label: `f${idx}`, block: 'unknown' };
 
@@ -122,4 +184,20 @@ export function blockStats(values, n_features) {
   const total = blocks.reduce((a, b) => a + b.sum, 0);
   blocks.forEach(b => (b.pct = (100 * b.sum) / total));
   return blocks;
+}
+
+// Filter features by a substring search on label/block/feature_name/math_summary.
+// `q` is case-insensitive. Returns indices that match.
+export function searchFeatures(q, n_features) {
+  const query = (q || '').trim().toLowerCase();
+  if (!query) return null;  // signal "no filter"
+  const out = [];
+  for (let i = 0; i < n_features; i++) {
+    const info = featureLabel(i, n_features);
+    const hay = [info.label, info.block, info.feature || '', info.math_summary || '']
+      .join(' ')
+      .toLowerCase();
+    if (hay.includes(query)) out.push(i);
+  }
+  return out;
 }

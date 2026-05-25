@@ -41,7 +41,13 @@ export function renderScaler(s, root) {
           cell.dataset.idx = featIdx;
           cell.dataset.val = v;
           const info = featureLabel(featIdx, n);
-          cell.title = `${info.label} (f${featIdx}) = ${v.toFixed(4)}`;
+          const tooltipParts = [
+            `${info.label} (f${featIdx})`,
+            `${title}: ${v.toFixed(4)}`,
+          ];
+          if (info.math_summary) tooltipParts.push(`math: ${info.math_summary}`);
+          if (info.source_ref) tooltipParts.push(`src: ${info.source_ref}`);
+          cell.title = tooltipParts.join('\n');
           grid.appendChild(cell);
         }
       }

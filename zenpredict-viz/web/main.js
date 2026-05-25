@@ -5,6 +5,7 @@ import { renderSummary } from './panels/summary.js';
 import { renderScaler } from './panels/scaler.js';
 import { renderImportance } from './panels/importance.js';
 import { renderForward } from './panels/forward.js';
+import { loadFeatureCatalog } from './feature_layout.js';
 
 const KNOWN_STAGES = [
   'zentrain.feature_transforms',
@@ -23,6 +24,9 @@ const state = {
 
 async function bootstrap() {
   await init();
+  // Fire-and-forget — the catalog is optional; panels degrade
+  // gracefully to the static layout when it's absent.
+  loadFeatureCatalog();
   wireUI();
 }
 

@@ -43,6 +43,16 @@ done
 echo "→ wasm-pack build ${ARGS[*]}"
 wasm-pack build "${ARGS[@]}"
 
+# Track B: regenerate feature_catalog.json sidecar. Skip silently if
+# the build fails (catalog is optional; the UI falls back to the
+# static feature_layout.js for tooltips and search).
+echo "→ build_feature_catalog"
+if cargo run --quiet -p zenpredict-viz --features feature-catalog --bin build_feature_catalog; then
+  echo "  ✓ web/feature_catalog.json refreshed"
+else
+  echo "  ! build_feature_catalog failed — UI will use the static feature layout"
+fi
+
 echo ""
 echo "✓ built. serve with:"
 echo "    python3 -m http.server -d web 3001"
