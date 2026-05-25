@@ -53,6 +53,22 @@ else
   echo "  ! build_feature_catalog failed — UI will use the static feature layout"
 fi
 
+# Note: web/sample_pack.json is COMMITTED to the repo, not regenerated
+# here. It seeds the forward-pass panel's "load sample" dropdown with
+# real (image, codec, q)-style feature vectors drawn from the canonical
+# training parquets at /mnt/v/zen/zensim-training/canonical-2026-05-21/.
+# Those parquets live on the author's NAS and CI runners don't see them.
+# To refresh the sample pack (rare — only when adding new bands /
+# corpora), run:
+#   cargo run --release -p zenpredict-viz \
+#       --features sample-pack --bin build_sample_pack
+# and commit the resulting web/sample_pack.json.
+if [ -f web/sample_pack.json ]; then
+  echo "→ web/sample_pack.json present ($(wc -c < web/sample_pack.json) bytes) — not regenerated"
+else
+  echo "  ! web/sample_pack.json missing — forward-pass dropdown will be disabled"
+fi
+
 echo ""
 echo "✓ built. serve with:"
 echo "    python3 -m http.server -d web 3001"

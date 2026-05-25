@@ -203,11 +203,17 @@ button.action:hover { filter: brightness(1.1); }
 
   <section class="panel" data-panel="forward">
     <h2>live forward pass</h2>
-    <div class="hint">paste a feature vector (e.g. 372 floats, comma- or whitespace-separated) or click "synthetic" for a sine-wave probe. waterfall shows each stage's output magnitude AND the post-MLP calibration stages applied in pipeline order.</div>
-    <div class="controls">
+    <div class="hint">paste a feature vector (e.g. 372 floats, comma- or whitespace-separated), pick a real sample from a canonical training corpus, or click "synthetic" for a sine-wave probe. waterfall shows each stage's output magnitude AND the post-MLP calibration stages applied in pipeline order.</div>
+    <div class="controls" style="flex-wrap: wrap; gap: 8px; align-items: center;">
+      <label for="sample-select" style="font-size:11px; color:var(--fg-dim);">load sample:</label>
+      <select id="sample-select" style="background:var(--panel-2); color:var(--fg); border:1px solid var(--line); padding:4px 6px; font-family:var(--mono); font-size:11px; min-width: 260px;">
+        <option value="">&mdash; pick a real (image, quality) sample &mdash;</option>
+      </select>
+      <span id="sample-expected" style="font-family:var(--mono); font-size:11px; color:var(--fg-dim);"></span>
       <button class="action" id="synth-features">synthetic input</button>
       <button class="action" id="run-forward">forward</button>
     </div>
+    <div id="sample-note" style="font-family:var(--mono); font-size:11px; color:var(--warn); margin: 6px 0; display:none;"></div>
     <textarea id="feature-input" rows="6" placeholder="paste feature vector here..."></textarea>
     <div id="forward-body" style="margin-top: 16px;"><div class="empty">click forward to see the per-stage waterfall.</div></div>
   </section>

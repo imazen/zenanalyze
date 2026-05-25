@@ -22,6 +22,11 @@ name = "build_feature_catalog"
 path = "src/bin/build_feature_catalog.rs"
 required-features = ["feature-catalog"]
 
+[[bin]]
+name = "build_sample_pack"
+path = "src/bin/build_sample_pack.rs"
+required-features = ["sample-pack"]
+
 [dependencies]
 zenpredict = { path = "../zenpredict" }
 wasm-bindgen = "0.2.103"
@@ -34,6 +39,8 @@ serde-wasm-bindgen = "0.6.5"
 onnx-pb = { version = "0.1.4", optional = true }
 prost = { version = "0.6.1", optional = true }
 serde_json = { version = "1.0.140", optional = true }
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "58.3.0", default-features = false, optional = true }
 
 [features]
 default = []
@@ -48,6 +55,13 @@ onnx-export = ["dep:onnx-pb", "dep:prost"]
 # `web/feature_catalog.json` sidecar used by the importance/scaler
 # tooltips and feature-search box.
 feature-catalog = ["dep:serde_json"]
+# Native `build_sample_pack` binary; produces the
+# `web/sample_pack.json` sidecar of real feature vectors drawn from
+# canonical training parquets, used by the forward-pass panel's
+# "load sample" dropdown. Sidecar is committed; the build doesn't
+# regenerate it (canonical parquets live on the author's NAS, not
+# in CI).
+sample-pack = ["dep:serde_json", "dep:parquet", "dep:arrow"]
 
 [dependencies.console_error_panic_hook]
 version = "0.1.7"

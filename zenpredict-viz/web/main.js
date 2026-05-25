@@ -24,6 +24,11 @@ const KNOWN_STAGES = [
 const state = {
   bakeBytes: null,
   summary: null,
+  // Loaded asynchronously from web/sample_pack.json. Each entry is
+  // { id, label, expected_score, expected_score_source, n_features,
+  //   features: [...], source_corpus, ref_basename }. Use the
+  // dropdown's selected value (= sample.id) to look up the row.
+  samplePack: null,
 };
 
 async function bootstrap() {
@@ -31,7 +36,104 @@ async function bootstrap() {
   // Fire-and-forget — the catalog is optional; panels degrade
   // gracefully to the static layout when it's absent.
   loadFeatureCatalog();
+  loadSamplePack();
   wireUI();
+}
+
+// Fetch the sample_pack sidecar. The file is committed to the repo so
+// dev environments serve it from web/; CI builds don't regenerate it.
+// Missing sidecar => disable the dropdown and rely on synthetic input.
+function loadSamplePack() {
+  fetch('./sample_pack.json')
+    .then(resp => {
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    })
+    .then(pack => {
+      state.samplePack = pack;
+      refreshSampleDropdown();
+    })
+    .catch(err => {
+      console.warn('sample_pack.json not found — only synthetic input available:', err.message);
+      const sel = document.getElementById('sample-select');
+      if (sel) {
+        sel.innerHTML = '<option value="">(sample_pack.json missing)</option>';
+        sel.disabled = true;
+      }
+    });
+}
+
+function refreshSampleDropdown() {
+  const sel = document.getElementById('sample-select');
+  if (!sel) return;
+  const note = document.getElementById('sample-note');
+  if (!state.samplePack || !Array.isArray(state.samplePack.samples)) {
+    sel.disabled = true;
+    return;
+  }
+  // Schema gating: hide samples that don't match the current bake's
+  // n_inputs. MVP ships only 372-feature samples; show a hint when a
+  // 228/300-input bake is loaded.
+  const schema = state.samplePack.schema;
+  const need = state.summary ? state.summary.n_inputs : null;
+  const matches = need === null || need === schema;
+  sel.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = matches
+    ? '— pick a real (image, quality) sample —'
+    : `— no ${need}-feat samples (pack is ${schema}-feat) —`;
+  sel.appendChild(placeholder);
+  if (!matches) {
+    sel.disabled = true;
+    if (note) {
+      note.style.display = 'block';
+      note.textContent =
+        `sample_pack ships only ${schema}-input samples; current bake expects ${need}. ` +
+        `load v_tuner_v11_2026-05-24 (372-input) to use them.`;
+    }
+    return;
+  }
+  sel.disabled = false;
+  if (note) { note.style.display = 'none'; note.textContent = ''; }
+  for (const s of state.samplePack.samples) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    const exp = Number.isFinite(s.expected_score)
+      ? ` (≈${s.expected_score.toFixed(1)})`
+      : '';
+    opt.textContent = `${s.label}${exp}`;
+    sel.appendChild(opt);
+  }
+}
+
+function onSampleSelectChange(e) {
+  const id = e.target.value;
+  const exp = document.getElementById('sample-expected');
+  if (!id || !state.samplePack) {
+    if (exp) exp.textContent = '';
+    return;
+  }
+  const sample = state.samplePack.samples.find(s => s.id === id);
+  if (!sample) {
+    if (exp) exp.textContent = '';
+    return;
+  }
+  const ta = document.getElementById('feature-input');
+  if (ta) {
+    ta.value = sample.features.map(v => v.toFixed(6)).join(', ');
+  }
+  if (exp) {
+    if (Number.isFinite(sample.expected_score)) {
+      exp.innerHTML = `expected ≈ <strong>${sample.expected_score.toFixed(2)}</strong> ` +
+        `<span style="color:var(--fg-dim);">(${sample.expected_score_source})</span>`;
+    } else {
+      exp.innerHTML = `<span style="color:var(--fg-dim);">expected: bake-dependent (zero-vector probe)</span>`;
+    }
+  }
+  // Stash the expected score on state so runForward can show a delta.
+  state.lastExpectedScore = Number.isFinite(sample.expected_score) ? sample.expected_score : null;
+  state.lastSampleLabel = sample.label;
 }
 
 function wireUI() {
@@ -63,6 +165,8 @@ function wireUI() {
 
   document.getElementById('synth-features').addEventListener('click', synthFeatures);
   document.getElementById('run-forward').addEventListener('click', runForward);
+  const sel = document.getElementById('sample-select');
+  if (sel) sel.addEventListener('change', onSampleSelectChange);
 }
 
 async function loadBake(bytes, name) {
@@ -76,6 +180,7 @@ async function loadBake(bytes, name) {
   }
   document.getElementById('bake-name').textContent = `${name} · ${bytes.length} bytes`;
   renderSidebar();
+  refreshSampleDropdown();
   refreshActivePanel();
 }
 
@@ -188,6 +293,27 @@ async function runForward() {
     alert(`forward pass failed: ${err}`); return;
   }
   renderForward(taps, document.getElementById('forward-body'), state.summary);
+
+  // If a sample is currently picked, show an actual-vs-expected
+  // banner. The expected score comes from the corpus row's anchor
+  // column; the actual value comes from the bake's final scalar
+  // output. They won't match in general — that's the point of the
+  // viz, surface the difference.
+  if (state.lastExpectedScore != null && taps.output && taps.output.length === 1) {
+    const actual = taps.output[0];
+    const delta = actual - state.lastExpectedScore;
+    const sign = delta >= 0 ? '+' : '';
+    const banner = document.createElement('div');
+    banner.style.cssText = 'margin-top: 12px; padding: 8px 12px; background: var(--panel-2); ' +
+      'border: 1px solid var(--line); border-radius: 4px; font-family: var(--mono); font-size: 11px;';
+    banner.innerHTML = `<strong>sample:</strong> ${state.lastSampleLabel}<br>` +
+      `<strong>actual MLP output:</strong> ${actual.toFixed(3)} &nbsp; ` +
+      `<strong>expected:</strong> ${state.lastExpectedScore.toFixed(3)} &nbsp; ` +
+      `<strong>Δ:</strong> <span style="color: ${Math.abs(delta) < 5 ? 'var(--ok)' : 'var(--warn)'}">${sign}${delta.toFixed(3)}</span>` +
+      `<div style="color: var(--fg-dim); margin-top: 4px;">expected is the parquet row's anchor column; ` +
+      `actual is the raw MLP output (before tanh / spline / per-codec calibration if present).</div>`;
+    document.getElementById('forward-body').appendChild(banner);
+  }
 }
 
 bootstrap();
