@@ -19,6 +19,12 @@ default = ["std"]
 # `std::error::Error` impls for `BakeError`. The composer itself is
 # `no_std + alloc` compatible.
 std = []
+# Pulls `parquet` + `arrow` so the `fit_yeo_johnson` MLE binary can
+# read training-corpus parquets. Off by default — keeps the lean
+# composer/JSON-bake build free of columnar-format crates. Enable
+# with `cargo build -p zenpredict-bake --features fit-yj
+# --bin fit_yeo_johnson`.
+fit-yj = ["dep:parquet", "dep:arrow"]
 
 [[bin]]
 name = "zenpredict-bake"
@@ -32,6 +38,11 @@ path = "src/bin/zenpredict_inspect.rs"
 name = "zenpredict"
 path = "src/bin/zenpredict.rs"
 
+[[bin]]
+name = "fit_yeo_johnson"
+path = "src/bin/fit_yeo_johnson.rs"
+required-features = ["fit-yj"]
+
 [dependencies]
 # The reader side: zenpredict-bake round-trips against the parser
 # in its own tests, and the JSON-bake CLI parses + verifies the bake
@@ -44,6 +55,10 @@ serde_json = { version = "1.0.149", default-features = false, features = ["alloc
 # into bake() unconditionally, gated by BakeRequest.compressed.
 # `lz4_flex::block::compress` is pure-safe-Rust + no_std.
 lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-encode"] }
+# Optional: parquet/arrow for the `fit_yeo_johnson` MLE binary.
+# Gated behind the `fit-yj` feature.
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "58.3.0", default-features = false, optional = true }
 
 [dev-dependencies]
 rand = { version = "0.9.2", default-features = false, features = ["std", "std_rng", "small_rng"] }

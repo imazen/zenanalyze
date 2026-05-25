@@ -138,6 +138,29 @@ pub enum FeatureTransform {
     /// produces non-negative output for `ε ≥ 0`. With `params = []`
     /// falls back to plain `Log1p` on `max(0, x)`. Added 2026-05-17.
     ClipThenLog1pThenWinsor,
+    /// Yeo & Johnson 2000 power transform. Works on the full real
+    /// line (handles negative AND positive inputs) and the shape
+    /// parameter λ is fit per-feature from data via MLE. The
+    /// trainer's `fit_yeo_johnson` binary picks λ ∈ [-2, 2] by
+    /// maximizing the YJ log-likelihood on the marginal training
+    /// distribution.
+    ///
+    /// Definition: for fit parameter λ ∈ ℝ,
+    /// - `x ≥ 0, λ != 0`: `y = ((x + 1)^λ − 1) / λ`
+    /// - `x ≥ 0, λ == 0`: `y = ln(x + 1)`
+    /// - `x  < 0, λ != 2`: `y = -((−x + 1)^(2 − λ) − 1) / (2 − λ)`
+    /// - `x  < 0, λ == 2`: `y = -ln(−x + 1)`
+    ///
+    /// Smooth at the λ→0 and λ→2 limits — the implementation uses
+    /// a small ε guard (`|λ - 0| < 1e-7` or `|λ - 2| < 1e-7` falls
+    /// to the log branch). λ = 1 yields `y = x` (identity-shifted),
+    /// useful as a sanity check.
+    ///
+    /// Requires **1 parameter** (`λ`) in
+    /// [`crate::keys::FEATURE_TRANSFORM_PARAMS`]. With `params = []`
+    /// falls back to `Identity` (caller error — the trainer is
+    /// expected to bake a λ at preprocessing time). Added 2026-05-25.
+    YeoJohnson,
 }
 
 /// Branchless inclusive clamp that tolerates `lo > hi` (returns `lo`)
@@ -168,6 +191,67 @@ fn signed_cbrt(x: f32) -> f32 {
     #[cfg(not(feature = "std"))]
     {
         s * libm::cbrtf(libm::fabsf(x))
+    }
+}
+
+/// Yeo-Johnson power transform. Smooth across the entire real line;
+/// `λ = 1` reduces to a constant-shifted identity (`y = x`), `λ = 0`
+/// falls to `ln(1 + x)` for non-negative input, `λ = 2` falls to
+/// `-ln(1 − x)` for negative input. The ε guard below ensures the
+/// match-arms transition smoothly rather than dividing by ~0.
+///
+/// Defensive non-finite handling: NaN in → NaN out (matches the
+/// existing transforms). Inputs at ±∞ would produce ±∞ via `powf`
+/// — also matches the existing winsor-then-log behavior.
+#[inline]
+fn yeo_johnson(x: f32, lambda: f32) -> f32 {
+    // 1e-7 chosen so a literal `0.0_f32` and `2.0_f32` exactly hit
+    // the log branch (the limit is mathematically defined there);
+    // ULPs around 0 and 2 are well below this threshold.
+    const LAMBDA_EPS: f32 = 1.0e-7;
+    if x >= 0.0 {
+        if (lambda - 0.0).abs() < LAMBDA_EPS {
+            // y = ln(x + 1)
+            #[cfg(feature = "std")]
+            {
+                (x + 1.0).ln()
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                libm::logf(x + 1.0)
+            }
+        } else {
+            // y = ((x + 1)^λ − 1) / λ
+            #[cfg(feature = "std")]
+            {
+                ((x + 1.0).powf(lambda) - 1.0) / lambda
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                (libm::powf(x + 1.0, lambda) - 1.0) / lambda
+            }
+        }
+    } else if (lambda - 2.0).abs() < LAMBDA_EPS {
+        // y = -ln(-x + 1)
+        #[cfg(feature = "std")]
+        {
+            -((-x) + 1.0).ln()
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            -libm::logf((-x) + 1.0)
+        }
+    } else {
+        // y = -((-x + 1)^(2 − λ) − 1) / (2 − λ)
+        let exp = 2.0 - lambda;
+        #[cfg(feature = "std")]
+        {
+            -((((-x) + 1.0).powf(exp)) - 1.0) / exp
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            -(libm::powf((-x) + 1.0, exp) - 1.0) / exp
+        }
     }
 }
 
@@ -275,6 +359,12 @@ impl FeatureTransform {
                 let y = if x > 0.0 { x } else { 0.0 };
                 libm::log1pf(y)
             }
+            // YeoJohnson without params: caller error — the trainer
+            // is expected to ship λ. Degrade to Identity (the YJ
+            // formula at λ = 1 yields `y = x`, but using strict
+            // identity here keeps the "no params = no transform"
+            // invariant other variants follow).
+            Self::YeoJohnson => x,
             Self::WinsorP99 | Self::QuantileBins => x,
         }
     }
@@ -416,6 +506,12 @@ impl FeatureTransform {
                 let y = libm::log1pf(clipped);
                 clamp_inclusive(y, q_lo, q_hi)
             }
+            Self::YeoJohnson => {
+                let Some(&lambda) = params.first() else {
+                    return self.apply(x);
+                };
+                yeo_johnson(x, lambda)
+            }
             _ => self.apply(x),
         }
     }
@@ -437,6 +533,7 @@ impl FeatureTransform {
                 | Self::WinsorThenSignedCbrt
                 | Self::SignedCbrtThenWinsor
                 | Self::ClipThenLog1pThenWinsor
+                | Self::YeoJohnson
         )
     }
 
@@ -465,6 +562,7 @@ impl FeatureTransform {
             "winsor_then_signed_cbrt" => Ok(Self::WinsorThenSignedCbrt),
             "signed_cbrt_then_winsor" => Ok(Self::SignedCbrtThenWinsor),
             "clip_then_log1p_then_winsor" => Ok(Self::ClipThenLog1pThenWinsor),
+            "yeo_johnson" => Ok(Self::YeoJohnson),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -486,6 +584,7 @@ impl FeatureTransform {
             Self::WinsorThenSignedCbrt => "winsor_then_signed_cbrt",
             Self::SignedCbrtThenWinsor => "signed_cbrt_then_winsor",
             Self::ClipThenLog1pThenWinsor => "clip_then_log1p_then_winsor",
+            Self::YeoJohnson => "yeo_johnson",
         }
     }
 }
@@ -665,6 +764,7 @@ mod tests {
             "winsor_then_signed_cbrt",
             "signed_cbrt_then_winsor",
             "clip_then_log1p_then_winsor",
+            "yeo_johnson",
         ] {
             let v = FeatureTransform::from_token(tok).expect("parse");
             assert_eq!(v.as_token(), tok);
@@ -862,6 +962,7 @@ mod tests {
             FeatureTransform::WinsorThenSignedCbrt,
             FeatureTransform::SignedCbrtThenWinsor,
             FeatureTransform::ClipThenLog1pThenWinsor,
+            FeatureTransform::YeoJohnson,
         ];
         for v in variants {
             let tok = v.as_token();
@@ -869,5 +970,154 @@ mod tests {
             assert_eq!(parsed, v);
             assert!(parsed.requires_params(), "{tok} should require params");
         }
+    }
+
+    // ───── YeoJohnson tests (2026-05-25) ─────
+
+    #[test]
+    fn yeo_johnson_lambda_one_is_shifted_identity() {
+        // λ = 1, positive: y = ((x + 1)^1 − 1) / 1 = x — pure identity.
+        let t = FeatureTransform::YeoJohnson;
+        for x in [-3.0_f32, -0.5, 0.0, 0.5, 3.0, 100.0] {
+            let y = t.apply_with_params(x, &[1.0]);
+            assert!(
+                (y - x).abs() < 1e-5,
+                "λ=1 should yield y=x for x={x}, got y={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn yeo_johnson_lambda_zero_positive_branch() {
+        // λ = 0, x ≥ 0: y = ln(x + 1)
+        let t = FeatureTransform::YeoJohnson;
+        for x in [0.0_f32, 0.5, 1.0, 10.0, 100.0] {
+            let y = t.apply_with_params(x, &[0.0]);
+            let expected = (x + 1.0).ln();
+            assert!(
+                (y - expected).abs() < 1e-5,
+                "λ=0, x={x}: expected {expected}, got {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn yeo_johnson_lambda_two_negative_branch() {
+        // λ = 2, x < 0: y = -ln(-x + 1)
+        let t = FeatureTransform::YeoJohnson;
+        for x in [-0.5_f32, -1.0, -10.0, -100.0] {
+            let y = t.apply_with_params(x, &[2.0]);
+            let expected = -((-x + 1.0).ln());
+            assert!(
+                (y - expected).abs() < 1e-5,
+                "λ=2, x={x}: expected {expected}, got {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn yeo_johnson_positive_branch_general_lambda() {
+        // Spot-check λ = 0.5: y = ((x+1)^0.5 − 1) / 0.5 = 2(√(x+1) − 1)
+        let t = FeatureTransform::YeoJohnson;
+        let x = 3.0_f32;
+        let y = t.apply_with_params(x, &[0.5]);
+        let expected = ((x + 1.0).sqrt() - 1.0) / 0.5;
+        assert!((y - expected).abs() < 1e-5, "got {y} vs expected {expected}");
+
+        // λ = 1.5
+        let y2 = t.apply_with_params(x, &[1.5]);
+        let expected2 = ((x + 1.0).powf(1.5) - 1.0) / 1.5;
+        assert!((y2 - expected2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn yeo_johnson_negative_branch_general_lambda() {
+        // λ = 0.5: x = -1.0 → y = -((-(-1) + 1)^(2 - 0.5) − 1) / (2 - 0.5)
+        //                     = -((2)^1.5 − 1) / 1.5 ≈ -(2.828 − 1) / 1.5 ≈ -1.219
+        let t = FeatureTransform::YeoJohnson;
+        let x = -1.0_f32;
+        let y = t.apply_with_params(x, &[0.5]);
+        let exp = 2.0 - 0.5;
+        let expected = -(((-x) + 1.0).powf(exp) - 1.0) / exp;
+        assert!((y - expected).abs() < 1e-5, "got {y} vs expected {expected}");
+    }
+
+    #[test]
+    fn yeo_johnson_monotone_in_x_for_fixed_lambda() {
+        // For each fixed λ, YJ(·, λ) is strictly monotone in x.
+        let t = FeatureTransform::YeoJohnson;
+        let xs: Vec<f32> = (-50..=50).map(|i| i as f32 * 0.2).collect();
+        for &lambda in &[-0.5_f32, 0.0, 0.5, 1.0, 1.5, 2.0] {
+            let mut prev = f32::NEG_INFINITY;
+            for &x in &xs {
+                let y = t.apply_with_params(x, &[lambda]);
+                assert!(
+                    y > prev,
+                    "YJ not monotone at λ={lambda}, x={x}: y={y} <= prev={prev}"
+                );
+                prev = y;
+            }
+        }
+    }
+
+    #[test]
+    fn yeo_johnson_continuous_at_lambda_zero() {
+        // At x=2, YJ(2, λ→0) should match YJ(2, 0) within tight ε.
+        // Tests the ε guard transitions smoothly.
+        let t = FeatureTransform::YeoJohnson;
+        let x = 2.0_f32;
+        let y_eps_pos = t.apply_with_params(x, &[1e-4]);
+        let y_eps_neg = t.apply_with_params(x, &[-1e-4]);
+        let y_zero = t.apply_with_params(x, &[0.0]);
+        // log limit ≈ ln(3) ≈ 1.0986
+        assert!((y_eps_pos - y_zero).abs() < 1e-2);
+        assert!((y_eps_neg - y_zero).abs() < 1e-2);
+    }
+
+    #[test]
+    fn yeo_johnson_continuous_at_lambda_two() {
+        // For negative x, YJ should be continuous at λ → 2.
+        let t = FeatureTransform::YeoJohnson;
+        let x = -2.0_f32;
+        let y_eps_pos = t.apply_with_params(x, &[2.0 + 1e-4]);
+        let y_eps_neg = t.apply_with_params(x, &[2.0 - 1e-4]);
+        let y_two = t.apply_with_params(x, &[2.0]);
+        // -ln(3) ≈ -1.0986
+        assert!((y_eps_pos - y_two).abs() < 1e-2);
+        assert!((y_eps_neg - y_two).abs() < 1e-2);
+    }
+
+    #[test]
+    fn yeo_johnson_zero_input() {
+        // YJ(0, λ) = 0 for all λ (both positive-branch formulas
+        // collapse to 0 when x = 0: ((0+1)^λ - 1) / λ where (1^λ
+        // - 1) / λ = 0 / λ = 0 for λ != 0, and ln(1) = 0 for
+        // λ = 0).
+        let t = FeatureTransform::YeoJohnson;
+        for lambda in [-1.0_f32, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0] {
+            let y = t.apply_with_params(0.0, &[lambda]);
+            assert!(y.abs() < 1e-5, "YJ(0, λ={lambda}) should be 0, got {y}");
+        }
+    }
+
+    #[test]
+    fn yeo_johnson_requires_params_no_param_falls_back_to_identity() {
+        // apply(x) with no params → Identity.
+        let t = FeatureTransform::YeoJohnson;
+        assert_eq!(t.apply(3.0), 3.0);
+        assert_eq!(t.apply(-3.0), -3.0);
+        // apply_with_params with empty params → Identity.
+        assert_eq!(t.apply_with_params(3.0, &[]), 3.0);
+        assert_eq!(t.apply_with_params(-3.0, &[]), -3.0);
+        // And requires_params is true.
+        assert!(t.requires_params());
+    }
+
+    #[test]
+    fn yeo_johnson_token_roundtrip() {
+        let tok = "yeo_johnson";
+        let v = FeatureTransform::from_token(tok).expect("parse");
+        assert_eq!(v, FeatureTransform::YeoJohnson);
+        assert_eq!(v.as_token(), tok);
     }
 }

@@ -1324,6 +1324,20 @@ fn validate_feature_transforms(
                         });
                     }
                 }
+                FeatureTransform::YeoJohnson => {
+                    // λ must be finite. The trainer typically fits
+                    // λ ∈ [-2, 2] via MLE; we don't enforce that
+                    // range because the math is well-defined for any
+                    // finite real, but warn-worthy values lie way
+                    // outside it.
+                    if !p[0].is_finite() {
+                        return Err(BakeError::FeatureTransformParamInvalid {
+                            feature_index: i,
+                            transform: t.as_token(),
+                            reason: "lambda must be finite",
+                        });
+                    }
+                }
                 _ => {}
             }
         }
@@ -1340,7 +1354,7 @@ fn validate_feature_transforms(
 fn required_param_arity(t: zenpredict::FeatureTransform) -> Option<usize> {
     use zenpredict::FeatureTransform;
     match t {
-        FeatureTransform::ClipThenLog1p => Some(1),
+        FeatureTransform::ClipThenLog1p | FeatureTransform::YeoJohnson => Some(1),
         FeatureTransform::WinsorP99
         | FeatureTransform::WinsorThenLog
         | FeatureTransform::WinsorThenLog1p
