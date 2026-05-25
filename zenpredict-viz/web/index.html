@@ -145,6 +145,8 @@ button.action:hover { filter: brightness(1.1); }
     <button data-panel="weights">weights</button>
     <button data-panel="calibration">calibration</button>
     <button data-panel="forward">forward</button>
+    <button data-panel="attribution">attribution</button>
+    <button data-panel="compare">compare</button>
   </nav>
 </header>
 
@@ -208,6 +210,18 @@ button.action:hover { filter: brightness(1.1); }
     </div>
     <textarea id="feature-input" rows="6" placeholder="paste feature vector here..."></textarea>
     <div id="forward-body" style="margin-top: 16px;"><div class="empty">click forward to see the per-stage waterfall.</div></div>
+  </section>
+
+  <section class="panel" data-panel="attribution">
+    <h2>feature attribution</h2>
+    <div class="hint">MVP first-layer attribution: shows which input features pulled the activation up vs down vs the bake's training mean. Cheap approximation — SHAP / IG would account for downstream non-linearities; this is one matmul pass.</div>
+    <div id="attribution-body"><div class="empty">load a bake.</div></div>
+  </section>
+
+  <section class="panel" data-panel="compare">
+    <h2>bake comparison</h2>
+    <div class="hint">load 2&ndash;4 bakes with matching schemas. baseline is the first; later bakes show scaler shift, L0 importance reshuffle, per-layer weight RMS, and overlay calibration curves.</div>
+    <div id="compare-body"><div class="empty">load a bake.</div></div>
   </section>
 </main>
 

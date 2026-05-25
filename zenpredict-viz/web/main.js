@@ -7,6 +7,8 @@ import { renderImportance } from './panels/importance.js';
 import { renderForward } from './panels/forward.js';
 import { renderWeights } from './panels/weights.js';
 import { renderCalibration } from './panels/calibration.js';
+import { renderCompare } from './panels/compare.js';
+import { renderAttribution } from './panels/attribution.js';
 import { loadFeatureCatalog } from './feature_layout.js';
 
 const KNOWN_STAGES = [
@@ -136,6 +138,22 @@ function refreshActivePanel() {
       break;
     case 'calibration':
       renderCalibration(state.summary, document.getElementById('calibration-body'));
+      break;
+    case 'attribution':
+      renderAttribution(
+        state.summary,
+        (idx) => layer_weights(state.bakeBytes, idx),
+        forward_with_taps,
+        state.bakeBytes,
+        document.getElementById('attribution-body'),
+      );
+      break;
+    case 'compare':
+      renderCompare(
+        parse_bake,
+        (bytes, idx) => layer_weights(bytes, idx),
+        document.getElementById('compare-body'),
+      );
       break;
     case 'forward': /* user-driven */ break;
   }
