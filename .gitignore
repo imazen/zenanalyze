@@ -26,3 +26,9 @@ benchmarks/joint_pretrain*_2026-*/joint*_picker.json
 benchmarks/joint_pretrain*_2026-*/jointpre*_picker.json
 benchmarks/joint_pretrain_bigtrunk*_2026-*/*_picker.json
 benchmarks/joint_finetune*_2026-*/finetune*_picker.json
+
+# zenpredict-viz: build artifacts + per-build bake copies.
+# The bakes live in `zensim/zensim/weights/`; `build.sh` copies a few
+# into the static site dir so the quick-load buttons work.
+zenpredict-viz/web/pkg/
+zenpredict-viz/web/bakes/

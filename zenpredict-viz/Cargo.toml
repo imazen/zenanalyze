@@ -1,0 +1,33 @@
+[package]
+name = "zenpredict-viz"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+repository = "https://github.com/imazen/zenanalyze"
+description = "WASM bridge for the zenpredict-viz interactive ZNPR v3 bake visualizer (browser tool). Exposes parse + per-stage forward-pass taps over zenpredict's Predictor."
+authors = ["Lilith River <lilith@imazen.io>"]
+rust-version = "1.93"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zenpredict = { path = "../zenpredict" }
+wasm-bindgen = "0.2.103"
+serde = { version = "1.0.219", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
+
+[features]
+default = []
+# Pulled in by `wasm-pack build --target web`; provides
+# `console_error_panic_hook::set_once()` so Rust panics surface as
+# console errors with a backtrace in the browser DevTools.
+panic_console = ["dep:console_error_panic_hook"]
+
+[dependencies.console_error_panic_hook]
+version = "0.1.7"
+optional = true
+
+[lints.rust]
+unsafe_code = "forbid"
