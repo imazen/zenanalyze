@@ -12,11 +12,28 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "znpr2onnx"
+path = "src/bin/znpr2onnx.rs"
+required-features = ["onnx-export"]
+
+[[bin]]
+name = "build_feature_catalog"
+path = "src/bin/build_feature_catalog.rs"
+required-features = ["feature-catalog"]
+
 [dependencies]
 zenpredict = { path = "../zenpredict" }
 wasm-bindgen = "0.2.103"
 serde = { version = "1.0.219", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+
+# Native-only deps (gated behind feature flags so wasm-pack ignores them).
+# Note: onnx-pb 0.1.4 pins prost ^0.6.1; we match the version so the
+# `Message::encode` trait method resolves to the same crate.
+onnx-pb = { version = "0.1.4", optional = true }
+prost = { version = "0.6.1", optional = true }
+serde_json = { version = "1.0.140", optional = true }
 
 [features]
 default = []
@@ -24,6 +41,13 @@ default = []
 # `console_error_panic_hook::set_once()` so Rust panics surface as
 # console errors with a backtrace in the browser DevTools.
 panic_console = ["dep:console_error_panic_hook"]
+# Track A: native `znpr2onnx` binary; emits Netron-renderable ONNX
+# from a ZNPR v3 bake. Not built in the WASM target.
+onnx-export = ["dep:onnx-pb", "dep:prost"]
+# Track B: native `build_feature_catalog` binary; produces the
+# `web/feature_catalog.json` sidecar used by the importance/scaler
+# tooltips and feature-search box.
+feature-catalog = ["dep:serde_json"]
 
 [dependencies.console_error_panic_hook]
 version = "0.1.7"
