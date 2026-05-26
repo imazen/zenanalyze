@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
 """Train MLP variant of v0.6 zenjxl picker (zensim_mask methodology, ZNPR-bakeable)."""
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: v06_zenjxl_picker_mlp_train.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.6 zenjxl MLP picker (predates train_hybrid).\n"
+    "         Use: zentrain/tools/train_hybrid.py with a zenjxl codec-config module.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, random, sys
 from collections import defaultdict, Counter
 from pathlib import Path

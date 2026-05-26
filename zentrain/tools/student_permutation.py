@@ -55,6 +55,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _picker_lib  # noqa: E402  (loader delegation, DEDUP-B3)
+
 import numpy as np
 
 # DEDUP-B2 (2026-05-26): the standardize-then-MLP body of
@@ -102,41 +105,24 @@ SIZE_INDEX = {s: i for i, s in enumerate(SIZE_CLASSES)}
 
 
 def load_features(path: Path) -> tuple[dict, list[str]]:
-    feats: dict[tuple[str, str], np.ndarray] = {}
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
-        cols = [c for c in KEEP_FEATURES if c in all_cols]
-        n_dropped = 0
-        for r in rdr:
-            vals = []
-            has_nan = False
-            for c in cols:
-                v = r[c]
-                if v == "" or v is None:
-                    has_nan = True
-                    vals.append(float("nan"))
-                else:
-                    fv = float(v)
-                    if fv != fv:
-                        has_nan = True
-                    vals.append(fv)
-            if has_nan:
-                # Tiny images skip percentile features (zenanalyze #49).
-                # At inference these go through the OOD-bounds fallback;
-                # the student MLP was never trained on them. Drop them
-                # from the permutation eval set too.
-                n_dropped += 1
-                continue
-            feats[(r["image_path"], r["size_class"])] = np.array(
-                vals, dtype=np.float32
-            )
-        if n_dropped:
-            sys.stderr.write(
-                f"Dropped {n_dropped} (image, size) keys with NaN "
-                f"feature values.\n"
-            )
-    return feats, cols
+    """Load the features TSV, restricting to `KEEP_FEATURES` and dropping
+    rows whose feature values contain any NaN. Delegates to
+    `_picker_lib.load_features_raw(strict=False, drop_nan_rows=True)`.
+
+    Tiny images skip percentile features (zenanalyze #49). At inference
+    these go through the OOD-bounds fallback; the student MLP was never
+    trained on them. Drop them from the permutation eval set too.
+
+    `strict=False` is used because some KEEP_FEATURES schemas may not
+    match the on-disk TSV exactly (codec-config drift across runs).
+
+    Migrated DEDUP-B3 (2026-05-26) — was a ~30-line copy predating the
+    `drop_nan_rows` kwarg on the canonical loader. See
+    `student_permutation_migration_evidence.txt`.
+    """
+    return _picker_lib.load_features_raw(
+        path, KEEP_FEATURES, strict=False, drop_nan_rows=True
+    )
 
 
 def load_pareto(path: Path) -> dict:

@@ -22,6 +22,20 @@ clean wins on a held-out split, the v0.5 picker just had bad teacher
 labels — no new sweep needed.
 """
 from __future__ import annotations
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: picker_v06_classifier_prototype.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.6 zenjxl classifier prototype on v05c data (early R&D).\n"
+    "         Use: tools/v14_metapicker_train.py for cross-codec routing, or zentrain/tools/train_hybrid.py for per-codec picking.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, sys, math, random
 from collections import defaultdict, Counter
 from pathlib import Path

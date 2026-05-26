@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (2026-05-26 — DEDUP-B3)
+
+- **`zentrain/tools/_picker_lib.load_features_raw` grew `drop_nan_rows:
+  bool = False`** (mirrors DEDUP-B's `strict: bool = True` extension
+  pattern). When True, rows whose feature values contain any NaN are
+  silently dropped and a "Dropped N (image, size) keys with NaN
+  feature values." stderr message is emitted (verbatim format match
+  with the pre-extraction `student_permutation.load_features`). The
+  flag also makes empty-string cells parse to NaN regardless of
+  whether they're kept or dropped. Default False preserves every
+  existing caller's contract. New regression tests in
+  `zentrain/tools/test_picker_lib_strict.py` cover 4 new cases
+  (drop_nan combinations × keep_features filter × strict flag);
+  total 9/9 PASS.
+- **Migrated `zentrain/tools/student_permutation.load_features`** to
+  delegate to `_picker_lib.load_features_raw(strict=False,
+  drop_nan_rows=True)`. ~30 LOC saved; behaviour byte-identical per
+  the new regression-gate cases. Evidence appended to
+  `zentrain/tools/student_permutation_migration_evidence.txt` (the
+  same file the DEDUP-B2 forward-pass migration wrote to).
+- **Audited + deprecated 12 retired `tools/v*` / `tools/picker_v06_*`
+  scripts** per the May 17, 2026 ecosystem cleanliness review
+  (`docs/ecosystem_cleanliness_review_2026-05-17.md`): none are
+  imported by the canonical trainer (`zentrain/tools/train_hybrid.py`)
+  or covered by CI. Each script received a stderr deprecation banner
+  at module load pointing callers at the canonical replacement
+  (`train_hybrid.py` / `v14_metapicker_train.py` /
+  `validate_schema.py`). Source bodies preserved per CLAUDE.md
+  NEVER-DESTROY discipline. Affected scripts:
+  `tools/v0_2_zenjpeg_picker_train.py`,
+  `tools/v06_champ_per_class.py`,
+  `tools/v06_zenjxl_picker_mlp_train.py`,
+  `tools/v07_zenjxl_picker_with_cclass.py`,
+  `tools/v07b_zenjxl_picker_no_screen.py`,
+  `tools/v10_router_mlp_train.py`,
+  `tools/v15_zenjpeg_picker_train.py`,
+  `tools/picker_v06_classifier_prototype.py`,
+  `tools/picker_v06_mlp_prototype.py`,
+  `tools/picker_v06_multi.py`,
+  `tools/picker_v06_v07_union.py`,
+  `tools/picker_v07_explore.py`.
+- Updated `docs/PICKER_LIB_MIGRATION.md` with the DEDUP-B3 addendum
+  documenting the full audit + migration narrative + LOC totals.
+
 ### Changed (2026-05-26 — DEDUP-B2)
 
 - **New canonical `zentrain/tools/_predict_lib.py`** (Tier-1 #6 second

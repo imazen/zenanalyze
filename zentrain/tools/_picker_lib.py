@@ -166,6 +166,7 @@ def load_features_raw(
     keep_features: list[str] | None,
     *,
     strict: bool = True,
+    drop_nan_rows: bool = False,
 ) -> tuple[dict, list[str]]:
     """Slow path: parse the features TSV. Optionally restrict + reorder columns.
 
@@ -178,6 +179,16 @@ def load_features_raw(
             drop missing columns from the returned `cols`. The lenient
             mode is for tools (e.g. `capacity_sweep`) that probe across
             schema versions and tolerate columns dropping in/out.
+        drop_nan_rows: When True, rows whose feature values contain any
+            NaN (or empty string parsed as NaN) are silently dropped from
+            the returned dict. When False (default), NaN values are kept
+            in the row's feature vector. The drop-NaN mode is for tools
+            (e.g. `student_permutation`) that filter tiny images skipping
+            percentile features (zenanalyze #49). A count of dropped
+            rows is written to `sys.stderr` when non-zero.
+
+    Empty-string cells are treated as NaN regardless of `drop_nan_rows`;
+    the flag only controls whether the resulting row is kept or dropped.
     """
     feats: dict = {}
     with open(path) as f:
@@ -190,9 +201,30 @@ def load_features_raw(
                 raise SystemExit(f"missing feature columns in TSV: {missing}")
         else:
             cols = all_cols
+        n_dropped = 0
         for r in rdr:
+            vals = []
+            has_nan = False
+            for c in cols:
+                v = r[c]
+                if v == "" or v is None:
+                    has_nan = True
+                    vals.append(float("nan"))
+                else:
+                    fv = float(v)
+                    if fv != fv:  # NaN check
+                        has_nan = True
+                    vals.append(fv)
+            if drop_nan_rows and has_nan:
+                n_dropped += 1
+                continue
             feats[(r["image_path"], r["size_class"])] = np.array(
-                [float(r[c]) for c in cols], dtype=np.float32
+                vals, dtype=np.float32
+            )
+        if drop_nan_rows and n_dropped:
+            sys.stderr.write(
+                f"Dropped {n_dropped} (image, size) keys with NaN "
+                f"feature values.\n"
             )
     return feats, cols
 

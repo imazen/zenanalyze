@@ -5,6 +5,20 @@ Hypothesis: if class is in the input, picker should learn 'screen → default'.
 Compare to v0.6 baseline (no class in input) which has +41% screen regression.
 """
 from __future__ import annotations
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: v07_zenjxl_picker_with_cclass.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.7 zenjxl MLP picker, content-class one-hot in input (predates train_hybrid).\n"
+    "         Use: zentrain/tools/train_hybrid.py — content-class is a first-class input channel there.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, random, sys
 from collections import defaultdict, Counter
 from pathlib import Path

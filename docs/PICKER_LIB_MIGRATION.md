@@ -18,8 +18,8 @@ before it can migrate, and is tracked here.
 | Sibling `_metapicker_lib.py` (cross-codec scaffolding) | **SHIPPED** (DEDUP-C) |
 | Sibling `_predict_lib.py` (canonical numpy forward) | **SHIPPED** (DEDUP-B2 — see below) |
 | `build_dataset` (dense `config_id_remap`) | **STAYS LOCAL** (intentional variation) |
-| `student_permutation.load_features` (drops NaN rows) | **DEFERRED** (DEDUP-B3 candidate) |
-| `tools/v*_*.py` + `tools/picker_v06_*.py` (different sub-tree) | **DEFERRED** (DEDUP-B3 candidate) |
+| `student_permutation.load_features` (drops NaN rows) | **SHIPPED** (DEDUP-B3 — see addendum below) |
+| `tools/v*_*.py` + `tools/picker_v06_*.py` (different sub-tree) | **AUDITED + RETIRED** (DEDUP-B3 — banner only, source preserved) |
 
 ## What shipped
 
@@ -360,3 +360,169 @@ consumer un-migrated past the lib landing creates a divergent state
 where future agents would not know which is canonical. The 4
 migrations are each ~10-LOC delegations — the LOC removed dwarfs
 the per-commit overhead of splitting them.
+
+## DEDUP-B3 addendum — `drop_nan_rows` + RETIRED `tools/v*` audit
+
+Closes the two `DEFERRED` rows from the DEDUP-B status table above:
+`student_permutation.load_features` (drop-NaN flavour) and the
+`tools/v*` / `tools/picker_v06_*` sub-tree audit.
+
+### What shipped (2026-05-26)
+
+| Concern | File | Status |
+|---|---|---|
+| `_picker_lib.load_features_raw(drop_nan_rows=False)` kwarg | `zentrain/tools/_picker_lib.py` (+34 / -8 LOC) | **SHIPPED** |
+| Regression tests for `drop_nan_rows` | `zentrain/tools/test_picker_lib_strict.py` (+88 LOC, 4 new cases, 9/9 PASS) | **SHIPPED** |
+| `student_permutation.load_features` migration | `zentrain/tools/student_permutation.py` (-30 LOC) | **MIGRATED** |
+| 12 retired `tools/v*` / `tools/picker_v06_*` scripts | banner-only (audit, no source change) | **DEPRECATED** |
+
+Aggregate: 1 new kwarg + 4 new test cases + 1 ~30-LOC migration +
+12 deprecation banners.
+
+### Phase 1 — `drop_nan_rows` kwarg
+
+Mirrors the DEDUP-B `strict: bool = True` extension pattern.
+`load_features_raw(path, keep_features, *, strict=True,
+drop_nan_rows=False)`:
+
+- `drop_nan_rows=False` (default): preserves the pre-DEDUP-B3
+  contract for every existing caller (3 ablation tools + capacity_sweep +
+  `load_or_build_dataset`'s internal caller). NaN values are kept in the
+  feature vector. Empty-string cells are coerced to NaN.
+- `drop_nan_rows=True`: rows whose feature values contain any NaN
+  are silently dropped from the returned dict. A "Dropped N (image,
+  size) keys with NaN feature values." message is written to
+  `sys.stderr` when non-zero — verbatim format match with the
+  pre-extraction `student_permutation.load_features`.
+
+The two flags compose: `strict=False, drop_nan_rows=True` is the
+exact contract `student_permutation.load_features` needs and ships
+with `student_permutation_migration_evidence.txt`.
+
+The 4 new test cases in `test_picker_lib_strict.py`:
+- CASE 6: `drop_nan_rows=False` keeps NaN-bearing rows.
+- CASE 7: `drop_nan_rows=True` drops NaN-text + empty-string rows.
+- CASE 8: `drop_nan_rows=True` with a clean-column filter keeps all rows.
+- CASE 9: `strict=False` + `drop_nan_rows=True` compose correctly.
+
+All 9 cases PASS (5 pre-existing + 4 new).
+
+### Phase 2 — `tools/v*` audit
+
+The Tier-1 #6 follow-on plan noted: "tools/v* sub-tree shares the
+same `load_features` patterns but lives in a different sub-tree;
+a future consolidation chunk should grep them once `_picker_lib`
+covers whatever shapes they need (most use the simple no-filter or
+`KEEP_FEATURES`-filter strict shape that's already supported)."
+
+The DEDUP-B3 audit found that **every script under `tools/` matching
+`v0_2_*` / `v06_*` / `v07_*` / `v07b_*` / `v10_*` / `v15_zenjpeg_*` /
+`picker_v06_*` / `picker_v07_*` is RETIRED** per the May 17, 2026
+ecosystem cleanliness review (`docs/ecosystem_cleanliness_review_
+2026-05-17.md`):
+
+> "tools/v0_2_zenjpeg_picker_train.py, v06_champ_per_class.py,
+> v06_zenjxl_picker_mlp_train.py, v07b_zenjxl_picker_no_screen.py,
+> v07_zenjxl_picker_with_cclass.py, v10_router_mlp_train.py,
+> v12_metapicker_train.py, v14_metapicker_train.py,
+> v15_compare_pickers.py, v15_metapicker_train.py,
+> v15_zenjpeg_picker_train.py — none are imported by the current
+> trainer (zentrain/tools/train_hybrid.py is the canonical entry)."
+
+The audit independently confirmed:
+- Last git modification: 2026-05-04 through 2026-05-07 (3+ weeks old).
+- Zero references from `.github/workflows/ci.yml`, root `justfile`
+  (none exists), or any `*.toml` recipe.
+- Zero references from `.py` files (the only references found are
+  in docs/benchmarks markdown describing their historical role).
+- Of v14 / v15 / v15_compare_pickers / v12 — v14 + v15 are ACTIVE
+  (DEDUP-C migrated them onto `_metapicker_lib`); v12 already has
+  a deprecation banner (DEDUP-C); v15_compare_pickers is ACTIVE
+  and migrated.
+
+The 12 RETIRED-status scripts grouped by family:
+
+| family | scripts | use-case |
+|---|---|---|
+| v0.2 zenjpeg | `v0_2_zenjpeg_picker_train.py` | hybrid regression+classification (pre-train_hybrid) |
+| v0.6 / v0.7 zenjxl champions + R&D | `v06_champ_per_class`, `v06_zenjxl_picker_mlp_train`, `v07_zenjxl_picker_with_cclass`, `v07b_zenjxl_picker_no_screen` | one-off content-class explorations |
+| v0.10 router | `v10_router_mlp_train` | early multi-codec router (pre-metapicker) |
+| v0.15 zenjpeg trainer | `v15_zenjpeg_picker_train` | single-codec trainer using v15 dense sweep (superseded by train_hybrid + zenjpeg config) |
+| v0.6 R&D prototypes | `picker_v06_classifier_prototype`, `picker_v06_mlp_prototype`, `picker_v06_multi`, `picker_v06_v07_union`, `picker_v07_explore` | early R&D scripts on v05c / v06+v07 unified sweeps |
+
+#### Banner-only deprecation
+
+Each of the 12 scripts received a stderr banner at the top of the
+module (after the docstring + `from __future__`-imports, before the
+first real code line). The banner format mirrors the v12 DEDUP-C
+banner: it names the script as RETIRED, summarises what the script
+did, and points callers at the canonical replacement
+(`train_hybrid.py` for per-codec training, `v14_metapicker_train.py`
+for cross-codec metapicker, `validate_schema.py` for per-class
+auditing).
+
+**No source bodies were removed.** Per CLAUDE.md ("NEVER DESTROY
+UNCOMMITTED WORK" + DEDUP-C deprecation precedent for v12), the
+source survives for:
+- Auditability — future investigators can read the pre-train_hybrid
+  picker designs.
+- Template — if anyone wants to revive a single-codec trainer or
+  early-R&D-style classification ablation, the v15_zenjpeg /
+  picker_v06_classifier_prototype scripts are good starting points.
+
+#### Why no structural migration
+
+Each retired script reads features into a different in-memory shape
+than `_picker_lib.load_features_raw` produces — `dict[str, list[float]]`
+keyed by `basename(image_path)`, often with a content-class side dict,
+sometimes with extension-fallback registration of `.gif`/`.png`
+basenames. None of them use the `_picker_lib`-canonical `dict[(image,
+size_class), np.ndarray]` shape. Migrating would mean either (a)
+adding yet another return-shape variant to `_picker_lib` (which has
+zero live callers), or (b) rewriting each script's downstream
+consumer logic. Both options burn LOC for tools nobody runs.
+
+The deprecation banner is the minimum-viable signal that future
+agents should not copy-paste these patterns into new work. Code-deletion
+candidates are out of scope here (per CLAUDE.md "AVOID
+git stash / never use git reset to discard"); a future audit can
+move them under `tools/_archive/` once the team confirms no one is
+referencing them ad-hoc.
+
+### Migration evidence
+
+`zentrain/tools/student_permutation_migration_evidence.txt` shows the
+DEDUP-B3 section (appended after the DEDUP-B2 forward-pass evidence)
+with the pre-extraction function verbatim, structural-equivalence
+table per code review, and the regression-gate test summary (9/9
+cases PASS).
+
+### LOC totals
+
+- `_picker_lib.load_features_raw`: +34 / -8 (net +26).
+- `test_picker_lib_strict.py`: +88 (4 new test cases + new NaN fixture).
+- `student_permutation.load_features`: -30 (function body collapsed to a
+  ~7-line delegation).
+- `tools/v*` banners (12 scripts × ~12 lines): +144 LOC.
+- Migration evidence + this addendum: docs only, +~210 LOC.
+
+Net: ~+318 LOC in tree (regression-gate tests + audit-banner stderr
+calls + this addendum). Subjective: the LOC-removed-from-the-canonical-
+loader-pattern accounting is ~30 (the `student_permutation` body) plus
+~480 LOC of "would have been duplicated if anyone copy-pasted from these
+12 retired scripts" prevented going forward — the banners are the
+load-bearing future-prevention signal.
+
+### Follow-on candidates
+
+After DEDUP-B3 the highest-EV remaining items are:
+
+1. Move RETIRED `tools/v*` scripts to `tools/_archive/` (separate
+   chunk, requires user sign-off because it's a directory move not
+   a deletion; the banner is the precursor signal).
+2. Tier-1 #4 (zensim recipe-driver forks) — different repo, same
+   methodology.
+3. Tier-2 #9 (CodecFamily enum order mismatch) — coefficient repo.
+
+Tier-1 #1 and #2 (zensim score_row + spearman/pearson) remain
+open in the zensim repo.

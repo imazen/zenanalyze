@@ -17,6 +17,20 @@ Reports: per-variant Δbytes vs effort=7 default, Δ-target-metric, Δms,
 pick distribution, classification accuracy. Best one wins.
 """
 from __future__ import annotations
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: picker_v06_multi.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.6 multi-target picker training (early R&D).\n"
+    "         Use: tools/v14_metapicker_train.py or zentrain/tools/train_hybrid.py.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, math, random, sys
 from collections import defaultdict, Counter
 from pathlib import Path

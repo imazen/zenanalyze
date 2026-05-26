@@ -46,6 +46,20 @@ Output: model JSON consumable by tools/bake_picker.py for ZNPR v3 baking.
 """
 from __future__ import annotations
 
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: v15_zenjpeg_picker_train.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v15 zenjpeg per-codec picker (single-codec trainer using v15 dense sweep).\n"
+    "         Use: zentrain/tools/train_hybrid.py with the zenjpeg codec-config module + _picker_lib pipeline.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv
 import json
 import random

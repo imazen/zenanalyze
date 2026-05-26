@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """v0.7b: Train picker EXCLUDING screen samples; at inference, gate routes screen to default."""
 from __future__ import annotations
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: v07b_zenjxl_picker_no_screen.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.7b zenjxl MLP picker, screen-class excluded at training time (predates train_hybrid).\n"
+    "         Use: zentrain/tools/train_hybrid.py with appropriate sample filtering, or the v14/v15 metapicker pipeline for cross-codec routing including a screen gate.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, random, sys
 from collections import defaultdict, Counter
 from pathlib import Path

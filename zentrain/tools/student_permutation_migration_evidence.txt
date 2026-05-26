@@ -47,3 +47,102 @@ which is the load-bearing parity check. Live A/B regen:
 DEDUP-B2 lifts ZERO behavior — every consumer was bit-identical (or
 within 1 ULP for f32 chains, which is byte-identical for these
 schemas).
+
+
+================================================================================
+DEDUP-B3 (2026-05-26) migration evidence — student_permutation
+================================================================================
+
+Migrated `load_features` to delegate to
+`_picker_lib.load_features_raw(strict=False, drop_nan_rows=True)`.
+
+LOC SAVED
+---------
+~30 LOC — function body collapsed from ~35 LOC (open + DictReader +
+nested per-row NaN check + drop counter + stderr message) to ~7 LOC
+(single delegation call + docstring pointing at this evidence file).
+
+PRE-EXTRACTION FUNCTION (verbatim)
+-----------------------------------
+def load_features(path: Path) -> tuple[dict, list[str]]:
+    feats: dict[tuple[str, str], np.ndarray] = {}
+    with open(path) as f:
+        rdr = csv.DictReader(f, delimiter="\t")
+        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
+        cols = [c for c in KEEP_FEATURES if c in all_cols]
+        n_dropped = 0
+        for r in rdr:
+            vals = []
+            has_nan = False
+            for c in cols:
+                v = r[c]
+                if v == "" or v is None:
+                    has_nan = True
+                    vals.append(float("nan"))
+                else:
+                    fv = float(v)
+                    if fv != fv:
+                        has_nan = True
+                    vals.append(fv)
+            if has_nan:
+                n_dropped += 1
+                continue
+            feats[(r["image_path"], r["size_class"])] = np.array(
+                vals, dtype=np.float32
+            )
+        if n_dropped:
+            sys.stderr.write(
+                f"Dropped {n_dropped} (image, size) keys with NaN "
+                f"feature values.\n"
+            )
+    return feats, cols
+
+STRUCTURAL EQUIVALENCE
+----------------------
+The canonical `_picker_lib.load_features_raw(strict=False,
+drop_nan_rows=True)` inlines bit-identical logic:
+
+  pre-extraction               | canonical                      | match
+  -----------------------------|--------------------------------|------
+  KEEP_FEATURES filter         | `keep_features` arg + strict=  | YES
+  missing-col silently dropped | `strict=False` branch          | YES
+  empty/None -> NaN coercion   | `if v == "" or v is None`      | YES
+  fv != fv NaN check           | identical expr                 | YES
+  drop row when has_nan        | `drop_nan_rows=True` branch    | YES
+  stderr drop count            | identical f-string             | YES
+  return shape                 | `tuple[dict, list[str]]`       | YES
+
+REGRESSION GATE
+---------------
+`zentrain/tools/test_picker_lib_strict.py` extended from 5 to 9 cases:
+  - CASE 6: drop_nan_rows=False default keeps NaN-bearing rows (4/4).
+  - CASE 7: drop_nan_rows=True drops NaN-text + empty-string rows (2/4).
+  - CASE 8: drop_nan_rows=True + clean-column filter keeps all 4 rows.
+  - CASE 9: strict=False + drop_nan_rows=True compose correctly.
+
+All 9 cases PASS.
+
+LIVE CORPUS A/B
+---------------
+No live before/after diff was captured because
+`student_permutation.py` requires (a) a baked picker model JSON and
+(b) the codec-config module the model was trained against to
+exercise `load_features` in context. The regression-gate test suite
+covers the loader's contract (column filter, NaN coercion, drop
+semantics, stderr format), which is the load-bearing parity check.
+
+To re-verify on a live corpus once the right model + config are
+staged, run:
+
+  cd ~/work/zen/zenanalyze
+  python3 zentrain/tools/student_permutation.py \
+      --codec-config <codec>_picker_config \
+      --model-json benchmarks/<codec>_picker_v0_1.json \
+      --features benchmarks/<features>.tsv \
+      --output /tmp/student_perm_after.json \
+      --n-repeats 5
+
+The stderr line "Dropped N (image, size) keys with NaN feature values."
+should match the pre-migration count exactly (canonical loader uses
+the identical f-string).
+

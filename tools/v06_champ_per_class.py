@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """Re-run v06 zensim_mask_histgb champion + audit per-content-class behavior."""
 from __future__ import annotations
+
+# DEDUP-B3 deprecation banner — added 2026-05-26 (B3 audit).
+# This script is RETIRED per docs/ecosystem_cleanliness_review_2026-05-17.md
+# (none of the v* picker scripts under tools/ are imported by the
+# canonical trainer (zentrain/tools/train_hybrid.py) or covered by CI).
+# Source kept for audit + as template — NOT a live training path.
+import sys as _b3_sys
+_b3_sys.stderr.write(
+    "WARNING: v06_champ_per_class.py is RETIRED (DEDUP-B3 audit, 2026-05-26).\n"
+    "         v0.6 zenjxl champion / per-content-class audit (one-off recovery investigation).\n"
+    "         Use: Per-class auditing is now covered by zentrain/tools/validate_schema.py + _picker_lib's load_or_build_dataset cache. v0.6 sweep data at /home/lilith/sweep-data/zenjxl_v06.tsv may not be staged.\n"
+    "         Source kept for audit; not on the live training path.\n"
+)
+
 import csv, json, sys
 from collections import defaultdict, Counter
 from pathlib import Path
