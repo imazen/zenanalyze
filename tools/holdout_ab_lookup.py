@@ -46,6 +46,13 @@ from pathlib import Path
 
 import numpy as np
 
+# DEDUP-B2 (2026-05-26): forward delegated to `_predict_lib.forward`
+# (canonical home — sibling to `_picker_lib` and `_metapicker_lib`).
+# `dtype=np.float64` preserves the pre-extraction f64 chain bit-for-bit
+# (proven by test_predict_lib::test_holdout_ab_lookup_*_f64_bit_identical).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "zentrain" / "tools"))
+from _predict_lib import forward as _predict_forward  # noqa: E402
+
 
 def relu(x):
     return np.maximum(x, 0.0)
@@ -57,21 +64,7 @@ def forward(model_json, x):
     Layer keys are 'W' (n_in, n_out) and 'b' (n_out,) — matching
     sklearn's coefs_ orientation (input × hidden), not Keras's.
     """
-    h = (np.asarray(x, dtype=np.float64) - np.asarray(model_json["scaler_mean"])) / np.asarray(model_json["scaler_scale"])
-    layers = model_json["layers"]
-    activation = model_json.get("activation", "relu")
-    for i, layer in enumerate(layers):
-        W = np.asarray(layer["W"])      # shape (n_in, n_out)
-        b = np.asarray(layer["b"])      # shape (n_out,)
-        h = h @ W + b
-        if i < len(layers) - 1:
-            if activation == "relu":
-                h = relu(h)
-            elif activation == "identity":
-                pass
-            else:
-                raise ValueError(f"unsupported activation {activation}")
-    return h
+    return _predict_forward(model_json, np.asarray(x), dtype=np.float64)
 
 
 # Engineering pipeline matching train_hybrid.py:945-985 (Xe layout).

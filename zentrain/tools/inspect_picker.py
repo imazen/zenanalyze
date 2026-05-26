@@ -74,7 +74,9 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-LEAKY_RELU_ALPHA = 0.01
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _predict_lib import forward as _predict_forward, LEAKY_RELU_ALPHA  # noqa: E402,F401
 
 # ====================================================================
 # Loading the bake via zenpredict-inspect.
@@ -122,51 +124,20 @@ def load_model(bin_path: Path, inspect_bin: Path | None) -> dict:
 # ====================================================================
 
 
+# DEDUP-B2 (2026-05-26): forward + forward_batch delegated to
+# `_predict_lib.forward` (canonical home — sibling to `_picker_lib`
+# and `_metapicker_lib`). `_predict_lib.forward` auto-detects the
+# `weights/biases` + `in_dim`/`out_dim` schema this tool uses and
+# is bit-identical to the pre-extraction impls (proven by
+# test_predict_lib::test_inspect_picker_*).
 def forward(model: dict, features: np.ndarray) -> np.ndarray:
-    """Run a single feature vector through the MLP. Returns the
-    raw output vector. Activation handling matches the runtime."""
-    mean = np.asarray(model["scaler_mean"], dtype=np.float32)
-    scale = np.asarray(model["scaler_scale"], dtype=np.float32)
-    x = (features.astype(np.float32) - mean) / scale
-    last_idx = len(model["layers"]) - 1
-    for i, layer in enumerate(model["layers"]):
-        in_dim = layer["in_dim"]
-        out_dim = layer["out_dim"]
-        w = np.asarray(layer["weights"], dtype=np.float32).reshape(in_dim, out_dim)
-        b = np.asarray(layer["biases"], dtype=np.float32)
-        x = x @ w + b
-        if i == last_idx:
-            continue
-        act = layer["activation"]
-        if act == "relu":
-            x = np.maximum(x, 0.0)
-        elif act == "leakyrelu":
-            x = np.where(x >= 0.0, x, LEAKY_RELU_ALPHA * x)
-        # identity: no-op
-    return x
+    """Run a single feature vector through the MLP. Raw output."""
+    return _predict_forward(model, features)
 
 
 def forward_batch(model: dict, X: np.ndarray) -> np.ndarray:
-    """Vectorized forward over a (n_samples, n_inputs) matrix.
-    Returns (n_samples, n_outputs)."""
-    mean = np.asarray(model["scaler_mean"], dtype=np.float32)
-    scale = np.asarray(model["scaler_scale"], dtype=np.float32)
-    x = (X.astype(np.float32) - mean[None, :]) / scale[None, :]
-    last_idx = len(model["layers"]) - 1
-    for i, layer in enumerate(model["layers"]):
-        in_dim = layer["in_dim"]
-        out_dim = layer["out_dim"]
-        w = np.asarray(layer["weights"], dtype=np.float32).reshape(in_dim, out_dim)
-        b = np.asarray(layer["biases"], dtype=np.float32)
-        x = x @ w + b
-        if i == last_idx:
-            continue
-        act = layer["activation"]
-        if act == "relu":
-            x = np.maximum(x, 0.0)
-        elif act == "leakyrelu":
-            x = np.where(x >= 0.0, x, LEAKY_RELU_ALPHA * x)
-    return x
+    """Vectorized forward over a (n_samples, n_inputs) matrix."""
+    return _predict_forward(model, X)
 
 
 # ====================================================================

@@ -469,41 +469,29 @@ def write_metapicker_json(
 # ---------------------------------------------------------------------------
 # Numpy forward-pass for a baked metapicker JSON. Used by comparators.
 #
-# This is a domain-specific subset of the deferred Tier-1 #6 follow-on
-# `_predict_lib.forward`. Metapicker JSONs always carry standardize +
-# dense-MLP-with-uniform-activation + identity-on-final-layer schema, so
-# the impl is tighter than the general ZNPR runtime helper would be.
-# When `_predict_lib.py` ships, this should delegate to it.
+# DEDUP-B2 (2026-05-26): the standardize + MLP body moved to the
+# sibling `_predict_lib.forward` (canonical home for the numeric op
+# shared by all picker / metapicker JSONs across the tree). This
+# function is now a thin wrapper that adds the metapicker-specific
+# argmax tail — every other consumer of `_predict_lib.forward`
+# applies a different reduction (argmin in bytes-space for
+# per-codec pickers, identity for runtime parity checkers, etc.),
+# so the argmax stays here, not in `_predict_lib`.
 
-def _leaky_relu(x: np.ndarray, slope: float = 0.01) -> np.ndarray:
-    return np.where(x > 0, x, slope * x)
-
-
-def _relu(x: np.ndarray) -> np.ndarray:
-    return np.maximum(x, 0)
+from _predict_lib import forward as _predict_forward  # noqa: E402
 
 
 def forward_metapicker(model: dict, X: np.ndarray) -> np.ndarray:
-    """Numpy forward-pass for a baked metapicker JSON.
+    """Numpy forward-pass + argmax for a baked metapicker JSON.
 
-    Standardize, then dense → activation → ... → identity (raw logits).
-    Returns argmax indices. Activation is `model['activation']`;
+    Delegates the standardize-then-MLP chain to
+    `_predict_lib.forward`, then returns argmax indices over the
+    final-layer logits. Activation is `model['activation']`;
     `leakyrelu` / `leaky_relu` use slope=0.01, anything else uses ReLU.
 
     Used by `v15_compare_pickers.py`.
     """
-    mean = np.array(model["scaler_mean"], dtype=np.float32)
-    scale = np.array(model["scaler_scale"], dtype=np.float32)
-    Z = ((X - mean) / scale).astype(np.float32)
-    act = model.get("activation", "relu").lower()
-    af = _leaky_relu if act in ("leakyrelu", "leaky_relu") else _relu
-    layers = model["layers"]
-    for i, layer in enumerate(layers):
-        W = np.asarray(layer["W"], dtype=np.float32)
-        b = np.asarray(layer["b"], dtype=np.float32)
-        Z = Z @ W + b
-        if i < len(layers) - 1:
-            Z = af(Z)
+    Z = _predict_forward(model, X)
     return np.argmax(Z, axis=1)
 
 

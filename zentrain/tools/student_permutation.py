@@ -57,6 +57,17 @@ from pathlib import Path
 
 import numpy as np
 
+# DEDUP-B2 (2026-05-26): the standardize-then-MLP body of
+# `forward_one` delegates to `_predict_lib.forward` (canonical home —
+# sibling to `_picker_lib` and `_metapicker_lib`). The closure still
+# owns feature engineering (size_oh + log_px polynomials + cross
+# terms) and the n_inputs / n_outputs shape checks; only the numeric
+# standardize-then-MLP loop crossed the line. Bit-identical to the
+# pre-extraction impl (proven by
+# test_predict_lib::test_student_permutation_*).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _predict_lib import forward as _predict_forward  # noqa: E402
+
 
 # ---------------------------------------------------------------------
 # Codec-config plumbing — shared with feature_ablation.py /
@@ -230,19 +241,12 @@ def make_forward_fn(model_json: dict):
     + zq_norm·raw_feats(n) + [icc=0]). This factory bakes the
     engineering + standardization + layer chain into one closure.
     """
-    layers = model_json["layers"]
     activation = model_json["activation"]
-    scaler_mean = np.asarray(model_json["scaler_mean"], dtype=np.float32)
-    scaler_scale = np.asarray(model_json["scaler_scale"], dtype=np.float32)
     n_outputs = int(model_json["n_outputs"])
     n_inputs_expected = int(model_json["n_inputs"])
 
     if activation not in ("relu", "leakyrelu"):
         raise ValueError(f"unsupported activation {activation}")
-    leaky_slope = 0.01
-
-    Ws = [np.asarray(l["W"], dtype=np.float32) for l in layers]
-    bs = [np.asarray(l["b"], dtype=np.float32) for l in layers]
 
     def engineer(raw: np.ndarray, w: int, h: int, tz: int) -> np.ndarray:
         n = (w * h) if (w * h) > 0 else 1
@@ -269,18 +273,10 @@ def make_forward_fn(model_json: dict):
                 f"engineered length {x.shape[0]} != model n_inputs {n_inputs_expected} "
                 f"(raw_feats={raw.shape[0]} — KEEP_FEATURES count must match the model's training run)"
             )
-        x = (x - scaler_mean) / scaler_scale
-        for i, (W, b) in enumerate(zip(Ws, bs)):
-            x = x @ W + b
-            if i < len(Ws) - 1:
-                # hidden activations
-                if activation == "leakyrelu":
-                    x = np.where(x > 0, x, leaky_slope * x)
-                else:
-                    x = np.maximum(x, 0)
-        if x.shape[0] != n_outputs:
-            raise ValueError(f"output length {x.shape[0]} != n_outputs {n_outputs}")
-        return x
+        out = _predict_forward(model_json, x)
+        if out.shape[0] != n_outputs:
+            raise ValueError(f"output length {out.shape[0]} != n_outputs {n_outputs}")
+        return out
 
     def forward_batch(
         raws: np.ndarray, ws: list[int], hs: list[int], tzs: list[int]

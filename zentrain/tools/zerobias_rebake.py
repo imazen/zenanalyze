@@ -303,22 +303,19 @@ def emit_bake(parsed: dict) -> bytes:
     return bytes(buf)
 
 
+# DEDUP-B2 (2026-05-26): forward delegated to
+# `_predict_lib.forward_from_layers` (canonical home — sibling to
+# `_picker_lib` and `_metapicker_lib`). The lib auto-detects the
+# `weights_f32` / `biases` schema + the numeric `activation` codes
+# (1=ReLU, 2=LeakyReLU) + mirrors the `dtype==2` i8 re-quantization
+# the saved bake will apply. Bit-identical to the pre-extraction impl
+# (proven by test_predict_lib::test_zerobias_rebake_*).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _predict_lib import forward_from_layers as _predict_forward_from_layers  # noqa: E402
+
+
 def forward(features: np.ndarray, mean, scale, layers):
-    x = (features - mean[None, :]) / scale[None, :]
-    for i, layer in enumerate(layers):
-        w = layer["weights_f32"]
-        # Re-quantize i8 if dtype was 2 (the saved bake will round; mirror that)
-        if layer["dtype"] == 2:
-            max_col = np.max(np.abs(w), axis=0)
-            scales = np.where(max_col == 0, 1.0, max_col / 127.0)
-            q = np.clip(np.round(w / scales[None, :]), -128, 127)
-            w = q * scales[None, :]
-        x = x @ w + layer["biases"][None, :]
-        if layer["activation"] == 2 and i < len(layers) - 1:  # LeakyReLU
-            x = np.where(x > 0, x, x * 0.01)
-        elif layer["activation"] == 1 and i < len(layers) - 1:  # ReLU
-            x = np.maximum(x, 0)
-    return x
+    return _predict_forward_from_layers(features, mean, scale, layers)
 
 
 def main():

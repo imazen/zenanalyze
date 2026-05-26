@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security / Changed (2026-05-26)
+### Changed (2026-05-26 — DEDUP-B2)
+
+- **New canonical `zentrain/tools/_predict_lib.py`** (Tier-1 #6 second
+  half — closes the "DEFERRED — numpy forward-pass duplication" item
+  from the DEDUP-B status table). Exposes
+  `forward(model_json, X, *, dtype=np.float32)` +
+  `forward_from_layers(X, mean, scale, layers, *, default_activation,
+  dtype)` — the canonical home for the numpy forward-pass shared by
+  every picker / metapicker JSON consumer. Auto-detects three
+  layer-dict schemas (`W`/`b`, `weights`/`biases` + in_dim/out_dim,
+  `weights_f32`/`biases` + i8 re-quant) and three activation
+  conventions (model-level string, per-layer string, per-layer
+  numeric code 1/2). Optional `dtype` keyword preserves
+  `holdout_ab_lookup`'s pre-extraction f64 chain bit-for-bit.
+- **Migrated 4 tools to delegate forward-pass** to `_predict_lib`:
+  - `zentrain/tools/inspect_picker.py` (`forward` + `forward_batch`)
+  - `zentrain/tools/zerobias_rebake.py` (`forward`)
+  - `tools/holdout_ab_lookup.py` (`forward`, dtype=np.float64)
+  - `zentrain/tools/student_permutation.py` (`make_forward_fn`
+    closure body — feature engineering + shape checks stay local)
+- **`_metapicker_lib.forward_metapicker`** now thin-wraps
+  `_predict_lib.forward` then takes argmax (the metapicker-specific
+  tail). Public callers see no API change.
+- All migrations produce **bit-identical output** (max |ours - theirs|
+  = 0.0) on per-tool paired tests. Documented in adjacent
+  `<tool>_migration_evidence.txt` files. Regression-gated by
+  `zentrain/tools/test_predict_lib.py` (13 tests) which carries
+  verbatim copies of each pre-extraction `forward()` and asserts
+  equality on 30 random MLPs per schema variant.
+
+### Security / Changed (2026-05-26 — DEDUP-L)
 
 - **`zentrain/tools/zensim_metric_train.py::attach_zenanalyze_features`** now
   routes its `ref_basename` sidecar attach through

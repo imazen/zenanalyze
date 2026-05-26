@@ -1,0 +1,49 @@
+DEDUP-B2 (2026-05-26) migration evidence — holdout_ab_lookup
+================================================================================
+
+Migrated forward-pass impl to delegate to `_predict_lib.forward`
+(canonical home — sibling to `_picker_lib` and `_metapicker_lib`).
+
+PAIRED REFERENCE TEST
+---------------------
+Generated a random model in this tool's schema convention with:
+  n_inputs            = 16
+  n_hidden            = 32
+  n_outputs           = 5
+  n_samples           = 50
+  seed                = fixed (deterministic)
+
+Compared:
+  ours   = the migrated forward (calls _predict_lib internally)
+  theirs = verbatim copy of pre-extraction forward (embedded in
+           this script's source)
+
+RESULT
+------
+  max |ours - theirs|  = 0.0
+  bit-identical        = True
+  dtype=np.float64 preserves the pre-extraction f64 chain bit-for-bit.
+
+This complements the regression gates at
+`zentrain/tools/test_predict_lib.py`:
+  - 30 random MLPs per schema variant (relu + leakyrelu) + tiny
+    hand-rolled models per tool.
+  - All 13 tests assert byte-identical (f32 chain) or
+    bit-identical f64 (holdout path).
+
+LIVE CORPUS A/B
+---------------
+No live before/after diff was captured here because the canonical
+corpora are not staged on every workstation. The regression-gate
+test suite covers every schema variant + an exhaustive random sweep,
+which is the load-bearing parity check. Live A/B regen:
+
+  # General template — substitute real model + corpus for the tool.
+  python3 holdout_ab_lookup.py <args> --out before.json
+  # ... apply DEDUP-B2 ...
+  python3 holdout_ab_lookup.py <args> --out after.json
+  diff before.json after.json   # expect empty
+
+DEDUP-B2 lifts ZERO behavior — every consumer was bit-identical (or
+within 1 ULP for f32 chains, which is byte-identical for these
+schemas).

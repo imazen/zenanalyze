@@ -12,10 +12,14 @@ before it can migrate, and is tracked here.
 
 | Concern | Status |
 |---|---|
-| `load_pareto` / `load_features` in 4 zentrain ablation tools | **SHIPPED** (this chunk) |
-| `_picker_lib.load_features_raw(strict=False)` lenient mode | **SHIPPED** (this chunk) |
-| numpy forward-pass duplication in 3 probe tools | **DEFERRED** — needs new helper |
+| `load_pareto` / `load_features` in 4 zentrain ablation tools | **SHIPPED** (DEDUP-B) |
+| `_picker_lib.load_features_raw(strict=False)` lenient mode | **SHIPPED** (DEDUP-B) |
+| numpy forward-pass duplication in 4 probe / rebake tools | **SHIPPED** (DEDUP-B2 — see below) |
+| Sibling `_metapicker_lib.py` (cross-codec scaffolding) | **SHIPPED** (DEDUP-C) |
+| Sibling `_predict_lib.py` (canonical numpy forward) | **SHIPPED** (DEDUP-B2 — see below) |
 | `build_dataset` (dense `config_id_remap`) | **STAYS LOCAL** (intentional variation) |
+| `student_permutation.load_features` (drops NaN rows) | **DEFERRED** (DEDUP-B3 candidate) |
+| `tools/v*_*.py` + `tools/picker_v06_*.py` (different sub-tree) | **DEFERRED** (DEDUP-B3 candidate) |
 
 ## What shipped
 
@@ -250,23 +254,22 @@ inputs.
 
 ### Follow-on candidates beyond DEDUP-B2/B3
 
-After completing DEDUP-C, the highest-EV remaining items are:
+After completing DEDUP-B2 + DEDUP-C, the highest-EV remaining items
+are:
 
-1. **`_predict_lib.py`** (Tier-1 #6 second half — see deferred
-   table above). The 4 remaining inference-side scripts
-   (zerobias_rebake, inspect_picker, holdout_ab_lookup,
-   student_permutation) each reimplement standardize-then-MLP.
-   `_metapicker_lib.forward_metapicker` shows the shape; could
-   either promote that to a top-level `_predict_lib.py` or have
-   `_predict_lib` import from `_metapicker_lib`. The cleanest design
-   is to extract the forward-pass to `_predict_lib`, have
-   `_metapicker_lib` re-export it (so existing v15_compare_pickers
-   import stays valid), and migrate the other 4 scripts to
-   `_predict_lib` directly.
+1. **DEDUP-B3** (`student_permutation.load_features` + `tools/v*`
+   sub-tree). `student_permutation` carries a `drop_nan_rows`
+   flavoured loader the canonical `_picker_lib.load_features_raw`
+   doesn't yet expose (filed in the "Out of scope" section above).
+   The cleanest fix is to add `drop_nan_rows: bool = False` to
+   `load_features_raw` (mirrors the `strict: bool = True` extension
+   DEDUP-B already shipped) — then migrate
+   `student_permutation.load_features` AND grep the `tools/v*`
+   sub-tree for the same pattern (4-6 tools, ~150 LOC saved).
 
 2. **Tier-1 #4** (zensim recipe-driver forks). 21 scripts across 3
    fork families with measured 50-80% overlap. Different repo
-   (zensim), but the methodology proven by DEDUP-B/C maps directly.
+   (zensim), but the methodology proven by DEDUP-B/B2/C maps directly.
 
 3. **Tier-2 #9** (CodecFamily enum order — `coefficient/src/
    constraints.rs:30` diverges from `coefficient/src/oracle_picker
@@ -275,4 +278,85 @@ After completing DEDUP-C, the highest-EV remaining items are:
 
 Tier-1 #1 (zensim score_row inline rerolls) and #2 (spearman/pearson
 recomputed 7×) are in the zensim repo and would each be a single
-chunk of similar scope to DEDUP-B/C.
+chunk of similar scope to DEDUP-B/B2/C.
+
+## DEDUP-B2 addendum — `_predict_lib` (Tier-1 #6 second half)
+
+Closes the "DEFERRED — numpy forward-pass duplication" item from the
+DEDUP-B status table (above). The plan in DEDUP-C's "Follow-on
+candidates" line 1 was: extract the forward-pass to `_predict_lib`,
+have `_metapicker_lib` re-export it (so existing v15_compare_pickers
+import stays valid), and migrate the other 4 scripts to
+`_predict_lib` directly. DEDUP-B2 shipped exactly that shape.
+
+### What shipped (2026-05-26)
+
+| Concern | File | Status |
+|---|---|---|
+| Canonical forward-pass lib | `zentrain/tools/_predict_lib.py` (NEW, ~210 LOC) | **SHIPPED** |
+| Regression test gate | `zentrain/tools/test_predict_lib.py` (NEW, ~300 LOC, 13 tests PASS) | **SHIPPED** |
+| `_metapicker_lib.forward_metapicker` → thin wrapper | `zentrain/tools/_metapicker_lib.py` (-30 LOC, +10 LOC) | **MIGRATED** |
+| `inspect_picker.forward` + `.forward_batch` | `zentrain/tools/inspect_picker.py` (-43 LOC, +14 LOC) | **MIGRATED** |
+| `zerobias_rebake.forward` | `zentrain/tools/zerobias_rebake.py` (-16 LOC, +12 LOC) | **MIGRATED** |
+| `tools/holdout_ab_lookup.forward` | `tools/holdout_ab_lookup.py` (-22 LOC, +10 LOC) | **MIGRATED** |
+| `student_permutation.make_forward_fn` closure body | `zentrain/tools/student_permutation.py` (-15 LOC, +12 LOC) | **MIGRATED** |
+
+Aggregate across the 5 migrated functions: ~126 LOC of duplicated
+forward-pass code removed + ~58 LOC of `_predict_lib` shims added =
+**~68 net LOC saved**, plus ~15 LOC of dead per-tool activation
+helpers (`relu`, `_leaky_relu`, redundant `LEAKY_RELU_ALPHA`
+constants) eliminated as a side effect. New shared module + tests add
+~510 LOC. Net +442 LOC in tree; the value is a single regression-gated
+home for the numeric op shared by every picker / metapicker JSON
+consumer in the workspace.
+
+### What lives in `_predict_lib.py`
+
+A 3-symbol API:
+
+- `forward(model_json, X, *, dtype=np.float32) -> np.ndarray` — full
+  forward over a baked picker / metapicker JSON. Returns raw output
+  logits (caller applies argmax / argmin / softmax).
+- `forward_from_layers(X, mean, scale, layers, *,
+  default_activation=None, dtype=np.float32) -> np.ndarray` — same,
+  but with standardization + layer list passed separately. Used by
+  `zerobias_rebake` whose parsed-bake representation carries layers
+  in a parsed dict, not a JSON.
+- `LEAKY_RELU_ALPHA: float = 0.01` — re-exported for callers that
+  reference it directly (currently just `inspect_picker`).
+
+The lib auto-detects three layer-dict schemas via `_extract_weights`:
+`W` / `b`, `weights` / `biases` (+ optional `in_dim` / `out_dim`),
+and `weights_f32` / `biases` (+ optional `dtype == 2` for i8
+re-quantization). It auto-detects activation as model-level string,
+per-layer string, or per-layer numeric code (1=ReLU, 2=LeakyReLU)
+via `_resolve_activation`. The final layer is always identity.
+
+The `dtype` keyword (added during DEDUP-B2 specifically to preserve
+`holdout_ab_lookup`'s pre-extraction f64 chain bit-for-bit) supports
+arbitrary numpy dtypes — the i8 re-quantization path stays f32
+regardless because the integer rounding does not benefit from f64.
+
+### Per-tool migration evidence
+
+Each migrated script ships `<script>_migration_evidence.txt` adjacent
+to it. All 4 tools produced **BIT-IDENTICAL output** (max |ours -
+theirs| = 0.0) on a deterministic random model + 50-sample paired
+test. The reference is a verbatim copy of the pre-extraction forward
+embedded in the evidence runner.
+
+The 13 unit tests in `zentrain/tools/test_predict_lib.py` are the
+live regression gate: they include byte-identical reference impls
+for each pre-extraction forward() and assert equality on 30 random
+MLPs per (schema × activation) variant plus the metapicker re-export.
+
+### Why this is one chunk, not five
+
+DEDUP-B2 ships the canonical lib + 4 migrations in one commit
+because (a) the lib's API surface was de-risked across all 4
+consumers' schemas simultaneously (added `dtype` for holdout, added
+numeric-activation handling for zerobias, etc.), and (b) leaving any
+consumer un-migrated past the lib landing creates a divergent state
+where future agents would not know which is canonical. The 4
+migrations are each ~10-LOC delegations — the LOC removed dwarfs
+the per-commit overhead of splitting them.
