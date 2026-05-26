@@ -98,6 +98,23 @@ import pyarrow.parquet as pq
 import torch
 from scipy import stats as sstats
 
+# Cross-repo import of zensim's join_safety guards. The 2026-05-25 kadid/tid
+# corpus corruption came from a ref-only-broadcast merge identical in shape
+# to the one in attach_zenanalyze_features below; route the attach through
+# attach_per_source_features so a duplicated sidecar row cannot silently
+# broadcast (Mode B), and post-attach guard rejects any *_mock* or
+# human_score-bit-identical column (Mode A).
+_ZEN_CORPUS_JOIN_DIR = Path(
+    "/home/lilith/work/zen/zensim/scripts/canonical_corpus"
+)
+if str(_ZEN_CORPUS_JOIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_ZEN_CORPUS_JOIN_DIR))
+from join_safety import (  # noqa: E402
+    JoinSafetyError,
+    attach_per_source_features,
+    guard_metric_table,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data loaders
@@ -219,7 +236,19 @@ def attach_zenanalyze_features(df: pd.DataFrame, sidecar_path: Path,
                   for i, name in enumerate(feature_names)}
     sub = sc[[key] + feature_names].rename(
         columns={key: "ref_basename", **rename_map})
-    merged = df.merge(sub, on="ref_basename", how="left")
+    # attach_per_source_features enforces sidecar-side uniqueness on
+    # ref_basename — a duplicated sidecar row would silently broadcast
+    # different feature values onto the same ref's distortions (Mode-B
+    # broadcast pattern). If duplicates exist, this RAISES rather than
+    # silently picking a row at random.
+    try:
+        merged = attach_per_source_features(
+            df, sub, "ref_basename", how="left"
+        )
+    except JoinSafetyError as e:
+        raise SystemExit(
+            f"attach_zenanalyze_features({sidecar_path}): {e}"
+        ) from e
     n_nan_per_row = merged[[
         f"feat_{n_prior + i}" for i in range(len(feature_names))]]\
         .isna().any(axis=1).sum()
@@ -228,6 +257,16 @@ def attach_zenanalyze_features(df: pd.DataFrame, sidecar_path: Path,
           f"({n_prior} → {n_prior + len(feature_names)}); "
           f"{n_nan_per_row:,} / {len(merged):,} rows had NaN in the "
           f"appended block (joined on ref_basename)", flush=True)
+    # Post-attach guard against the Mode-A leak (mock columns + any
+    # ssim2/cvvdp/butter/dssim/iwssim column bit-identical to
+    # human_score). Wraps a pyarrow conversion internally.
+    try:
+        guard_metric_table(
+            f"attach_zenanalyze_features[{sidecar_path.name}]",
+            merged,
+        )
+    except JoinSafetyError as e:
+        raise SystemExit(str(e)) from e
     return merged
 
 

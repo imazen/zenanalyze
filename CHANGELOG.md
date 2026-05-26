@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security / Changed (2026-05-26)
+
+- **`zentrain/tools/zensim_metric_train.py::attach_zenanalyze_features`** now
+  routes its `ref_basename` sidecar attach through
+  `zensim::scripts::canonical_corpus::join_safety::attach_per_source_features`
+  (the post-2026-05-25-corpus-corruption shared guard). Calls
+  `guard_metric_table` after the attach to catch Mode-A (mock + human-copy
+  leak) regressions. A duplicated sidecar row now `SystemExit`s with a
+  diagnostic instead of silently picking one row at random per `ref_basename`.
+  See `zensim/benchmarks/joinsafety-migration-2026-05-26/MIGRATION_EVIDENCE.md`.
+
 > **Cross-crate cadence:** zenpredict and zenanalyze publish
 > independently from this workspace. Each crate has its own
 > per-crate subsection below; tag the dated section per crate when
