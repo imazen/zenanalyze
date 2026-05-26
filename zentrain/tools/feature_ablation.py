@@ -90,34 +90,29 @@ SKIP_GREEDY = True
 
 CONFIG_NAMES: dict = {}
 
+# Cross-repo dedup (Tier-1 #6): both loaders are byte-identical to
+# `_picker_lib.load_pareto_raw` / `load_features_raw`. The local
+# `build_dataset` keeps a dense `config_id_remap` that `_picker_lib`
+# does NOT provide (this script's distinct value-add) so it remains
+# below.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _picker_lib as _picker  # noqa: E402
+
 
 def load_pareto(path):
-    rows = defaultdict(list)
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        for r in rdr:
-            try:
-                cid = int(r["config_id"])
-                bytes_v = int(r["bytes"])
-                zensim_v = float(r["zensim"])
-            except (ValueError, KeyError):
-                continue
-            CONFIG_NAMES.setdefault(cid, r["config_name"])
-            key = (r["image_path"], r["size_class"], int(r["width"]), int(r["height"]))
-            rows[key].append({"config_id": cid, "bytes": bytes_v, "zensim": zensim_v})
+    """Delegate to `_picker_lib.load_pareto_raw`; populate this module's
+    global `CONFIG_NAMES` so the dense-remap `build_dataset` keeps
+    working unchanged."""
+    rows, config_names = _picker.load_pareto_raw(Path(path))
+    for cid, name in config_names.items():
+        CONFIG_NAMES.setdefault(cid, name)
     return rows
 
 
 def load_features(path):
-    feats = {}
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
-        for r in rdr:
-            feats[(r["image_path"], r["size_class"])] = np.array(
-                [float(r[c]) for c in cols], dtype=np.float32
-            )
-    return feats, cols
+    """Delegate to `_picker_lib.load_features_raw` (no KEEP_FEATURES
+    filter — same as the previous local impl)."""
+    return _picker.load_features_raw(Path(path), keep_features=None)
 
 
 def build_dataset(pareto, feats, feat_cols):

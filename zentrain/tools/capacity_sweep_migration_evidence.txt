@@ -1,0 +1,38 @@
+Tier-1 #6 dedup migration evidence for capacity_sweep.py
+Captured: 2026-05-26 by claude-dedup-B-picker-lib
+
+Test inputs:
+  PARETO   = /home/lilith/work/zen/zenjpeg/benchmarks/zq_pareto_2026-04-29.tsv
+  FEATURES = /home/lilith/work/zen/zenjpeg/benchmarks/zq_pareto_features_2026-04-29.tsv
+
+Procedure:
+  1. Ran capture_before.py (calls each tool's load_pareto + load_features
+     directly on the live inputs above), serialized summary stats
+     (row counts, first 3 keys, first key's first sample dict, bytes
+     sum, zensim mean, CONFIG_NAMES count, feat col list, first array
+     mean/sum) to before.json.
+  2. Edited the 4 tools to delegate to _picker_lib.load_pareto_raw +
+     load_features_raw.
+  3. Re-ran capture_before.py against the same tools, serialized to
+     after.json.
+  4. `diff before.json after.json` produced no output (BYTE-IDENTICAL).
+
+Result for capacity_sweep (from before.json == after.json):
+  pareto.n_keys           : 1388
+  pareto.n_samples        : 3497409
+  pareto.n_configs        : 120
+  pareto.bytes_sum        : 128434332030
+  pareto.zensim_mean      : 47.27702615924205
+  pareto.first_key        : ['/home/lilith/work/codec-eval/codec-corpus/CID22/CID22-512/training/1001682.png', 'large', 512, 512]
+  pareto.first_sample     : {'config_id': 0, 'bytes': 9299, 'zensim': 15.8437}
+  features.n_keys         : 1388
+  features.n_cols         : 5
+  features.first_3_cols   : ['feat_variance', 'feat_edge_density', 'feat_chroma_complexity']
+  features.first_key      : ['/home/lilith/work/codec-eval/codec-corpus/CID22/CID22-512/training/1001682.png', 'large']
+  features.first_arr_first3: [4520.8740234375, 0.27865201234817505, 0.09659600257873535]
+  features.first_arr_mean : 904.2530517578125
+  features.first_arr_sum  : 4521.26513671875
+  CONFIG_NAMES_count      : 120
+
+BEFORE vs AFTER: `diff before.json after.json` empty (BYTE-IDENTICAL).
+Migration preserved load_pareto + load_features output exactly.

@@ -60,36 +60,31 @@ CONFIG_NAMES: dict = {}
 
 
 # ---------- Data loading (same as distill scripts) ----------
+#
+# Cross-repo dedup (Tier-1 #6): both loaders are byte-identical to
+# `_picker_lib.load_pareto_raw` / `load_features_raw`. capacity_sweep
+# is permissive about KEEP_FEATURES — silently drops cols absent from
+# the TSV (probes across schema versions). The shipped delegation
+# passes `strict=False` to preserve that behavior.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _picker_lib as _picker  # noqa: E402
 
 
 def load_pareto(path):
-    rows = defaultdict(list)
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        for r in rdr:
-            try:
-                cid = int(r["config_id"])
-                bytes_v = int(r["bytes"])
-                zensim_v = float(r["zensim"])
-            except (ValueError, KeyError):
-                continue
-            CONFIG_NAMES.setdefault(cid, r["config_name"])
-            key = (r["image_path"], r["size_class"], int(r["width"]), int(r["height"]))
-            rows[key].append({"config_id": cid, "bytes": bytes_v, "zensim": zensim_v})
+    """Delegate to `_picker_lib.load_pareto_raw`; populate this
+    module's global `CONFIG_NAMES` so the downstream
+    `n_configs = max(CONFIG_NAMES) + 1` line still works."""
+    rows, config_names = _picker.load_pareto_raw(Path(path))
+    for cid, name in config_names.items():
+        CONFIG_NAMES.setdefault(cid, name)
     return rows
 
 
 def load_features(path):
-    feats = {}
-    with open(path) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
-        cols = [c for c in KEEP_FEATURES if c in all_cols]
-        for r in rdr:
-            feats[(r["image_path"], r["size_class"])] = np.array(
-                [float(r[c]) for c in cols], dtype=np.float32
-            )
-    return feats, cols
+    """Delegate to `_picker_lib.load_features_raw` with KEEP_FEATURES
+    filter in lenient mode (silently drop cols missing from TSV — the
+    pre-dedup local impl did the same)."""
+    return _picker.load_features_raw(Path(path), KEEP_FEATURES, strict=False)
 
 
 # ---------- Cross-term recipes (the knobs we vary) ----------

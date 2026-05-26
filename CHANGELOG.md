@@ -443,6 +443,24 @@ hard one's tree-friendly threshold are different inductive biases).
 
 ### Changed — Python training pipeline
 
+- **dedup: migrate 4 ablation tools to `_picker_lib`** (Tier-1 #6,
+  `zensim/benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md`).
+  `zentrain/tools/{feature_ablation,feature_group_ablation,validate_schema,capacity_sweep}.py`
+  replaced their local byte-identical `load_pareto` / `load_features`
+  copies with delegations to
+  `_picker_lib.load_pareto_raw` / `load_features_raw`. Extended
+  `load_features_raw` with `strict: bool = True` kwarg (default
+  preserves SystemExit on missing cols; `strict=False` enables the
+  silent-drop behavior `capacity_sweep` needs for schema-version
+  probes). New `zentrain/tools/test_picker_lib_strict.py` covers all
+  5 modes. Per-tool `_migration_evidence.txt` shipped alongside each
+  migrated script with summary stats showing BYTE-IDENTICAL output
+  before/after migration on the live `zq_pareto_2026-04-29.tsv`
+  fixture (1388 cells × 3,497,409 samples × 120 configs × 19 feat
+  cols). Tracking doc `docs/PICKER_LIB_MIGRATION.md` lists what
+  shipped + 3 forward-pass duplicates deferred to a future chunk
+  (need a new `_predict_lib` runtime helper before they can
+  migrate).
 - **`tools/bake_picker.py` rewritten** to emit a portable
   `BakeRequestJson` and shell out to `zenpredict-bake`. Byte-packing
   (struct.pack, magic constants, i8 quantization, alignment padding)

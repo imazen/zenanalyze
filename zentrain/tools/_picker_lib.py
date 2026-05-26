@@ -162,9 +162,23 @@ def load_pareto_raw(path: Path) -> tuple[dict, dict]:
 
 
 def load_features_raw(
-    path: Path, keep_features: list[str] | None
+    path: Path,
+    keep_features: list[str] | None,
+    *,
+    strict: bool = True,
 ) -> tuple[dict, list[str]]:
-    """Slow path: parse the features TSV. Optionally restrict + reorder columns."""
+    """Slow path: parse the features TSV. Optionally restrict + reorder columns.
+
+    Args:
+        path: TSV path.
+        keep_features: If non-None, restrict + reorder feat_ columns to
+            this list (preserving the order of `keep_features`).
+        strict: When True (default) and a column in `keep_features` is
+            absent from the TSV, raise `SystemExit`. When False, silently
+            drop missing columns from the returned `cols`. The lenient
+            mode is for tools (e.g. `capacity_sweep`) that probe across
+            schema versions and tolerate columns dropping in/out.
+    """
     feats: dict = {}
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
@@ -172,7 +186,7 @@ def load_features_raw(
         if keep_features is not None:
             cols = [c for c in keep_features if c in all_cols]
             missing = [c for c in keep_features if c not in all_cols]
-            if missing:
+            if missing and strict:
                 raise SystemExit(f"missing feature columns in TSV: {missing}")
         else:
             cols = all_cols
