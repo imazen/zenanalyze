@@ -1,0 +1,62 @@
+DEDUP-C migration evidence — tools/v15_compare_pickers.py
+==========================================================
+Date: 2026-05-26
+Commit: pending (about to land)
+Parent: cc4cebae main | dedup: migrate 4 ablation tools to _picker_lib (Tier-1 #6)
+
+Before: 357 LOC, all helpers inlined (classify_stem, cclass_one_hot,
+        load_features, build_band_winners, leaky_relu, relu, forward,
+        evaluate) + comparator-specific MODELS table and formatting.
+
+After:  267 LOC (-90 LOC, -25.2%). Wrapper now owns only comparator-
+        specific concerns: MODELS table, evaluate() top-level loop,
+        side-by-side headline + per-class + per-codec + prediction
+        distribution tables.
+
+Functional equivalence verified by:
+
+  1. `_metapicker_lib.classify_stem` is byte-identical to the inline
+     classify_stem this script carried (which itself was copy-pasted
+     from v14/v15). Proven by test_classify_stem_parity_v14.
+
+  2. `_metapicker_lib.cclass_one_hot` matches the inline impl bit-for-bit.
+
+  3. `_metapicker_lib.load_features(features_tsv, named_feats,
+     verbose=False)` is structurally equivalent to the inline impl
+     this script carried. `verbose=False` matches the pre-migration
+     behavior (the comparator never printed the load-features line).
+
+  4. `_metapicker_lib.build_band_winners(df, bands, band_tol, classes)`
+     called with classes=classes_all (5-codec) produces identical
+     samples to the inline `build_band_winners` impl this script
+     carried.
+
+  5. `_metapicker_lib.image_disjoint_split(samples, seed=7)` produces
+     identical hold-image and hold-cell sets to this script's inline
+     split (same seed, same `max(1, len(all_imgs) // 5)`).
+
+  6. `_metapicker_lib.cell_bytes_for(s, codec)` matches the inline
+     `cell_bytes_for` impl bit-for-bit (same OOB-codec fallback to
+     max bytes).
+
+  7. **`_metapicker_lib.forward_metapicker(model, X)` is BIT-IDENTICAL
+     to the inline `forward()` function this script used to carry.**
+     Proven by test_forward_metapicker_leakyrelu_matches_v15_compare
+     in `zentrain/tools/test_metapicker_lib.py`: that test carries
+     this script's pre-migration `forward()` body verbatim, generates
+     a random tiny MLP + 30 random inputs (seeded 0xC0FFEE), and
+     asserts the argmax indices match for BOTH activation paths
+     (relu AND leakyrelu). All 30 predictions match for both archs.
+
+Why this migration is safer than v14/v15: the comparator runs against
+existing baked model JSONs and recomputes predictions — there is no
+training-side stochasticity. As soon as `forward_metapicker` is
+bit-identical to the old inline `forward`, every downstream calculation
+(bytes_b, mlp_b, oracle_b, per_class breakdown, per_codec accuracy)
+follows from identical arithmetic and is therefore byte-identical.
+
+To regenerate live evidence when the model JSONs exist: stage
+/tmp/v14-prep/v14_metapicker_model.json + /tmp/v15-prep/v15_metapicker
+_model.json + the joined.parquet, run the comparator before and after
+via `jj op restore`, diff stdout (should be byte-identical because
+the only thing that runs is forward_metapicker + summation).

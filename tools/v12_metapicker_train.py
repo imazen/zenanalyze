@@ -6,6 +6,18 @@ corpus images. Three codecs (zenjxl/avif/webp). Output: ZNPR-bakeable.
 
 Usage:
     python3 v12_metapicker_train.py [output_json]
+
+DEPRECATED (2026-05-26 — DEDUP-C): v12 (3-codec) is superseded by v14
+(4-codec, adds zenjpeg). Both rely on /tmp scratch dirs; v12 additionally
+depends on `/tmp/v12-sweep-data` which is typically absent. Kept in tree
+so the historical 3-codec training recipe stays auditable, but the
+shared scaffolding (load_features, classify_stem, cclass_one_hot, JSON
+writer, etc.) was NOT migrated to `_metapicker_lib.py` here because
+v12's two-features-TSV merge logic and v10/v12 dual-sweep loaders are
+sufficiently divergent from v14/v15 that the wrapper would be larger
+than the saved LOC. If anyone wants to revive v12, mechanism A: rewrite
+on top of `_metapicker_lib` using the v14 wrapper as a template (will
+need an adapter for the two-TSV column-intersection path).
 """
 from __future__ import annotations
 import csv, json, random, sys
@@ -15,6 +27,15 @@ import numpy as np
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
+
+# DEDUP-C deprecation banner — emitted at every run start.
+print(
+    "WARNING: v12_metapicker_train.py is RETIRED (DEDUP-C, 2026-05-26).\n"
+    "         Superseded by v14_metapicker_train.py (4-codec, adds zenjpeg).\n"
+    "         v12 source kept for audit; not on the shared _metapicker_lib path.\n"
+    "         If you actually want to run v12, ensure /tmp/v12-sweep-data exists.",
+    file=sys.stderr,
+)
 
 V10_DIR = Path("/home/lilith/sweep-data/v10")
 V12_LOCAL = Path("/tmp/v12-sweep-data")  # we'll populate this

@@ -1,0 +1,78 @@
+DEDUP-C migration evidence — tools/v15_metapicker_train.py
+============================================================
+Date: 2026-05-26
+Commit: pending (about to land)
+Parent: cc4cebae main | dedup: migrate 4 ablation tools to _picker_lib (Tier-1 #6)
+
+Before: 839 LOC, all helpers inlined (classify_stem, cclass_one_hot,
+        load_features, load_sweep_tsvs, build_band_winners, holdout split,
+        cell_bytes_for, per-class report formatting, per-codec accuracy,
+        winner distribution, JSON writer) plus v15-specific PyTorch model
+        + ensemble + class weighting.
+
+After:  582 LOC (-257 LOC, -30.6%). Wrapper now owns only v15-specific
+        concerns: PyTorch PickerMLP, AdamW + ReduceLROnPlateau optimizer,
+        bytes-aware regret loss, multi-arch ensemble (6 archs × 4 seeds =
+        24 candidates), inner train/val split for early stopping,
+        5-codec CLASSES list, leakyrelu activation tag, PNG broadcast
+        notes. All scaffolding routed through
+        `zentrain/tools/_metapicker_lib.py`.
+
+Functional equivalence verified by:
+
+  1. `_metapicker_lib.classify_stem` is byte-identical to v15's inline
+     classify_stem (and to v14's — they were copy-pasted; proven by
+     test_classify_stem_parity_v14 in test_metapicker_lib.py).
+
+  2. `_metapicker_lib.cclass_one_hot` matches v15's inline impl bit-for-bit.
+
+  3. `_metapicker_lib.load_features` is structurally equivalent to v15's
+     inline impl: same csv.DictReader, same KeyError/ValueError row-skip,
+     same `.png` append, same cclass priority order.
+
+  4. `_metapicker_lib.load_sweep_tsvs` matches v15's inline impl AND
+     includes v15's symlinked codec-dir support (`is_dir() or is_symlink()`)
+     because v15 symlinks zenwebp/zenjxl/zenavif/zenjpeg into v14's
+     data dir then adds zenpng directly. The lib carries the symlink
+     branch (it's a strict superset of v14's behavior).
+
+  5. `_metapicker_lib.build_band_winners` produces identical 5-codec
+     samples when called with classes=CLASSES (5-codec list) — same
+     groupby/pivot_table, same winner=argmin, same schema.
+
+  6. `_metapicker_lib.image_disjoint_split(samples, seed=7)` matches the
+     v15 inline split (same seed, same `sorted({image})` then shuffle,
+     same `max(1, len(all_imgs) // 5)` holdout size).
+
+  7. `_metapicker_lib.bytes_delta_vs_baseline` matches v15's inline
+     local `cell_bytes_for` + summation logic.
+
+  8. `_metapicker_lib.format_per_codec_accuracy` matches v15's inline
+     per-codec block (same `by_codec[s["winner"]].append(p)` grouping,
+     same `sum(1 for p in ps if p == c) / max(1, n)` accuracy).
+
+  9. `_metapicker_lib.write_metapicker_json` writes a JSON with the
+     same fields v15's inline writer used. The only schema difference
+     is documented: v15 set `"activation": "leakyrelu"` (passed via
+     the activation= kwarg) and uses bake_name "zenpicker_meta_v0.5_
+     5codec" + schema_version_tag "zenpicker.metapicker.v0.5.5codec"
+     (both passed via kwargs).
+
+ 10. The PyTorch model layer extraction (linear_layers_for_bake →
+     numpy .T transpose for bake-side W shape) is UNCHANGED — it
+     stays inline because it's v15-only behavior (v14 sklearn doesn't
+     need the transpose).
+
+ 11. The multi-arch ensemble selection, regret loss, make_cost_matrix,
+     and per-arch training loop are UNCHANGED — these are v15's
+     defining contribution and don't generalize to v14/v12.
+
+Why no live A/B run captured here: identical reason to v14. The v15
+trainer requires /tmp/v15-prep/data/{zenwebp,zenjxl,zenavif,zenjpeg,
+zenpng}/ (with the first 4 symlinked into v14-prep/data) plus the
+same features TSV. To regenerate live evidence when the data is back:
+stage /tmp/v15-prep/data, set torch.manual_seed(7) (matches v15
+default), run before and after, diff the model.json files. Layer
+weights may differ in low-order bits IF torch's gradient computation
+order changed between runs, but the structural schema and (image,band)
+sample set will be identical.

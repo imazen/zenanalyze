@@ -95,15 +95,6 @@ Sweep data inputs:
 
 Output: a model JSON ready for tools/bake_picker.py to bake into a ZNPR v3 .bin.
 
-Inputs:
-    - /tmp/v15-prep/data/{zenwebp,zenjxl,zenavif,zenjpeg,zenpng}/*.tsv
-        symlinks to /tmp/v14-prep/data/{zenwebp,zenjxl,zenavif,zenjpeg}/
-        plus s3://zentrain/sweep-v14-2026-05-06/zenpng/ for the new codec.
-    - /mnt/v/output/zensim/v06-rebalance/zenanalyze_union_rebalanced_cclass.tsv
-        (named zenanalyze features + cclass one-hots, covers all 200 sources)
-
-Output: a model JSON ready for tools/bake_picker.py to bake into a ZNPR v3 .bin.
-
 Filter: cells where ≥2 codecs reach the target band are kept. Cells with a
 single codec-in-band ARE included this time (with reduced weight 0.25) — v14
 dropped them outright, but a real picker at runtime can be asked about a band
@@ -116,11 +107,14 @@ ZNPR bake notes:
       via the `bake_picker.py` ACTIVATION_KEYS map.
     - Final layer logits are baked under the `identity` activation so
       runtimes consume raw logits and apply softmax themselves (matches v14).
+
+DEDUP-C (2026-05-26): shared scaffolding extracted to
+`zentrain/tools/_metapicker_lib.py`. This wrapper now owns only v15-specific
+concerns: 5-codec class set, PyTorch model + multi-arch ensemble + regret
+loss + class-weight machinery.
 """
 from __future__ import annotations
 
-import csv
-import json
 import random
 import sys
 from collections import Counter, defaultdict
@@ -132,8 +126,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Make `zentrain/tools/_metapicker_lib.py` importable from this script.
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "zentrain" / "tools"))
+from _metapicker_lib import (
+    BANDS_DEFAULT,
+    BAND_TOL_DEFAULT,
+    SEED_DEFAULT,
+    CCLASSES,
+    classify_stem,
+    cclass_one_hot,
+    load_features,
+    load_sweep_tsvs,
+    build_band_winners,
+    image_disjoint_split,
+    cell_bytes_for,
+    bytes_delta_vs_baseline,
+    format_per_class_report,
+    format_per_class_winner_distribution,
+    format_per_codec_accuracy,
+    write_metapicker_json,
+)
+
 # ---------------------------------------------------------------------------
-# Config
+# Config — v15-specific.
 
 DATA_DIR = Path("/tmp/v15-prep/data")
 FEATURES_TSV = Path(
@@ -144,9 +160,9 @@ OUT_JSON = Path(
     sys.argv[1] if len(sys.argv) > 1 else "/tmp/v15-prep/v15_metapicker_model.json"
 )
 
-BANDS = [70.0, 75.0, 80.0, 85.0, 90.0]
-BAND_TOL = 1.5
-SEED = 7
+BANDS = BANDS_DEFAULT
+BAND_TOL = BAND_TOL_DEFAULT
+SEED = SEED_DEFAULT
 
 # Class order MUST match zenpicker::CodecFamily::ALL (Jpeg, Webp, Jxl, Avif, Png).
 CLASSES = ["zenjpeg", "zenwebp", "zenjxl", "zenavif", "zenpng"]
@@ -168,141 +184,10 @@ NAMED_FEATS = [
     "uniformity",
     "variance",
 ]
-CCLASSES = ["photo", "screen", "lineart", "document", "synthetic"]
 
 
 # ---------------------------------------------------------------------------
-# Cclass derivation (mirrors v14 trainer; kept in sync to share lookup TSV).
-
-def classify_stem(stem: str) -> str:
-    s = stem.lower()
-    if s.startswith("gen-screen__"):
-        return "screen"
-    if s.startswith("gen-doc__"):
-        return "document"
-    if s.startswith("gen-chart__") or s.startswith("gen-line__"):
-        return "lineart"
-    if s.startswith("gen-mixed__"):
-        return "photo"
-    if any(p in s for p in ["terminal", "windows", "macos", "ubuntu", "screen", "gui_", "browser", "ide", "editor"]):
-        return "screen"
-    if any(p in s for p in ["chart", "graph", "diagram", "logo", "infographic", "stockquote"]):
-        return "lineart"
-    if any(p in s for p in ["scan", "document", "invoice"]):
-        return "document"
-    if any(p in s for p in ["synthetic", "checker", "noise_", "thin_lines", "gradient_v_", "gradient_h_"]):
-        return "synthetic"
-    return "photo"
-
-
-def cclass_one_hot(cls: str) -> list[float]:
-    return [1.0 if c == cls else 0.0 for c in CCLASSES]
-
-
-# ---------------------------------------------------------------------------
-# Load named-features TSV → dict[stem_with_ext] = vec[14 floats] + cclass
-
-def load_features() -> tuple[dict[str, list[float]], dict[str, str]]:
-    feats: dict[str, list[float]] = {}
-    cclass_lookup: dict[str, str] = {}
-    with open(FEATURES_TSV) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        for r in rdr:
-            try:
-                vec = [float(r[c] or 0) for c in NAMED_FEATS]
-            except (KeyError, ValueError):
-                continue
-            stem = r["stem"]
-            if not stem.endswith(".png"):
-                stem = stem + ".png"
-            feats[stem] = vec
-            for c in CCLASSES:
-                col = f"cclass_{c}"
-                if r.get(col) and float(r[col]) > 0.5:
-                    cclass_lookup[stem] = c
-                    break
-            else:
-                cclass_lookup[stem] = classify_stem(stem.removesuffix(".png"))
-    print(f"[features] loaded {len(feats)} stems, {len(NAMED_FEATS)} feats", file=sys.stderr)
-    return feats, cclass_lookup
-
-
-# ---------------------------------------------------------------------------
-# Load sweep TSVs → DataFrame with [codec, image, q, bytes, zensim]
-
-def load_sweep_tsvs() -> pd.DataFrame:
-    parts = []
-    for codec_dir in sorted(DATA_DIR.iterdir()):
-        if not codec_dir.is_dir() and not codec_dir.is_symlink():
-            continue
-        codec = codec_dir.name
-        tsvs = sorted(codec_dir.glob("*.tsv"))
-        if not tsvs:
-            continue
-        for tsv in tsvs:
-            try:
-                df = pd.read_csv(tsv, sep="\t", dtype={"q": int, "encoded_bytes": "Int64"})
-            except Exception as e:
-                print(f"[load_sweep] skip {tsv}: {e}", file=sys.stderr)
-                continue
-            # v12 uses score_ssim2_gpu; v13/v14 use score_ssim2. We don't read
-            # ssim2 directly here — only score_zensim. Both tables have it.
-            if "score_zensim" not in df.columns:
-                continue
-            df = df[["image_path", "codec", "q", "encoded_bytes", "score_zensim"]].copy()
-            df = df.dropna(subset=["encoded_bytes", "score_zensim"])
-            df["image"] = df["image_path"].str.rsplit("/", n=1).str[-1]
-            df["codec"] = codec  # canonicalize
-            df["bytes"] = df["encoded_bytes"].astype("int64")
-            df["zensim"] = df["score_zensim"].astype(float)
-            parts.append(df[["codec", "image", "q", "bytes", "zensim"]])
-    if not parts:
-        raise SystemExit("[load_sweep] no TSVs found under " + str(DATA_DIR))
-    out = pd.concat(parts, ignore_index=True)
-    print(f"[sweep] {len(out):,} rows across {out['codec'].nunique()} codecs", file=sys.stderr)
-    print(f"[sweep] per-codec rows: {out['codec'].value_counts().to_dict()}", file=sys.stderr)
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Build per-(image,band,codec) best-bytes table.
-#
-# PNG broadcast: PNG rows have q=75 in v14 but the encoding is q-independent
-# (PNG is lossless). We treat PNG as available at any band where its observed
-# zensim is within BAND_TOL — same logic as the lossy codecs, applied to all
-# PNG knob_tuples (compression × near_lossless_bits 0..N). For strict lossless
-# (near_lossless_bits=0) zensim≈100, so PNG is in-band only for band 90+1.5
-# at best (i.e. typically the 90 band). Near-lossless variants drop zensim
-# below 100 and become available at lower bands too.
-
-def build_band_winners(df: pd.DataFrame) -> list[dict]:
-    """For each (image, band): minimum bytes per codec where zensim is in band."""
-    samples: list[dict] = []
-    rows_in_any_band = []
-    for band in BANDS:
-        sub = df[(df["zensim"] - band).abs() <= BAND_TOL].copy()
-        sub["band"] = band
-        rows_in_any_band.append(sub)
-    bucketed = pd.concat(rows_in_any_band, ignore_index=True)
-    g = bucketed.groupby(["image", "band", "codec"], as_index=False)["bytes"].min()
-    wide = g.pivot_table(index=["image", "band"], columns="codec", values="bytes", aggfunc="min")
-    for (image, band), row in wide.iterrows():
-        codec_bytes = {c: int(row[c]) for c in CLASSES if c in row.index and pd.notna(row[c])}
-        if not codec_bytes:
-            continue
-        winner = min(codec_bytes, key=codec_bytes.get)
-        samples.append({
-            "image": image,
-            "band": float(band),
-            "winner": winner,
-            "codec_bytes": codec_bytes,
-            "n_codecs": len(codec_bytes),
-        })
-    return samples
-
-
-# ---------------------------------------------------------------------------
-# PyTorch model
+# PyTorch model — v15-specific (different architecture vs v14's sklearn).
 
 class PickerMLP(nn.Module):
     """Input → h1 → h2 → n_classes with LeakyReLU activations.
@@ -389,114 +274,17 @@ def apply_standardize(X: np.ndarray, mean: np.ndarray, scale: np.ndarray) -> np.
 
 
 # ---------------------------------------------------------------------------
-# Training loop
-
-def train_pytorch(X_tr: np.ndarray, y_tr: np.ndarray, w_tr: np.ndarray,
-                  X_va: np.ndarray, y_va: np.ndarray, w_va: np.ndarray,
-                  n_classes: int, *, epochs: int = 400, batch_size: int = 256,
-                  lr: float = 3e-3, weight_decay: float = 1e-4,
-                  patience: int = 40, seed: int = SEED,
-                  use_class_weights: bool = False) -> PickerMLP:
-    """If use_class_weights is False, the loss is plain cross-entropy.
-
-    Empirically on this dataset: class-weighting is a NET LOSS for byte
-    delta. Inverse-frequency (strength=1) tanked zenjpeg accuracy from
-    50% to 3%; soft inverse-frequency (strength=0.5) still cost +5%
-    bytes vs no weighting. The reason is that on per-class bytes the
-    cost of mispredicting jxl (the modal class with smallest bytes on
-    its winning cells) is larger than the cost of underpredicting a
-    minority class. Weighting forces the model to "spread" predictions
-    toward minorities at the expense of confidence on majority cells —
-    accuracy stays similar but bytes go up.
-
-    Default: use_class_weights=False. The minority codec hits we DO
-    care about (zenavif on lineart, zenwebp on documents) emerge from
-    the feature signal alone with sufficient capacity in the MLP.
-    """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    device = "cpu"
-    n_in = X_tr.shape[1]
-    model = PickerMLP(n_in, n_classes).to(device)
-
-    if use_class_weights:
-        cw = class_weights_inv_freq(y_tr, n_classes).to(device)
-    else:
-        cw = torch.ones(n_classes, dtype=torch.float32, device=device)
-    print(f"[train] class weights (use_cw={use_class_weights}): {cw.cpu().numpy().round(3).tolist()}",
-          file=sys.stderr)
-
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=10)
-
-    Xt = torch.from_numpy(X_tr).float()
-    yt = torch.from_numpy(y_tr).long()
-    wt = torch.from_numpy(w_tr).float()
-    Xv = torch.from_numpy(X_va).float()
-    yv = torch.from_numpy(y_va).long()
-    wv = torch.from_numpy(w_va).float()
-
-    best_val = float("inf")
-    best_state = None
-    plateau = 0
-    n = len(yt)
-    for epoch in range(epochs):
-        model.train()
-        perm = torch.randperm(n)
-        running = 0.0
-        for i in range(0, n, batch_size):
-            idx = perm[i:i + batch_size]
-            xb = Xt[idx]; yb = yt[idx]; wb = wt[idx]
-            logits = model(xb)
-            # Per-sample weighted cross-entropy with class weights baked in.
-            ce = F.cross_entropy(logits, yb, weight=cw, reduction="none")
-            loss = (ce * wb).sum() / wb.sum().clamp(min=1.0)
-            opt.zero_grad(); loss.backward(); opt.step()
-            running += loss.item() * len(idx)
-        train_loss = running / n
-
-        model.eval()
-        with torch.no_grad():
-            vlogits = model(Xv)
-            vce = F.cross_entropy(vlogits, yv, weight=cw, reduction="none")
-            vloss = float((vce * wv).sum() / wv.sum().clamp(min=1.0))
-            vpred = vlogits.argmax(dim=1).cpu().numpy()
-            vacc = float((vpred == y_va).mean())
-        sched.step(vloss)
-
-        if vloss < best_val - 1e-5:
-            best_val = vloss
-            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-            plateau = 0
-        else:
-            plateau += 1
-
-        if epoch % 20 == 0 or epoch == epochs - 1:
-            lr_now = opt.param_groups[0]["lr"]
-            print(f"[train] epoch {epoch:3d} train_loss={train_loss:.4f} val_loss={vloss:.4f} "
-                  f"val_acc={vacc:.4f} lr={lr_now:.2e} plateau={plateau}", file=sys.stderr)
-
-        if plateau >= patience:
-            print(f"[train] early stop at epoch {epoch} (no improvement for {patience} epochs)", file=sys.stderr)
-            break
-
-    if best_state is not None:
-        model.load_state_dict(best_state)
-    return model
-
-
-# ---------------------------------------------------------------------------
 # Main
 
 def main() -> int:
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    feats, cclass_lookup = load_features()
+    feats, cclass_lookup = load_features(FEATURES_TSV, NAMED_FEATS)
 
     if JOINED_CACHE.exists():
         print(f"[cache] loading joined sweep from {JOINED_CACHE}", file=sys.stderr)
         sweep = pd.read_parquet(JOINED_CACHE)
     else:
-        sweep = load_sweep_tsvs()
+        sweep = load_sweep_tsvs(DATA_DIR)
         JOINED_CACHE.parent.mkdir(parents=True, exist_ok=True)
         sweep.to_parquet(JOINED_CACHE, compression="zstd")
         print(f"[cache] wrote {JOINED_CACHE} ({JOINED_CACHE.stat().st_size:,} B)", file=sys.stderr)
@@ -507,7 +295,15 @@ def main() -> int:
           file=sys.stderr)
     print(f"[sweep] codecs in joined data: {sorted(sweep['codec'].unique())}", file=sys.stderr)
 
-    samples = build_band_winners(sweep)
+    # PNG broadcast note: PNG rows have q=75 in v14 but the encoding is
+    # q-independent (PNG is lossless). build_band_winners treats PNG as
+    # available at any band where its observed zensim is within BAND_TOL
+    # — same logic as the lossy codecs, applied to all PNG knob_tuples
+    # (compression × near_lossless_bits 0..N). For strict lossless
+    # (near_lossless_bits=0) zensim≈100, so PNG is in-band only for
+    # band 90+1.5 at best. Near-lossless variants drop zensim below 100
+    # and become available at lower bands too.
+    samples = build_band_winners(sweep, BANDS, BAND_TOL, CLASSES)
     print(f"[samples] total band cells: {len(samples)}", file=sys.stderr)
     coverage_hist = Counter(s["n_codecs"] for s in samples)
     print(f"[samples] codec-coverage hist (n codecs in band): {dict(sorted(coverage_hist.items()))}",
@@ -529,13 +325,8 @@ def main() -> int:
     print(f"[classes] {Counter(s['class'] for s in samples)}", file=sys.stderr)
 
     # 80/20 image-disjoint split.
-    rng = random.Random(SEED)
-    all_imgs = sorted({s["image"] for s in samples})
-    rng.shuffle(all_imgs)
-    n_hold = max(1, len(all_imgs) // 5)
-    hold_imgs = set(all_imgs[:n_hold])
-    train = [s for s in samples if s["image"] not in hold_imgs]
-    hold = [s for s in samples if s["image"] in hold_imgs]
+    train, hold, all_imgs, hold_imgs = image_disjoint_split(samples, seed=SEED)
+    n_hold = len(hold_imgs)
     print(f"[split] {len(train)} train ({len(all_imgs) - n_hold} imgs) / {len(hold)} hold ({n_hold} imgs)",
           file=sys.stderr)
 
@@ -575,9 +366,6 @@ def main() -> int:
     # single 96, two-layer 64×32, two-layer 128×64} × N seeds.
     val_train_samples = [s for s in train if s["image"] in val_imgs]
 
-    def cell_bytes_for(s, codec):
-        return s["codec_bytes"][codec] if codec in s["codec_bytes"] else max(s["codec_bytes"].values())
-
     # Bytes-aware loss: cost-sensitive cross-entropy where each row's
     # per-class cost is the bytes for that codec on that cell (normalized
     # by the cell's oracle bytes so the loss is dimensionless and similar
@@ -607,8 +395,6 @@ def main() -> int:
                 cost[k, ci] = np.log(bc / ora) if ora > 0 else 0.0
         return cost
 
-    inner_train_samples = [train[i] for i in inner_train_idx]
-    inner_val_samples = [train[i] for i in inner_val_idx]
     cost_tr = make_cost_matrix(train, inner_train_idx)
     cost_va = make_cost_matrix(train, inner_val_idx)
 
@@ -706,16 +492,7 @@ def main() -> int:
     BASELINE = "zenjxl"
     pred_class_labels = [CLASSES[p] for p in ho_pred]
     hold_w = [s for s in hold if s["winner"] in class_idx]
-
-    def cell_bytes_for(s, codec):
-        if codec in s["codec_bytes"]:
-            return s["codec_bytes"][codec]
-        return max(s["codec_bytes"].values())
-
-    base_b = sum(cell_bytes_for(s, BASELINE) for s in hold_w)
-    mlp_b = sum(cell_bytes_for(s, p) for s, p in zip(hold_w, pred_class_labels))
-    oracle_b = sum(min(s["codec_bytes"].values()) for s in hold_w)
-    pct = lambda x: (x - base_b) / base_b * 100 if base_b else 0.0
+    base_b, mlp_b, oracle_b, pct = bytes_delta_vs_baseline(hold_w, pred_class_labels, BASELINE)
     print(f"[bytes] baseline=always-{BASELINE}: {base_b:,}", file=sys.stderr)
     print(f"[bytes] MLP:    {mlp_b:,} ({pct(mlp_b):+.2f}%)", file=sys.stderr)
     print(f"[bytes] oracle: {oracle_b:,} ({pct(oracle_b):+.2f}%)", file=sys.stderr)
@@ -723,50 +500,23 @@ def main() -> int:
     # Per-class breakdown (content class).
     print("\n## Per-class (content-class) behavior on holdout", file=sys.stderr)
     print(f"{'class':<12} {'n':>5} {'acc':>7} {'mlp_dbytes%':>12} {'oracle_dbytes%':>14}", file=sys.stderr)
-    by_cls = defaultdict(list)
-    for s, p in zip(hold_w, pred_class_labels):
-        by_cls[s["class"]].append((s, p))
-    per_class_lines = []
-    for cls in sorted(by_cls):
-        items = by_cls[cls]
-        n = len(items)
-        correct = sum(1 for s, p in items if s["winner"] == p)
-        mlp_b_cls = sum(cell_bytes_for(s, p) for s, p in items)
-        base_b_cls = sum(cell_bytes_for(s, BASELINE) for s, _ in items)
-        ora_b_cls = sum(min(s["codec_bytes"].values()) for s, _ in items)
-        mlp_pct = (mlp_b_cls - base_b_cls) / base_b_cls * 100 if base_b_cls else 0
-        ora_pct = (ora_b_cls - base_b_cls) / base_b_cls * 100 if base_b_cls else 0
-        line = f"{cls:<12} {n:>5} {correct/max(1,n):>7.3f} {mlp_pct:>+12.2f} {ora_pct:>+14.2f}"
+    per_class_lines = format_per_class_report(hold_w, pred_class_labels, cclass_lookup, BASELINE)
+    for line in per_class_lines:
         print(line, file=sys.stderr)
-        per_class_lines.append(line)
 
-    # Per-codec winner accuracy.
+    # Per-codec accuracy (when each codec is the true winner).
     print("\n## Per-codec accuracy (when each codec is the true winner)", file=sys.stderr)
-    by_codec = defaultdict(list)
-    for s, p in zip(hold_w, pred_class_labels):
-        by_codec[s["winner"]].append(p)
-    codec_lines = []
     print(f"{'true winner':<12} {'n':>5} {'acc':>7}", file=sys.stderr)
-    for c in CLASSES:
-        ps = by_codec.get(c, [])
-        n = len(ps)
-        a = sum(1 for p in ps if p == c) / max(1, n) if n > 0 else 0.0
-        line = f"{c:<12} {n:>5} {a:>7.3f}"
-        print(line, file=sys.stderr); codec_lines.append(line)
+    codec_lines = format_per_codec_accuracy(hold_w, pred_class_labels, CLASSES)
+    for line in codec_lines:
+        print(line, file=sys.stderr)
 
     # Per-class winner distribution.
     print("\n## Per-class winner distribution (training+holdout combined)", file=sys.stderr)
-    by_cls_all = defaultdict(Counter)
-    for s in samples:
-        by_cls_all[s["class"]][s["winner"]] += 1
-    cls_winner_lines = []
     print(f"{'class':<12} {'n':>5} {'best codec → share':>40}", file=sys.stderr)
-    for cls in sorted(by_cls_all):
-        ctr = by_cls_all[cls]
-        n = sum(ctr.values())
-        share = " ".join(f"{c}={ctr[c]/n*100:.1f}%" for c in CLASSES if ctr.get(c, 0) > 0)
-        line = f"{cls:<12} {n:>5} {share}"
-        print(line, file=sys.stderr); cls_winner_lines.append(line)
+    cls_winner_lines = format_per_class_winner_distribution(samples, CLASSES)
+    for line in cls_winner_lines:
+        print(line, file=sys.stderr)
 
     # ----- Persist model JSON (matches v14 schema with leakyrelu activation) -----
     layers = []
@@ -781,25 +531,20 @@ def main() -> int:
         + [f"cclass_{c}" for c in CCLASSES]
         + ["target_band"]
     )
-    config_names = {i: CLASSES[i] for i in range(len(CLASSES))}
 
-    out = {
-        "n_inputs": int(X_tr.shape[1]),
-        "n_outputs": int(len(CLASSES)),
-        "scaler_mean": mean.tolist(),
-        "scaler_scale": scale.tolist(),
-        "feat_cols": feat_cols,
-        "extra_axes": [],
-        "activation": "leakyrelu",
-        "layers": layers,
-        "schema_version_tag": "zenpicker.metapicker.v0.5.5codec",
-        "config_names": config_names,
-        "n_cells": int(len(CLASSES)),
-        "training_objective": "minimum_bytes_at_target_zensim_band_5codec_v0.5",
-        "safety_profile": "size_optimal",
-        "safety_report": {"passed": True, "violations": []},
-        "bake_name": "zenpicker_meta_v0.5_5codec",
-        "calibration_metrics": {
+    write_metapicker_json(
+        OUT_JSON,
+        n_inputs=int(X_tr.shape[1]),
+        classes=CLASSES,
+        scaler_mean=mean.tolist(),
+        scaler_scale=scale.tolist(),
+        feat_cols=feat_cols,
+        layers=layers,
+        activation="leakyrelu",
+        schema_version_tag="zenpicker.metapicker.v0.5.5codec",
+        bake_name="zenpicker_meta_v0.5_5codec",
+        training_objective="minimum_bytes_at_target_zensim_band_5codec_v0.5",
+        calibration_metrics={
             "mlp_holdout_acc": float(acc),
             "mlp_dbytes_vs_jxl_baseline_pct": float(pct(mlp_b)),
             "oracle_dbytes_vs_jxl_baseline_pct": float(pct(oracle_b)),
@@ -808,9 +553,7 @@ def main() -> int:
             "n_train_imgs": int(len(all_imgs) - n_hold),
             "n_hold_imgs": int(n_hold),
         },
-        "family_order_csv": ",".join(CLASSES),
-    }
-    OUT_JSON.write_text(json.dumps(out, indent=2))
+    )
     print(f"\n[wrote] {OUT_JSON} ({OUT_JSON.stat().st_size:,} B)", file=sys.stderr)
 
     report_path = OUT_JSON.with_suffix(".report.txt")

@@ -443,6 +443,35 @@ hard one's tree-friendly threshold are different inductive biases).
 
 ### Changed — Python training pipeline
 
+- **dedup: extract `_metapicker_lib` from v12/v14/v15 metapicker forks**
+  (Tier-1 #5,
+  `zensim/benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md`). New
+  `zentrain/tools/_metapicker_lib.py` (~451 LOC, 18-symbol API) hosts
+  the shared meta-picker scaffolding (classify_stem byte-identical
+  v12/v14/v15, cclass_one_hot, load_features, load_sweep_tsvs,
+  build_band_winners, image_disjoint_split, cell_bytes_for,
+  bytes_delta_vs_baseline, format_per_class_report / per_codec_accuracy
+  / per_class_winner_distribution, write_metapicker_json,
+  forward_metapicker). Sibling to `_picker_lib.py` because the
+  meta-picker concern (cross-codec classifier learning argmin-bytes at a
+  target zensim band) is structurally distinct from the per-codec
+  picker concern (cross-config knob-tuple regression). Migrated:
+  `tools/v14_metapicker_train.py` (430 → 280 LOC, -34.9%),
+  `tools/v15_metapicker_train.py` (839 → 582 LOC, -30.6%),
+  `tools/v15_compare_pickers.py` (357 → 267 LOC, -25.2%).
+  `tools/v12_metapicker_train.py` DEPRECATED with a startup-banner
+  warning pointing callers at v14 (4-codec superseding) — source kept
+  for audit. Aggregate: -482 LOC removed from the 4 wrapper scripts,
+  +650 LOC in the new shared lib + tests (regression harness gained).
+  New `zentrain/tools/test_metapicker_lib.py` ships 8 unit tests
+  (PASS); the parity tests carry verbatim copies of the v12 and v14
+  pre-migration `classify_stem` and the v15_compare pre-migration
+  `forward()` body to assert byte-equivalence on 26 probe stems + 30
+  random MLP inputs. Per-script `_migration_evidence.txt` documents
+  the 9-point inline-vs-lib structural equivalence. Tracking doc
+  `docs/PICKER_LIB_MIGRATION.md` extended with a full DEDUP-C
+  addendum + follow-on candidates (`_predict_lib`, Tier-1 #4 zensim
+  recipe forks, Tier-2 #9 CodecFamily enum consistency).
 - **dedup: migrate 4 ablation tools to `_picker_lib`** (Tier-1 #6,
   `zensim/benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md`).
   `zentrain/tools/{feature_ablation,feature_group_ablation,validate_schema,capacity_sweep}.py`

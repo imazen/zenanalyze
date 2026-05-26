@@ -1,0 +1,83 @@
+DEDUP-C migration evidence — tools/v14_metapicker_train.py
+============================================================
+Date: 2026-05-26
+Commit: pending (about to land)
+Parent: cc4cebae main | dedup: migrate 4 ablation tools to _picker_lib (Tier-1 #6)
+
+Before: 430 LOC, all helpers inlined (classify_stem, cclass_one_hot,
+        load_features, load_sweep_tsvs, build_band_winners, holdout split,
+        cell_bytes_for, per-class report formatting, JSON writer).
+
+After:  280 LOC (-150 LOC, -34.9%). Wrapper now owns only v14-specific
+        concerns: sklearn MLPClassifier, 4-codec CLASSES list, baseline
+        choice, training-objective tag. All scaffolding routed through
+        `zentrain/tools/_metapicker_lib.py`.
+
+Functional equivalence verified by:
+
+  1. `_metapicker_lib.classify_stem` is byte-identical to the v14 inline
+     `classify_stem` body (proven by test_classify_stem_parity_v14 in
+     `zentrain/tools/test_metapicker_lib.py`, which carries a verbatim
+     copy of the v14 pre-migration impl and asserts equality on 26 probe
+     stems including all branches: gen-screen__, gen-doc__, gen-chart__,
+     gen-line__, gen-mixed__, terminal/macos/browser keywords, chart/
+     stockquote keywords, scan/invoice keywords, synthetic/checker
+     keywords, default-photo fallback, edge cases like empty/short stems).
+
+  2. `_metapicker_lib.cclass_one_hot(cls)` produces identical vectors to
+     the v14 inline impl for all 6 cclass inputs (photo, screen, lineart,
+     document, synthetic, unknown).
+
+  3. `_metapicker_lib.load_features(features_tsv, named_feats)` produces
+     identical `(feats, cclass_lookup)` to the v14 inline impl: it uses
+     the same csv.DictReader, the same try/except KeyError/ValueError
+     row-skip, the same `.png` extension append, the same cclass_*
+     >0.5 priority then classify_stem fallback.
+
+  4. `_metapicker_lib.load_sweep_tsvs(data_dir)` produces an identical
+     DataFrame to the v14 inline impl: same column projection
+     [image_path, codec, q, encoded_bytes, score_zensim], same dropna,
+     same image rsplit, same codec canonicalization, same int64 bytes
+     cast, same Float zensim cast.
+
+  5. `_metapicker_lib.build_band_winners(df, bands, band_tol, classes)`
+     produces identical samples to the v14 inline impl: same per-band
+     filter via abs(zensim-band)<=band_tol, same per-(image,band,codec)
+     min via groupby+pivot_table, same winner=argmin(codec_bytes), same
+     {image, band, winner, codec_bytes, n_codecs} schema.
+
+  6. `_metapicker_lib.image_disjoint_split(samples, seed=7)` produces
+     identical (train, hold) to v14's inline split: same
+     `random.Random(seed)`, same `sorted({s["image"]})` then shuffle,
+     same `n_hold = max(1, len(all_imgs) // 5)`.
+
+  7. `_metapicker_lib.bytes_delta_vs_baseline(hold, pred, "zenjxl")`
+     produces identical (base_b, mlp_b, oracle_b, pct) to v14's inline
+     impl: same cell_bytes_for fallback, same sum() loops.
+
+  8. `_metapicker_lib.format_per_class_report` produces identical line
+     content to v14's inline report loop (same `"{cls:<12} {n:>5}
+     {correct/max(1,n):>7.3f} {mlp_pct:>+12.2f} {ora_pct:>+14.2f}"`
+     format string; same by_cls grouping by `cclass_lookup[image]` or
+     fallback to `classify_stem(image[:-4])`).
+
+  9. `_metapicker_lib.write_metapicker_json` writes an identical JSON
+     to v14's inline writer: same key order, same int/float coercion,
+     same `safety_report`, same `family_order_csv` join, same
+     `n_outputs == len(classes)` (not len(mlp.classes_) — preserves the
+     v14 invariant when all classes are observed during training).
+
+Why no live A/B run captured here: the v14 trainer requires sweep TSVs
+under /tmp/v14-prep/data/{zenwebp,zenjxl,zenavif,zenjpeg}/ plus the
+features TSV at /mnt/v/output/zensim/v06-rebalance/zenanalyze_union_
+rebalanced_cclass.tsv. Neither was staged when this dedup chunk ran.
+The 9-point equivalence above is the functional gate; the migration's
+correctness rests on the unit tests in test_metapicker_lib.py (passing
+8/8 on 2026-05-26) plus the inline-vs-lib structural equivalence
+documented per-helper above.
+
+To regenerate live evidence when the data is back: stage /tmp/v14-prep/
+data, run v14_metapicker_train.py before and after via `jj op restore`
+to switch parents, diff the resulting model.json files (should be
+byte-identical because both code paths execute the same numpy + sklearn
+calls in the same order).

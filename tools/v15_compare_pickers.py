@@ -21,10 +21,16 @@ Pipeline:
 
 Usage:
     python3 tools/v15_compare_pickers.py
+
+DEDUP-C (2026-05-26): shared scaffolding extracted to
+`zentrain/tools/_metapicker_lib.py`. This wrapper now owns only
+comparator-specific concerns: MODELS table, side-by-side formatting.
+The forward-pass implementation is delegated to
+`_metapicker_lib.forward_metapicker` (byte-identical to the local impl
+this script used to carry — see test_metapicker_lib for proof).
 """
 from __future__ import annotations
 
-import csv
 import json
 import random
 import sys
@@ -34,14 +40,31 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-REPO = Path("/home/lilith/work/zen/zenanalyze")
+# Make `zentrain/tools/_metapicker_lib.py` importable.
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "zentrain" / "tools"))
+from _metapicker_lib import (
+    BANDS_DEFAULT,
+    BAND_TOL_DEFAULT,
+    SEED_DEFAULT,
+    CCLASSES,
+    classify_stem,
+    cclass_one_hot,
+    load_features,
+    build_band_winners,
+    image_disjoint_split,
+    cell_bytes_for,
+    forward_metapicker,
+)
+
+
 JOINED_CACHE = Path("/tmp/v15-prep/joined.parquet")
 FEATURES_TSV = Path(
     "/mnt/v/output/zensim/v06-rebalance/zenanalyze_union_rebalanced_cclass.tsv"
 )
-BANDS = [70.0, 75.0, 80.0, 85.0, 90.0]
-BAND_TOL = 1.5
-SEED = 7
+BANDS = BANDS_DEFAULT
+BAND_TOL = BAND_TOL_DEFAULT
+SEED = SEED_DEFAULT
 
 NAMED_FEATS = [
     "aspect_min_over_max", "chroma_complexity", "colourfulness",
@@ -50,7 +73,6 @@ NAMED_FEATS = [
     "laplacian_variance", "log_pixels", "luma_histogram_entropy",
     "uniformity", "variance",
 ]
-CCLASSES = ["photo", "screen", "lineart", "document", "synthetic"]
 
 
 # Models to compare. Each entry must list the codec families the model
@@ -74,108 +96,6 @@ MODELS = [
 ]
 
 
-def classify_stem(stem: str) -> str:
-    s = stem.lower()
-    if s.startswith("gen-screen__"):
-        return "screen"
-    if s.startswith("gen-doc__"):
-        return "document"
-    if s.startswith("gen-chart__") or s.startswith("gen-line__"):
-        return "lineart"
-    if s.startswith("gen-mixed__"):
-        return "photo"
-    if any(p in s for p in ["terminal", "windows", "macos", "ubuntu", "screen", "gui_", "browser", "ide", "editor"]):
-        return "screen"
-    if any(p in s for p in ["chart", "graph", "diagram", "logo", "infographic", "stockquote"]):
-        return "lineart"
-    if any(p in s for p in ["scan", "document", "invoice"]):
-        return "document"
-    if any(p in s for p in ["synthetic", "checker", "noise_", "thin_lines", "gradient_v_", "gradient_h_"]):
-        return "synthetic"
-    return "photo"
-
-
-def cclass_one_hot(cls: str) -> list[float]:
-    return [1.0 if c == cls else 0.0 for c in CCLASSES]
-
-
-def load_features() -> tuple[dict[str, list[float]], dict[str, str]]:
-    feats: dict[str, list[float]] = {}
-    cclass_lookup: dict[str, str] = {}
-    with open(FEATURES_TSV) as f:
-        rdr = csv.DictReader(f, delimiter="\t")
-        for r in rdr:
-            try:
-                vec = [float(r[c] or 0) for c in NAMED_FEATS]
-            except (KeyError, ValueError):
-                continue
-            stem = r["stem"]
-            if not stem.endswith(".png"):
-                stem = stem + ".png"
-            feats[stem] = vec
-            for c in CCLASSES:
-                col = f"cclass_{c}"
-                if r.get(col) and float(r[col]) > 0.5:
-                    cclass_lookup[stem] = c
-                    break
-            else:
-                cclass_lookup[stem] = classify_stem(stem.removesuffix(".png"))
-    return feats, cclass_lookup
-
-
-def build_band_winners(df: pd.DataFrame, classes_all: list[str]) -> list[dict]:
-    """Build cells for ALL 5 codecs (so each model's eval has access to its
-    universe). Cells with <2 codecs in band are kept (so v0.5 PNG-only
-    cells appear); each model's accuracy is conditioned on the cells
-    where its codec set has ≥1 entry in band."""
-    samples: list[dict] = []
-    rows_in_any_band = []
-    for band in BANDS:
-        sub = df[(df["zensim"] - band).abs() <= BAND_TOL].copy()
-        sub["band"] = band
-        rows_in_any_band.append(sub)
-    bucketed = pd.concat(rows_in_any_band, ignore_index=True)
-    g = bucketed.groupby(["image", "band", "codec"], as_index=False)["bytes"].min()
-    wide = g.pivot_table(index=["image", "band"], columns="codec", values="bytes", aggfunc="min")
-    for (image, band), row in wide.iterrows():
-        codec_bytes = {c: int(row[c]) for c in classes_all if c in row.index and pd.notna(row[c])}
-        if not codec_bytes:
-            continue
-        winner = min(codec_bytes, key=codec_bytes.get)
-        samples.append({
-            "image": image, "band": float(band),
-            "winner": winner, "codec_bytes": codec_bytes,
-            "n_codecs": len(codec_bytes),
-        })
-    return samples
-
-
-def leaky_relu(x, slope=0.01):
-    return np.where(x > 0, x, slope * x)
-
-
-def relu(x):
-    return np.maximum(x, 0)
-
-
-def forward(model: dict, X: np.ndarray) -> np.ndarray:
-    """Numpy forward pass. Standardize, then dense → activation → dense ...
-    Final layer is identity (raw logits). Returns argmax indices."""
-    mean = np.array(model["scaler_mean"], dtype=np.float32)
-    scale = np.array(model["scaler_scale"], dtype=np.float32)
-    Z = ((X - mean) / scale).astype(np.float32)
-    act = model.get("activation", "relu").lower()
-    af = leaky_relu if act in ("leakyrelu", "leaky_relu") else relu
-    layers = model["layers"]
-    for i, layer in enumerate(layers):
-        W = np.asarray(layer["W"], dtype=np.float32)
-        b = np.asarray(layer["b"], dtype=np.float32)
-        Z = Z @ W + b
-        if i < len(layers) - 1:
-            Z = af(Z)
-    return np.argmax(Z, axis=1)
-
-
 def evaluate(model_entry: dict, hold: list[dict], feats: dict, cclass_lookup: dict,
              baseline: str = "zenjxl") -> dict:
     """Forward through model, compute bytes Δ + per-class breakdown."""
@@ -192,14 +112,8 @@ def evaluate(model_entry: dict, hold: list[dict], feats: dict, cclass_lookup: di
         feat = feats[s["image"]] + cclass_one_hot(cls) + [s["band"]]
         X.append(feat)
     X = np.array(X, dtype=np.float32)
-    pred_idx = forward(model, X)
+    pred_idx = forward_metapicker(model, X)
     pred_codecs = [classes[i] for i in pred_idx]
-
-    def cell_bytes_for(s, codec):
-        if codec in s["codec_bytes"]:
-            return s["codec_bytes"][codec]
-        # Fallback: max bytes among in-band codecs (worst-case penalty).
-        return max(s["codec_bytes"].values())
 
     base_b = sum(cell_bytes_for(s, baseline) for s in hold)
     mlp_b = sum(cell_bytes_for(s, p) for s, p in zip(hold, pred_codecs))
@@ -254,7 +168,7 @@ def evaluate(model_entry: dict, hold: list[dict], feats: dict, cclass_lookup: di
 
 
 def main() -> int:
-    feats, cclass_lookup = load_features()
+    feats, cclass_lookup = load_features(FEATURES_TSV, NAMED_FEATS, verbose=False)
     if not JOINED_CACHE.exists():
         sys.stderr.write(f"missing {JOINED_CACHE}; run tools/v15_metapicker_train.py first\n")
         return 1
@@ -262,18 +176,14 @@ def main() -> int:
     sweep = sweep[sweep["image"].isin(feats.keys())].copy()
 
     classes_all = ["zenjpeg", "zenwebp", "zenjxl", "zenavif", "zenpng"]
-    samples = build_band_winners(sweep, classes_all)
+    samples = build_band_winners(sweep, BANDS, BAND_TOL, classes_all)
 
     # Use SAME filter as v15 trainer for the comparison: ≥2 codecs in band.
     samples = [s for s in samples if s["n_codecs"] >= 2]
 
     # Image-disjoint 80/20 split with deterministic seed (matches v15).
-    rng = random.Random(SEED)
-    all_imgs = sorted({s["image"] for s in samples})
-    rng.shuffle(all_imgs)
+    _, hold, all_imgs, _ = image_disjoint_split(samples, seed=SEED)
     n_hold = max(1, len(all_imgs) // 5)
-    hold_imgs = set(all_imgs[:n_hold])
-    hold = [s for s in samples if s["image"] in hold_imgs]
 
     print(f"# holdout: {len(hold)} cells over {n_hold} images "
           f"(seed={SEED}, ≥2-codec filter)\n", file=sys.stdout)
