@@ -80,6 +80,14 @@ zenpicker-train --input ... --codec zenjpeg --out ... --hidden 128,128 --seed 0
 # Legacy ridge baseline:
 zenpicker-train --mode ridge --input ... --codec zenjpeg \
     --target-column score_zensim --out ridge.bin
+
+# zentrain teacher → student distillation (per-cell HistGB teacher's
+# DENSE soft bytes_log → pure-Rust MLP student via soft-target MSE):
+zenpicker-train --input ... --codec zenjpeg --out distilled.bin \
+    --val-frac 0.25 --distill
+#   --soft-weight 0.5   # optional soft↔hard blend (1.0 = pure soft = zentrain)
+#   --export-dataset E  # just export the teacher dataset parquet and exit
+#   --soft-targets S    # distill against a pre-computed soft-target sidecar
 ```
 
 A TOML recipe can supply defaults (`--manifest recipe.toml`); CLI
@@ -94,6 +102,33 @@ grid, same `feat_0..feat_N` feature set), so
 on the SAME data — isolating the trainer implementation from feature /
 cell / grid differences. The held-out argmin accuracy + byte overhead
 of the two should be in the same ballpark (the port is faithful).
+
+## Teacher → student distillation (`--distill`)
+
+Faithfully replicates zentrain's full recipe: a per-cell
+`HistGradientBoostingRegressor` teacher (`max_iter=400, max_depth=8,
+lr=0.05, l2=0.5`; `< 50` reaching-row cells fall back to the per-cell
+nanmean) produces DENSE per-`(row, cell)` soft `bytes_log`, and the
+pure-Rust MLP student distills against them via **pure soft-target
+MSE** (no hard blend / temperature / sample weighting — zentrain's
+default). Held-out eval is `argmin(prediction, mask=reach)` vs the HARD
+oracle. The teacher is a one-time OFFLINE step
+(`scripts/teacher_soft_targets.py`, sklearn) — the Rust runtime gains
+**no Python dependency**; `--distill` shells to it once, then distills
+in Rust. Inputs are still image features + `zq_norm` only (no
+q-leakage; manifest `q_is_input = false`).
+
+**Honest result on this corpus:** distillation does **not** close the
+gap. HistGB teacher held-out argmin **0.476**; distilled MLP student
+**0.161** — worse than the direct hard-target MLP **0.216**; the
+measured soft↔hard blends (α=1.0, 0.7) are below baseline too. This
+reproduces zentrain's own behavior
+(distilled student 0.187 ≪ teacher 0.392): the teacher's argmin
+advantage is a tree-structure property the smooth MLP can't absorb on
+a 5-q-level corpus. The gap is **data-limited**, not
+implementation-limited. Ship the direct hard-target MLP; closing the
+gap needs the dense q + size sweep (a separate data-gen task). Full
+numbers + verdict: `benchmarks/zenpicker_train_distill_2026-05-27.md`.
 
 ## Data-coverage caveat
 

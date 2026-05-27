@@ -169,3 +169,121 @@ fn pack_rows(ds: &PickerDataset, x_std: &[f64], rows: &[usize]) -> (Vec<f64>, Ve
     }
     (x, y)
 }
+
+/// Pack the given rows' standardized features + a DENSE distillation
+/// target matrix. At `soft_weight = 1.0` (zentrain's recipe) the target
+/// is the teacher's pure soft `bytes_log` (the teacher fills every (row,
+/// cell), so the target is NaN-free and the student's MSE is unmasked).
+/// At `soft_weight < 1.0` the target blends in the HARD `bytes_log` where
+/// the cell is reachable: `soft_weight·soft + (1−soft_weight)·hard`;
+/// unreachable cells (hard = NaN) stay at the soft value so the target
+/// remains dense.
+fn pack_rows_soft(
+    ds: &PickerDataset,
+    x_std: &[f64],
+    soft: &[f64],
+    rows: &[usize],
+    n_in: usize,
+    n_cells: usize,
+    soft_weight: f64,
+) -> (Vec<f64>, Vec<f64>) {
+    let mut x = Vec::with_capacity(rows.len() * n_in);
+    let mut y = Vec::with_capacity(rows.len() * n_cells);
+    for &r in rows {
+        x.extend_from_slice(&x_std[r * n_in..(r + 1) * n_in]);
+        for c in 0..n_cells {
+            let s = soft[r * n_cells + c];
+            let h = ds.bytes_log[r * n_cells + c];
+            let t = if soft_weight >= 1.0 || !h.is_finite() {
+                s
+            } else {
+                soft_weight * s + (1.0 - soft_weight) * h
+            };
+            y.push(t);
+        }
+    }
+    (x, y)
+}
+
+/// Distillation variant of [`run_search`]: trains each student on the
+/// teacher's DENSE soft targets (`soft`, row-major `n_rows × n_cells`),
+/// but evaluates on `val_rows` against the HARD within-cell-optimal
+/// oracle in `ds` — exactly as zentrain scores its distilled student.
+/// Ranking + tie-break are identical (held-out argmin accuracy, ties by
+/// bytes-log SROCC).
+///
+/// `soft_weight` is the distillation blend (1.0 = zentrain's pure
+/// soft-target MSE; < 1.0 mixes in the hard within-cell-optimal target
+/// where reachable — a principled extension probed when pure soft
+/// distillation does not close the teacher↔student argmin gap).
+#[allow(clippy::too_many_arguments)]
+pub fn run_search_distill(
+    ds: &PickerDataset,
+    x_std: &[f64],
+    soft: &[f64],
+    train_rows: &[usize],
+    val_rows: &[usize],
+    grid: &[GridPoint],
+    base: &MlpConfig,
+    soft_weight: f64,
+    mut log: impl FnMut(&str),
+) -> Option<SearchResult> {
+    if grid.is_empty() {
+        return None;
+    }
+    let n_in = ds.n_in;
+    let n_out = ds.n_cells;
+
+    let (x_tr, y_tr) = pack_rows_soft(ds, x_std, soft, train_rows, n_in, n_out, soft_weight);
+    let n_train = train_rows.len();
+
+    let mut best: Option<(usize, Mlp, MlpConfig, PickerEval, f64)> = None;
+    let mut trail: Vec<TrailRow> = Vec::with_capacity(grid.len());
+
+    for (gi, gp) in grid.iter().enumerate() {
+        let cfg = MlpConfig {
+            hidden: gp.hidden.clone(),
+            lr: gp.lr,
+            seed: gp.seed,
+            ..base.clone()
+        };
+        let model = train_mlp(&x_tr, &y_tr, n_train, n_in, n_out, &cfg);
+        // Eval against the HARD oracle (distillation changes the training
+        // target only; decision quality is judged vs the true optimum).
+        let eval = evaluate_picker(&model, ds, x_std, val_rows);
+        let (srocc, argmin) = match &eval {
+            Some(e) => (e.bytes_panel.srocc, e.argmin_acc),
+            None => (f64::NAN, f64::NAN),
+        };
+        log(&format!(
+            "[distill] cand {gi}: hidden={:?} lr={} seed={} -> heldout bytes-SROCC={:.4} argmin_acc={:.4} (n_iter={})",
+            gp.hidden, gp.lr, gp.seed, srocc, argmin, model.n_iter
+        ));
+        trail.push((gp.clone(), srocc, argmin));
+
+        if let Some(e) = eval {
+            let key = if e.argmin_acc.is_finite() {
+                e.argmin_acc
+            } else {
+                f64::NEG_INFINITY
+            };
+            let better = match &best {
+                None => true,
+                Some((_, _, _, be, bkey)) => {
+                    key > *bkey || (key == *bkey && e.bytes_panel.srocc > be.bytes_panel.srocc)
+                }
+            };
+            if better {
+                best = Some((gi, model, cfg, e, key));
+            }
+        }
+    }
+
+    best.map(|(idx, model, cfg, eval, _)| SearchResult {
+        best_model: model,
+        best_cfg: cfg,
+        best_eval: eval,
+        trail,
+        selected_index: idx,
+    })
+}

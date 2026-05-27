@@ -102,8 +102,52 @@ pub struct MlpPickerManifest {
     pub znpr_version: u8,
     /// Held-out picker numbers (honest — no q-leakage).
     pub heldout: HeldoutManifest,
+    /// Present only for distilled bakes (teacher → student). `None` for a
+    /// direct hard-target fit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distillation: Option<DistillManifest>,
     pub data_coverage_caveat: String,
     pub follow_ons: Vec<String>,
+}
+
+/// Provenance for teacher → student distillation (zentrain's recipe).
+#[derive(Debug, Serialize, Clone)]
+pub struct DistillManifest {
+    /// `"histgb_per_cell_soft_target_mse"` — the zentrain recipe id.
+    pub recipe: String,
+    pub recipe_note: String,
+    /// Teacher model family + hyperparameters.
+    pub teacher_kind: String,
+    pub teacher_max_iter: u32,
+    pub teacher_max_depth: u32,
+    pub teacher_learning_rate: f64,
+    pub teacher_l2_regularization: f64,
+    pub teacher_min_cell_rows: u32,
+    pub teacher_random_state: u64,
+    pub teacher_params_fingerprint: String,
+    /// How many of the `n_cells` cells got a real per-cell teacher (vs the
+    /// per-cell nanmean fallback for cells with < min_cell_rows reaching
+    /// train rows).
+    pub n_cells_with_teacher: usize,
+    /// The student's distillation loss form.
+    pub student_loss: String,
+    /// Distillation blend weight on the soft target (1.0 = zentrain's
+    /// pure soft-target MSE; < 1.0 mixed in hard targets where reachable).
+    pub soft_weight: f64,
+    /// Path + sha256 of the dataset export the teacher was fit on.
+    pub teacher_dataset_export_path: String,
+    pub teacher_dataset_export_sha256: String,
+    /// Path + sha256 of the teacher's soft-target sidecar parquet.
+    pub soft_targets_path: String,
+    pub soft_targets_sha256: String,
+    /// The Python teacher script that produced the soft targets.
+    pub teacher_script: String,
+    /// Teacher's OWN held-out argmin accuracy (the distillation ceiling),
+    /// measured by the Python step on the val split.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teacher_heldout_argmin_acc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teacher_heldout_overhead_mean: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -234,6 +278,7 @@ pub fn bake_mlp_picker_to_znpr_v3(
     cell_labels: &[String],
     codec_family: &str,
     zq_targets: &[i64],
+    distilled: bool,
 ) -> Result<Vec<u8>, TrainError> {
     let baked = mlp.layers_for_bake();
     let n_layers = baked.len();
@@ -275,7 +320,8 @@ pub fn bake_mlp_picker_to_znpr_v3(
         "metadata": [
             { "key": "zenpicker.codec_family", "type": "utf8", "text": codec_family },
             { "key": "zenpicker.formulation", "type": "utf8", "text": "within_cell_optimal_bytes_argmin" },
-            { "key": "zenpicker_train.model_kind", "type": "utf8", "text": "leakyrelu_mlp_picker" },
+            { "key": "zenpicker_train.model_kind", "type": "utf8", "text": if distilled { "leakyrelu_mlp_picker_distilled" } else { "leakyrelu_mlp_picker" } },
+            { "key": "zenpicker_train.training_target", "type": "utf8", "text": if distilled { "histgb_per_cell_soft_bytes_log" } else { "hard_within_cell_optimal_bytes_log" } },
             { "key": "zenpicker_train.image_feature_names", "type": "utf8", "text": feature_names.join(",") },
             // The full input order: image features then zq_norm.
             { "key": "zenpicker_train.input_order", "type": "utf8", "text": format!("{},zq_norm", feature_names.join(",")) },
@@ -399,6 +445,8 @@ pub struct MlpPickerManifestInputs<'a> {
     pub cfg: &'a MlpConfig,
     pub search: SearchManifest,
     pub heldout: HeldoutManifest,
+    /// Distillation provenance, when this is a distilled bake.
+    pub distillation: Option<DistillManifest>,
 }
 
 /// Full MLP picker bake step: serialize → write → sibling TOML manifest.
@@ -417,6 +465,7 @@ pub fn bake_mlp_picker(
         inputs.cell_labels,
         inputs.codec_family,
         inputs.zq_targets,
+        inputs.distillation.is_some(),
     )?;
     fs::write(out_path, &bytes)
         .map_err(|e| TrainError::Io(format!("write {}: {e}", out_path.display())))?;
@@ -452,7 +501,11 @@ pub fn bake_mlp_picker(
             .to_string(),
         zq_targets: inputs.zq_targets.to_vec(),
         model: MlpModelManifest {
-            kind: "leakyrelu_mlp_picker".to_string(),
+            kind: if inputs.distillation.is_some() {
+                "leakyrelu_mlp_picker_distilled".to_string()
+            } else {
+                "leakyrelu_mlp_picker".to_string()
+            },
             hidden: inputs.cfg.hidden.clone(),
             activation: "leakyrelu".to_string(),
             leaky_slope: inputs.cfg.leaky_slope,
@@ -472,6 +525,7 @@ pub fn bake_mlp_picker(
         bake_bytes: bytes.len(),
         znpr_version: 3,
         heldout: inputs.heldout,
+        distillation: inputs.distillation.clone(),
         data_coverage_caveat: "The unified_v13_zenjpeg_cvvdp parquet sweeps only 5 q levels \
             {10,30,60,80,90} per image, so the 'reaches target_zq' ladder is COARSE. Per \
             zensim/CLAUDE.md 'Dense sampling for trained models', a production picker needs \

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-05-27 — zenpicker-train teacher → student distillation)
+
+- **Ported zentrain's teacher → student distillation** (the part the
+  hard-target MLP port skipped). `zenpicker-train --distill` faithfully
+  replicates `train_hybrid.py`: a per-cell HistGradientBoostingRegressor
+  teacher (`HISTGB_FULL`: `max_iter=400, max_depth=8, lr=0.05,
+  l2=0.5`, `< 50` reaching-row cells fall back to the per-cell nanmean),
+  `teacher_predict_all` → DENSE per-(row,cell) soft `bytes_log`, then the
+  pure-Rust LeakyReLU MLP student distills via **pure soft-target MSE**
+  (no hard blend / temperature / sample weighting — zentrain's default).
+  Held-out eval is `argmin(prediction, mask=reach)` vs the HARD oracle.
+  New `distill.rs` (`export_teacher_dataset`, `load_soft_targets`,
+  `TeacherParams`), `run_search_distill` in `search.rs`,
+  `scripts/teacher_soft_targets.py` (the offline sklearn teacher — the
+  Rust runtime gains NO Python dep), `DistillManifest` + a distilled
+  ZNPR-v3 bake metadata flag. `--soft-weight α` adds a soft↔hard blend
+  knob. The teacher dataset export + soft targets are content-addressed
+  (sha256-gated, zstd parquet). New test `tests/distill.rs`.
+- **Honest result — distillation does NOT close the gap (data-limited).**
+  Same `unified_v13_zenjpeg_cvvdp.parquet` (5109 rows, 36 cells, 301
+  inputs, grouped 0.25 holdout). HistGB teacher held-out argmin
+  **0.476** (overhead 0.063); distilled MLP student (α=1.0) **0.161**
+  (overhead 0.108) — WORSE than the direct hard-target MLP **0.216**
+  (`8df4713`); the measured soft↔hard blends (α=1.0, 0.7) are below
+  baseline too. This reproduces zentrain's own behavior (its distilled student 0.187 ≪ its teacher
+  0.392): the teacher's argmin advantage is a tree-structure property
+  the smooth MLP can't absorb on a 5-q-level corpus. The gap is
+  data-limited (sweep has only q {10,30,60,80,90}), not
+  distillation-implementation-limited; closing it is blocked on the
+  dense q + size sweep (separate data-gen task). Ship recommendation:
+  keep the direct hard-target MLP. Full numbers + verdict:
+  `benchmarks/zenpicker_train_distill_2026-05-27.md`.
+
 ### Changed (2026-05-27 — zenpicker-train MLP port, q-leakage fix)
 
 - **`zenpicker-train` advanced from the linear ridge skeleton to a real

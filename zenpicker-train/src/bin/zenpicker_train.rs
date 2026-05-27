@@ -26,10 +26,11 @@ use std::process::ExitCode;
 use serde::Deserialize;
 
 use zenpicker_train::{
-    CodecFilter, GridPoint, MlpConfig, MlpPickerManifestInputs, SearchCandidate, SearchManifest,
-    TrainError, bake_mlp_picker, bake_picker, build_picker_dataset, default_grid,
-    default_zq_targets, evaluate, fit_standardizer, grouped_split_picker, load_training_rows,
-    run_search, standardize_all, train_ridge,
+    CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, SearchCandidate,
+    SearchManifest, TeacherParams, TrainError, bake_mlp_picker, bake_picker, build_picker_dataset,
+    default_grid, default_zq_targets, evaluate, export_teacher_dataset, fit_standardizer,
+    grouped_split_picker, load_soft_targets, load_training_rows, run_search, run_search_distill,
+    standardize_all, teacher_params_fingerprint, train_ridge,
 };
 
 const USAGE: &str = "\
@@ -54,6 +55,27 @@ OPTIONS:
     --seed <N>              (mlp) Seed override (default 0). With --hidden, a single
                             deterministic fit.
 
+  mlp distillation (zentrain teacher -> student recipe):
+    --distill               Distill the MLP student against a per-cell HistGB
+                            teacher's DENSE soft bytes_log targets (zentrain's
+                            full recipe), instead of the direct hard-target fit.
+                            Orchestrates: export dataset -> run teacher script ->
+                            load soft targets -> distill. q stays OUT of inputs.
+    --teacher-script <PATH> Python teacher (default: alongside this crate's
+                            scripts/teacher_soft_targets.py). One-time OFFLINE
+                            target-gen step; the Rust runtime gains no Python dep.
+    --export-dataset <PATH> Just export the Rust-built dataset parquet (the
+                            teacher's exact train rows + hard targets) and exit.
+                            For running the teacher step manually.
+    --soft-targets <PATH>   Distill against a pre-computed soft-target parquet
+                            (skips the teacher-script shell-out; pairs with a
+                            prior --export-dataset + manual teacher run).
+    --python <BIN>          Python interpreter for --distill (default: python3).
+    --soft-weight <F>       Distillation blend (default 1.0 = zentrain's pure soft-target
+                            MSE). < 1.0 mixes in the hard within-cell-optimal target where
+                            reachable: soft_weight*soft + (1-soft_weight)*hard. A principled
+                            extension to probe when pure soft distillation doesn't close the gap.
+
   ridge-mode only:
     --target-column <NAME>  Supervised target column (e.g. score_zensim).
     --lambda <F>            Ridge L2 penalty (default 1.0).
@@ -75,6 +97,12 @@ struct RecipeToml {
     include_q: Option<bool>,
     hidden: Option<String>,
     seed: Option<u64>,
+    distill: Option<bool>,
+    teacher_script: Option<String>,
+    export_dataset: Option<String>,
+    soft_targets: Option<String>,
+    python: Option<String>,
+    soft_weight: Option<f64>,
 }
 
 struct Args {
@@ -89,6 +117,12 @@ struct Args {
     include_q: Option<bool>,
     hidden: Option<String>,
     seed: Option<u64>,
+    distill: Option<bool>,
+    teacher_script: Option<String>,
+    export_dataset: Option<String>,
+    soft_targets: Option<String>,
+    python: Option<String>,
+    soft_weight: Option<f64>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
@@ -104,6 +138,12 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         include_q: None,
         hidden: None,
         seed: None,
+        distill: None,
+        teacher_script: None,
+        export_dataset: None,
+        soft_targets: None,
+        python: None,
+        soft_weight: None,
     };
     let mut it = argv.iter();
     while let Some(arg) = it.next() {
@@ -138,6 +178,18 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
                 )
             }
             "--include-q" => a.include_q = Some(true),
+            "--distill" => a.distill = Some(true),
+            "--teacher-script" => a.teacher_script = Some(next_val(&mut it, "--teacher-script")?),
+            "--export-dataset" => a.export_dataset = Some(next_val(&mut it, "--export-dataset")?),
+            "--soft-targets" => a.soft_targets = Some(next_val(&mut it, "--soft-targets")?),
+            "--python" => a.python = Some(next_val(&mut it, "--python")?),
+            "--soft-weight" => {
+                a.soft_weight = Some(
+                    next_val(&mut it, "--soft-weight")?
+                        .parse()
+                        .map_err(|e| format!("--soft-weight: {e}"))?,
+                )
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -205,6 +257,17 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             val_frac,
             args.hidden.or(recipe.hidden),
             args.seed.or(recipe.seed),
+            DistillOpts {
+                distill: args.distill.or(recipe.distill).unwrap_or(false),
+                teacher_script: args.teacher_script.or(recipe.teacher_script),
+                export_dataset: args.export_dataset.or(recipe.export_dataset),
+                soft_targets: args.soft_targets.or(recipe.soft_targets),
+                python: args
+                    .python
+                    .or(recipe.python)
+                    .unwrap_or_else(|| "python3".to_string()),
+                soft_weight: args.soft_weight.or(recipe.soft_weight).unwrap_or(1.0),
+            },
         ),
         "ridge" => run_ridge(
             &input,
@@ -220,6 +283,25 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// Distillation orchestration options (zentrain teacher → student).
+struct DistillOpts {
+    distill: bool,
+    teacher_script: Option<String>,
+    export_dataset: Option<String>,
+    soft_targets: Option<String>,
+    python: String,
+    /// Distillation blend (1.0 = pure soft-target MSE, zentrain's recipe).
+    soft_weight: f64,
+}
+
+/// Default location of the bundled Python teacher script — sibling to
+/// this crate's `Cargo.toml`. Resolved at build time via `CARGO_MANIFEST_DIR`.
+fn default_teacher_script() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("teacher_soft_targets.py")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_mlp(
     input: &str,
@@ -229,6 +311,7 @@ fn run_mlp(
     val_frac: f64,
     hidden_override: Option<String>,
     seed_override: Option<u64>,
+    distill_opts: DistillOpts,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let codec_family = codec.clone().unwrap_or_else(|| "unknown".to_string());
     eprintln!(
@@ -268,7 +351,79 @@ fn run_mlp(
     let (mean, scale) = fit_standardizer(&ds.features, ds.n_in, &train_rows);
     let x_std = standardize_all(&ds.features, ds.n_in, &mean, &scale);
 
+    // --export-dataset: write the teacher's exact dataset parquet and exit.
+    if let Some(export_path) = &distill_opts.export_dataset {
+        let sha = export_teacher_dataset(&ds, &train_rows, &val_rows, Path::new(export_path))?;
+        eprintln!(
+            "[zenpicker-train] exported teacher dataset: {export_path} (sha256 {sha}); \
+             n_rows={} n_cells={} n_in={} (raw teacher inputs incl. zq_norm). \
+             Run the teacher script next to produce soft_targets.parquet.",
+            ds.n_rows(),
+            ds.n_cells,
+            ds.n_in
+        );
+        return Ok(());
+    }
+
+    // Distillation: obtain the teacher's DENSE soft targets, either by
+    // orchestrating the offline teacher step (--distill) or from a
+    // pre-computed sidecar (--soft-targets).
+    let teacher_params = TeacherParams::default();
+    let distill_state: Option<DistillState> = if distill_opts.distill {
+        Some(orchestrate_teacher(
+            &ds,
+            &train_rows,
+            &val_rows,
+            out_path,
+            &teacher_params,
+            &distill_opts,
+        )?)
+    } else if let Some(sp) = &distill_opts.soft_targets {
+        eprintln!("[zenpicker-train] distilling against pre-computed soft targets: {sp}");
+        let soft = load_soft_targets(Path::new(sp), ds.n_rows(), ds.n_cells)?;
+        Some(DistillState {
+            soft_path: sp.clone(),
+            soft_sha256: soft.sha256.clone(),
+            export_path: String::new(),
+            export_sha256: soft.source_export_sha256.clone(),
+            n_cells_with_teacher: soft.n_cells_with_teacher,
+            teacher_argmin: None,
+            teacher_overhead: None,
+            soft: soft.soft,
+        })
+    } else {
+        None
+    };
+
     let base = MlpConfig::default();
+    let distilling = distill_state.is_some();
+    if distilling {
+        eprintln!(
+            "[zenpicker-train] DISTILLATION: training student on the per-cell HistGB teacher's \
+             dense soft bytes_log (zentrain recipe); held-out eval is vs the HARD oracle."
+        );
+    }
+
+    // The closure picks hard vs soft training per the distillation state.
+    let do_search = |grid: &[GridPoint]| {
+        if let Some(st) = &distill_state {
+            run_search_distill(
+                &ds,
+                &x_std,
+                &st.soft,
+                &train_rows,
+                &val_rows,
+                grid,
+                &base,
+                distill_opts.soft_weight,
+                |m| eprintln!("{m}"),
+            )
+        } else {
+            run_search(&ds, &x_std, &train_rows, &val_rows, grid, &base, |m| {
+                eprintln!("{m}")
+            })
+        }
+    };
 
     // Either a single explicit topology or the bounded grid search.
     let (model, cfg, eval, search_manifest) = if let Some(h) = hidden_override {
@@ -279,10 +434,7 @@ fn run_mlp(
             seed: seed_override.unwrap_or(0),
         }];
         eprintln!("[zenpicker-train] single fit: hidden={hidden:?} (search disabled)");
-        let res = run_search(&ds, &x_std, &train_rows, &val_rows, &grid, &base, |m| {
-            eprintln!("{m}")
-        })
-        .ok_or("MLP fit produced no evaluable model")?;
+        let res = do_search(&grid).ok_or("MLP fit produced no evaluable model")?;
         let sm = build_search_manifest(&res, "single_fit");
         (res.best_model, res.best_cfg, res.best_eval, sm)
     } else {
@@ -291,10 +443,7 @@ fn run_mlp(
             "[zenpicker-train] bounded grid search: {} candidates (hidden × lr × seed), ranked by held-out argmin accuracy",
             grid.len()
         );
-        let res = run_search(&ds, &x_std, &train_rows, &val_rows, &grid, &base, |m| {
-            eprintln!("{m}")
-        })
-        .ok_or("grid search produced no evaluable model")?;
+        let res = do_search(&grid).ok_or("grid search produced no evaluable model")?;
         eprintln!(
             "[zenpicker-train] selected candidate #{}: hidden={:?} lr={} seed={}",
             res.selected_index, res.best_cfg.hidden, res.best_cfg.lr, res.best_cfg.seed
@@ -303,6 +452,67 @@ fn run_mlp(
         (res.best_model, res.best_cfg, res.best_eval, sm)
     };
 
+    // Build the distillation manifest block, if distilling.
+    let distillation: Option<DistillManifest> = distill_state.as_ref().map(|st| DistillManifest {
+        recipe: "histgb_per_cell_soft_target_mse".to_string(),
+        recipe_note: "zentrain/tools/train_hybrid.py: per-cell HistGradientBoostingRegressor \
+            teacher (one tree ensemble per categorical cell, fit on the reaching train rows for \
+            that cell), then teacher_predict_all produces DENSE per-(row,cell) soft bytes_log; \
+            the LeakyReLU MLP student trains on those soft targets via pure MSE (no hard-target \
+            blend, no temperature, no sample weighting). Held-out eval is argmin(prediction, \
+            mask=reach) vs the true within-cell-optimal oracle — distillation changes the \
+            training target only."
+            .to_string(),
+        teacher_kind: "sklearn.ensemble.HistGradientBoostingRegressor (per cell)".to_string(),
+        teacher_max_iter: teacher_params.max_iter,
+        teacher_max_depth: teacher_params.max_depth,
+        teacher_learning_rate: teacher_params.learning_rate,
+        teacher_l2_regularization: teacher_params.l2_regularization,
+        teacher_min_cell_rows: teacher_params.min_cell_rows,
+        teacher_random_state: teacher_params.random_state,
+        teacher_params_fingerprint: teacher_params_fingerprint(&teacher_params),
+        n_cells_with_teacher: st.n_cells_with_teacher,
+        student_loss: if distill_opts.soft_weight >= 1.0 {
+            "soft_target_mse (dense, unmasked)".to_string()
+        } else {
+            format!(
+                "blended_mse (soft_weight={:.3}*soft + {:.3}*hard where reachable)",
+                distill_opts.soft_weight,
+                1.0 - distill_opts.soft_weight
+            )
+        },
+        soft_weight: distill_opts.soft_weight,
+        teacher_dataset_export_path: st.export_path.clone(),
+        teacher_dataset_export_sha256: st.export_sha256.clone(),
+        soft_targets_path: st.soft_path.clone(),
+        soft_targets_sha256: st.soft_sha256.clone(),
+        teacher_script: distill_opts
+            .teacher_script
+            .clone()
+            .unwrap_or_else(|| default_teacher_script().display().to_string()),
+        teacher_heldout_argmin_acc: st.teacher_argmin,
+        teacher_heldout_overhead_mean: st.teacher_overhead,
+    });
+
+    if let Some(d) = &distillation {
+        eprintln!("[zenpicker-train] DISTILLED student. Teacher (HistGB) provenance:");
+        eprintln!(
+            "    soft targets   = {} (sha256 {})",
+            d.soft_targets_path, d.soft_targets_sha256
+        );
+        eprintln!(
+            "    teacher        = {} cells/{} got a per-cell teacher (else nanmean)",
+            d.n_cells_with_teacher, ds.n_cells
+        );
+        if let (Some(ta), Some(to)) = (
+            d.teacher_heldout_argmin_acc,
+            d.teacher_heldout_overhead_mean,
+        ) {
+            eprintln!(
+                "    teacher heldout= argmin_acc {ta:.4} | overhead mean {to:.3} (the distillation ceiling)"
+            );
+        }
+    }
     eprintln!("[zenpicker-train] HELD-OUT PICKER PANEL (honest — no q in inputs):");
     eprintln!("    rows scored   = {}", eval.n_rows);
     eprintln!("    cell pairs    = {}", eval.n_pairs);
@@ -356,6 +566,7 @@ fn run_mlp(
             cfg: &cfg,
             search: search_manifest,
             heldout,
+            distillation,
         },
     )?;
 
@@ -390,6 +601,136 @@ fn build_search_manifest(res: &zenpicker_train::SearchResult, kind: &str) -> Sea
         selected_index: res.selected_index,
         selection_metric: "heldout_argmin_accuracy".to_string(),
     }
+}
+
+/// In-flight distillation state threaded from the teacher step into the
+/// student fit + manifest.
+struct DistillState {
+    soft_path: String,
+    soft_sha256: String,
+    export_path: String,
+    export_sha256: String,
+    n_cells_with_teacher: usize,
+    teacher_argmin: Option<f64>,
+    teacher_overhead: Option<f64>,
+    /// Dense `n_rows × n_cells` soft targets in dataset row order.
+    soft: Vec<f64>,
+}
+
+/// `--distill` orchestration: export the dataset → shell to the Python
+/// HistGB teacher (one-time offline target-gen) → load the soft targets.
+/// The Rust runtime never imports Python; this is a build-side step.
+fn orchestrate_teacher(
+    ds: &zenpicker_train::PickerDataset,
+    train_rows: &[usize],
+    val_rows: &[usize],
+    out_path: &Path,
+    teacher_params: &TeacherParams,
+    opts: &DistillOpts,
+) -> Result<DistillState, Box<dyn std::error::Error>> {
+    let export_path = opts
+        .export_dataset
+        .clone()
+        .unwrap_or_else(|| sibling(out_path, "teacher_export.parquet"));
+    let soft_path = opts
+        .soft_targets
+        .clone()
+        .unwrap_or_else(|| sibling(out_path, "soft_targets.parquet"));
+    let stats_path = sibling(out_path, "teacher_stats.json");
+    let script = opts
+        .teacher_script
+        .clone()
+        .unwrap_or_else(|| default_teacher_script().display().to_string());
+
+    eprintln!("[zenpicker-train] [distill] exporting teacher dataset → {export_path}");
+    let export_sha = export_teacher_dataset(ds, train_rows, val_rows, Path::new(&export_path))?;
+    eprintln!("[zenpicker-train] [distill] export sha256 {export_sha}");
+
+    eprintln!(
+        "[zenpicker-train] [distill] running teacher: {} {} (HistGB max_iter={} max_depth={} lr={} l2={} min_cell_rows={})",
+        opts.python,
+        script,
+        teacher_params.max_iter,
+        teacher_params.max_depth,
+        teacher_params.learning_rate,
+        teacher_params.l2_regularization,
+        teacher_params.min_cell_rows,
+    );
+    let status = std::process::Command::new(&opts.python)
+        .arg(&script)
+        .arg("--export")
+        .arg(&export_path)
+        .arg("--out")
+        .arg(&soft_path)
+        .arg("--stats-out")
+        .arg(&stats_path)
+        .arg("--n-cells")
+        .arg(ds.n_cells.to_string())
+        .arg("--max-iter")
+        .arg(teacher_params.max_iter.to_string())
+        .arg("--max-depth")
+        .arg(teacher_params.max_depth.to_string())
+        .arg("--learning-rate")
+        .arg(teacher_params.learning_rate.to_string())
+        .arg("--l2-regularization")
+        .arg(teacher_params.l2_regularization.to_string())
+        .arg("--min-cell-rows")
+        .arg(teacher_params.min_cell_rows.to_string())
+        .arg("--random-state")
+        .arg(teacher_params.random_state.to_string())
+        .status()
+        .map_err(|e| format!("failed to launch teacher script {script:?}: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "teacher script {script:?} exited with {status}; cannot distill without soft targets"
+        )
+        .into());
+    }
+
+    let soft = load_soft_targets(Path::new(&soft_path), ds.n_rows(), ds.n_cells)?;
+    // Integrity gate: the teacher must have been fit on the export we wrote.
+    if !soft.source_export_sha256.is_empty() && soft.source_export_sha256 != export_sha {
+        return Err(format!(
+            "soft-target provenance mismatch: teacher was fit on export sha256 {}, but we wrote {}",
+            soft.source_export_sha256, export_sha
+        )
+        .into());
+    }
+
+    // Optional: parse the teacher's own held-out numbers from the stats JSON.
+    let (teacher_argmin, teacher_overhead) = read_teacher_stats(&stats_path);
+
+    Ok(DistillState {
+        soft_path,
+        soft_sha256: soft.sha256.clone(),
+        export_path,
+        export_sha256: export_sha,
+        n_cells_with_teacher: soft.n_cells_with_teacher,
+        teacher_argmin,
+        teacher_overhead,
+        soft: soft.soft,
+    })
+}
+
+/// Build a sibling path `<out_stem>.<suffix>` next to the bake output.
+fn sibling(out_path: &Path, suffix: &str) -> String {
+    let mut s = out_path.as_os_str().to_os_string();
+    s.push(".");
+    s.push(suffix);
+    PathBuf::from(s).display().to_string()
+}
+
+/// Read `{argmin_acc, overhead_mean}` from the teacher stats JSON, if present.
+fn read_teacher_stats(path: &str) -> (Option<f64>, Option<f64>) {
+    let Ok(txt) = std::fs::read_to_string(path) else {
+        return (None, None);
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else {
+        return (None, None);
+    };
+    let argmin = v.get("argmin_acc").and_then(|x| x.as_f64());
+    let overhead = v.get("overhead_mean").and_then(|x| x.as_f64());
+    (argmin, overhead)
 }
 
 #[allow(clippy::too_many_arguments)]

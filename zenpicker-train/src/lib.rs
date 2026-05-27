@@ -43,6 +43,7 @@
 #![forbid(unsafe_code)]
 
 mod bake;
+mod distill;
 mod eval;
 mod mlp;
 mod model;
@@ -52,9 +53,14 @@ mod picker_eval;
 mod search;
 
 pub use bake::{
-    BakeOutcome, HeldoutManifest, MlpModelManifest, MlpPickerManifest, MlpPickerManifestInputs,
-    ModelManifest, PickerManifest, PickerManifestInputs, SearchCandidate, SearchManifest,
-    bake_mlp_picker, bake_mlp_picker_to_znpr_v3, bake_picker, bake_ridge_to_znpr_v3, file_sha256,
+    BakeOutcome, DistillManifest, HeldoutManifest, MlpModelManifest, MlpPickerManifest,
+    MlpPickerManifestInputs, ModelManifest, PickerManifest, PickerManifestInputs, SearchCandidate,
+    SearchManifest, bake_mlp_picker, bake_mlp_picker_to_znpr_v3, bake_picker,
+    bake_ridge_to_znpr_v3, file_sha256,
+};
+pub use distill::{
+    SoftTargets, TeacherParams, export_teacher_dataset, load_soft_targets,
+    teacher_params_fingerprint,
 };
 pub use eval::{EvalReport, evaluate};
 pub use mlp::{Mlp, MlpConfig, train_mlp};
@@ -65,7 +71,7 @@ pub use pareto_dataset::{
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
 pub use picker_eval::{PickerEval, evaluate_picker};
-pub use search::{GridPoint, SearchResult, default_grid, run_search};
+pub use search::{GridPoint, SearchResult, default_grid, run_search, run_search_distill};
 
 /// Errors surfaced by the training pipeline.
 #[derive(Debug)]

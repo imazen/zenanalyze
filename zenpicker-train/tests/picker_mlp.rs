@@ -224,6 +224,7 @@ fn picker_no_q_leak_train_bake_load() {
             cfg: &cfg,
             search,
             heldout,
+            distillation: None,
         },
     )
     .expect("bake mlp picker");
