@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bake manifest records `q_is_input = false`. Honest held-out numbers on
   `unified_v13_zenjpeg_cvvdp.parquet` (5109 decision rows, grouped-by-
   image holdout): Rust MLP **argmin accuracy 0.216, mean byte overhead
-  0.098**; zentrain's MLP student on the SAME data: argmin 0.187,
+  0.087**; zentrain's MLP student on the SAME data: argmin 0.187,
   overhead 0.087 — same ballpark, port is faithful. `cmaes` is not a
   zenanalyze workspace dep, so the bounded search is a grid (the spec's
   offered alternative). Comparison + numbers:

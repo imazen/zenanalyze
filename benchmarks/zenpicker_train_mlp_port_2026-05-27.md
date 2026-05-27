@@ -56,24 +56,30 @@ port. Both use a grouped-by-image holdout (Rust 0.25, zentrain's default
 
 ## Held-out results (HONEST — no q-leakage)
 
+Ranked by held-out argmin accuracy (the picker decision-quality metric
+zentrain gates on), the Rust search selected candidate #0
+(hidden=[64,64], lr=2e-3, seed=0):
+
 | Trainer | model | held-out argmin acc | mean byte overhead |
 |---|---|---:|---:|
-| **Rust `zenpicker-train`** | MLP 301→64→64→36, LeakyReLU | **0.216** | 0.098 |
+| **Rust `zenpicker-train`** | MLP 301→64→64→36, LeakyReLU | **0.216** | 0.087 |
 | zentrain `train_hybrid` | MLP student 610→64→64→36, LeakyReLU | **0.187** | 0.087 |
 | zentrain `train_hybrid` | HistGB teacher (not ported) | 0.392 | 0.054 |
 
 Rust MLP held-out full panel on predicted-vs-actual `bytes_log` over
-reachable cells (selected candidate hidden=[64,64], lr=2e-3, seed=0):
+reachable cells (1283 val rows, 42 392 reachable cell pairs):
 
 | stat | value |
 |---|---:|
 | SROCC | 0.067 |
-| (best-other-candidate SROCC) | 0.146 |
+| PWRC | 0.614 |
+| Z-RMSE | 0.962 |
 | argmin accuracy | 0.216 |
-| byte overhead mean / p50 / p90 | 0.098 / 0.064 / 0.273 |
+| byte overhead mean / p50 / p90 | 0.087 / 0.027 / 0.244 |
 
 The MLP-student numbers are in the same ballpark (Rust 0.216 vs zentrain
-0.187 argmin accuracy; overhead 9.8% vs 8.7%) — the port is faithful.
+0.187 argmin accuracy; identical 8.7% mean overhead) — the port is
+faithful.
 The ~3 pp argmin gap and the overhead gap are explained by legitimate
 differences, NOT a port bug: zentrain's MLP is a *distillation student*
 of a HistGB teacher (so it inherits some tree structure), it carries
