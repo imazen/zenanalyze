@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-05-27 — spec §4 chunk 1)
+
+- **New `zenpicker-train` workspace member** — the bounded first chunk
+  of the per-codec quality picker trainer from §4 of
+  `zenmetrics/docs/ZEN_CLOUD_AND_CONSOLIDATION_SPEC_2026-05-26.md`. A
+  binary + library that loads a unified sweep parquet
+  (`image_path, codec, q, knob_tuple_json, score_*, feat_0..feat_N`),
+  filters to one codec, builds `(feat_* [+ q] → --target-column)` rows,
+  trains a deterministic ridge linear baseline, and emits a **ZNPR v3**
+  bake via the `zenpredict-bake` JSON pipeline (`bake_from_json_str` —
+  no hand-rolled wire format) plus a sibling `<out>.toml` reproduce-this
+  manifest. Held-out evaluation uses a grouped-by-image split (≥20%) and
+  the canonical `zenstats` Mohammadi 2025 panel. CLI: `--input`,
+  `--codec`, `--target-column`, `--out`, `--manifest`, `--lambda`,
+  `--val-frac`, `--include-q`. New path dep on
+  `../../zenmetrics/crates/zenstats` (zero zenmetrics-root deps).
+  Smoke-run on `unified_v13_zenjpeg_cvvdp.parquet` (36 000 rows ×
+  301 features, codec=zenjpeg, target=score_zensim): bake loads through
+  `zenpredict::Model` + `zenpicker::MetaPicker`. End-to-end test (2/2
+  PASS) mints a tiny synthetic parquet → train → bake → load → assert
+  finite + ZNPR v3 header (`0x03`). **This is a skeleton baseline, not
+  the full picker trainer** — the scikit-learn-parity hyperparameter
+  search, CubeCL acceleration, cross-codec MetaPicker auto-regen, and
+  dense size/quality sampling are documented follow-ons in
+  `zenpicker-train/README.md`.
+
 ### Changed (2026-05-26 — DEDUP-B3)
 
 - **`zentrain/tools/_picker_lib.load_features_raw` grew `drop_nan_rows:

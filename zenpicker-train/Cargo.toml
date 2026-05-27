@@ -1,0 +1,57 @@
+[package]
+name = "zenpicker-train"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+repository = "https://github.com/imazen/zenanalyze"
+description = "Per-codec quality picker trainer: load a unified sweep parquet, train a baseline (features -> target-quality) model, and emit a ZNPR v3 bake loadable by zenpicker::MetaPicker / zenpredict::Model. Skeleton front-end for spec §4 (full hyperparameter search + CubeCL + cross-codec MetaPicker auto-regen are documented follow-ons)."
+keywords = ["picker", "codec", "training", "znpr", "image"]
+categories = ["multimedia::images"]
+authors = ["Lilith River <lilith@imazen.io>"]
+rust-version = "1.93"
+readme = "README.md"
+
+[[bin]]
+name = "zenpicker-train"
+path = "src/bin/zenpicker_train.rs"
+
+[dependencies]
+# Runtime + bake-side composer. Path deps to the local siblings —
+# crates.io zenpredict 0.1.0 is v2-only; v3 lives here. (per
+# zensim/CLAUDE.md "zenpredict crate dependency policy".)
+zenpredict = { path = "../zenpredict", default-features = false, features = ["std"] }
+# The canonical ZNPR v3 serializer. We build a `BakeRequestJson` and
+# run it through `bake_from_json` — the JSON pipeline mandate, no
+# hand-rolled wire format.
+zenpredict-bake = { path = "../zenpredict-bake", default-features = false, features = ["std"] }
+# IQA statistical panel (Mohammadi 2025). Self-contained member of
+# the zenmetrics workspace with zero zenmetrics-root deps, so this
+# path dep drags in no GPU infrastructure.
+zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false }
+# Columnar input. Same major as zenpredict-bake's `fit-yj` feature
+# (parquet 58.3.0) to keep the lockfile single-version.
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "58.3.0", default-features = false }
+# Manifest serialization (reproduce-this recipe, mirrors §3).
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+toml = "1.1.2"
+# Input-file provenance hashing for the manifest.
+sha2 = "0.11.0"
+
+[dev-dependencies]
+# Mint a tiny synthetic parquet in the end-to-end test.
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "58.3.0", default-features = false }
+# Confirm the bake loads through the consumer that will use per-codec
+# picker bakes (the meta-picker wraps the same zenpredict::Predictor).
+zenpicker = { path = "../zenpicker", default-features = false, features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
