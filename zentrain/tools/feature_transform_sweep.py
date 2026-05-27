@@ -347,6 +347,17 @@ ALL_TRANSFORMS: dict[str, Callable[[np.ndarray, list[float]], np.ndarray]] = {
 
 # ---------------------------------------------------------------------------
 # Screen scoring — aggregate Pearson lift across cells
+#
+# NOT a Mohammadi-2025 IQA panel. These per-cell helpers compute
+# |Pearson| / |Spearman| / signed-Pearson between a transformed feature
+# column and `bytes_log[:, cell]` for the picker transform screen. They
+# get called `n_features × n_transforms × n_param_grid × n_cells` times
+# in the inner loop; routing through the `panel` subprocess would be a
+# ≥1000× slowdown for no semantic gain (this isn't a (pred, MOS) panel).
+#
+# If you need the Mohammadi panel against MOS targets, import from
+# `scripts/lib/zen_stats.py` (vendored shim around the canonical Rust
+# `panel` binary).
 # ---------------------------------------------------------------------------
 
 
