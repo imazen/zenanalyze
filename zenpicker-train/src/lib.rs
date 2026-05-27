@@ -1,54 +1,71 @@
-//! # zenpicker-train — per-codec quality picker trainer (skeleton)
+//! # zenpicker-train — per-codec quality picker trainer
 //!
-//! This is the **bounded first chunk** of the `zenpicker-train`
-//! binary described in spec §4 of
-//! `zenmetrics/docs/ZEN_CLOUD_AND_CONSOLIDATION_SPEC_2026-05-26.md`.
-//! It establishes the END-TO-END pipeline — load a unified sweep
-//! parquet, filter to one codec, build `(features → target-quality)`
-//! rows, train a minimal baseline, emit a **ZNPR v3** bake via the
-//! `zenpredict-bake` JSON pipeline + a sibling TOML reproduce-this
-//! manifest, and report the held-out [`zenstats`] panel.
+//! Trains a per-codec quality picker by porting zentrain's established
+//! within-cell-optimal formulation (`zentrain/tools/train_hybrid.py`)
+//! to Rust: load a unified sweep parquet, factor each codec config into
+//! a **categorical cell**, and for every `(image, target_zq)` compute
+//! the within-cell-optimal `bytes_log[cell]` (= ln of the min encoded
+//! bytes over configs in the cell that reach the requested quality).
+//! An MLP maps `(image features, zq_norm)` → `bytes_log[0..n_cells]`;
+//! the codec picks via `argmin(bytes_log, mask=reach)`.
 //!
-//! It is deliberately NOT the full picker trainer. See
-//! [`README`](https://github.com/imazen/zenanalyze) and the "Follow-ons"
-//! section there for what's intentionally out of scope (the
-//! scikit-learn-parity hyperparameter search, CubeCL GPU
-//! acceleration, cross-codec `MetaPicker` auto-regeneration, dense
-//! size/quality sampling discipline).
+//! ## NO q-leakage
 //!
-//! ## What the skeleton learns
+//! The codec's per-encode `q` is **never** an input feature. `q` is the
+//! decision the picker exists to make (and it is monotone with achieved
+//! score, so feeding it in trivially inflates any "predict the score"
+//! task — that was the prior skeleton's bug). The only inputs are
+//! IMAGE features (`feat_*`) + `zq_norm` (the user's REQUESTED target
+//! quality / 100). The supervised target is per-cell `bytes_log`, not
+//! the achieved score.
 //!
-//! A per-codec quality picker maps `(image features, target knobs)
-//! → achieved quality`. The codec binary-searches encode params to
-//! hit a target score; the picker is what makes that search a single
-//! forward pass instead of an encode sweep. This skeleton trains a
-//! ridge-regularized linear baseline (one F32 ZNPR layer, identity
-//! activation) on `feat_* (+ q)` → `--target-column` and bakes it.
-//! A linear model is an honest baseline, not SOTA — the mature
-//! non-linear search is a documented follow-on.
+//! ## Models
 //!
-//! ## Bake shape
+//! - [`Mlp`] — the real picker: a LeakyReLU MLP (matching zentrain's
+//!   student topology), N-cell output, trained via [`train_mlp`] with
+//!   a bounded hyperparameter [`search`].
+//! - [`RidgeModel`] — a legacy single-layer linear baseline kept for
+//!   the cheap-reference path.
 //!
-//! The output is a single-output ZNPR v3 model loadable by
-//! [`zenpredict::Model::from_bytes`] and (for the regression-head
-//! case) by [`zenpicker::MetaPicker::predictor`]. The standardizing
-//! scaler is folded into the model's `scaler_mean` / `scaler_scale`;
-//! the linear weights live in one identity-activation layer.
+//! Both bake to **ZNPR v3** via the `zenpredict-bake` JSON pipeline
+//! (no hand-rolled wire format) and load through
+//! [`zenpredict::Model::from_bytes`] / [`zenpicker::MetaPicker`].
+//!
+//! ## Data-coverage caveat
+//!
+//! The available `unified_v13_zenjpeg_cvvdp.parquet` sweeps only 5 `q`
+//! levels {10,30,60,80,90}, so the "reaches target_zq" ladder is
+//! COARSE — sparse on quality per zensim/CLAUDE.md "Dense sampling for
+//! trained models". This validates the FORMULATION and the
+//! Rust-vs-zentrain port; a dense q+size sweep is a documented
+//! follow-on, not part of this bounded chunk.
 
 #![forbid(unsafe_code)]
 
 mod bake;
 mod eval;
+mod mlp;
 mod model;
+mod pareto_dataset;
 mod parquet_input;
+mod picker_eval;
+mod search;
 
 pub use bake::{
-    BakeOutcome, ModelManifest, PickerManifest, PickerManifestInputs, bake_picker,
-    bake_ridge_to_znpr_v3, file_sha256,
+    BakeOutcome, HeldoutManifest, MlpModelManifest, MlpPickerManifest, MlpPickerManifestInputs,
+    ModelManifest, PickerManifest, PickerManifestInputs, SearchCandidate, SearchManifest,
+    bake_mlp_picker, bake_mlp_picker_to_znpr_v3, bake_picker, bake_ridge_to_znpr_v3, file_sha256,
 };
 pub use eval::{EvalReport, evaluate};
+pub use mlp::{Mlp, MlpConfig, train_mlp};
 pub use model::{RidgeModel, Standardizer, train_ridge};
+pub use pareto_dataset::{
+    PickerDataset, build_picker_dataset, default_zq_targets, fit_standardizer,
+    grouped_split_picker, standardize_all,
+};
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
+pub use picker_eval::{PickerEval, evaluate_picker};
+pub use search::{GridPoint, SearchResult, default_grid, run_search};
 
 /// Errors surfaced by the training pipeline.
 #[derive(Debug)]

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (2026-05-27 — zenpicker-train MLP port, q-leakage fix)
+
+- **`zenpicker-train` advanced from the linear ridge skeleton to a real
+  per-codec picker by porting zentrain's within-cell-optimal
+  formulation** (`zentrain/tools/train_hybrid.py build_dataset`) to
+  Rust. The picker now factors each codec config into a categorical cell
+  (zenjpeg: `subsampling|progressive|sharp_yuv|effort` → 36 cells),
+  builds per-`(image, target_zq)` `bytes_log[cell]` targets (= ln of the
+  min encoded bytes over configs in the cell that reach the requested
+  quality, with a `reach` mask), trains a LeakyReLU MLP `(image feat_*,
+  zq_norm) → bytes_log[0..N]` via a bounded grid search ranked by
+  held-out argmin accuracy, and bakes a multi-output ZNPR v3 model. The
+  codec picks via `argmin(bytes_log, mask=reach)`. New modules
+  `mlp.rs` (MLP + Adam + masked MSE), `pareto_dataset.rs` (within-cell
+  dataset builder), `picker_eval.rs` (argmin acc + byte overhead +
+  bytes-log panel), `search.rs` (bounded grid). New `bake_mlp_picker`
+  path + `MlpPickerManifest`. The ridge baseline is preserved behind
+  `--mode ridge`.
+- **THE q-LEAKAGE FIX.** The skeleton put the codec's chosen `q` in the
+  input features → inflated SROCC 0.9988 (q is monotone with score). The
+  MLP picker never sees `q`: inputs are image features + `zq_norm` (the
+  user's *requested* quality); `q` is the decision the picker makes. The
+  bake manifest records `q_is_input = false`. Honest held-out numbers on
+  `unified_v13_zenjpeg_cvvdp.parquet` (5109 decision rows, grouped-by-
+  image holdout): Rust MLP **argmin accuracy 0.216, mean byte overhead
+  0.098**; zentrain's MLP student on the SAME data: argmin 0.187,
+  overhead 0.087 — same ballpark, port is faithful. `cmaes` is not a
+  zenanalyze workspace dep, so the bounded search is a grid (the spec's
+  offered alternative). Comparison + numbers:
+  `benchmarks/zenpicker_train_mlp_port_2026-05-27.md`; adapter for the
+  Rust-vs-zentrain comparison: `zenpicker-train/scripts/unified_to_zentrain.py`.
+- **Data-coverage caveat (honest):** the parquet sweeps only 5 q levels
+  {10,30,60,80,90}, so the reach ladder is COARSE — this validates the
+  FORMULATION + port, NOT a production picker. Dense q + size sweep is a
+  documented follow-on.
+
 ### Added (2026-05-27 — spec §4 chunk 1)
 
 - **New `zenpicker-train` workspace member** — the bounded first chunk

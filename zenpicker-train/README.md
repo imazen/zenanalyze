@@ -1,84 +1,133 @@
 # zenpicker-train
 
-Per-codec quality picker trainer for the zen codec stack. Loads a
-unified sweep parquet, trains a model that maps image features (plus
-the encode-quality knob) to an achieved-quality metric, and emits a
-**ZNPR v3** bake loadable by `zenpredict::Model` / `zenpicker`.
+Per-codec quality picker trainer for the zen codec stack. Ports
+zentrain's established within-cell-optimal picker formulation
+(`zentrain/tools/train_hybrid.py`) to Rust, trains a LeakyReLU MLP,
+and emits a **ZNPR v3** bake loadable by `zenpredict::Model` /
+`zenpicker::MetaPicker`.
 
-This crate is the **bounded first chunk** of `zenpicker-train` as
-described in §4 of
-`zenmetrics/docs/ZEN_CLOUD_AND_CONSOLIDATION_SPEC_2026-05-26.md`. It is
-a working END-TO-END skeleton, **not** the full picker trainer. See
-[Follow-ons](#follow-ons) for what is intentionally out of scope.
+## What the picker predicts (and why `q` is NOT an input)
 
-## What it does (this chunk)
+A picker's job is to choose codec encode parameters that hit a
+**requested** quality at minimum size. So the inputs are IMAGE features
+plus the *target* quality the user asks for — never the codec's chosen
+`q`. `q` is the decision the picker makes, and it is monotone with the
+achieved score, so feeding it in trivially inflates any "predict the
+score" task. (A prior skeleton put `q` in the features and reported
+SROCC 0.9988 — that was q-leakage, not signal.)
 
-1. Loads a unified sweep parquet — schema
-   `(image_path, codec, q, knob_tuple_json, score_*, feat_0..feat_N)`.
-2. Filters to one codec (`--codec`), builds `(feat_* [+ q] →
-   --target-column)` training rows, dropping rows with non-finite
-   features or target.
-3. Trains a **deterministic ridge-regularized linear baseline**
-   (closed-form normal equations; a per-feature standardizer folded
-   into the bake scaler). This is an honest baseline, not SOTA.
-4. Emits a ZNPR v3 bake through the **`zenpredict-bake` JSON
-   pipeline** (`bake_from_json_str`) — never a hand-rolled wire format
-   — plus a sibling `<out>.toml` reproduce-this manifest recording the
-   input path + sha256, row counts, feature names, model hyperparams,
-   bake sha256, and held-out panel numbers.
-5. Evaluates on a **grouped held-out split** (≥20% of *images*, no
-   image leaks across the split) via the canonical **`zenstats`**
-   Mohammadi 2025 panel (SROCC / PLCC / KROCC / OR / PWRC / Z-RMSE).
+Following zentrain's `build_dataset`, this trainer:
+
+1. Factors each codec config into a **categorical cell** — the discrete
+   knob combination from `knob_tuple_json` (for zenjpeg:
+   `subsampling | progressive | sharp_yuv | effort`).
+2. For each `(image, target_zq)` over the `ZQ_TARGETS` grid (step 5 in
+   0..70, step 2 in 70..100 — the **requested** quality, an INPUT),
+   computes the within-cell optimal:
+   `bytes_log[cell] = ln(min encoded_bytes over configs in the cell
+   whose score_zensim ≥ target_zq)`, with a `reach[cell]` mask.
+3. Trains an MLP `(image feat_*, zq_norm) → bytes_log[0..n_cells]`.
+4. At inference the codec picks `cell = argmin(predicted bytes_log,
+   mask = reach)` — the smallest config that reaches the requested
+   quality.
+
+The supervised target is per-cell `bytes_log`, not the achieved score.
+
+## Model + search
+
+- **MLP** (default mode): LeakyReLU(0.01) hidden layers, identity
+  output, Adam, MSE, internal early stopping — matching zentrain's
+  student topology (`--hidden`, default `128,128`). NaN targets
+  (unreachable cells) are masked out of the loss.
+- **Bounded grid search** over `{hidden topology} × {learning rate} ×
+  {seed}` (6 candidates), ranked by held-out **argmin accuracy** (the
+  picker decision-quality metric zentrain gates on via
+  `min_argmin_acc`). `cmaes` is not a zenanalyze workspace dependency,
+  so the grid is the bounded search the spec offers as the alternative.
+- **`--mode ridge`**: a legacy single-layer linear baseline
+  (`feat_* [+q] → --target-column`). NOTE: `ridge --include-q` IS
+  q-leakage by construction — it exists only for the legacy baseline
+  comparison; the MLP mode never sees `q`.
+
+## Held-out evaluation (honest)
+
+A **grouped-by-image** split (≥20% of *images*, no image in both
+sides). The report covers:
+
+- the full **`zenstats`** Mohammadi-2025 panel (SROCC / PLCC / KROCC /
+  OR / PWRC / Z-RMSE) of predicted-vs-actual `bytes_log` over reachable
+  cells, and
+- zentrain's headline picker metrics: **argmin accuracy** + byte
+  overhead (mean / p50 / p90).
+
+Once `q` is out of the features the numbers are MUCH lower than the
+leaky 0.9988 — that is correct and the point. A picker over 36
+fine-grained cells with sparse-q data is a hard rank problem.
 
 ## Usage
 
 ```sh
+# Real MLP picker (default mode):
 zenpicker-train \
     --input  unified_v13_zenjpeg_cvvdp.parquet \
     --codec  zenjpeg \
-    --target-column score_zensim \
-    --include-q \
-    --out    zenjpeg_picker_skeleton.bin
+    --out    zenjpeg_picker_mlp.bin \
+    --val-frac 0.25
+
+# Single explicit topology (disables the search):
+zenpicker-train --input ... --codec zenjpeg --out ... --hidden 128,128 --seed 0
+
+# Legacy ridge baseline:
+zenpicker-train --mode ridge --input ... --codec zenjpeg \
+    --target-column score_zensim --out ridge.bin
 ```
 
 A TOML recipe can supply defaults (`--manifest recipe.toml`); CLI
-flags override. Recipe keys mirror the flags: `input`, `codec`,
-`target_column`, `out`, `lambda`, `val_frac`, `include_q`.
+flags override.
+
+## Rust-vs-zentrain comparison
+
+`scripts/unified_to_zentrain.py` converts a unified parquet into
+zentrain's Pareto + features TSVs (same images, same cells, same zq
+grid, same `feat_0..feat_N` feature set), so
+`zentrain/tools/train_hybrid.py --codec-config codec_config` can be run
+on the SAME data — isolating the trainer implementation from feature /
+cell / grid differences. The held-out argmin accuracy + byte overhead
+of the two should be in the same ballpark (the port is faithful).
+
+## Data-coverage caveat
+
+The available `unified_v13_zenjpeg_cvvdp.parquet` sweeps only **5 q
+levels {10,30,60,80,90}** per image, so the "reaches target_zq" ladder
+is COARSE — sparse on quality. Per zensim/CLAUDE.md "Dense sampling for
+trained models", a production picker needs ~30 q points + 16–20
+log-spaced sizes. This crate validates the **formulation** and the
+Rust-vs-zentrain port; it is **not** a production picker.
 
 ## Bake shape
 
-One identity-activation F32 ZNPR layer mapping `n_features → 1`. The
-standardizer lives in the bake's `scaler_mean` / `scaler_scale`; the
-linear weights are the layer weights; the intercept is the bias. The
-bake is loadable by `zenpredict::Model::from_bytes` and by
-`zenpicker::MetaPicker::new` (which wraps the same `Predictor`).
+`n_in → h0 → … → n_cells` LeakyReLU layers (identity on the output),
+F32 ZNPR v3, with the input standardizer folded into the bake's
+`scaler_mean` / `scaler_scale`. The bake is loadable by
+`zenpredict::Model::from_bytes` and by `zenpicker::MetaPicker::new`
+(which wraps the same `Predictor`).
 
-> Note: this is a **per-codec quality regression** bake (1 output),
-> not a 6-family categorical meta-picker. It deliberately does NOT
-> emit `zenpicker.family_order`, so `MetaPicker::validate_family_order`
-> will (correctly) reject it as a family picker — `MetaPicker` is used
-> here only as the runtime wrapper to confirm load + forward pass.
+> This is a per-codec picker bake, not a 6-family categorical
+> meta-picker — it does not emit `zenpicker.family_order`, so
+> `MetaPicker::validate_family_order` will (correctly) reject it as a
+> family picker. `MetaPicker` is used here only as the runtime wrapper
+> to confirm load + forward pass.
 
-## Follow-ons
+## Follow-ons (out of scope for this chunk)
 
-Documented as TODO so the next session knows the skeleton is a
-skeleton:
-
-- **Full hyperparameter search.** Port the scikit-learn-parity
-  search (cmaes / grid) the Python `zentrain` pipeline does. This
-  chunk ships a deterministic ridge baseline only — no non-linear
-  MLP, no search.
-- **CubeCL GPU acceleration** of the inner training loop (spec §4).
-- **Cross-codec `MetaPicker` auto-regeneration** — regenerate the
-  cross-codec family meta-bake whenever a per-codec bake updates
-  (spec §4 data-flow).
-- **Dense size/quality sampling discipline** per zensim/CLAUDE.md
-  (≥16–20 log-spaced sizes, q-dense in the perceptibility band,
-  k-means-stratified representative images). The skeleton trains on
-  whatever the input parquet contains.
-- **Per-band panel gate** and ship/no-ship verdict integration
-  (zenstats per-band).
-- **TOML manifest as the full reproduce-this recipe** (this chunk
-  writes a basic manifest and reads a basic recipe; the §3 trainer's
-  full manifest schema — every input file with sha256/row-count/mirror
-  URL + post-training steps — is the target).
+- **Dense q (~30 points) + log-spaced size sweep** before any
+  production bake (zensim/CLAUDE.md training-data discipline). The
+  available parquet is sparse on q — a dense sweep is a separate
+  data-gen task.
+- **Scalar prediction heads** (chroma_scale / lambda) for sweeps that
+  carry continuous Pareto axes — this parquet's knobs are all
+  categorical, so the bytes head IS the whole picker here.
+- **CubeCL GPU acceleration** of the inner MLP training loop.
+- **Cross-codec `MetaPicker` auto-regeneration** when a per-codec bake
+  updates.
+- **Per-band panel gate** + ship/no-ship verdict integration.
