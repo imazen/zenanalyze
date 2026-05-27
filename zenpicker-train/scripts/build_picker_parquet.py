@@ -40,6 +40,7 @@ import json
 import os
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -51,6 +52,36 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def sha256_many(paths, workers=16):
+    """Parallel sha256 over a list of (unique) paths. Returns {path: sha}.
+
+    The full-scale run content-addresses hundreds of thousands of encoded
+    files on a slow /mnt/v mount; serial sha256 dominates wall time. A
+    thread pool overlaps the I/O wait (the GIL is released during file
+    reads + hashlib C work), cutting the content-address pass several-fold.
+    """
+    out = {}
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for p, sha in zip(paths, ex.map(sha256_file, paths)):
+            out[p] = sha
+    return out
+
+
+def materialize_artifact(enc_path, art_path):
+    """Place the encoded file at its content-addressed artifact path.
+
+    Prefer a hardlink (instant, no byte duplication) when src + dst are on
+    the same filesystem; fall back to copy2 across filesystems. Idempotent:
+    a pre-existing artifact is left as-is (content-addressed = identical).
+    """
+    if os.path.exists(art_path):
+        return
+    try:
+        os.link(enc_path, art_path)
+    except OSError:
+        shutil.copy2(enc_path, art_path)
 
 
 def read_tsv(path):
@@ -105,6 +136,10 @@ def main():
             key = (fd["image_path"][i], int(fd["q"][i]), fd["knob_tuple_json"][i])
             feat_by_key[key] = [float(fd[c][i]) for c in fcols]
 
+        # First pass: collect valid candidate rows + their encoded paths.
+        # sha256 + artifact materialization are deferred to a parallel batch
+        # so the slow content-address I/O overlaps across the whole size.
+        pending = []  # (enc_path, row_dict, feat)
         for r in read_tsv(pareto_path):
             img_path = r["image_path"]
             q = int(r["q"])
@@ -124,12 +159,6 @@ def main():
             if feat is None:
                 continue
 
-            # Content-address the encoded bytes.
-            sha = sha256_file(enc_path)
-            art_path = os.path.join(art_dir, f"{sha}.jpg")
-            if not os.path.exists(art_path):
-                shutil.copy2(enc_path, art_path)
-
             image_basename = f"{os.path.splitext(os.path.basename(img_path))[0]}@{sz}"
             row = {
                 "image_basename": image_basename,
@@ -138,7 +167,6 @@ def main():
                 "knob_tuple_json": knob,
                 "score_zensim": score,
                 "encoded_bytes": float(r["encoded_bytes"]),
-                "encoded_sha256": sha,
                 "size_class": sz,
             }
             # carry ALL metric variants from the pareto TSV
@@ -151,7 +179,21 @@ def main():
                         pass
             for j, fv in enumerate(feat):
                 row[f"feat_{j}"] = fv
+            pending.append((enc_path, row, feat))
+
+        # Parallel content-address pass over the UNIQUE encoded paths for
+        # this size, then materialize each into artifacts/<sha>.jpg.
+        uniq_paths = sorted({p for p, _, _ in pending})
+        sha_by_path = sha256_many(uniq_paths)
+        for enc_path, sha in sha_by_path.items():
+            materialize_artifact(enc_path, os.path.join(art_dir, f"{sha}.jpg"))
+        for enc_path, row, _ in pending:
+            row["encoded_sha256"] = sha_by_path[enc_path]
             out_rows.append(row)
+        print(
+            f"  {sz}: {len(pending)} rows, {len(uniq_paths)} unique encodes content-addressed",
+            file=sys.stderr,
+        )
 
     if not out_rows:
         print("ERROR: no rows assembled", file=sys.stderr)
