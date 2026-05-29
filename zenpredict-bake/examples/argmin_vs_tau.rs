@@ -87,9 +87,14 @@ fn main() -> ExitCode {
     let model = Model::from_bytes(&bake_baseline).expect("parse baseline");
     let n_in = model.n_inputs();
     let n_out = model.n_outputs();
-    eprintln!("baseline: n_in={n_in} n_out={n_out} bytes={}", bake_baseline.len());
+    eprintln!(
+        "baseline: n_in={n_in} n_out={n_out} bytes={}",
+        bake_baseline.len()
+    );
 
-    let inputs: Vec<Vec<f32>> = (0..N_SAMPLES as u64).map(|s| synth_features(n_in, s)).collect();
+    let inputs: Vec<Vec<f32>> = (0..N_SAMPLES as u64)
+        .map(|s| synth_features(n_in, s))
+        .collect();
     let (out_base, argmin_base) = predict_all(&bake_baseline, &inputs);
 
     println!(

@@ -5,7 +5,8 @@
 //! Rust deps light).
 use zenpredict::{Model, Predictor};
 
-const BAKE: &str = "/home/lilith/work/zen/zensim/zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin";
+const BAKE: &str =
+    "/home/lilith/work/zen/zensim/zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin";
 
 #[test]
 fn reference_output_for_sine_input() {
@@ -16,7 +17,9 @@ fn reference_output_for_sine_input() {
     let bytes = std::fs::read(BAKE).unwrap();
     let model = Model::from_bytes(&bytes).unwrap();
     let n_inputs = model.n_inputs();
-    let features: Vec<f32> = (0..n_inputs).map(|i| (0.1f32 * i as f32).sin() * 5.0).collect();
+    let features: Vec<f32> = (0..n_inputs)
+        .map(|i| (0.1f32 * i as f32).sin() * 5.0)
+        .collect();
     let mut p = Predictor::new(&model);
     let out: Vec<f32> = p.predict(&features).unwrap().to_vec();
     eprintln!("zenpredict reference output[0] = {}", out[0]);

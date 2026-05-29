@@ -158,8 +158,8 @@ fn load_column(
     max_rows: Option<usize>,
 ) -> Result<Vec<f64>, String> {
     let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
-        .map_err(|e| format!("parquet open: {e}"))?;
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| format!("parquet open: {e}"))?;
     let schema = builder.schema().clone();
     let resolved_idx = if let Some(name) = col_name {
         schema
@@ -179,10 +179,7 @@ fn load_column(
     let field = schema.field(resolved_idx);
     let field_name = field.name().clone();
     let dtype = field.data_type().clone();
-    let mask = ProjectionMask::leaves(
-        builder.parquet_schema(),
-        std::iter::once(resolved_idx),
-    );
+    let mask = ProjectionMask::leaves(builder.parquet_schema(), std::iter::once(resolved_idx));
     let reader = builder
         .with_projection(mask)
         .build()
@@ -295,13 +292,10 @@ fn main() -> std::process::ExitCode {
         match a.as_str() {
             "--feature-idx" => {
                 i += 1;
-                let v: usize = args
-                    .get(i)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or_else(|| {
-                        eprintln!("error: --feature-idx requires a non-negative integer");
-                        std::process::exit(1);
-                    });
+                let v: usize = args.get(i).and_then(|s| s.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("error: --feature-idx requires a non-negative integer");
+                    std::process::exit(1);
+                });
                 col_idx = Some(v);
             }
             "--max-rows" => {

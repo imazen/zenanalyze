@@ -26,8 +26,8 @@
 //! no compact per-output-column quant scheme that maps 1:1 to ZNPR's).
 
 use onnx_pb::{
-    AttributeProto, GraphProto, ModelProto, NodeProto, OperatorSetIdProto, TensorProto,
-    TypeProto, ValueInfoProto, attribute_proto::AttributeType, tensor_proto::DataType,
+    AttributeProto, GraphProto, ModelProto, NodeProto, OperatorSetIdProto, TensorProto, TypeProto,
+    ValueInfoProto, attribute_proto::AttributeType, tensor_proto::DataType,
     tensor_shape_proto::Dimension, type_proto::Value as TypeProtoValue,
 };
 use prost::Message;
@@ -174,7 +174,11 @@ fn build_onnx_model(model: &Model, name: &str) -> Result<ModelProto, String> {
     let mut nodes: Vec<NodeProto> = Vec::new();
 
     // Standardize: (features - mean) * (1/scale).
-    initializers.push(float_tensor("scaler_mean", &scaler_mean, &[n_inputs as i64]));
+    initializers.push(float_tensor(
+        "scaler_mean",
+        &scaler_mean,
+        &[n_inputs as i64],
+    ));
     initializers.push(float_tensor(
         "scaler_scale_inv",
         &scaler_scale_inv,

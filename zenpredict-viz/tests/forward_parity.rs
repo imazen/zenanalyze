@@ -41,8 +41,8 @@ fn forward_matches_reference_predict() {
         let ref_output: Vec<f32> = predictor.predict(&features).expect("predict").to_vec();
 
         // Under test: zenpredict_viz::forward_with_taps's final output.
-        let taps_js = zenpredict_viz::forward_with_taps_native(&bytes, &features)
-            .expect("forward_with_taps");
+        let taps_js =
+            zenpredict_viz::forward_with_taps_native(&bytes, &features).expect("forward_with_taps");
         assert_eq!(
             taps_js.output.len(),
             n_outputs,

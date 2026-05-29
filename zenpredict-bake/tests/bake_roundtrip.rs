@@ -60,7 +60,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         };
         bake(&req).unwrap()
     }
@@ -132,7 +131,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -182,7 +180,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -226,7 +223,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -272,7 +268,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         };
         let bytes = bake(&req).unwrap();
         let aligned = Aligned(bytes);
@@ -391,7 +386,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -493,7 +487,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -543,7 +536,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -585,7 +577,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -640,7 +631,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -689,7 +679,6 @@ mod bake_roundtrip {
                 output_order: None,
                 compressed: false,
                 hu_permutations: None,
-
             })
             .unwrap();
             let aligned = Aligned(bytes);
@@ -737,7 +726,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -884,7 +872,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -937,7 +924,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1067,7 +1053,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1109,7 +1094,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1208,7 +1192,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap();
         let aligned = Aligned(bytes);
@@ -1263,7 +1246,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap_err();
         assert!(matches!(
@@ -1305,7 +1287,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap_err();
         assert!(matches!(err, zenpredict_bake::BakeError::MetadataKeyEmpty));
@@ -1345,7 +1326,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap_err();
         assert!(matches!(
@@ -1371,7 +1351,6 @@ mod bake_roundtrip {
             output_order: None,
             compressed: false,
             hu_permutations: None,
-
         })
         .unwrap_err();
         assert!(matches!(err, zenpredict_bake::BakeError::EmptyLayers));

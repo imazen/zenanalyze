@@ -284,8 +284,14 @@ fn locate_block(widths: &[usize], within_channel: usize) -> (usize, usize) {
 /// `zensim/src/metric.rs` (the `FEATURES_PER_CHANNEL_BASIC` doc block).
 const BASIC_FEATURES: &[(&str, &str)] = &[
     ("ssim_mean", "mean(SSIM error map)"),
-    ("ssim_4th", "(Σ d⁴ / N)^(1/4) over SSIM error map (L4 pooling)"),
-    ("ssim_2nd", "(Σ d² / N)^(1/2) over SSIM error map (L2 / RMSE pooling)"),
+    (
+        "ssim_4th",
+        "(Σ d⁴ / N)^(1/4) over SSIM error map (L4 pooling)",
+    ),
+    (
+        "ssim_2nd",
+        "(Σ d² / N)^(1/2) over SSIM error map (L2 / RMSE pooling)",
+    ),
     ("art_mean", "mean of edge-artifact map (ringing)"),
     ("art_4th", "L4 pool of edge-artifact map"),
     ("art_2nd", "L2 pool of edge-artifact map"),
@@ -293,22 +299,37 @@ const BASIC_FEATURES: &[(&str, &str)] = &[
     ("det_4th", "L4 pool of edge-detail-lost map"),
     ("det_2nd", "L2 pool of edge-detail-lost map"),
     ("mse", "mean((src - dst)²) per channel"),
-    ("hf_energy_loss", "max(0, 1 - Σ(dst-μ)²/Σ(src-μ)²) — local detail energy lost"),
-    ("hf_mag_loss", "max(0, 1 - Σ|dst-μ|/Σ|src-μ|) — L1 detail magnitude lost"),
-    ("hf_energy_gain", "max(0, Σ(dst-μ)²/Σ(src-μ)² - 1) — added local energy (ringing)"),
+    (
+        "hf_energy_loss",
+        "max(0, 1 - Σ(dst-μ)²/Σ(src-μ)²) — local detail energy lost",
+    ),
+    (
+        "hf_mag_loss",
+        "max(0, 1 - Σ|dst-μ|/Σ|src-μ|) — L1 detail magnitude lost",
+    ),
+    (
+        "hf_energy_gain",
+        "max(0, Σ(dst-μ)²/Σ(src-μ)² - 1) — added local energy (ringing)",
+    ),
 ];
 
 const PEAK_FEATURES: &[(&str, &str)] = &[
     ("ssim_max", "max(per-pixel SSIM error)"),
     ("art_max", "max(per-pixel edge-artifact)"),
     ("det_max", "max(per-pixel edge-detail-lost)"),
-    ("ssim_l8", "(Σ d⁸ / N)^(1/8) over SSIM error map (heavy-tail pooling)"),
+    (
+        "ssim_l8",
+        "(Σ d⁸ / N)^(1/8) over SSIM error map (heavy-tail pooling)",
+    ),
     ("art_l8", "L8 pool of edge-artifact map"),
     ("det_l8", "L8 pool of edge-detail-lost map"),
 ];
 
 const MASKED_FEATURES: &[(&str, &str)] = &[
-    ("masked_ssim_mean", "mean(SSIM × flatness_mask) — small errors in flat regions"),
+    (
+        "masked_ssim_mean",
+        "mean(SSIM × flatness_mask) — small errors in flat regions",
+    ),
     ("masked_ssim_4th", "L4 pool of masked SSIM error"),
     ("masked_ssim_2nd", "L2 pool of masked SSIM error"),
     ("masked_art_4th", "L4 pool of masked edge-artifact"),
@@ -317,7 +338,10 @@ const MASKED_FEATURES: &[(&str, &str)] = &[
 ];
 
 const IW_FEATURES: &[(&str, &str)] = &[
-    ("iw_ssim_mean", "mean(SSIM × iw_weight) — texture-EMPHASISED SSIM (Wang & Li 2011)"),
+    (
+        "iw_ssim_mean",
+        "mean(SSIM × iw_weight) — texture-EMPHASISED SSIM (Wang & Li 2011)",
+    ),
     ("iw_ssim_4th", "L4 pool of IW SSIM"),
     ("iw_ssim_2nd", "L2 pool of IW SSIM"),
     ("iw_art_4th", "L4 pool of IW edge-artifact"),
@@ -335,7 +359,13 @@ fn lookup_math_summary(block_tag: &str, feature_name: &str) -> String {
     };
     table
         .iter()
-        .find_map(|(n, m)| if *n == feature_name { Some((*m).to_string()) } else { None })
+        .find_map(|(n, m)| {
+            if *n == feature_name {
+                Some((*m).to_string())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| feature_name.to_string())
 }
 

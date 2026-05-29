@@ -35,11 +35,20 @@ use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 use zenpixels::{PixelDescriptor, PixelSlice};
 
 const NEW_HVS_FEATURES: &[(&str, AnalysisFeature)] = &[
-    ("feat_chroma_luma_covariance_cb", AnalysisFeature::ChromaLumaCovarianceCb),
-    ("feat_chroma_luma_covariance_cr", AnalysisFeature::ChromaLumaCovarianceCr),
+    (
+        "feat_chroma_luma_covariance_cb",
+        AnalysisFeature::ChromaLumaCovarianceCb,
+    ),
+    (
+        "feat_chroma_luma_covariance_cr",
+        AnalysisFeature::ChromaLumaCovarianceCr,
+    ),
     ("feat_info_weight_mean", AnalysisFeature::InfoWeightMean),
     ("feat_info_weight_p90", AnalysisFeature::InfoWeightP90),
-    ("feat_orientation_energy_ratio", AnalysisFeature::OrientationEnergyRatio),
+    (
+        "feat_orientation_energy_ratio",
+        AnalysisFeature::OrientationEnergyRatio,
+    ),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,11 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut lines = f.lines();
     let header_line = lines.next().ok_or("empty input")??;
     let header: Vec<&str> = header_line.split('\t').collect();
-    let col_index: HashMap<&str, usize> = header
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| (c, i))
-        .collect();
+    let col_index: HashMap<&str, usize> = header.iter().enumerate().map(|(i, &c)| (c, i)).collect();
 
     let image_path_idx = *col_index
         .get("image_path")
@@ -82,8 +87,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Detect existing HVS columns to make this idempotent.
     let new_col_names: Vec<&str> = NEW_HVS_FEATURES.iter().map(|(n, _)| *n).collect();
-    let existing_hvs: Vec<bool> =
-        new_col_names.iter().map(|c| col_index.contains_key(c)).collect();
+    let existing_hvs: Vec<bool> = new_col_names
+        .iter()
+        .map(|c| col_index.contains_key(c))
+        .collect();
     if existing_hvs.iter().any(|&b| b) {
         eprintln!(
             "WARNING: input already has some HVS columns: {:?}",
@@ -158,8 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Write original row + appended values.
         let mut out_fields = fields.clone();
-        let new_strs: Vec<String> =
-            new_vals.iter().map(|v| format_f32(*v)).collect();
+        let new_strs: Vec<String> = new_vals.iter().map(|v| format_f32(*v)).collect();
         for s in &new_strs {
             out_fields.push(s.as_str());
         }
@@ -209,8 +215,8 @@ fn compute_hvs(
     let stride = (w as usize) * 3;
     let slice = PixelSlice::new(&bytes, w, h, stride, descriptor)
         .map_err(|e| format!("PixelSlice::new: {e}"))?;
-    let results = zenanalyze::analyze_features(slice, query)
-        .map_err(|e| format!("analyze_features: {e}"))?;
+    let results =
+        zenanalyze::analyze_features(slice, query).map_err(|e| format!("analyze_features: {e}"))?;
     let mut out = Vec::with_capacity(NEW_HVS_FEATURES.len());
     for (_, feat) in NEW_HVS_FEATURES {
         let v = results.get_f32(*feat).unwrap_or(f32::NAN);

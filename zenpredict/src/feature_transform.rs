@@ -1043,7 +1043,10 @@ mod tests {
         let x = 3.0_f32;
         let y = t.apply_with_params(x, &[0.5]);
         let expected = ((x + 1.0).sqrt() - 1.0) / 0.5;
-        assert!((y - expected).abs() < 1e-5, "got {y} vs expected {expected}");
+        assert!(
+            (y - expected).abs() < 1e-5,
+            "got {y} vs expected {expected}"
+        );
 
         // λ = 1.5
         let y2 = t.apply_with_params(x, &[1.5]);
@@ -1060,7 +1063,10 @@ mod tests {
         let y = t.apply_with_params(x, &[0.5]);
         let exp = 2.0 - 0.5;
         let expected = -(((-x) + 1.0).powf(exp) - 1.0) / exp;
-        assert!((y - expected).abs() < 1e-5, "got {y} vs expected {expected}");
+        assert!(
+            (y - expected).abs() < 1e-5,
+            "got {y} vs expected {expected}"
+        );
     }
 
     #[test]
@@ -1150,11 +1156,18 @@ mod tests {
     fn yeo_johnson_extreme_negative_lambda_never_non_finite() {
         let t = FeatureTransform::YeoJohnson;
         for &lambda in &[
-            -1100.0_f32, -1000.0, -500.0, -213.0, -100.0, -50.0, -10.0, -5.0,
+            -1100.0_f32,
+            -1000.0,
+            -500.0,
+            -213.0,
+            -100.0,
+            -50.0,
+            -10.0,
+            -5.0,
         ] {
             for &x in &[
-                0.0_f32, 1e-10, 1e-6, 1e-3, 0.1, 1.0, 10.0, 100.0, 1000.0,
-                -1e-10, -1e-6, -1e-3, -0.1, -1.0, -10.0, -100.0, -1000.0,
+                0.0_f32, 1e-10, 1e-6, 1e-3, 0.1, 1.0, 10.0, 100.0, 1000.0, -1e-10, -1e-6, -1e-3,
+                -0.1, -1.0, -10.0, -100.0, -1000.0,
             ] {
                 let y = t.apply_with_params(x, &[lambda]);
                 assert!(
@@ -1170,10 +1183,7 @@ mod tests {
     fn yeo_johnson_extreme_positive_lambda_never_non_finite() {
         let t = FeatureTransform::YeoJohnson;
         for &lambda in &[10.0_f32, 50.0, 100.0, 500.0, 1000.0] {
-            for &x in &[
-                0.0_f32, 1e-10, 0.1, 1.0, 10.0,
-                -1e-10, -0.1, -1.0, -10.0,
-            ] {
+            for &x in &[0.0_f32, 1e-10, 0.1, 1.0, 10.0, -1e-10, -0.1, -1.0, -10.0] {
                 let y = t.apply_with_params(x, &[lambda]);
                 assert!(
                     y.is_finite(),
@@ -1251,10 +1261,8 @@ mod tests {
     /// JND scores).
     fn finite_test_inputs() -> [f32; 17] {
         [
-            0.0,
-            1e-30, 1e-10, 1e-6, 1e-3, 0.5, 1.0,
-            10.0, 100.0, 1e5, 1e10,
-            -1e-10, -0.5, -1.0, -10.0, -100.0, -1e5,
+            0.0, 1e-30, 1e-10, 1e-6, 1e-3, 0.5, 1.0, 10.0, 100.0, 1e5, 1e10, -1e-10, -0.5, -1.0,
+            -10.0, -100.0, -1e5,
         ]
     }
 
@@ -1305,11 +1313,7 @@ mod tests {
                     continue;
                 }
                 let y = t.apply(x);
-                assert!(
-                    y.is_finite(),
-                    "{:?} apply({x}) = {y} (non-finite)",
-                    t,
-                );
+                assert!(y.is_finite(), "{:?} apply({x}) = {y} (non-finite)", t,);
             }
         }
     }

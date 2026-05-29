@@ -128,8 +128,8 @@ fn main() {
         ("verylo_q", 14.0, 25.0, 1),
         ("pathological", 0.0, 12.0, 2),
     ];
-    let safesyn_rows = read_corpus_rows(&safesyn_path, true)
-        .expect("failed to read safesyn parquet");
+    let safesyn_rows =
+        read_corpus_rows(&safesyn_path, true).expect("failed to read safesyn parquet");
     pick_band_samples(
         &safesyn_rows,
         safesyn_targets,
@@ -141,16 +141,14 @@ fn main() {
     // on `human_score` which mirrors the dense-mix target). The dense
     // set has `pjnd_target` non-null for every row, which lets us bias
     // toward the actual JND threshold.
-    let konjnd_rows = read_corpus_rows(&konjnd_path, true)
-        .expect("failed to read konjnd parquet");
+    let konjnd_rows = read_corpus_rows(&konjnd_path, true).expect("failed to read konjnd parquet");
     pick_pjnd_anchors(&konjnd_rows, "konjnd-dense", &mut all_candidates, 2);
 
     // KADID — synthetic-distortion corpus where ssim2 clusters bimodally
     // (~125 rows in [93,94] from the heaviest distortion levels, ~10k
     // rows in [99.5, 100] from milder distortion levels). Pick one
     // from each cluster so the dropdown exposes both regimes.
-    let kadid_rows = read_corpus_rows(&kadid_path, true)
-        .expect("failed to read kadid parquet");
+    let kadid_rows = read_corpus_rows(&kadid_path, true).expect("failed to read kadid parquet");
     pick_band_samples(
         &kadid_rows,
         &[
@@ -233,8 +231,7 @@ fn main() {
             .collect(),
     };
 
-    let json = serde_json::to_string_pretty(&pack)
-        .expect("failed to serialize sample_pack json");
+    let json = serde_json::to_string_pretty(&pack).expect("failed to serialize sample_pack json");
     std::fs::write(&out_path, json).expect("failed to write sample_pack.json");
     println!(
         "✓ wrote {} ({} samples, schema={})",
@@ -276,7 +273,11 @@ fn main() {
             continue;
         }
         let mut predictor = zenpredict::Predictor::new(&model);
-        println!("\n=== diagnostic scoring on {} ({} bytes) ===", bake_name, bake_bytes.len());
+        println!(
+            "\n=== diagnostic scoring on {} ({} bytes) ===",
+            bake_name,
+            bake_bytes.len()
+        );
         let mut scores: Vec<f32> = Vec::new();
         for sample in &pack.samples {
             let feats: Vec<f32> = sample.features.iter().map(|v| *v as f32).collect();
@@ -288,7 +289,10 @@ fn main() {
                     } else {
                         format!("{:>8.3}", sample.expected_score)
                     };
-                    println!("  predicted={:>8.3}  expected={}  {}", v, exp_str, sample.label);
+                    println!(
+                        "  predicted={:>8.3}  expected={}  {}",
+                        v, exp_str, sample.label
+                    );
                     scores.push(v);
                 }
                 Err(e) => {
@@ -303,7 +307,10 @@ fn main() {
             let med = scores[scores.len() / 2];
             println!(
                 "  range [{:.2}, {:.2}]  median {:.2}  spread {:.2}",
-                lo, hi, med, hi - lo
+                lo,
+                hi,
+                med,
+                hi - lo
             );
         }
     }
@@ -332,18 +339,20 @@ fn read_corpus_rows(path: &Path, has_pjnd: bool) -> Result<CorpusRows, String> {
 
     // Build a name -> arrow-index map so projection is robust to column
     // reordering between corpora.
-    let name_to_idx = |needle: &str| -> Option<usize> {
-        arrow_fields.iter().position(|f| f.name() == needle)
-    };
+    let name_to_idx =
+        |needle: &str| -> Option<usize> { arrow_fields.iter().position(|f| f.name() == needle) };
 
     let ref_idx = name_to_idx(COL_REF).ok_or_else(|| format!("{path:?}: missing {COL_REF}"))?;
     let mix_idx = name_to_idx(COL_MIX);
     let ssim2_idx = name_to_idx(COL_SSIM2);
     let human_idx = name_to_idx("human_score");
-    let pjnd_idx = if has_pjnd { name_to_idx(COL_PJND) } else { None };
+    let pjnd_idx = if has_pjnd {
+        name_to_idx(COL_PJND)
+    } else {
+        None
+    };
 
-    let f0_idx =
-        name_to_idx("f0").ok_or_else(|| format!("{path:?}: missing f0"))?;
+    let f0_idx = name_to_idx("f0").ok_or_else(|| format!("{path:?}: missing f0"))?;
     // Sanity-check we have 372 consecutive feature cols.
     for i in 0..N_FEATURES {
         let need = format!("f{i}");
@@ -396,9 +405,8 @@ fn read_corpus_rows(path: &Path, has_pjnd: bool) -> Result<CorpusRows, String> {
         // a different order than requested.
         let bs = batch.schema();
         let bs_fields = bs.fields();
-        let get_col = |name: &str| -> Option<usize> {
-            bs_fields.iter().position(|f| f.name() == name)
-        };
+        let get_col =
+            |name: &str| -> Option<usize> { bs_fields.iter().position(|f| f.name() == name) };
         let ref_b = get_col(COL_REF).expect("ref column dropped by projection");
         let mix_b = get_col(COL_MIX);
         let ssim2_b = get_col(COL_SSIM2);
@@ -419,14 +427,16 @@ fn read_corpus_rows(path: &Path, has_pjnd: bool) -> Result<CorpusRows, String> {
         let mut feat_batch_idxs = Vec::<usize>::with_capacity(N_FEATURES);
         for i in 0..N_FEATURES {
             let name = format!("f{i}");
-            let idx = get_col(&name)
-                .ok_or_else(|| format!("{path:?}: missing {name} in batch"))?;
+            let idx = get_col(&name).ok_or_else(|| format!("{path:?}: missing {name} in batch"))?;
             feat_batch_idxs.push(idx);
         }
         let feat_arrs: Vec<&Float64Array> = feat_batch_idxs
             .iter()
             .map(|&i| {
-                cols[i].as_any().downcast_ref::<Float64Array>().expect("feature col not f64")
+                cols[i]
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .expect("feature col not f64")
             })
             .collect();
 
@@ -459,7 +469,13 @@ fn read_corpus_rows(path: &Path, has_pjnd: bool) -> Result<CorpusRows, String> {
 }
 
 fn read_opt(arr: &Option<&Float64Array>, row: usize) -> Option<f64> {
-    arr.and_then(|a| if a.is_null(row) { None } else { Some(a.value(row)) })
+    arr.and_then(|a| {
+        if a.is_null(row) {
+            None
+        } else {
+            Some(a.value(row))
+        }
+    })
 }
 
 /// Pick `count` samples per band from the source corpus, where each
@@ -541,7 +557,10 @@ fn pick_band_samples(
             let label = format_label(corpus_tag, band_label, exp, exp_src, refn);
             let id = format!(
                 "{corpus_tag}_{band_label}_{refn}",
-                refn = refn.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>()
+                refn = refn
+                    .chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '_')
+                    .collect::<String>()
             );
             out.push(CandidateRow {
                 id,
@@ -609,12 +628,13 @@ fn pick_pjnd_anchors(
             Some(v) => format!(" (PJND target {v:.2})"),
             None => String::new(),
         };
-        let label = format!(
-            "Near-PJND boundary ≈ {exp:.1}{pjnd_note} — {corpus_tag} {refn}"
-        );
+        let label = format!("Near-PJND boundary ≈ {exp:.1}{pjnd_note} — {corpus_tag} {refn}");
         let id = format!(
             "{corpus_tag}_pjnd_{refn_safe}",
-            refn_safe = refn.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>()
+            refn_safe = refn
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .collect::<String>()
         );
         out.push(CandidateRow {
             id,
@@ -629,20 +649,12 @@ fn pick_pjnd_anchors(
     }
 }
 
-fn format_label(
-    corpus: &str,
-    band: &str,
-    expected: f64,
-    src: &str,
-    refn: &str,
-) -> String {
+fn format_label(corpus: &str, band: &str, expected: f64, src: &str, refn: &str) -> String {
     let band_short = band.replace('_', " ");
     if expected.is_nan() {
         format!("{corpus} {band_short} — {refn}")
     } else {
-        format!(
-            "{corpus} {band_short} (≈{expected:.1} via {src}) — {refn}"
-        )
+        format!("{corpus} {band_short} (≈{expected:.1} via {src}) — {refn}")
     }
 }
 
@@ -653,9 +665,7 @@ fn utc_today() -> String {
         .args(["-u", "+%Y-%m-%d"])
         .output()
     {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => "unknown".into(),
     }
 }
