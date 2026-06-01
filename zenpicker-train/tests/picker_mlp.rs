@@ -225,6 +225,8 @@ fn picker_no_q_leak_train_bake_load() {
             search,
             heldout,
             distillation: None,
+            transforms: None,
+            shaping_mode: "none",
         },
     )
     .expect("bake mlp picker");

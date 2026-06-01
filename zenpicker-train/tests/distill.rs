@@ -275,6 +275,8 @@ fn teacher_export_roundtrips_and_soft_targets_distill() {
             search,
             heldout,
             distillation,
+            transforms: None,
+            shaping_mode: "none",
         },
     )
     .expect("bake distilled picker");

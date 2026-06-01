@@ -106,6 +106,10 @@ pub struct MlpPickerManifest {
     /// direct hard-target fit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distillation: Option<DistillManifest>,
+    /// Input-shaping provenance: the mode ("none"/"auto"/"yeo") and how
+    /// many of the image features got a non-Identity `feature_transform`.
+    pub input_shaping_mode: String,
+    pub input_features_shaped: usize,
     pub data_coverage_caveat: String,
     pub follow_ons: Vec<String>,
 }
@@ -279,6 +283,7 @@ pub fn bake_mlp_picker_to_znpr_v3(
     codec_family: &str,
     zq_targets: &[i64],
     distilled: bool,
+    transforms: Option<&crate::FittedTransforms>,
 ) -> Result<Vec<u8>, TrainError> {
     let baked = mlp.layers_for_bake();
     let n_layers = baked.len();
@@ -311,23 +316,43 @@ pub fn bake_mlp_picker_to_znpr_v3(
         .collect::<Vec<_>>()
         .join(",");
 
+    let mut metadata: Vec<serde_json::Value> = vec![
+        serde_json::json!({ "key": "zenpicker.codec_family", "type": "utf8", "text": codec_family }),
+        serde_json::json!({ "key": "zenpicker.formulation", "type": "utf8", "text": "within_cell_optimal_bytes_argmin" }),
+        serde_json::json!({ "key": "zenpicker_train.model_kind", "type": "utf8", "text": if distilled { "leakyrelu_mlp_picker_distilled" } else { "leakyrelu_mlp_picker" } }),
+        serde_json::json!({ "key": "zenpicker_train.training_target", "type": "utf8", "text": if distilled { "histgb_per_cell_soft_bytes_log" } else { "hard_within_cell_optimal_bytes_log" } }),
+        serde_json::json!({ "key": "zenpicker_train.image_feature_names", "type": "utf8", "text": feature_names.join(",") }),
+        // The full input order: image features then zq_norm.
+        serde_json::json!({ "key": "zenpicker_train.input_order", "type": "utf8", "text": format!("{},zq_norm", feature_names.join(",")) }),
+        serde_json::json!({ "key": "zenpicker_train.cell_labels", "type": "utf8", "text": cell_labels.join("\n") }),
+        serde_json::json!({ "key": "zenpicker_train.zq_targets", "type": "utf8", "text": zq_csv }),
+    ];
+
+    // Input shaping: emit `zentrain.feature_transforms` (+ params) so the
+    // runtime's `predict_transformed` reproduces the per-feature shaping
+    // applied at train time. Skipped entirely when every input is Identity.
+    if let Some(ft) = transforms {
+        if !ft.is_all_identity() {
+            metadata.push(serde_json::json!({
+                "key": "zentrain.feature_transforms",
+                "type": "utf8",
+                "text": ft.transforms_text(),
+            }));
+            metadata.push(serde_json::json!({
+                "key": "zentrain.feature_transform_params",
+                "type": "utf8",
+                "text": ft.params_text(),
+            }));
+        }
+    }
+
     let doc = serde_json::json!({
         "schema_hash": SCHEMA_HASH,
         "flags": 0,
         "scaler_mean": scaler_mean_f32,
         "scaler_scale": scaler_scale_f32,
         "layers": layers_json,
-        "metadata": [
-            { "key": "zenpicker.codec_family", "type": "utf8", "text": codec_family },
-            { "key": "zenpicker.formulation", "type": "utf8", "text": "within_cell_optimal_bytes_argmin" },
-            { "key": "zenpicker_train.model_kind", "type": "utf8", "text": if distilled { "leakyrelu_mlp_picker_distilled" } else { "leakyrelu_mlp_picker" } },
-            { "key": "zenpicker_train.training_target", "type": "utf8", "text": if distilled { "histgb_per_cell_soft_bytes_log" } else { "hard_within_cell_optimal_bytes_log" } },
-            { "key": "zenpicker_train.image_feature_names", "type": "utf8", "text": feature_names.join(",") },
-            // The full input order: image features then zq_norm.
-            { "key": "zenpicker_train.input_order", "type": "utf8", "text": format!("{},zq_norm", feature_names.join(",")) },
-            { "key": "zenpicker_train.cell_labels", "type": "utf8", "text": cell_labels.join("\n") },
-            { "key": "zenpicker_train.zq_targets", "type": "utf8", "text": zq_csv },
-        ],
+        "metadata": metadata,
     });
 
     let json =
@@ -447,6 +472,11 @@ pub struct MlpPickerManifestInputs<'a> {
     pub heldout: HeldoutManifest,
     /// Distillation provenance, when this is a distilled bake.
     pub distillation: Option<DistillManifest>,
+    /// Per-feature input shaping (zenpredict `feature_transforms`),
+    /// when input shaping was fit. `None` / all-Identity => raw features.
+    pub transforms: Option<&'a crate::FittedTransforms>,
+    /// Human-readable shaping mode for the manifest (e.g. "auto", "yeo").
+    pub shaping_mode: &'a str,
 }
 
 /// Full MLP picker bake step: serialize → write → sibling TOML manifest.
@@ -466,6 +496,7 @@ pub fn bake_mlp_picker(
         inputs.codec_family,
         inputs.zq_targets,
         inputs.distillation.is_some(),
+        inputs.transforms,
     )?;
     fs::write(out_path, &bytes)
         .map_err(|e| TrainError::Io(format!("write {}: {e}", out_path.display())))?;
@@ -526,12 +557,12 @@ pub fn bake_mlp_picker(
         znpr_version: 3,
         heldout: inputs.heldout,
         distillation: inputs.distillation.clone(),
-        data_coverage_caveat: "The unified_v13_zenjpeg_cvvdp parquet sweeps only 5 q levels \
-            {10,30,60,80,90} per image, so the 'reaches target_zq' ladder is COARSE. Per \
-            zensim/CLAUDE.md 'Dense sampling for trained models', a production picker needs \
-            ~30 q points + 16-20 log-spaced sizes. This bake validates the FORMULATION and \
-            the Rust-vs-zentrain port; it is NOT a production picker. A dense size+quality \
-            sweep is a separate data-gen task (documented follow-on)."
+        input_shaping_mode: inputs.shaping_mode.to_string(),
+        input_features_shaped: inputs.transforms.map(|t| t.n_shaped()).unwrap_or(0),
+        data_coverage_caveat: "Verify the input parquet's q/size coverage against \
+            zensim/CLAUDE.md 'Dense sampling for trained models' (≈30 q points + 16-20 \
+            log-spaced sizes) before treating this as a production picker — coarse sweeps \
+            cap held-out decision quality regardless of architecture/shaping."
             .to_string(),
         follow_ons: vec![
             "Dense q (≈30 points) + log-spaced size sweep before any production bake.".to_string(),

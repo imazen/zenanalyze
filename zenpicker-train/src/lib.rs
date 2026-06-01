@@ -45,6 +45,7 @@
 mod bake;
 mod distill;
 mod eval;
+mod input_shaping;
 mod mlp;
 mod model;
 mod pareto_dataset;
@@ -63,6 +64,7 @@ pub use distill::{
     teacher_params_fingerprint,
 };
 pub use eval::{EvalReport, evaluate};
+pub use input_shaping::{FittedTransforms, ShapingMode, apply_inplace, fit_transforms};
 pub use mlp::{Mlp, MlpConfig, train_mlp};
 pub use model::{RidgeModel, Standardizer, train_ridge};
 pub use pareto_dataset::{
@@ -70,7 +72,7 @@ pub use pareto_dataset::{
     grouped_split_picker, standardize_all,
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
-pub use picker_eval::{PickerEval, evaluate_picker};
+pub use picker_eval::{PickerEval, evaluate_picker, evaluate_picker_bake};
 pub use search::{GridPoint, SearchResult, default_grid, run_search, run_search_distill};
 
 /// Errors surfaced by the training pipeline.

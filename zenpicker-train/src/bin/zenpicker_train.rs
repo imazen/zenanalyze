@@ -27,8 +27,9 @@ use serde::Deserialize;
 
 use zenpicker_train::{
     CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, SearchCandidate,
-    SearchManifest, TeacherParams, TrainError, bake_mlp_picker, bake_picker, build_picker_dataset,
-    default_grid, default_zq_targets, evaluate, export_teacher_dataset, fit_standardizer,
+    SearchManifest, ShapingMode, TeacherParams, TrainError, apply_inplace, bake_mlp_picker,
+    bake_picker, build_picker_dataset, default_grid, default_zq_targets, evaluate,
+    evaluate_picker_bake, export_teacher_dataset, fit_standardizer, fit_transforms,
     grouped_split_picker, load_soft_targets, load_training_rows, run_search, run_search_distill,
     standardize_all, teacher_params_fingerprint, train_ridge,
 };
@@ -103,6 +104,7 @@ struct RecipeToml {
     soft_targets: Option<String>,
     python: Option<String>,
     soft_weight: Option<f64>,
+    input_shaping: Option<String>,
 }
 
 struct Args {
@@ -123,6 +125,8 @@ struct Args {
     soft_targets: Option<String>,
     python: Option<String>,
     soft_weight: Option<f64>,
+    input_shaping: Option<String>,
+    eval_bake: Option<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
@@ -144,6 +148,8 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         soft_targets: None,
         python: None,
         soft_weight: None,
+        input_shaping: None,
+        eval_bake: None,
     };
     let mut it = argv.iter();
     while let Some(arg) = it.next() {
@@ -190,6 +196,8 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
                         .map_err(|e| format!("--soft-weight: {e}"))?,
                 )
             }
+            "--input-shaping" => a.input_shaping = Some(next_val(&mut it, "--input-shaping")?),
+            "--eval-bake" => a.eval_bake = Some(next_val(&mut it, "--eval-bake")?),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -234,6 +242,17 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .input
         .or(recipe.input)
         .ok_or("--input (or manifest `input`) is required")?;
+
+    // --eval-bake: score an EXTERNAL ZNPR v3 bake on the held-out split
+    // via the deployed runtime path (predict_transformed → argmin) and
+    // exit. No training, no --out — used to measure quantized / bounded
+    // / shaped bake variants against the identical held-out split.
+    if let Some(bake_path) = args.eval_bake {
+        let codec = args.codec.or(recipe.codec);
+        let val_frac = args.val_frac.or(recipe.val_frac).unwrap_or(0.2);
+        return run_eval_bake(Path::new(&input), codec, val_frac, &bake_path);
+    }
+
     let out = args
         .out
         .or(recipe.out)
@@ -268,6 +287,9 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or_else(|| "python3".to_string()),
                 soft_weight: args.soft_weight.or(recipe.soft_weight).unwrap_or(1.0),
             },
+            args.input_shaping
+                .or(recipe.input_shaping)
+                .unwrap_or_else(|| "none".to_string()),
         ),
         "ridge" => run_ridge(
             &input,
@@ -302,6 +324,45 @@ fn default_teacher_script() -> PathBuf {
         .join("teacher_soft_targets.py")
 }
 
+/// `--eval-bake`: load an external ZNPR v3 picker bake and score it on
+/// the held-out split via the deployed runtime path. Measures any
+/// variant (quantized / feature-bounded / output-spec'd / shaped)
+/// against the identical val split the trainer used.
+fn run_eval_bake(
+    input_path: &Path,
+    codec: Option<String>,
+    val_frac: f64,
+    bake_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let zq_targets = default_zq_targets();
+    let ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
+    let (_train_rows, val_rows) = grouped_split_picker(&ds, val_frac);
+    let bytes =
+        std::fs::read(bake_path).map_err(|e| TrainError::Io(format!("read {bake_path}: {e}")))?;
+    eprintln!(
+        "[zenpicker-train] eval-bake: {bake_path} ({} bytes) on {} held-out rows (val_frac={val_frac})",
+        bytes.len(),
+        val_rows.len()
+    );
+    match evaluate_picker_bake(&bytes, &ds, &val_rows).map_err(TrainError::Bake)? {
+        Some(e) => {
+            println!(
+                "bake={bake_path}\nargmin_acc={:.4} overhead_mean={:.4} overhead_p50={:.4} \
+                 overhead_p90={:.4} bytes_srocc={:.4} n_rows={} n_pairs={}",
+                e.argmin_acc,
+                e.overhead_mean,
+                e.overhead_p50,
+                e.overhead_p90,
+                e.bytes_panel.srocc,
+                e.n_rows,
+                e.n_pairs
+            );
+        }
+        None => eprintln!("[zenpicker-train] eval-bake: no scorable held-out rows"),
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_mlp(
     input: &str,
@@ -312,6 +373,7 @@ fn run_mlp(
     hidden_override: Option<String>,
     seed_override: Option<u64>,
     distill_opts: DistillOpts,
+    shaping_mode_str: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let codec_family = codec.clone().unwrap_or_else(|| "unknown".to_string());
     eprintln!(
@@ -324,7 +386,7 @@ fn run_mlp(
     eprintln!("[zenpicker-train] inputs = image feat_* + zq_norm; q is NOT an input (no leakage)");
 
     let zq_targets = default_zq_targets();
-    let ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
+    let mut ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
     eprintln!(
         "[zenpicker-train] built picker dataset: {} (image,target_zq) rows | {} image features (+zq_norm = {} inputs) | {} categorical cells",
         ds.n_rows(),
@@ -347,7 +409,31 @@ fn run_mlp(
         )));
     }
 
-    // Standardizer fit on TRAIN rows only, applied to the full matrix.
+    // Input shaping (zenpredict `feature_transforms`): fit a PER-FEATURE
+    // transform on TRAIN rows and apply it to the full matrix BEFORE the
+    // standardizer. Each image feature independently picks the transform
+    // that best Gaussianises it (the dial column stays Identity). Applied
+    // through zenpredict's own `apply_with_params`, so train-time shaping
+    // is bit-identical to the runtime's `predict_transformed`. The bake
+    // emits the `feature_transforms` (+ params) metadata.
+    let shaping_mode = ShapingMode::parse(&shaping_mode_str).ok_or_else(|| {
+        TrainError::Degenerate(format!(
+            "unknown --input-shaping '{shaping_mode_str}' (expected none|auto|yeo)"
+        ))
+    })?;
+    let fitted = fit_transforms(&ds.features, ds.n_in, &train_rows, shaping_mode);
+    if !fitted.is_all_identity() {
+        eprintln!(
+            "[zenpicker-train] input shaping ({shaping_mode_str}): shaped {}/{} image features (per-feature transforms; dial stays identity)",
+            fitted.n_shaped(),
+            ds.n_in - 1
+        );
+        apply_inplace(&mut ds.features, ds.n_in, &fitted);
+    } else {
+        eprintln!("[zenpicker-train] input shaping: none (raw features)");
+    }
+
+    // Standardizer fit on TRAIN rows only, applied to the full (shaped) matrix.
     let (mean, scale) = fit_standardizer(&ds.features, ds.n_in, &train_rows);
     let x_std = standardize_all(&ds.features, ds.n_in, &mean, &scale);
 
@@ -567,6 +653,12 @@ fn run_mlp(
             search: search_manifest,
             heldout,
             distillation,
+            transforms: if fitted.is_all_identity() {
+                None
+            } else {
+                Some(&fitted)
+            },
+            shaping_mode: &shaping_mode_str,
         },
     )?;
 

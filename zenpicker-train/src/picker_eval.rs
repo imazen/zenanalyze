@@ -147,3 +147,122 @@ pub fn evaluate_picker(
         n_pairs: pred_pairs.len(),
     })
 }
+
+/// Evaluate an EXTERNAL ZNPR v3 bake over the **deployed runtime path**
+/// on `val_rows` of `ds`.
+///
+/// Unlike [`evaluate_picker`] (which scores the in-memory `Mlp` on
+/// pre-standardized features), this loads the bake via zenpredict and
+/// runs `predict_transformed` on the RAW (un-shaped, un-standardized)
+/// feature rows — so it exercises `feature_transforms` → standardize →
+/// the (possibly quantized) forward exactly as production would. Use it
+/// to measure quantization / feature-bounds / output-spec variants
+/// against the identical held-out split, and to confirm a quantized
+/// bake preserves the argmin decision.
+pub fn evaluate_picker_bake(
+    bake: &[u8],
+    ds: &PickerDataset,
+    val_rows: &[usize],
+) -> Result<Option<PickerEval>, String> {
+    if val_rows.is_empty() {
+        return Ok(None);
+    }
+    let model =
+        zenpredict::Model::from_bytes(bake).map_err(|e| format!("Model::from_bytes: {e}"))?;
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let use_tf = model.has_nontrivial_feature_transforms();
+    let n_cells = ds.n_cells;
+    let n_in = ds.n_in;
+
+    let mut pred_pairs: Vec<f64> = Vec::new();
+    let mut true_pairs: Vec<f64> = Vec::new();
+    let mut overheads: Vec<f64> = Vec::new();
+    let mut correct = 0usize;
+    let mut scored_rows = 0usize;
+    let mut row_f32 = vec![0.0f32; n_in];
+
+    for &r in val_rows {
+        let raw = &ds.features[r * n_in..(r + 1) * n_in];
+        for (k, &v) in raw.iter().enumerate() {
+            row_f32[k] = v as f32;
+        }
+        let pred = if use_tf {
+            predictor.predict_transformed(&row_f32)
+        } else {
+            predictor.predict(&row_f32)
+        }
+        .map_err(|e| format!("predict: {e}"))?;
+        debug_assert_eq!(pred.len(), n_cells);
+
+        let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];
+        let truth = &ds.bytes_log[r * n_cells..(r + 1) * n_cells];
+        let mut any = false;
+        let mut best_true_c: Option<usize> = None;
+        let mut best_true_v = f64::INFINITY;
+        let mut best_pred_c: Option<usize> = None;
+        let mut best_pred_v = f64::INFINITY;
+        for c in 0..n_cells {
+            if !reach[c] {
+                continue;
+            }
+            any = true;
+            pred_pairs.push(pred[c] as f64);
+            true_pairs.push(truth[c]);
+            if truth[c] < best_true_v {
+                best_true_v = truth[c];
+                best_true_c = Some(c);
+            }
+            if (pred[c] as f64) < best_pred_v {
+                best_pred_v = pred[c] as f64;
+                best_pred_c = Some(c);
+            }
+        }
+        if !any {
+            continue;
+        }
+        scored_rows += 1;
+        if let (Some(tc), Some(pc)) = (best_true_c, best_pred_c) {
+            if pc == tc {
+                correct += 1;
+            }
+            let pick_bytes = truth[pc].exp();
+            let best_bytes = best_true_v.exp();
+            if best_bytes > 0.0 && pick_bytes.is_finite() {
+                overheads.push(pick_bytes / best_bytes - 1.0);
+            }
+        }
+    }
+
+    if pred_pairs.len() < 2 {
+        return Ok(None);
+    }
+    let bytes_panel = compute_panel(&pred_pairs, &true_pairs);
+    let argmin_acc = if scored_rows > 0 {
+        correct as f64 / scored_rows as f64
+    } else {
+        0.0
+    };
+    overheads.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let pct = |p: f64| -> f64 {
+        if overheads.is_empty() {
+            return f64::NAN;
+        }
+        let idx = ((overheads.len() as f64 - 1.0) * p).round() as usize;
+        overheads[idx.min(overheads.len() - 1)]
+    };
+    let overhead_mean = if overheads.is_empty() {
+        f64::NAN
+    } else {
+        overheads.iter().sum::<f64>() / overheads.len() as f64
+    };
+
+    Ok(Some(PickerEval {
+        bytes_panel,
+        argmin_acc,
+        overhead_mean,
+        overhead_p50: pct(0.50),
+        overhead_p90: pct(0.90),
+        n_rows: scored_rows,
+        n_pairs: pred_pairs.len(),
+    }))
+}
