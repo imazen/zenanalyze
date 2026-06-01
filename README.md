@@ -11,22 +11,26 @@ something smaller**.
 
 ```toml
 [dependencies]
-zenanalyze = "0.1"
-# Opt in to source-direct HDR / wide-gamut / descriptor-gap signals:
-# zenanalyze = { version = "0.1", features = ["experimental"] }
-# Opt in to classifier-style composite scores (text / screen / natural /
-# line-art likelihoods). The raw signals these consume are stable; the
-# composite coefficients are calibration-driven and may drift in 0.1.x:
-# zenanalyze = { version = "0.1", features = ["composites"] }
+zenanalyze = "0.2"
+# Opt in to research-stage signals (PatchFraction, AqMap*, NoiseFloor*, …):
+# zenanalyze = { version = "0.2", features = ["experimental"] }
+# Opt in to HDR / wide-gamut / bit-depth signals (source-direct depth tier):
+# zenanalyze = { version = "0.2", features = ["experimental", "hdr"] }
 ```
 
 ## Cargo features
 
 | feature | what it gates | stability |
 |---|---|---|
-| _(default)_ | Stable raw signals: variance, edge density, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, etc. | Numeric drift in 0.1.x bounded by the threshold contract; signatures frozen |
-| `experimental` | Research-stage signals: PatchFraction, AqMapMean/Std, NoiseFloorY/UV, GradientFraction, source-direct HDR / wide-gamut / bit-depth | Metric definition or scale may change; opt in only if you re-validate per patch |
-| `composites` | Classifier-style scores: TextLikelihood, ScreenContentLikelihood, NaturalLikelihood, LineArtScore | Hand-tuned weighted combinators; the combination coefficients drift as the corpus calibration matures. The raw signals they consume are stable. |
+| _(default)_ | Stable raw signals: variance, edge density, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, etc. | Numeric drift in 0.x bounded by the threshold contract; signatures frozen |
+| `experimental` | Research-stage signals: PatchFraction, AqMapMean/Std, NoiseFloorY/UV, GradientFraction | Metric definition or scale may change; opt in only if you re-validate per patch |
+| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals (10 features, the depth tier). With `experimental + hdr`, `FeatureSet::SUPPORTED` is the full 108-feature set the codec quality pickers consume. | Off by default (SDR hot path skips the tier); definitions may change per patch |
+
+> **0.2.0 removed the `composites` feature** and retired all four composite
+> likelihoods it gated — `TextLikelihood`, `ScreenContentLikelihood`,
+> `NaturalLikelihood`, `LineArtScore`. Their `AnalysisFeature` variants are gone
+> (ids 27 / 28 / 29 / 45 stay reserved for ABI stability). Consume the stable raw
+> signals directly, or the research-stage ones under `experimental`.
 
 ## Why
 
@@ -124,13 +128,6 @@ enumerate the surface without hand-listing variants.
 | `LumaHistogramEntropy` | f32 | Shannon entropy of a 32-bin luma histogram (bits). |
 | `AlphaPresent` / `AlphaUsedFraction` / `AlphaBimodalScore` | bool / f32 / f32 | Straight-alpha statistics. |
 
-**Behind the `composites` cargo feature** (calibration-driven, may drift in 0.1.x):
-
-| Feature | Type | Description |
-|---|---|---|
-| `TextLikelihood` / `ScreenContentLikelihood` / `NaturalLikelihood` | f32 | Soft `[0, 1]` content-class scores. Combine raw signals (variance, edge density, distinct-color bins, etc.) via hand-tuned weights. |
-| `LineArtScore` | f32 | Soft `[0, 1]` rendered-line-art score from luma histogram bimodality + entropy. |
-
 **Behind the `experimental` cargo feature**, organised by what they drive:
 
 ### Codec-orchestrator gap-fillers
@@ -140,7 +137,6 @@ enumerate the surface without hand-listing variants.
 | `GrayscaleScore` | zenjpeg `ColorMode::Grayscale`, AVIF `Yuv400`, png/jxl gray paths (~30–40% smaller for B&W) |
 | `AqMapMean` / `AqMapStd` | zenjpeg hybrid trellis λ, webp segments + sns_strength, avif vaq |
 | `NoiseFloorY` / `NoiseFloorUV` | zenjpeg `pre_blur`, jxl `noise/denoise`, webp `sns_strength`, zenrav1e `film_grain` |
-| `LineArtScore` _(behind `composites`)_ | webp `Preset::Drawing`, jxl `splines` / `patches`, png palette preference |
 | `GradientFraction` | jxl `with_force_strategy` (DCT16 / DCT32 selection), zenrav1e deblock strength |
 | `SkinToneFraction` | photo-vs-other dispatch (one-direction signal, AUC 0.80) — webp `Preset::Photo`, jxl perceptual presets, jpeg chroma-aware quant |
 | `EdgeSlopeStdev` | screen-vs-photo dispatch (AUC 0.84, second only to `PatchFraction`) — webp `Preset::Drawing` vs `Photo`, jxl modular vs VarDCT |

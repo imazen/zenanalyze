@@ -122,12 +122,10 @@
 //! - **Strongest single screen-vs-photo discriminator**:
 //!   [`feature::AnalysisFeature::PatchFraction`] (AUC = 0.880,
 //!   F1 = 0.769 at `>= 0.27`).
-//! - **Strongest photo classifier**:
-//!   [`feature::AnalysisFeature::NaturalLikelihood`] (F1 = 0.924
-//!   at `>= 0.06`).
-//! - **Near-deterministic line-art signal**:
-//!   [`feature::AnalysisFeature::LineArtScore`] `> 0`
-//!   (F1 = 0.978).
+//! - **Strongest photo classifier** was the (now-retired in 0.2.0)
+//!   `NaturalLikelihood` composite (F1 = 0.924 at `>= 0.06`).
+//! - **Near-deterministic line-art signal** was the (now-retired in 0.2.0)
+//!   `LineArtScore` composite (`> 0`, F1 = 0.978).
 //! - **Derived likelihoods empirically saturate at ~0.70**, not
 //!   1.0 — operating thresholds live in the 0.3–0.6 band, not 0.8+.
 //!

@@ -1862,9 +1862,6 @@ fn dct2d_8_three_planes_simd(
 /// See `docs/calibration-corpus-2026-04-27.md` for the full empirical
 /// distribution and AUC table.
 ///
-/// [`text_likelihood`]: crate::feature::AnalysisFeature::TextLikelihood
-/// [`natural_likelihood`]: crate::feature::AnalysisFeature::NaturalLikelihood
-/// [`screen_content_likelihood`]: crate::feature::AnalysisFeature::ScreenContentLikelihood
 /// The 4 composite variants (`TextLikelihood`,
 /// `ScreenContentLikelihood`, `NaturalLikelihood`, `LineArtScore`)
 /// were deleted (#6, #59). This stub stays so the `lib.rs` analyze
