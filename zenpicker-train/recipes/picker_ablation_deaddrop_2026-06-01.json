@@ -1,0 +1,32 @@
+{
+  "full108": {
+    "argmin_acc": 0.2467850581751378,
+    "overhead_mean": 0.04357655950457351,
+    "overhead_p95": 0.1652007276742744,
+    "bytes_srocc": 0.9884555468503206,
+    "n_val_scored": 1633,
+    "n_features": 108,
+    "fit_sec": 32.80608582496643,
+    "n_cells_with_teacher": 36
+  },
+  "drop8dead_keep100": {
+    "argmin_acc": 0.2467850581751378,
+    "overhead_mean": 0.04357655950457351,
+    "overhead_p95": 0.1652007276742744,
+    "bytes_srocc": 0.9884555468503206,
+    "n_val_scored": 1633,
+    "n_features": 100,
+    "fit_sec": 35.47692060470581,
+    "n_cells_with_teacher": 36
+  },
+  "drop17deadcorpus_keep91": {
+    "argmin_acc": 0.2467850581751378,
+    "overhead_mean": 0.04357655950457351,
+    "overhead_p95": 0.1652007276742744,
+    "bytes_srocc": 0.9884555468503206,
+    "n_val_scored": 1633,
+    "n_features": 91,
+    "fit_sec": 36.00695204734802,
+    "n_cells_with_teacher": 36
+  }
+}
