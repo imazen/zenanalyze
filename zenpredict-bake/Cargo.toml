@@ -10,6 +10,11 @@ categories = ["multimedia::images", "encoding"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
 readme = "README.md"
+exclude = [
+  # Integration tests and benches — local-only, not useful to crates.io consumers
+  "tests/**",
+  "benches/**",
+]
 
 [lib]
 name = "zenpredict_bake"

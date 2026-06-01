@@ -10,6 +10,14 @@ categories = ["multimedia::images", "no-std"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
 readme = "README.md"
+exclude = [
+  # Dev/CI tooling
+  "deny.toml",
+  # Internal dev notes (wire format spec WIRE_FORMAT_V3_1.md and docs/ZNPR_V3.md are kept)
+  "docs/v0_2_review_2026-05-13.md",
+  # Fuzz crate — not useful to crates.io consumers
+  "fuzz/**",
+]
 
 [lib]
 name = "zenpredict"

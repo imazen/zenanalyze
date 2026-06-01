@@ -10,6 +10,13 @@ categories = ["multimedia::images"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
 readme = "README.md"
+exclude = [
+  # Research/training artifacts — not useful to crates.io consumers
+  "recipes/**",
+  "scripts/**",
+  # Integration tests — local-only
+  "tests/**",
+]
 
 [[bin]]
 name = "zenpicker-train"

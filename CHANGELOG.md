@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Trim published package contents: exclude benchmarks/, docs/, scripts/, tools/, zentrain/, .github/, and dev-only root markdown files from the `zenanalyze` crate tarball; exclude tests/, benches/ from `zenpredict-bake` and `zenpicker-train`; exclude fuzz/ and deny.toml from `zenpredict`. No Rust source, examples, or model bakes were touched.
+
 ### Added
 
 - **`AnalysisResults::pack` / `from_packed` / `require`** — a version-stable

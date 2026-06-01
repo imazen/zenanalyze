@@ -10,6 +10,26 @@ categories = ["multimedia::images"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
 readme = "README.md"
+exclude = [
+  # Dev tooling / CI — not useful to crates.io consumers
+  ".github/**",
+  ".gitignore",
+  ".claude/**",
+  # Dev-only documentation and session notes
+  "CLAUDE.md",
+  "CONTEXT-HANDOFF.md",
+  "everything.md",
+  "recovery_cycle_summary_2026-05-13.md",
+  "zensim_champion_log.md",
+  # Internal planning docs (external users don't need migration plans)
+  "MIGRATION_PLAN.md",
+  # Research/training artifacts — not part of the Rust library
+  "benchmarks/**",
+  "docs/**",
+  "scripts/**",
+  "tools/**",
+  "zentrain/**",
+]
 
 [lib]
 name = "zenanalyze"
