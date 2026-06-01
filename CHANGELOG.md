@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-01
+
+### BREAKING (semver-correct minor bump; the "0.1.x-forever" freeze is retired for this release)
+
+- **Removed the `composites` cargo feature** and the `LineArtScore`
+  `AnalysisFeature` enum variant. `LineArtScore` (the sole composite the
+  feature gated) was retired pre-0.1.0; its numeric feature id stays
+  reserved for ABI stability, but the named variant and the `composites`
+  feature flag are gone. Downstream code that enabled
+  `features = ["composites"]` or referenced `AnalysisFeature::LineArtScore`
+  must drop those references. `cargo semver-checks` flagged both
+  (`feature_missing` + `enum_variant_missing`); 0.2.0 is the correct bump.
+
+### Added
+
+- **`hdr` cargo feature** — opt-in HDR / wide-gamut / depth features (10
+  features, ids 32–39, 46, 47) via the source-direct depth tier (`tier_depth`).
+  Off by default (every default sweep corpus is SDR, so the analyzer hot path
+  skips the tier). With `experimental + hdr`, `FeatureSet::SUPPORTED` is the
+  full **108-feature** set — the input contract the zenjpeg / zenwebp /
+  zenavif / zenjxl codec quality pickers (`zenpredict` runtime) train and
+  infer against.
+
 ### Fixed (2026-06-01 — zenpicker-train held-out eval O(n²) memory blow-up)
 
 - **`zenpicker-train` no longer OOMs on the held-out picker panel.** The
