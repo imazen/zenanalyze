@@ -28,8 +28,11 @@ Endpoint `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`, creds
 | `source/zenjpeg_source_features_full.tsv` | `bcacb8d8f040dc93` | 374,796 | 108 source features per (image,size) variant, real values |
 | `source/feature_order.txt` | `dc6882fe6168447c` | 3,321 | `feat_i` → zenanalyze feature name (runtime extraction order) |
 | `scripts/rebuild_sourcefeat_parquet.py` | `90e896ceb1d58891` | 4,352 | join-fix (also in git here) |
-| `METHODOLOGY_zenpredict_caps_2026-06-01.md` | `b87b53859b5c8cea` | 9,853 | method (also in git here) |
-| `bakes/…` | — | — | final FIXED bakes + quant variants (added post-search) |
+| `METHODOLOGY_zenpredict_caps_2026-06-01.md` | `1977bd6c070aecf6` | ~11 KB | method (also in git here) |
+| `bakes/picker_zenjpeg_A_FIXED_none_v3.bin` | `cb858c8abe1cf2ae` | 59,571 | **shipped FIXED bake** (f32, [64,64] distilled, no shaping; held-out SROCC 0.906, overhead 3.39%) |
+| `bakes/picker_zenjpeg_A_FIXED_none_v3_f16.bin` | `5b807ce292dfda13` | 29,870 | f16 quant (2.0×, safe) |
+| `bakes/picker_zenjpeg_A_FIXED_none_v3_i8.bin` | `888221ce25c64fb2` | 17,001 | i8 quant (3.5×, overhead-neutral) |
+| `bakes/picker_zenjpeg_A_FIXED_auto_v3.bin` | — | — | input-shaping arm (FALSIFIED: SROCC 0.84; audit only, do not ship) |
 
 ## Reproduce
 

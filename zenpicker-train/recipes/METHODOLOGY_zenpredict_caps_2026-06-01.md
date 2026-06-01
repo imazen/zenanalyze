@@ -56,13 +56,14 @@ the teacher's dense soft `bytes_log`.
 | HistGB teacher (zq-only data) | 0.3007 | 5.11% | — |
 | distilled [128,128] (zq-only data) | 0.2168 | 4.97% | 12.5% |
 | HistGB teacher (**FIXED real features**) | 0.2486 | **4.39%** | — |
-| distilled student (**FIXED real features**) | _pending_ | _pending_ | _pending_ |
+| **distilled student (FIXED, no shaping)** [64,64] | 0.1402 | **3.39%** | 9.9% |
 
-Distillation beats single-fit by ~1pp overhead. Topology sweet spot
-[128,128] (— [256,256] was *worse*: 0.1476). Real features cut teacher
-overhead 5.11%→4.39% (image-specific picks; argmin_acc drops because they no
-longer memorise the modal cell — **overhead is the product metric, not
-argmin**).
+Distillation beats single-fit by ~1pp overhead. Real features cut **student
+overhead to 3.39%** (p50 0.72%) — vs 4.97% (zq-only distilled) and 5.95%
+(single-fit). Held-out **bytes-SROCC 0.906** (vs 0.34 zq-only). argmin_acc
+drops with real features because the picker makes image-specific near-optimal
+picks rather than memorising the modal cell — **overhead is the product
+metric, not argmin**. This is the shipped FIXED bake.
 
 ## 3. Input shaping — per-feature `feature_transforms` (implemented)
 
@@ -73,7 +74,18 @@ dial column is forced Identity. Applied through
 `zenpredict::FeatureTransform::apply_with_params` so train-time shaping is
 bit-identical to the runtime's `predict_transformed` (no re-impl drift).
 Emits `zentrain.feature_transforms` (+ params) as newline-separated UTF-8
-metadata. Result on FIXED features: _pending_.
+metadata.
+
+**Result (FIXED features): FALSIFIED — do not ship shaping.** `auto` shaped
+**84/108** features (mechanism confirmed working) but **hurt bytes-SROCC at
+every matched config** (e.g. [64,64] lr.002: 0.93 → 0.84; [128,128] lr.002:
+0.92 → 0.80). The selected auto bake reached a lower *overhead* (2.89% vs
+3.39%) but on a different selected topology (confounded) and with a noticeably
+noisier cost surface (SROCC 0.84) — not a robust win. This reproduces the
+V_20 learning: a LeakyReLU MLP already absorbs per-feature non-linearity, and
+WinsorP99 clipping discards tail information the picker uses. Shaping is
+**implemented + available** (`--input-shaping auto`) but **off by default**;
+the shipped FIXED bake is `none`.
 
 ## 4. Quantization (`zenpredict repack`) — tried + measured
 
@@ -91,6 +103,20 @@ the per-cell cost surface is flat, so i8's ~0.04 round-trip Δ flips argmin to
 a near-equal neighbour (argmin→0) while bytes barely move. **Judge picker
 quant on overhead, not argmin_acc.** f16 is the safe default; i8 if size
 dominates and you optimise overhead.
+
+**On the shipped FIXED [64,64] bake (real features), quant is even cleaner —
+both f16 AND i8 are overhead-neutral** (the real-feature surface is less
+degenerate than the zq-only one, so i8 keeps a sane argmin too):
+
+| FIXED none bake | size | vs f32 | overhead_mean | bytes_srocc | argmin |
+|---|---|---|---|---|---|
+| f32 | 59,571 | — | 3.39% | 0.9060 | 0.140 |
+| **f16** (shipped quant) | 29,870 | 2.0× | 3.35% | 0.9061 | 0.151 |
+| i8 + zerobias + compress + optimize | 17,001 | 3.5× | 3.43% | 0.9057 | 0.107 |
+
+Ship `picker_zenjpeg_A_FIXED_none_v3_f16.bin` (29.9 KB; held-out quality
+identical to f32). Runtime-path eval (`--eval-bake`) confirms the toml
+numbers exactly.
 
 ## 5. Capability applicability matrix (the rest of "everything new")
 
