@@ -2150,7 +2150,141 @@ impl AnalysisResults {
     pub fn get_f32(&self, f: AnalysisFeature) -> Option<f32> {
         self.get(f).map(FeatureValue::to_f32)
     }
+
+    /// Pack the populated features as `(stable_id, f32_value)` pairs, sorted
+    /// ascending by id.
+    ///
+    /// This is the **version-stable wire form** of a results object. Each
+    /// pair's `u16` is [`AnalysisFeature::id`], which follows the
+    /// retired-keeps-its-slot rule (a retired feature's id is never reused;
+    /// new features get fresh ids). So a blob packed by one zenanalyze
+    /// version is readable by any other via [`Self::from_packed`] — features
+    /// the reader doesn't know are skipped, and the reader checks for the
+    /// ones it needs with [`Self::require`]. Crossing a crate boundary as
+    /// this plain `(u16, f32)` data (rather than as an `AnalysisResults`
+    /// value) is also how two crates pinned to **semver-incompatible**
+    /// zenanalyze versions can hand each other analysis output without a
+    /// type clash.
+    ///
+    /// Carries feature **values only** — not image geometry or the source
+    /// pixel descriptor. Values are the lossless [`FeatureValue::to_f32`]
+    /// view, so integral / boolean features round-trip exactly through
+    /// `f32` (e.g. `Bool(true) → 1.0`).
+    #[must_use]
+    pub fn pack(&self) -> Vec<(u16, f32)> {
+        self.values.iter().map(|(f, v)| (f.id(), v.to_f32())).collect()
+    }
+
+    /// Reconstruct a results object from [`Self::pack`]ed pairs, for feature
+    /// lookup ([`Self::get`], [`Self::get_f32`], [`Self::require`]).
+    ///
+    /// Lets a consumer (e.g. a codec picker) accept pre-computed features and
+    /// skip re-running analysis. Pairs whose id is unknown to **this** build
+    /// (a feature added in a newer version, or one this build didn't compile
+    /// in) are skipped — that tolerance is what makes the format survive
+    /// across major versions. Use [`Self::require`] afterwards to assert the
+    /// features you actually need are present.
+    ///
+    /// Reconstructs values as [`FeatureValue::F32`] (the `to_f32` view; a
+    /// later typed [`Self::get`] on an integral feature returns `F32`, not the
+    /// original variant). [`Self::geometry`] reads as `0×0` and
+    /// [`Self::source_descriptor`] as `RGB8_SRGB` — the packed form carries
+    /// neither; treat a `from_packed` result as a feature table, not an image
+    /// descriptor.
+    ///
+    /// # Errors
+    /// [`PackError::DuplicateId`] if a known id appears twice, or
+    /// [`PackError::NonFiniteValue`] if a value is NaN / ±∞.
+    pub fn from_packed(pairs: &[(u16, f32)]) -> Result<Self, PackError> {
+        let mut values: Vec<(AnalysisFeature, FeatureValue)> = Vec::with_capacity(pairs.len());
+        let mut requested = FeatureSet::new();
+        for &(id, v) in pairs {
+            // Unknown id → a feature this build doesn't define. Skip it: that
+            // forward-tolerance is the whole point of an id-keyed wire form.
+            let Some(f) = AnalysisFeature::from_u16(id) else {
+                continue;
+            };
+            if !v.is_finite() {
+                return Err(PackError::NonFiniteValue(id));
+            }
+            if values.iter().any(|(k, _)| *k == f) {
+                return Err(PackError::DuplicateId(id));
+            }
+            values.push((f, FeatureValue::F32(v)));
+            requested = requested.with(f);
+        }
+        values.sort_by_key(|(f, _)| f.id());
+        Ok(Self {
+            requested,
+            geometry: ImageGeometry::new(0, 0),
+            source_descriptor: zenpixels::PixelDescriptor::RGB8_SRGB,
+            values,
+        })
+    }
+
+    /// Assert that every feature in `needed` is present, returning the ids of
+    /// any that are missing.
+    ///
+    /// Works on any results object — freshly analyzed or [`Self::from_packed`].
+    /// A consumer that requires a fixed feature set (e.g. a picker's input
+    /// vector) calls this on packed input so a caller that supplied an
+    /// incomplete pack gets a clear error instead of silently-zeroed inputs.
+    ///
+    /// # Errors
+    /// [`MissingFeatures`] listing the absent ids if any `needed` feature is
+    /// not present.
+    pub fn require(&self, needed: FeatureSet) -> Result<(), MissingFeatures> {
+        let missing: Vec<u16> = needed
+            .iter()
+            .filter(|f| self.get(*f).is_none())
+            .map(AnalysisFeature::id)
+            .collect();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(MissingFeatures { missing })
+        }
+    }
 }
+
+/// Error from [`AnalysisResults::from_packed`].
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PackError {
+    /// A known feature id appeared more than once in the packed pairs.
+    DuplicateId(u16),
+    /// A packed value was non-finite (NaN or ±∞).
+    NonFiniteValue(u16),
+}
+
+impl core::fmt::Display for PackError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::DuplicateId(id) => write!(f, "duplicate feature id {id} in packed input"),
+            Self::NonFiniteValue(id) => {
+                write!(f, "non-finite value for feature id {id} in packed input")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PackError {}
+
+/// Returned by [`AnalysisResults::require`] when one or more needed features
+/// are absent. `missing` holds their stable ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingFeatures {
+    /// Stable ids of the features that were requested but not present.
+    pub missing: Vec<u16>,
+}
+
+impl core::fmt::Display for MissingFeatures {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "missing {} required feature(s): {:?}", self.missing.len(), self.missing)
+    }
+}
+
+impl std::error::Error for MissingFeatures {}
 
 impl core::fmt::Debug for AnalysisResults {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -2395,6 +2529,85 @@ mod tests {
         assert_eq!(r.geometry().width(), 1920);
         assert_eq!(r.geometry().pixels(), 1920 * 1080);
         assert!((r.geometry().aspect_ratio() - 1920.0 / 1080.0).abs() < 1e-6);
+    }
+
+    fn sample_results() -> AnalysisResults {
+        let requested = FeatureSet::just(AnalysisFeature::Variance)
+            .with(AnalysisFeature::DistinctColorBins)
+            .with(AnalysisFeature::AlphaPresent);
+        let mut r = AnalysisResults::new(
+            requested,
+            ImageGeometry::new(64, 64),
+            zenpixels::PixelDescriptor::RGB8_SRGB,
+        );
+        r.set(AnalysisFeature::Variance, 43.0_f32);
+        r.set(AnalysisFeature::DistinctColorBins, 1234_u32);
+        r.set(AnalysisFeature::AlphaPresent, true);
+        r
+    }
+
+    #[test]
+    fn pack_then_from_packed_round_trips_the_f32_view() {
+        let r = sample_results();
+        let packed = r.pack();
+        // Packed pairs are id-sorted and carry the to_f32 view.
+        assert_eq!(packed.len(), 3);
+        assert!(packed.windows(2).all(|w| w[0].0 < w[1].0));
+
+        let r2 = AnalysisResults::from_packed(&packed).expect("round-trip");
+        assert_eq!(r2.get_f32(AnalysisFeature::Variance), Some(43.0));
+        assert_eq!(r2.get_f32(AnalysisFeature::DistinctColorBins), Some(1234.0));
+        assert_eq!(r2.get_f32(AnalysisFeature::AlphaPresent), Some(1.0));
+        // Integral/bool collapse to the F32 view (documented).
+        assert_eq!(
+            r2.get(AnalysisFeature::DistinctColorBins),
+            Some(FeatureValue::F32(1234.0))
+        );
+        // Geometry/descriptor are NOT carried — read as the documented sentinels.
+        assert_eq!(r2.geometry().width(), 0);
+    }
+
+    #[test]
+    fn from_packed_skips_ids_unknown_to_this_build() {
+        // A pack from a newer version may carry ids this build doesn't define.
+        // 60000 is well past any real feature id → skipped, not an error.
+        let pairs = [(AnalysisFeature::Variance.id(), 5.0_f32), (60000u16, 99.0)];
+        let r = AnalysisResults::from_packed(&pairs).expect("unknown id is skipped");
+        assert_eq!(r.get_f32(AnalysisFeature::Variance), Some(5.0));
+        assert_eq!(r.pack().len(), 1, "only the known feature survives");
+    }
+
+    #[test]
+    fn from_packed_rejects_duplicate_and_non_finite() {
+        let vid = AnalysisFeature::Variance.id();
+        // (AnalysisResults isn't PartialEq, so compare the unwrapped error.)
+        assert_eq!(
+            AnalysisResults::from_packed(&[(vid, 1.0), (vid, 2.0)]).unwrap_err(),
+            PackError::DuplicateId(vid)
+        );
+        assert_eq!(
+            AnalysisResults::from_packed(&[(vid, f32::NAN)]).unwrap_err(),
+            PackError::NonFiniteValue(vid)
+        );
+        assert_eq!(
+            AnalysisResults::from_packed(&[(vid, f32::INFINITY)]).unwrap_err(),
+            PackError::NonFiniteValue(vid)
+        );
+    }
+
+    #[test]
+    fn require_flags_missing_needed_features() {
+        let r = sample_results();
+        // All present → Ok.
+        assert!(r.require(FeatureSet::just(AnalysisFeature::Variance)).is_ok());
+        // EdgeDensity was never set → reported missing by id.
+        let err = r
+            .require(
+                FeatureSet::just(AnalysisFeature::Variance)
+                    .with(AnalysisFeature::EdgeDensity),
+            )
+            .unwrap_err();
+        assert_eq!(err.missing, [AnalysisFeature::EdgeDensity.id()]);
     }
 
     #[test]

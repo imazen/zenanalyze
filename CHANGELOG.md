@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`AnalysisResults::pack` / `from_packed` / `require`** — a version-stable
+  `(u16 stable_id, f32 value)` wire form for analysis output. `pack` emits
+  id-sorted pairs (the lossless `to_f32` view); `from_packed` reconstructs a
+  feature table from them, skipping ids unknown to the reader (forward-tolerant
+  across major versions, per the retired-keeps-its-slot id rule) and erroring on
+  duplicate ids / non-finite values; `require(FeatureSet)` asserts a needed set
+  is present, returning the missing ids. Lets a consumer (e.g. a codec quality
+  picker) accept pre-computed features and skip re-running analysis, and lets two
+  crates pinned to semver-incompatible zenanalyze versions exchange analysis
+  output as plain data rather than as a clashing `AnalysisResults` type. New
+  public items: `feature::{PackError, MissingFeatures}`. Additive — no break.
+
 ## [0.2.0] - 2026-06-01
 
 ### BREAKING (semver-correct minor bump; the "0.1.x-forever" freeze is retired for this release)
