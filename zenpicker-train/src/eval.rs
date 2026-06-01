@@ -2,14 +2,19 @@
 //!
 //! We score the trained model on the held-out rows and run the full
 //! Mohammadi 2025 panel (SROCC / PLCC / KROCC / OR / PWRC / Z-RMSE)
-//! through `zenstats::compute_panel` — the same stat path the metric
-//! work uses. No hand-rolled SROCC here (per the "don't hand-roll
-//! srocc/plcc" rule in zensim/CLAUDE.md).
+//! through [`crate::picker_eval::compute_panel_lowmem`] — a bit-for-bit
+//! reproduction of `zenstats::compute_panel` that computes the PWRC
+//! SA-ST AUC with O(`PWRC_N_POINTS`) memory instead of the canonical
+//! all-pairs `Vec` (O(n²)), so the held-out numbers are identical while
+//! the trainer can't OOM when the held-out split is large. No
+//! hand-rolled SROCC here (per the "don't hand-roll srocc/plcc" rule in
+//! zensim/CLAUDE.md).
 
-use zenstats::{PanelStats, compute_panel};
+use zenstats::PanelStats;
 
 use crate::model::RidgeModel;
 use crate::parquet_input::TrainingData;
+use crate::picker_eval::compute_panel_lowmem;
 
 /// Held-out report: the panel plus the row count actually scored.
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +38,6 @@ pub fn evaluate(model: &RidgeModel, data: &TrainingData, val_rows: &[usize]) -> 
         preds.push(model.predict_raw(row));
         truth.push(data.targets[r]);
     }
-    let panel = compute_panel(&preds, &truth);
+    let panel = compute_panel_lowmem(&preds, &truth);
     Some(EvalReport { panel })
 }

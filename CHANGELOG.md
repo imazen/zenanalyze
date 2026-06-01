@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (2026-06-01 — zenpicker-train held-out eval O(n²) memory blow-up)
+
+- **`zenpicker-train` no longer OOMs on the held-out picker panel.** The
+  evaluator's full Mohammadi-2025 panel (`evaluate_picker` /
+  `evaluate_picker_bake`) was computed via `zenstats::compute_panel`,
+  whose PWRC term (`pwrc_sa_st_auc` → `sa_st_curve`) materialises a
+  `Vec<(f64, bool)>` of **all `n·(n−1)/2` pairs** — O(n²) memory. The
+  panel is fed one entry per `(held-out row, reachable cell)`, so for the
+  dense zenjpeg sweep `n ≈ val_rows × n_cells = 1633 × 36 = 58_788` and
+  the all-pairs vector is `58_788² / 2 × 16 B ≈ 27 GB`. Measured VmHWM
+  **23.0 GB** on a single `--hidden 128,128` distilled fit (the bounded
+  grid hit the same ceiling per candidate), OOM-killing the trainer.
+  Replaced the panel call with a local `compute_panel_lowmem` that
+  delegates every term to the same public `zenstats` functions
+  `compute_panel` calls (SROCC/KROCC/PLCC/OR/Z-RMSE, same order, same
+  inputs) and computes the PWRC SA-ST AUC with an O(`PWRC_N_POINTS`=128)
+  difference-array sweep instead of the all-pairs vector — same O(n²)
+  *time*, O(128) *memory*, **bit-for-bit identical output** (proven by
+  `picker_eval::panel_parity_tests`, which assert exact `f64::to_bits`
+  equality vs `zenstats::compute_panel` across seeds/sizes/edge cases up
+  to n=3000). Peak RSS: single fit **23.0 GB → 0.62 GB** (37×); full
+  6-candidate grid search now peaks at **0.62 GB**. Held-out metrics
+  (and therefore selected candidate) unchanged.
+
 ### Added (2026-05-27 — zenpicker-train teacher → student distillation)
 
 - **Ported zentrain's teacher → student distillation** (the part the
