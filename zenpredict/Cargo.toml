@@ -44,6 +44,12 @@ std = []
 # unconditionally — gating only controls the typed Rust API. Codec
 # runtimes that only call `predict` / `argmin_masked` stay lean by
 # default; per-codec pickers that need the extras opt in.
+#
+# NOT YET STABILIZED: unlike the default surface, items behind
+# `advanced` may change shape or be removed in a 0.2.x patch. Pin a
+# specific version if you depend on them. (Distinct from
+# `zenanalyze`'s `experimental`, which gates unstable feature
+# numerics rather than extra API.)
 advanced = []
 
 [dependencies]

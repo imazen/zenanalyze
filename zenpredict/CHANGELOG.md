@@ -68,7 +68,10 @@ between v2 and v3.
   `pick_with_confidence*`, `argmin_masked_with_scorer*`,
   `threshold_mask`), and the output-space OOD check (`OutputBound`,
   `output_first_out_of_distribution`). Wire-format slots still parse
-  unconditionally — the feature gates only the typed Rust API.
+  unconditionally — the feature gates only the typed Rust API. The
+  `advanced` surface is **not yet stabilized**: items behind it may
+  change or be removed in a 0.2.x patch (the default surface follows
+  normal 0.x semver).
 - **Feature-space out-of-distribution detection on the default
   surface**: `FeatureBound` + `first_out_of_distribution` (the only
   bounds API any consumer uses today) no longer require the `advanced`

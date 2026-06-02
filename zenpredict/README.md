@@ -94,6 +94,8 @@ Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_
 | `std` | yes | `std::error::Error` trait impls |
 | `advanced` | no | safety / rescue / output_specs typed API / top-K argmin + scorer hybrids — see "Decision math" above |
 
+The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. The default surface follows normal 0.x semver. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
+
 `no_std + alloc` builds drop only the `std::error::Error` impls. All numeric work — including `f32::exp` for `ScoreTransform::Exp` — runs identically via the unconditional `libm` dependency.
 
 ## Compressed bakes
