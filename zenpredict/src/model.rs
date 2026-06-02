@@ -267,6 +267,7 @@ pub struct LayerEntry {
 const _: () = assert!(core::mem::size_of::<LayerEntry>() == LAYER_ENTRY_SIZE);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Activation {
     Identity = 0,
     Relu = 1,
@@ -288,6 +289,7 @@ impl Activation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum WeightDtype {
     F32 = 0,
     F16 = 1,

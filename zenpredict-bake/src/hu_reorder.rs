@@ -478,6 +478,10 @@ mod tests {
                             acc
                         }
                     }
+                    _ => unreachable!(
+                        "reference forward pass: unsupported Activation {:?}",
+                        layer.activation
+                    ),
                 };
             }
             current = next;

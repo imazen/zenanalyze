@@ -53,11 +53,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-11-arm, macos-15-intel, macos-latest]
-        # zenpredict has 3 valid feature combos (`bake` requires `std`):
-        #   ""           — no_std + alloc, runtime only
-        #   "std"        — full runtime, no baker
-        #   "std,bake"   — full runtime + Rust-side baker + CLIs
-        features: ["", "std", "std,bake"]
+        # zenpredict has 3 valid feature combos (`advanced` requires `std`):
+        #   ""             — no_std + alloc, runtime only
+        #   "std"          — full runtime (lean: predict + argmin_masked)
+        #   "std,advanced" — full runtime + typed multi-output / safety /
+        #                    rescue / top-K / scorer-hybrid API
+        features: ["", "std", "std,advanced"]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -65,20 +66,20 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'std,advanced' && matrix.os == 'ubuntu-latest'
         run: cargo fmt -p zenpredict --check
       - name: Clippy
-        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'std,advanced' && matrix.os == 'ubuntu-latest'
         run: cargo clippy -p zenpredict --no-default-features --features "${{ matrix.features }}" --all-targets -- -D warnings
       - name: Build
         run: cargo build -p zenpredict --no-default-features --features "${{ matrix.features }}"
       - name: Test (lib)
         run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --lib
       - name: Test (integration)
-        if: matrix.features == 'std,bake'
+        if: matrix.features == 'std,advanced'
         run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --tests
       - name: Test (doc)
-        if: matrix.features == 'std,bake' && matrix.os == 'ubuntu-latest'
+        if: matrix.features == 'std,advanced' && matrix.os == 'ubuntu-latest'
         run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --doc
 
   cross:
@@ -111,8 +112,8 @@ jobs:
       # because Model::from_bytes does u32 / usize arithmetic that wraps
       # on 32-bit; checked_mul guards exist but live-fire tests confirm.
       - name: Build zenpredict
-        run: cross build -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,bake"
+        run: cross build -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,advanced"
       - name: Test zenpredict
         env:
           CROSS_RUNTIME: "1"
-        run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,bake" --lib
+        run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,advanced" --lib

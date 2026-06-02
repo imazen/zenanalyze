@@ -141,5 +141,12 @@ opt-level = 2
 debug = true
 
 [workspace]
-members = ["zenpicker", "zenpicker-train", "zenpredict", "zenpredict-bake", "zenpredict-viz"]
+members = ["zenpicker", "zenpredict", "zenpredict-bake", "zenpredict-viz"]
+# zenpicker-train is a local training binary that pulls a cross-repo
+# path dependency (`zenstats` from the sibling `zenmetrics` checkout)
+# plus parquet/arrow. It is not publishable and the sibling repo is
+# not present on CI, so excluding it keeps the workspace manifest
+# loadable in CI. Build it on demand with
+# `cargo build --manifest-path zenpicker-train/Cargo.toml`.
+exclude = ["zenpicker-train"]
 resolver = "3"

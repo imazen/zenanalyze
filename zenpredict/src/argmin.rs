@@ -55,6 +55,7 @@ impl<'a> AllowedMask<'a> {
 /// matters when an offsets table mixes per-output overhead in
 /// linear bytes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ScoreTransform {
     /// Argmin over the raw model outputs (no transform). Use when
     /// outputs are already in the argmin-target space — perceptual

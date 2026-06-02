@@ -158,6 +158,7 @@ fn activation_name(a: Activation) -> &'static str {
         Activation::Identity => "identity",
         Activation::Relu => "relu",
         Activation::LeakyRelu => "leaky_relu",
+        _ => "unknown",
     }
 }
 
@@ -400,6 +401,11 @@ pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<Forwar
                     }
                 }
             }
+            // An activation this viz build doesn't know about: pass the
+            // pre-activation values through unchanged. `activation_name`
+            // renders "unknown" for the same variant, so post == pre
+            // signals "not applied" rather than silently faking a curve.
+            _ => {}
         }
 
         layer_stages.push(LayerStage {

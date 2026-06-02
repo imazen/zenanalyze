@@ -689,6 +689,11 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 }
                 Section::new(start, layer.weights.len() as u32)
             }
+            _ => unreachable!(
+                "zenpredict-bake composer cannot serialize WeightDtype {:?}; \
+                 rebuild zenpredict-bake against the matching zenpredict",
+                layer.dtype
+            ),
         };
 
         let scales_section = match layer.dtype {
@@ -745,6 +750,11 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 MetadataType::Utf8 => 1,
                 MetadataType::Numeric => 2,
                 MetadataType::Reserved(b) => b,
+                _ => unreachable!(
+                    "zenpredict-bake composer cannot serialize MetadataType {:?}; \
+                     rebuild zenpredict-bake against the matching zenpredict",
+                    entry.kind
+                ),
             };
             buf.push(type_byte);
             // [4] value_len LE
@@ -965,6 +975,7 @@ fn forward_permute_inputs(
         WeightDtype::F32 => 4,
         WeightDtype::F16 => 2,
         WeightDtype::I8 => 1,
+        _ => unreachable!("unsupported layer0 WeightDtype: {layer0_dtype:?}"),
     };
     let row_bytes = layer0_out_dim * elem_bytes;
     forward_permute_rows(buf, layer0_weights_section, perm, row_bytes);
@@ -988,6 +999,7 @@ fn forward_permute_outputs(
         WeightDtype::F32 => 4,
         WeightDtype::F16 => 2,
         WeightDtype::I8 => 1,
+        _ => unreachable!("unsupported last-layer WeightDtype: {last_dtype:?}"),
     };
     // Permute COLS of last-layer weights.
     forward_permute_cols(

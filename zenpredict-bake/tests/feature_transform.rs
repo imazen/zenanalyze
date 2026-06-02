@@ -235,6 +235,7 @@ mod feature_transform_tests {
                 assert!((v - 1.0).abs() < 1e-5, "ln(e) ≈ 1.0, got {v}");
             }
             OutputValue::Default => panic!("expected Override"),
+            _ => panic!("unexpected OutputValue variant"),
         }
     }
 

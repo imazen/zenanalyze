@@ -93,26 +93,19 @@ Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_
 |---|---|---|
 | `std` | yes | `std::error::Error` impls; `f32::exp` for `ScoreTransform::Exp` |
 | `advanced` | no | safety / rescue / output_specs typed API / top-K argmin + scorer hybrids — see "Decision math" above |
-| `compressed-weights` | no | `WeightDtype::I8Lz4` (wire byte 3) + the vendored LZ4 block decoder. Pair with `zenpredict-bake`'s matching `lz4` feature to emit compressed bakes. See "Compressed weights" below. |
 
 `no_std + alloc` builds drop `std::error::Error` impls and `f32::exp` — `ScoreTransform::Exp` falls back to identity (loses linear-space mixing). Everything else works.
 
-## Compressed weights
+## Compressed bakes
 
-The `compressed-weights` feature adds `WeightDtype::I8Lz4` — i8 weights with an LZ4-block-compressed byte stream. Wire layout: `[u32 decompressed_len_bytes][lz4_block_payload]`, followed by the same per-output f32 scales section the plain I8 path uses.
+A bake's payload (everything after the 128-byte header) may be LZ4-block-compressed as a single envelope. There is **no feature flag** — the loader always links the decoder (`lz4_flex`, `safe-decode` only, ~4 KB) and handles compression transparently:
 
-**Decoder** is pure-safe-Rust, single-alloc, ~280 LOC, no_std-compatible. Lives at `src/lz4_block.rs`. The per-Predictor scratch is allocated once at `Predictor::new` (sized to `max(decompressed_len)` across all `I8Lz4` layers, zero if no compressed layers); each `predict()` re-decompresses fresh into it. No global decoded-weight cache.
+- Header `flags` bit 0 marks a compressed payload; the algorithm nibble selects LZ4 (`lz4_flex::block`). Header byte offset 96 carries `decompressed_payload_len: u32`.
+- At load the parser allocates `128 + decompressed_payload_len` bytes, copies the header verbatim, and decompresses the payload into place. From there it parses exactly as an uncompressed bake — section offsets are written as if uncompressed, so the compression is purely an envelope.
 
-**Measured trade-off** on V0_17 → V0_18 shape (228 → 384 → 1, 87.5K i8 weights):
+The composer (`zenpredict-bake`) decides whether to emit a compressed envelope; the runtime accepts either form. The earlier per-layer `WeightDtype::I8Lz4` scheme was removed in favour of this whole-payload approach — see [`WIRE_FORMAT_V3_1.md`](WIRE_FORMAT_V3_1.md). Weight dtypes are now exactly `F32` / `F16` / `I8`.
 
-| variant | bake bytes | first-parse µs | per-predict µs |
-|---|---:|---:|---:|
-| I8 raw | 93,064 | 0.1 | 140.3 |
-| I8Lz4 + τ=0.005 zerobias | **37,976 (-59 %)** | 0.7 | 179.8 (+40) |
-
-Pair lz4 with `zenpredict-bake::apply_zero_bias_in_place` to get the shrink; LZ4 alone on raw i8 weights *expands* (uniform-LSB byte streams have no runs to compress). For binary-size-sensitive consumers the 59 % shrink is real; for predict-throughput-sensitive ones the 40 µs/predict overhead is the cost.
-
-**Resource limits**: every parse is bounded by `MAX_BAKE_BYTES = 64 MiB`, `MAX_DIM = 65,536`, `MAX_LAYERS = 256`. Limits are enforced before any allocation against the value being bounded; a 1 GB-claiming header fails in O(1). Constants exposed at `zenpredict::limits`. Fuzz targets at `fuzz/` cover parser + lz4 decoder + the full predict pipeline.
+**Resource limits**: every parse is bounded by `MAX_BAKE_BYTES = 64 MiB`, `MAX_DIM = 65,536`, `MAX_LAYERS = 256`, and the decompressed payload is additionally bounded to `MAX_BAKE_BYTES` minus the header. Limits are enforced before any allocation against the value being bounded; a 1 GB-claiming header fails in O(1). Constants exposed at `zenpredict::limits`. Fuzz targets at `fuzz/` cover parser + decompression + the full predict pipeline.
 
 ## License
 

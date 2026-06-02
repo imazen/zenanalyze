@@ -175,6 +175,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
                 Activation::Identity => "identity",
                 Activation::Relu => "relu",
                 Activation::LeakyRelu => "leakyrelu",
+                _ => "unknown",
             };
             let (dtype, n_weights, scales): (&str, usize, Option<&[f32]>) = match &layer.weights {
                 WeightStorage::F32(w) => ("f32", w.len(), None),
@@ -517,6 +518,7 @@ fn metadata_to_json(md: &zenpredict::Metadata<'_>) -> Value {
                         "value_hex": hex_of(e.value),
                     });
                 }
+                _ => "unknown",
             };
             // Surface text inline for utf8; hex for everything else.
             let mut obj = json!({

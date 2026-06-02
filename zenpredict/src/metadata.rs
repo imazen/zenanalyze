@@ -62,6 +62,7 @@ use crate::error::PredictError;
 /// gates a generic dump tool's render and lets typed accessors
 /// (`get_utf8`, `get_numeric`, `get_bytes`) fail loudly on mismatch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum MetadataType {
     /// Opaque bytes (wire type 0). Could be a `#[repr(C)]` struct,
     /// codec-private payload, packed length-prefixed string array,

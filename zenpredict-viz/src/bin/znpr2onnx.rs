@@ -292,6 +292,13 @@ fn build_onnx_model(model: &Model, name: &str) -> Result<ModelProto, String> {
                     &[make_attr_float("alpha", 0.01)],
                 ));
             }
+            _ => {
+                return Err(format!(
+                    "znpr2onnx: cannot export Activation {:?} to ONNX; \
+                     this converter build does not support it",
+                    layer.activation
+                ));
+            }
         }
 
         current_out = post_name;

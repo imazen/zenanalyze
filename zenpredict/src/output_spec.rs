@@ -53,6 +53,7 @@ use crate::bounds::FeatureBound;
 /// describe the post-activation domain that consumers care about.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum OutputTransform {
     /// Pass through unchanged. The default; outputs are returned raw.
     #[default]
@@ -242,6 +243,7 @@ impl OutputSpec {
 /// or "use codec default" — the latter when the rounded value matched
 /// the spec's sentinel, or when a sparse override entry was `NaN`.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OutputValue {
     /// A concrete predicted value the caller should use. Always
     /// finite (NaN propagates to `Default`).

@@ -38,6 +38,7 @@ use crate::metadata::{Metadata, MetadataType};
 /// `Log1p` uses [`f32::ln_1p`] for non-negative features that can hit
 /// zero — `log1p(0) == 0`, no clamping needed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+#[non_exhaustive]
 pub enum FeatureTransform {
     /// Pass-through. Same as not declaring a transform.
     #[default]
@@ -773,6 +774,10 @@ pub fn apply_feature_transforms_with_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Bring `Vec` into scope explicitly so the test module compiles
+    // under `--no-default-features` (no_std, no std prelude) as well as
+    // std. Same type as the std prelude's `Vec` under std builds.
+    use alloc::vec::Vec;
 
     #[test]
     fn from_token_round_trips_parameterized_variants() {

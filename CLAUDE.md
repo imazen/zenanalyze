@@ -188,3 +188,24 @@ runtime branch).
 - Decoder bug filed: `imazen/zenjxl-decoder#15` — effort=9 +
   distance ≤ 0.5 + screen content produces files jxl-oxide accepts
   but zenjxl-decoder rejects (decoder bug, not encoder)
+
+## Known Bugs
+
+- **`zenpredict-bake/src/bin/fit_yeo_johnson.rs:447` test
+  `golden_search_finds_optimum_on_synthetic_gaussian` fails**
+  (pre-existing since `0b11215`, 2026-05-25). The golden-section MLE
+  returns λ≈−0.84 on deterministic log-normal data where the test
+  asserts |λ|<0.5 (log-transform ⇒ λ≈0). The test is fully
+  deterministic (Box-Muller, no RNG seed), so it has failed since the
+  day it landed. Scope: the `fit_yeo_johnson` tool in `zenpredict-bake`
+  only — `zenpredict` (the published runtime) is unaffected, and CI
+  does not run `zenpredict-bake`'s tests. Either the fitter's
+  objective or the test's expectation is wrong; needs a numerical
+  investigation. Do NOT relax the assertion without confirming the
+  fitter is correct.
+- CI does not run `zenpredict-bake`'s tests/benches at all (only
+  `-p zenpredict`, `-p zenpicker`, and the workspace `cargo build`).
+  `zenpredict-bake/benches/predict.rs` is also bit-rotted against
+  rand 0.9 (`gen_range` → `random_range`) and the current `Predictor`
+  API (E0308). Adding a `zenpredict-bake` test job would surface both
+  the bench rot and the `fit_yeo_johnson` failure above.

@@ -693,6 +693,7 @@ mod bake_roundtrip {
                 Activation::Identity => 0.0,
                 Activation::Relu => 3.0,
                 Activation::LeakyRelu => 2.97,
+                _ => unreachable!("test covers only known activations"),
             };
             assert!((out[0] - expected).abs() < 1e-5, "act={act:?} got {out:?}");
         }
