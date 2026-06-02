@@ -171,6 +171,12 @@ pub(crate) mod tier2_chroma;
 pub(crate) mod tier3;
 #[cfg(feature = "hdr")]
 pub(crate) mod tier_depth;
+// PROTOTYPE — zenjpeg YCbCr↔XYB picker color-loss features. NOT wired into
+// the shipped `features_table!` (feature ids are frozen at 0.1.x). Gated
+// behind `experimental` so it stays out of the default build until the
+// user signs off on spending two feature ids. See module docs.
+#[cfg(feature = "experimental")]
+pub(crate) mod xyb_color_loss;
 
 use core::fmt;
 
@@ -734,7 +740,39 @@ pub fn analyze_features_rgb8(
     let stride = w * 3;
     let slice = PixelSlice::new(rgb, width, height, stride, PixelDescriptor::RGB8_SRGB)
         .expect("RGB8 PixelSlice from packed buffer");
-    analyze_features(slice, query).expect("analyze never fails on RGB8")
+    #[allow(unused_mut)]
+    let mut results = analyze_features(slice, query).expect("analyze never fails on RGB8");
+    // RGB8-only prototype XYB color-loss features (experimental, held). Their
+    // computation needs the contiguous RGB buffer, which the generic analyzer
+    // moves into RowStream — so they are populated here as a post-step. `set`
+    // overwrites the into_results default and is a no-op for unrequested ids.
+    #[cfg(feature = "experimental")]
+    {
+        use feature::AnalysisFeature as F;
+        let q = query.features();
+        if w > 0
+            && h > 0
+            && (q.contains(F::Xyb444ColorLoss)
+                || q.contains(F::Ycbcr420ChromaLoss)
+                || q.contains(F::XybBquarterChromaLoss)
+                || q.contains(F::XybBquarterAdvantage))
+        {
+            let cl = xyb_color_loss::analyze_xyb_color_loss_rgb8(rgb, w, h);
+            if q.contains(F::Xyb444ColorLoss) {
+                results.set(F::Xyb444ColorLoss, cl.xyb444_color_loss);
+            }
+            if q.contains(F::Ycbcr420ChromaLoss) {
+                results.set(F::Ycbcr420ChromaLoss, cl.ycbcr420_chroma_loss);
+            }
+            if q.contains(F::XybBquarterChromaLoss) {
+                results.set(F::XybBquarterChromaLoss, cl.xyb_bquarter_chroma_loss);
+            }
+            if q.contains(F::XybBquarterAdvantage) {
+                results.set(F::XybBquarterAdvantage, cl.xyb_bquarter_advantage);
+            }
+        }
+    }
+    results
 }
 
 /// Fallible parallel of [`analyze_features_rgb8`]. Returns

@@ -1229,6 +1229,54 @@ features_table! {
     /// J. Opt. Soc. Am. A 1987.
     #[cfg(feature = "experimental")]
     SpectralSlopeY = 137 : f32 => spectral_slope_y,
+
+    /// `f32`. Mean per-block high-frequency chroma DCT energy — the L2
+    /// energy of the Cb+Cr AC coefficients in the `u≥4 ∨ v≥4` quadrant,
+    /// the chroma detail a 2× chroma downsample (4:2:0 / XYB-BQuarter)
+    /// discards. The **favor-XYB chroma-subsample** picker signal: high
+    /// values mean the source carries chroma detail YCbCr 4:2:0 would
+    /// drop, where XYB's chroma handling pays off.
+    ///
+    /// **Why:** validated against a 351-image zenjpeg XYB-vs-YCbCr sweep
+    /// (per-image bitrate-matched + equal-q advantage). On real-sized
+    /// images this is the strongest single color predictor of the XYB
+    /// advantage, beating an exact XYB round-trip reference — Spearman
+    /// vs the equal-q advantage +0.78 (size≥512), +0.85 (size≥1024);
+    /// vs bitrate-matched +0.79 (size≥512). Pair with [`LogPixels`] (the
+    /// header-overhead size axis, +0.72 vs bitrate-matched) which carries
+    /// the small-image regime this color signal cannot.
+    ///
+    /// **Cost:** free — one pass over 48 coefficients per sampled block,
+    /// reusing the Tier-3 chroma DCT already computed for
+    /// `DctCompressibilityUV` / noise-floor. No new DCT, no LUT.
+    #[cfg(feature = "experimental")]
+    ChromaHfEnergy = 138 : f32 => chroma_hf_energy,
+
+    /// `f32`. AXIS 1 (color, unsubsampled). Fraction of pixels in colors
+    /// XYB's 4:4:4 opsin+cbrt+8-bit round trip sheds that YCbCr 4:4:4
+    /// keeps (per-px: err_xyb444 > 8 AND err_ycbcr444 <= 3). The
+    /// **favor-YCbCr** color discriminant — independent of subsampling.
+    /// RGB8-only (computed in `analyze_features_rgb8`). Range [0, 1].
+    #[cfg(feature = "experimental")]
+    Xyb444ColorLoss = 139 : f32 => xyb444_color_loss,
+
+    /// `f32`. AXIS 2 (subsample). Mean RGB-MAE YCbCr 4:2:0 introduces by
+    /// averaging Cb,Cr over 2×2 (linear, cbrt-free). High ⇒ chroma detail
+    /// 4:2:0 would drop. RGB8-only. Held alternative to [`ChromaHfEnergy`].
+    #[cfg(feature = "experimental")]
+    Ycbcr420ChromaLoss = 140 : f32 => ycbcr420_chroma_loss,
+
+    /// `f32`. AXIS 2 (subsample). Mean RGB-MAE XYB BQuarter introduces by
+    /// subsampling the scaled-B plane 2×2 (`J·|Δsb|` via a 12 KiB B-LUT,
+    /// cbrt pre-paid). RGB8-only.
+    #[cfg(feature = "experimental")]
+    XybBquarterChromaLoss = 141 : f32 => xyb_bquarter_chroma_loss,
+
+    /// `f32`. AXIS 2 (subsample). Combined `ycbcr420 − xyb_bquarter`
+    /// favor-XYB subsample delta. Dominated by [`ChromaHfEnergy`] on the
+    /// n=351 ground truth — held for comparison. RGB8-only.
+    #[cfg(feature = "experimental")]
+    XybBquarterAdvantage = 142 : f32 => xyb_bquarter_advantage,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -2405,13 +2453,15 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the HVS-feature block added 2026-05-17
-        // (ids 132..137; the SpectralSlopeY landing at 137). Bump
-        // when new ids land beyond 137.
+        // First unused id past the HVS-feature block (ids 132..137), the
+        // ChromaHfEnergy feature at 138, and the experimental XYB color-loss
+        // prototype block (Xyb444ColorLoss 139, Ycbcr420ChromaLoss 140,
+        // XybBquarterChromaLoss 141, XybBquarterAdvantage 142) added 2026-06-03.
+        // Bump when new ids land beyond 142.
         assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(123).is_none());
         assert!(AnalysisFeature::from_u16(124).is_none());
-        assert!(AnalysisFeature::from_u16(138).is_none());
+        assert!(AnalysisFeature::from_u16(143).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 

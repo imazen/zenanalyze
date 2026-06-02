@@ -96,6 +96,7 @@ pub fn populate_tier3(
         {
             out.dct_compressibility_y = dct.compressibility_y;
             out.dct_compressibility_uv = dct.compressibility_uv;
+            out.chroma_hf_energy = dct.chroma_hf_energy;
             out.patch_fraction = dct.patch_fraction;
             out.aq_map_mean = dct.aq_map_mean;
             out.aq_map_std = dct.aq_map_std;
@@ -242,6 +243,12 @@ struct Tier3DctStats {
     /// Differentiable everywhere; same intent (smooth-gradient
     /// detection) without the threshold cliff.
     gradient_fraction_smooth: f32,
+    /// Mean per-block high-frequency chroma DCT energy in the `u≥4 ∨ v≥4`
+    /// quadrant ([`chroma_hf_quadrant`]) — the Cb+Cr detail a 2× chroma
+    /// downsample (4:2:0 / XYB-BQuarter) discards. The favor-XYB
+    /// chroma-subsample picker signal; reuses the already-computed
+    /// `coeffs_cb`/`coeffs_cr`, no extra DCT.
+    chroma_hf_energy: f32,
     /// **Experimental.** dHash-based patch_fraction (~10× cheaper than
     /// the DCT signature). 0.99 correlated with `patch_fraction`; AUC
     /// 0.852 (vs DCT's 0.880); peak F1 0.779 (DCT 0.763) on the
@@ -919,6 +926,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
             gradient_fraction_smooth: 0.0,
+            chroma_hf_energy: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
@@ -980,6 +988,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             noise_floor_uv_p90: 0.0,
             gradient_fraction: 0.0,
             gradient_fraction_smooth: 0.0,
+            chroma_hf_energy: 0.0,
             patch_fraction_fast: 0.0,
             quant_survival_y: 0.0,
             quant_survival_uv: 0.0,
@@ -1002,6 +1011,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
 
     let mut low_energy = 0.0f64;
     let mut high_energy = 0.0f64;
+    let mut chroma_hf_sum = 0.0f64;
     let mut blocks_sampled: u32 = 0;
     let mut alpha_y_sum: u64 = 0;
     let mut alpha_uv_sum: u64 = 0;
@@ -1193,6 +1203,11 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             }
             block_low_cb.push(low_cb as f32);
             block_low_cr.push(low_cr as f32);
+            // FREE reuse for the favor-XYB chroma-subsample feature: the
+            // high-frequency (u≥4 ∨ v≥4) Cb+Cr energy a 2× chroma downsample
+            // (4:2:0 / XYB-BQuarter) discards, off the already-computed
+            // `coeffs_cb`/`coeffs_cr` — one pass over 48 coeffs, no new DCT.
+            chroma_hf_sum += chroma_hf_quadrant(&coeffs_cb, &coeffs_cr);
             // libwebp α per block (luma): /16 bin divisor.
             alpha_y_sum += block_alpha(&coeffs_y, BIN_DIV_LUMA) as u64;
             // libwebp α per block (chroma): /8 bin divisor (finer bins
@@ -1361,6 +1376,12 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     };
     let compressibility_uv = if blocks_sampled > 0 {
         (alpha_uv_sum as f64 / blocks_sampled as f64) as f32
+    } else {
+        0.0
+    };
+    // Mean per-block high-frequency chroma energy (favor-XYB subsample signal).
+    let chroma_hf_energy = if blocks_sampled > 0 {
+        (chroma_hf_sum / blocks_sampled as f64) as f32
     } else {
         0.0
     };
@@ -1671,6 +1692,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         noise_floor_uv_p90,
         gradient_fraction,
         gradient_fraction_smooth,
+        chroma_hf_energy,
         patch_fraction_fast,
         quant_survival_y,
         quant_survival_uv,
@@ -1698,7 +1720,25 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
 /// amortized 3× and LLVM keeps the eight `DCT_COEF_T` lane vectors hot
 /// in YMM registers across planes.
 #[inline]
-fn dct2d_8_three_planes(
+/// High-frequency chroma DCT energy in the `u≥4 ∨ v≥4` quadrant — the Cb+Cr
+/// coefficients a 2× chroma downsample (4:2:0 / XYB-BQuarter) discards. L2
+/// (sum of squares), summed over both chroma planes, on the AC band only (DC
+/// excluded). Reuses already-computed `coeffs_cb`/`coeffs_cr`; one extra pass
+/// over 48 coefficients per block, no new DCT. The favor-XYB subsample signal
+/// (the chroma detail subsampling drops) — see the color-loss feature work.
+pub(crate) fn chroma_hf_quadrant(cb: &[[f32; 8]; 8], cr: &[[f32; 8]; 8]) -> f64 {
+    let mut e = 0.0f64;
+    for v in 0..8 {
+        for u in 0..8 {
+            if (u >= 4 || v >= 4) && !(u == 0 && v == 0) {
+                e += (cb[v][u] * cb[v][u] + cr[v][u] * cr[v][u]) as f64;
+            }
+        }
+    }
+    e
+}
+
+pub(crate) fn dct2d_8_three_planes(
     blk_y: &[[f32; 8]; 8],
     blk_cb: &[[f32; 8]; 8],
     blk_cr: &[[f32; 8]; 8],
@@ -1709,6 +1749,48 @@ fn dct2d_8_three_planes(
     incant!(dct2d_8_three_planes_simd(
         blk_y, blk_cb, blk_cr, coeffs_y, coeffs_cb, coeffs_cr
     ));
+}
+
+/// Mean per-block high-frequency chroma DCT energy over a full RGB8 image —
+/// the validation analogue of the in-loop [`chroma_hf_quadrant`] accumulator
+/// in [`dct_stats`]. Uses the SAME integer BT.601 Cb/Cr conversion, the SAME
+/// production [`dct2d_8_three_planes`] routine, and the SAME quadrant band, so
+/// it reproduces exactly what the (free, no-extra-DCT) in-loop accumulator
+/// would emit per block. This helper re-runs the DCT (it is for measurement /
+/// eval, not the hot path); production reuses tier-3's already-computed
+/// coefficients. Iterates every full 8×8 block (no edge partials).
+#[cfg(test)]
+pub(crate) fn chroma_hf_energy_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
+    let (bw, bh) = (w / 8, h / 8);
+    if bw == 0 || bh == 0 {
+        return 0.0;
+    }
+    let blk_y = [[0.0f32; 8]; 8]; // luma unused for the chroma quadrant
+    let mut blk_cb = [[0.0f32; 8]; 8];
+    let mut blk_cr = [[0.0f32; 8]; 8];
+    let (mut cy, mut ccb, mut ccr) = ([[0.0f32; 8]; 8], [[0.0f32; 8]; 8], [[0.0f32; 8]; 8]);
+    let mut sum = 0.0f64;
+    let mut nblocks = 0u64;
+    for by in 0..bh {
+        for bx in 0..bw {
+            for y in 0..8 {
+                for x in 0..8 {
+                    let o = ((by * 8 + y) * w + (bx * 8 + x)) * 3;
+                    let r = rgb[o] as i32;
+                    let g = rgb[o + 1] as i32;
+                    let b = rgb[o + 2] as i32;
+                    let cb_i = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+                    let cr_i = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+                    blk_cb[y][x] = cb_i as f32 - 128.0;
+                    blk_cr[y][x] = cr_i as f32 - 128.0;
+                }
+            }
+            dct2d_8_three_planes(&blk_y, &blk_cb, &blk_cr, &mut cy, &mut ccb, &mut ccr);
+            sum += chroma_hf_quadrant(&ccb, &ccr);
+            nblocks += 1;
+        }
+    }
+    (sum / nblocks.max(1) as f64) as f32
 }
 
 /// f32x8 SIMD 2D DCT-II for three 8×8 blocks (Y, Cb, Cr).
