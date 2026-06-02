@@ -3929,6 +3929,10 @@ mod hvs {
     /// AC pattern over many blocks (each block independently shaped).
     /// β estimate should land near 1.0 with reasonable looseness.
     #[test]
+    // `u`/`v`/`x`/`y` are DCT frequencies / pixel coordinates used in the
+    // cosine math, not mere collection indices — range loops read clearer
+    // than `.enumerate()` here, and the index is needed numerically.
+    #[allow(clippy::needless_range_loop)]
     fn one_over_f_synthetic_spectral_slope_near_one() {
         // 256×256 = 32×32 = 1024 8×8 blocks, well above MIN_BLOCKS.
         let w = 256u32;

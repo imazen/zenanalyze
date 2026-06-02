@@ -2172,7 +2172,10 @@ impl AnalysisResults {
     /// `f32` (e.g. `Bool(true) → 1.0`).
     #[must_use]
     pub fn pack(&self) -> Vec<(u16, f32)> {
-        self.values.iter().map(|(f, v)| (f.id(), v.to_f32())).collect()
+        self.values
+            .iter()
+            .map(|(f, v)| (f.id(), v.to_f32()))
+            .collect()
     }
 
     /// Reconstruct a results object from [`Self::pack`]ed pairs, for feature
@@ -2280,7 +2283,12 @@ pub struct MissingFeatures {
 
 impl core::fmt::Display for MissingFeatures {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "missing {} required feature(s): {:?}", self.missing.len(), self.missing)
+        write!(
+            f,
+            "missing {} required feature(s): {:?}",
+            self.missing.len(),
+            self.missing
+        )
     }
 }
 
@@ -2599,13 +2607,13 @@ mod tests {
     fn require_flags_missing_needed_features() {
         let r = sample_results();
         // All present → Ok.
-        assert!(r.require(FeatureSet::just(AnalysisFeature::Variance)).is_ok());
+        assert!(
+            r.require(FeatureSet::just(AnalysisFeature::Variance))
+                .is_ok()
+        );
         // EdgeDensity was never set → reported missing by id.
         let err = r
-            .require(
-                FeatureSet::just(AnalysisFeature::Variance)
-                    .with(AnalysisFeature::EdgeDensity),
-            )
+            .require(FeatureSet::just(AnalysisFeature::Variance).with(AnalysisFeature::EdgeDensity))
             .unwrap_err();
         assert_eq!(err.missing, [AnalysisFeature::EdgeDensity.id()]);
     }
