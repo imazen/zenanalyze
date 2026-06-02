@@ -24,10 +24,10 @@ name = "zenpredict"
 
 [features]
 default = ["std"]
-# `std::error::Error` impls and `f32::exp` for the linear-domain
-# argmin transform. `no_std + alloc` builds drop these — score
-# transforms beyond `Identity` will currently silently degrade (see
-# `argmin::ScoreTransform::Exp` docs).
+# `std::error::Error` trait impls only. All numeric work (including
+# `f32::exp` for `argmin::ScoreTransform::Exp`) runs identically on
+# `no_std + alloc` via the unconditional `libm` dependency — no
+# transform degrades when `std` is off.
 std = []
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety

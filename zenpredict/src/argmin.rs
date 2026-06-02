@@ -66,15 +66,11 @@ pub enum ScoreTransform {
     /// numerics finite) before adding offsets and running argmin.
     /// Lets log-domain regressors mix with linear-domain offsets.
     ///
-    /// **`no_std` build behavior:** without `f32::exp` (which lives
-    /// in `std`), this fallthrough returns the **clamped log-domain
-    /// score**, NOT a constant. Argmin still picks the smallest
-    /// `score` value because `exp` is monotonic — but `ArgminOffsets`
-    /// added in linear-byte space will be combined with log-domain
-    /// scores, mixing units. **Enable the `std` feature** for
-    /// correct linear-space argmin when using `Exp` with offsets.
-    /// Anchored without offsets, the log-vs-linear pick is
-    /// equivalent.
+    /// Computed via `f32::exp` under `std` and `libm::expf` under
+    /// no_std (`libm` is an unconditional dependency), so both build
+    /// configurations apply a true `exp` and produce the same
+    /// linear-space argmin — `ArgminOffsets` in linear-byte space mix
+    /// correctly with the exponentiated scores either way.
     Exp,
 }
 
@@ -525,10 +521,10 @@ fn clamped_exp(x: f32) -> f32 {
     }
     #[cfg(not(feature = "std"))]
     {
-        // no_std + alloc has no `f32::exp`. Returning `x` keeps the
-        // ordering monotonic so argmin still picks the smallest log
-        // value, but the magnitudes won't reflect linear-space
-        // mixing with offsets. Enable `std` for correctness.
-        x
+        // `core` has no `f32::exp`, but `libm` is an unconditional
+        // dependency (it backs `ln` / `ln_1p` in `feature_transform`),
+        // so no_std computes a true `exp` — same linear-space argmin as
+        // the std path, no silent degradation.
+        libm::expf(x)
     }
 }

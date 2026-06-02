@@ -108,11 +108,10 @@
 //! ## no_std
 //!
 //! `default-features = false` keeps the crate `no_std + alloc`. The
-//! `std` feature adds `std::error::Error` impls and `f32::exp` for
-//! [`ScoreTransform::Exp`]; `no_std` builds without an exp
-//! implementation degrade `Exp` to a tied score (see
-//! [`ScoreTransform`] docs). Add an `alloc-libm` feature in a
-//! future patch if the no_std-with-Exp consumer ever surfaces.
+//! `std` feature adds only `std::error::Error` impls; all numeric
+//! work — including `f32::exp` for [`ScoreTransform::Exp`] — runs
+//! identically on no_std via the unconditional `libm` dependency, so
+//! there is no degraded transform path.
 //!
 //! ## Crate boundary
 //!

@@ -101,6 +101,15 @@ between v2 and v3.
   `zentrain/tools/feature_transform_sweep.py` byte-identically so
   bake round-trips match.
 
+### Fixed
+
+- `ScoreTransform::Exp` now applies a true `exp` on `no_std` builds
+  via the unconditional `libm` dependency, instead of degrading to
+  identity (the old fallthrough returned the un-exponentiated score).
+  std and no_std now produce the same linear-space argmin, so a
+  picker that mixes `Exp` with linear-byte `ArgminOffsets` is correct
+  without the `std` feature.
+
 ### Documentation
 
 - README + crate-level docs rewritten for v3-only + the

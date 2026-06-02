@@ -91,10 +91,10 @@ Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_
 
 | Feature | Default | What it gates |
 |---|---|---|
-| `std` | yes | `std::error::Error` impls; `f32::exp` for `ScoreTransform::Exp` |
+| `std` | yes | `std::error::Error` trait impls |
 | `advanced` | no | safety / rescue / output_specs typed API / top-K argmin + scorer hybrids — see "Decision math" above |
 
-`no_std + alloc` builds drop `std::error::Error` impls and `f32::exp` — `ScoreTransform::Exp` falls back to identity (loses linear-space mixing). Everything else works.
+`no_std + alloc` builds drop only the `std::error::Error` impls. All numeric work — including `f32::exp` for `ScoreTransform::Exp` — runs identically via the unconditional `libm` dependency.
 
 ## Compressed bakes
 
