@@ -19,6 +19,12 @@ exclude = [
   "fuzz/**",
 ]
 
+[package.metadata.docs.rs]
+# Render the complete API. The `advanced` typed subsystems are
+# feature-gated; without this docs.rs builds only the default surface
+# and intra-doc links from default items into the gated API break.
+features = ["advanced"]
+
 [lib]
 name = "zenpredict"
 

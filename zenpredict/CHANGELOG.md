@@ -66,9 +66,14 @@ between v2 and v3.
   (`predict_with_specs*`, `OutputValue`, `apply_spec`), the top-K /
   scorer-hybrid argmin family (`argmin_masked_top_k*`,
   `pick_with_confidence*`, `argmin_masked_with_scorer*`,
-  `threshold_mask`), and `bounds::*_out_of_distribution` /
-  `OutputBound`. Wire-format slots still parse unconditionally — the
-  feature gates only the typed Rust API.
+  `threshold_mask`), and the output-space OOD check (`OutputBound`,
+  `output_first_out_of_distribution`). Wire-format slots still parse
+  unconditionally — the feature gates only the typed Rust API.
+- **Feature-space out-of-distribution detection on the default
+  surface**: `FeatureBound` + `first_out_of_distribution` (the only
+  bounds API any consumer uses today) no longer require the `advanced`
+  feature, so codecs can guard inputs without opting into the heavier
+  typed subsystems.
 - **`zenpredict::wire` module** exposing the shared byte-offset
   constants (`HEADER_SIZE`, `LAYER_ENTRY_SIZE`, `SECTION_OFF_*`) the
   parser and the `zenpredict-bake` composer both consume, ending a

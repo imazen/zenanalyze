@@ -150,9 +150,9 @@ pub use argmin::{
     argmin_masked_top_k, argmin_masked_top_k_in_range, argmin_masked_top_k_with_scorer,
     argmin_masked_with_scorer, pick_with_confidence, pick_with_confidence_in_range, threshold_mask,
 };
-pub use bounds::FeatureBound;
+pub use bounds::{FeatureBound, first_out_of_distribution};
 #[cfg(feature = "advanced")]
-pub use bounds::{OutputBound, first_out_of_distribution, output_first_out_of_distribution};
+pub use bounds::{OutputBound, output_first_out_of_distribution};
 pub use error::PredictError;
 pub use feature_transform::{FeatureTransform, apply_feature_transforms};
 pub use inference::f16_bits_to_f32;

@@ -50,7 +50,6 @@ impl FeatureBound {
 /// assert_eq!(first_out_of_distribution(&[2.0, 0.0], &bounds), Some(0));
 /// assert_eq!(first_out_of_distribution(&[0.5, f32::NAN], &bounds), Some(1));
 /// ```
-#[cfg(feature = "advanced")]
 pub fn first_out_of_distribution(features: &[f32], bounds: &[FeatureBound]) -> Option<usize> {
     debug_assert_eq!(
         features.len(),
