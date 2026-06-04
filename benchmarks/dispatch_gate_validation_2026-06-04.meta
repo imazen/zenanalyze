@@ -1,0 +1,84 @@
+# Dispatch-plan gate validation — imazen/zenanalyze#53 / PR #54
+
+date_utc:        2026-06-04
+git_commit:      94086a4ba1bfbb55e86607be58539d6f6516f0c9 (Stage 1.5/2 impl; validation
+                 committed in the following commit on branch feat/dispatch-plan)
+hostname:        lilith
+toolchain:       cargo (release profile, no target-cpu=native)
+features:        experimental,hdr
+corpus:          /home/lilith/work/codec-corpus/imazen-26  (READ-ONLY; only decoded)
+codec backends:  image 0.25 png+jpeg only (HEIC/DNG/TIFF in the corpus skipped)
+
+command:
+  cargo run --release --features "experimental,hdr" \
+    --example validate_dispatch_gates -- \
+    --corpus /home/lilith/work/codec-corpus/imazen-26 \
+    --output benchmarks/dispatch_gate_validation_2026-06-04.tsv \
+    --screen-n 50 --photo-n 100 --seed 1
+
+## Sample (deterministic seed=1 stride sample over sorted paths)
+
+- screen/   : 438 PNG available, 50 sampled
+- photo/mixed (unsplash, nasa, noaa, national-park-service, epa,
+  internet-archive-scans, skitter, office-documents):
+              329 PNG/JPG available, 100 sampled
+- decode-failed/skipped: 3 (PNGs the image 0.25 png decoder rejected)
+- images scored: 147
+
+## Method
+
+For each image, run BOTH entry points with FeatureSet::SUPPORTED:
+  full  = analyze_features            (no gating)
+  gated = analyze_with_dispatch_plan  (Stage 0/1.5/2)
+Gate firing is read from the FULL-analysis signals (is_grayscale,
+uniformity) — the same signals the dispatch plan reads internally from
+Tier 1. For each feature a gate WOULD drop, record the value the FULL
+analysis computed on images where the gate condition fired
+(counterfactual safety assessment — independent of whether the plan
+currently ACTS on that gate). Ground-truth chroma is measured directly
+from RGB8 bytes (max-min channel spread per pixel), independent of the
+analyzer's is_grayscale classifier, to detect grayscale-gate misfires.
+
+A gate is SAFE iff every would-drop feature is consistently negligible
+(|full value| < 1.0) on the images where its condition fired.
+
+## Result (per the GATE VALIDATION SUMMARY on stderr)
+
+GRAYSCALE gate (CHROMA_DROP_FEATURES) — VALIDATED-SAFE, shipped ENABLED
+  condition fire rate:            8/147 (5.4%)
+  worst-case would-drop magnitude: 0.000000 (every chroma feature)
+  meaningful would-drop events:   0
+  misfires (fired on real-chroma image): 0  (cross-checked vs ground-truth)
+  => On strict R==G==B grayscale the dropped chroma features are
+     bit-exactly their default; classifier never fired on coloured
+     content. Safe to drop.
+
+UNIFORMITY gate (SATURATING_DROP_FEATURES) — UNSAFE on this sample,
+                                             correctly shipped DISABLED
+  condition fire rate:            10/147 (6.8%)
+  worst-case would-drop magnitude: 255.000000 (laplacian_variance_peak)
+  meaningful would-drop events:   34
+  worst offending: laplacian_variance_peak=255.0 on
+    screen/1440x900/proofwiki__pythagoras__1440x900__dpr1.png
+  => The issue-#53 spec assumed uniformity>0.95 ⇒ Laplacian percentiles
+     pin to ~0 and patch_fraction_fast won't vary. That holds for
+     PHOTOGRAPHIC flat content but is VIOLATED on text / line-art /
+     document / diagram screen content: a mostly-white page with
+     sparse-but-maximally-sharp black text reports uniformity>0.95 yet
+     has laplacian_variance_peak=255, laplacian_variance_p99 up to 38,
+     patch_fraction_fast≈0.99, aq_map_p99 up to 5.9. Dropping these
+     discards the single most discriminating line-art / text signals —
+     exactly the screen-content class the picker most needs. Gate kept
+     OFF (ENABLE_UNIFORMITY_GATE=false in src/dispatch.rs) until a
+     content-aware threshold (uniformity AND low edge-peak) is
+     calibrated. SATURATING_DROP_FEATURES retained for that follow-up.
+
+## TSV columns
+
+path, stratum, width, height, is_grayscale, uniformity, chroma_frac_gt2
+(fraction of sampled px with channel spread > 2 levels), max_channel_spread,
+gray_gate_fired, uniformity_gate_fired, n_chroma_dropped (plan actually
+dropped), n_saturating_dropped (plan actually dropped; 0 — gate disabled),
+gray_gate_misfire, then drop_C_<feature> columns (full value on
+grayscale-condition-fired images) and drop_S_<feature> columns (full
+value on uniformity-condition-fired images).

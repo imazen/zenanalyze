@@ -4290,44 +4290,77 @@ mod dispatch_plan {
         }
     }
 
-    /// Stage 1.5 uniformity gate: a perfectly flat image reports
-    /// `uniformity` well above 0.95, so the saturating Tier 3
-    /// percentile columns (`SATURATING_DROP_FEATURES`) are dropped,
-    /// while `AqMapMean` / `AqMapStd` (kept by design) survive.
+    /// Stage 1.5 uniformity gate is DISABLED pending data: the
+    /// imazen-26 validation found it drops meaningful signal
+    /// (`laplacian_variance_peak = 255`, `patch_fraction_fast ≈ 0.99`)
+    /// on text / line-art / document screen content that reports
+    /// `uniformity > 0.95`. So even on a flat image where the gate
+    /// *would* fire, every requested saturating feature must still be
+    /// KEPT (populated), and must match `analyze_features` exactly —
+    /// the disabled gate makes the path pure parity. See
+    /// `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}` and
+    /// the `UNIFORMITY gate — DISABLED PENDING DATA` block in
+    /// `src/dispatch.rs`.
     #[cfg(feature = "experimental")]
     #[test]
-    fn stage1_5_uniform_drops_saturating_features() {
-        // Solid mid-gray 64×64 — flat luma ⇒ uniformity ≈ 1.0.
+    fn stage1_5_uniformity_gate_disabled_keeps_saturating_features() {
+        // Solid mid-gray 64×64 — flat luma ⇒ uniformity ≈ 1.0, the
+        // condition the gate *would* fire on if it were enabled.
         let buf = vec![128u8; 64 * 64 * 3];
-        let slice = rgb_slice(&buf, 64, 64);
-        let requested = FeatureSet::new()
-            .with(AnalysisFeature::Uniformity)
-            .with(AnalysisFeature::AqMapMean)
-            .with(AnalysisFeature::AqMapStd)
-            .with(AnalysisFeature::AqMapP99)
-            .with(AnalysisFeature::PatchFractionFast)
-            .with(AnalysisFeature::LaplacianVarianceP90);
-        let q = AnalysisQuery::new(requested);
-        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        let q = AnalysisQuery::new(
+            FeatureSet::new()
+                .with(AnalysisFeature::Uniformity)
+                .with(AnalysisFeature::AqMapMean)
+                .with(AnalysisFeature::AqMapStd)
+                .with(AnalysisFeature::AqMapP99)
+                .with(AnalysisFeature::PatchFractionFast)
+                .with(AnalysisFeature::LaplacianVarianceP90),
+        );
+
+        let baseline = analyze_features(rgb_slice(&buf, 64, 64), &q).unwrap();
+        let r = analyze_with_dispatch_plan(rgb_slice(&buf, 64, 64), &q, None).unwrap();
 
         let u = r.get_f32(AnalysisFeature::Uniformity).unwrap();
-        assert!(u > 0.95, "flat image must report uniformity > 0.95 (got {u})");
+        assert!(
+            u > 0.95,
+            "flat image must report uniformity > 0.95 (got {u})"
+        );
 
-        // Kept: cheap AQ-map mean/std byproducts.
-        assert!(r.get(AnalysisFeature::AqMapMean).is_some());
-        assert!(r.get(AnalysisFeature::AqMapStd).is_some());
-        // Dropped: saturating percentile columns.
+        // Gate is OFF ⇒ pure parity with `analyze_features`: each
+        // saturating feature has the SAME presence as the un-gated
+        // baseline and the SAME value. (AqMapP99 may be `None` in both
+        // on a 64×64 image — below the #49 per-feature percentile
+        // sample-count floor — which is exactly the point: the plan
+        // must mirror the baseline, not force a value the gate would
+        // otherwise have dropped.)
         for f in [
+            AnalysisFeature::AqMapMean,
+            AnalysisFeature::AqMapStd,
             AnalysisFeature::AqMapP99,
             AnalysisFeature::PatchFractionFast,
             AnalysisFeature::LaplacianVarianceP90,
         ] {
-            assert!(
-                r.get(f).is_none(),
-                "{f:?} must be dropped by the uniformity gate (got {:?})",
-                r.get(f),
+            let (b, p) = (baseline.get_f32(f), r.get_f32(f));
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for {f:?} with the gate off: base={b:?} plan={p:?}",
             );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "{f:?} must match baseline with the gate off: base={bv} plan={pv}",
+                );
+            }
         }
+        // At least the floor-surviving features must be present (so the
+        // test isn't vacuously passing on an all-None set).
+        assert!(
+            r.get_f32(AnalysisFeature::AqMapMean).is_some()
+                && r.get_f32(AnalysisFeature::PatchFractionFast).is_some(),
+            "AqMapMean + PatchFractionFast survive the floor at 64×64 and must be present",
+        );
     }
 
     /// Stage 0: a 64 × 64 image is below [`MIN_EXHAUSTIVE_THRESHOLD`]

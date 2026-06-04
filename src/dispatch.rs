@@ -238,15 +238,36 @@ pub(crate) fn run(
 
     // ----- Stage 1.5: narrow the remaining query --------------------
     let mut narrowed = requested;
+
+    // GRAYSCALE gate — VALIDATED SAFE against the imazen-26 corpus
+    // (benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}). On
+    // strict R==G==B grayscale input every CHROMA_DROP feature is
+    // *bit-exactly* its default (chroma is definitionally zero), and
+    // the strict-equality classifier never fired on an image carrying
+    // real chroma (0 misfires across the sample, cross-checked against
+    // a ground-truth max-channel-spread measure). Safe to drop.
     if raw.is_grayscale {
         narrowed = narrowed.difference(feature::CHROMA_DROP_FEATURES);
     }
-    // `uniformity` is a Tier 1 output written above. The 0.95
-    // threshold is the issue-#53 spec value (flat enough that the
-    // Laplacian percentiles pin to ~0 and `patch_fraction_fast`
-    // won't vary). Validated against the imazen-26 corpus before
-    // shipping — see `benchmarks/dispatch_gate_validation_*`.
-    if raw.uniformity > 0.95 {
+
+    // UNIFORMITY gate — DISABLED PENDING DATA. The issue-#53 spec
+    // assumed `uniformity > 0.95` ⇒ the Laplacian percentiles pin to
+    // ~0 and `patch_fraction_fast` won't vary. That holds for
+    // *photographic* flat content but is VIOLATED on text / line-art /
+    // document / diagram screen content: a mostly-white page with
+    // sparse-but-maximally-sharp black text reports `uniformity > 0.95`
+    // yet has `laplacian_variance_peak = 255`, `laplacian_variance_p99`
+    // up to 38, `patch_fraction_fast ≈ 0.99`, `aq_map_p99` up to 5.9.
+    // The imazen-26 validation (benchmarks/dispatch_gate_validation_*)
+    // measured 34 meaningful-drop events across 10 gated images — every
+    // dropped saturating feature carried real signal on the screen-
+    // content class the picker most needs to distinguish. Dropping them
+    // is information loss, so the gate stays OFF until a content-aware
+    // threshold (e.g. uniformity-AND-low-edge-peak) is calibrated.
+    // `SATURATING_DROP_FEATURES` is retained for that follow-up.
+    const ENABLE_UNIFORMITY_GATE: bool = false;
+    #[allow(clippy::overly_complex_bool_expr)]
+    if ENABLE_UNIFORMITY_GATE && raw.uniformity > 0.95 {
         narrowed = narrowed.difference(feature::SATURATING_DROP_FEATURES);
     }
 

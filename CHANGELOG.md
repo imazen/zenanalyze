@@ -25,33 +25,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output as plain data rather than as a clashing `AnalysisResults` type. New
   public items: `feature::{PackError, MissingFeatures}`. Additive — no break.
 
-### Added — `analyze_with_dispatch_plan` (issue #53, stage 0)
+### Added — `analyze_with_dispatch_plan` (issue #53, stages 0 + 1.5 + 2)
 
 - **New public entry point `analyze_with_dispatch_plan`** alongside
-  the existing `analyze_features`. Adjusts **sampling budget** based
-  on image dimensions before any scan — never narrows the caller's
-  feature query. Existing `analyze_features` is unchanged — codecs
-  opt in by switching call sites.
+  the existing `analyze_features`. Existing `analyze_features` is
+  unchanged — codecs opt in by switching call sites.
 - **New public type `DispatchHints`** — an empty
-  `#[non_exhaustive]` seat. Stage 0 does not consume any hint, so
-  the type ships with no fields. Future stages add fields
-  additively under 0.1.x without a public-signature change.
+  `#[non_exhaustive]` seat. No stage consumes a hint yet (every
+  decision derives from image dimensions + Tier 1 output), so the
+  type ships with no fields. Future stages add fields additively
+  under 0.2.x without a public-signature change.
 - **Stage 0**: empty-feature requests short-circuit; ≤ 64 K-pixel
   images get the budget bumped to exhaustive (per-call fixed
-  overhead dominates per-pixel work below this size, so sampling
-  buys nothing); ≥ 8 MP images record an internal extended-pass
-  flag for a future Stage 2 retry.
-- **Contract preserved for fixed-shape consumers**: for every
-  requested feature, the dispatch plan returns the same
-  `Some(_)` / `None` shape `analyze_features` would have returned
-  with the same query. The picker MLP and other consumers that
-  fill fixed-shape input vectors keep their training distribution
-  intact — no `None` substituted for a requested feature.
-- **Stages 2+ (extended-budget retry, selective Tier 3, derived
-  likelihoods)** are deferred to follow-up PRs gated on the
-  imazen/zenanalyze#47 corpus sweep. None will skip caller-requested
-  features either — the dispatch tree only ever adds compute, never
-  drops it.
+  overhead dominates per-pixel work below this size); ≥ 8 MP images
+  set an extended-pass flag for Stage 2.
+- **Stage 1.5 (content-class gating)**: when the strict-grayscale
+  classifier reports `is_grayscale = true`, the chroma-dependent
+  features (Tier 1 chroma, all of Tier 2, chroma DCT
+  compressibility, UV noise/quant percentiles, skin-tone) are
+  dropped from the result and come back as `None` instead of their
+  inert default. **Validated safe against the imazen-26 corpus** —
+  on strict R==G==B grayscale every dropped chroma feature is
+  bit-exactly its default, and the classifier showed 0 misfires
+  (never fired on an image carrying real chroma), cross-checked
+  against a ground-truth channel-spread measure. See
+  `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}`.
+- **Stage 1.5 uniformity gate — shipped DISABLED.** The
+  `uniformity > 0.95` → drop-saturating-Tier-3-percentiles gate from
+  the issue-#53 spec was found UNSAFE on the imazen-26 corpus: text /
+  line-art / document / diagram screen content reports
+  `uniformity > 0.95` yet carries meaningful sparse-edge signal
+  (`laplacian_variance_peak = 255`, `patch_fraction_fast ≈ 0.99`,
+  `aq_map_p99` up to 5.9). The gate is kept off
+  (`ENABLE_UNIFORMITY_GATE = false`) until a content-aware threshold
+  is calibrated; `SATURATING_DROP_FEATURES` is retained for that
+  follow-up.
+- **Stage 2 (extended-budget retry)**: on ≥ 8 MP images the
+  budget-sensitive Tier 3 DCT features (`patch_fraction_fast`,
+  `aq_map_p99`, `noise_floor_y_p90`) are re-sampled at 2× the DCT
+  block cap and overwritten with the finer-sampled values — the one
+  deliberate divergence from `analyze_features` (a strictly more
+  accurate value where the default block cap is spread thinnest).
+- **Parity**: every feature *not* dropped by Stage 1.5 and *not* one
+  of the three Stage 2 targets on a ≥ 8 MP image matches
+  `analyze_features` bit-for-bit. Dropped features come back as
+  `None`, never a stale or zero-default `Some(_)`.
 
 ## [0.2.0] - 2026-06-01
 
