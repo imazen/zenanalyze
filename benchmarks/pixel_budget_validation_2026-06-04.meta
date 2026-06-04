@@ -1,0 +1,51 @@
+# pixel_budget_validation_2026-06-04 — provenance
+
+git_commit:    0abe38b2e6ad836cdcc259be1edd6a17658bb7f1
+                (feat/raise-pixel-budget-defaults, rebased onto main 66d08f6,
+                 zenpredict 0.2.0 release-prep)
+branch:        feat/raise-pixel-budget-defaults  (PR #44, DRAFT, closes #9)
+hostname:      lilith
+machine:       AMD Ryzen 9 7950X, 128 GB RAM (water-cooled; no thermal throttle)
+date_utc:      2026-06-04T01:57:41Z
+rustc:         rustc 1.96.0 (ac68faa20 2026-05-25)
+
+# Build + run command (NO target-cpu=native — runtime SIMD dispatch is what
+# users get; native bakes in ISA extensions and gives misleading numbers).
+build_cmd:     cargo build --release --features experimental --example tier1_bench
+run_cmd:       RUSTFLAGS="" ./target/release/examples/tier1_bench   (run twice)
+
+# Harness: examples/tier1_bench.rs — existing in-tree perf example. It calls
+# zenanalyze::analyze_features() with the DEFAULT pixel budget (no override),
+# so it exercises the post-bump constants verified in source at run time:
+#   DEFAULT_PIXEL_BUDGET = 2_000_000   (was 500_000)
+#   DEFAULT_HF_MAX_BLOCKS = 4096       (was 1024)
+# Three query shapes per size: Tier-1-only (Variance), zenjpeg
+# ADAPTIVE_FEATURES (7-feature realistic orchestrator hot path), and the
+# full FeatureSet::SUPPORTED (~100+ features). 30 iters at 1/4 MP, 10 at
+# 16 MP, 3-iter warmup each. Input is deterministic LCG-random RGB8.
+
+# CAVEATS — read before citing these numbers:
+#   * Release build WITH debuginfo (the crate's default release profile);
+#     not a stripped/LTO build. Absolute latency would drop under LTO.
+#   * Each iter re-allocates a PixelSlice over a static buffer; the buffer
+#     itself is allocated once. Per-iter overhead is small but nonzero.
+#   * make_random produces high-entropy noise — a worst case for the
+#     entropy/DCT/AQ passes vs natural photo content.
+
+# WHAT THIS VALIDATES (issue #9's actual question — does the budget cap keep
+# cost bounded as image size grows?):
+#   YES. The 2 MP budget caps sampling, so cost is strongly SUBLINEAR in
+#   pixels. ms/MP for FeatureSet::SUPPORTED falls 17.6 -> 8.1 -> 3.25 as the
+#   image grows 1 -> 4 -> 16 MP; a 16 MP image costs ~3x a 1 MP image, not
+#   16x. Tier-1-only is essentially flat from 4 MP (14.4 ms) to 16 MP
+#   (13.8-14.9 ms) — the budget is doing its job.
+#
+# WHAT THIS DOES *NOT* VALIDATE (why PR #44 stays a DRAFT):
+#   The ABSOLUTE full-pipeline latency at the new budget is well above #9's
+#   "<1 ms/MP (~0.67 ms/MP at 16 MP)" headroom target for FeatureSet::SUPPORTED:
+#   16 MP full = ~51 ms = ~3.25 ms/MP on this box. #9's ~0.67 ms/MP figure
+#   plausibly refers to a single SIMD tier / a target-cpu=native path, NOT the
+#   full feature set this harness times. The headroom claim for the full
+#   pipeline is therefore NOT confirmed by this run. Corpus-based validation
+#   (#47) and the adaptive-budget path (#46) remain prerequisites before this
+#   default change is merge-ready.

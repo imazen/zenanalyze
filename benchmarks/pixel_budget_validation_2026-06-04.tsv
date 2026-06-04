@@ -1,0 +1,10 @@
+size_label	width	height	megapixels	query	ms_per_iter_run1	ms_per_iter_run2	ms_per_megapixel_mean
+1MP	1024	1024	1.00	tier1_only_variance	7.165	7.150	7.16
+1MP	1024	1024	1.00	zenjpeg_adaptive_features	11.917	12.014	11.97
+1MP	1024	1024	1.00	feature_set_supported	17.690	17.523	17.61
+4MP	2048	2048	4.00	tier1_only_variance	14.420	14.326	3.59
+4MP	2048	2048	4.00	zenjpeg_adaptive_features	19.320	19.030	4.79
+4MP	2048	2048	4.00	feature_set_supported	31.750	32.727	8.06
+16MP	4096	4096	16.00	tier1_only_variance	13.840	14.915	0.90
+16MP	4096	4096	16.00	zenjpeg_adaptive_features	24.626	25.756	1.57
+16MP	4096	4096	16.00	feature_set_supported	50.753	53.222	3.25
