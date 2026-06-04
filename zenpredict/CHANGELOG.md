@@ -108,6 +108,19 @@ between v2 and v3.
   NaN-safety test suite (`0b11215`, `9a9be82`). Transform math mirrors
   `zentrain/tools/feature_transform_sweep.py` byte-identically so
   bake round-trips match.
+- **`FeatureTransform::Sinusoidal` + a variable-arity (expander)
+  pipeline.** A scalar→vector positional embedding (`[sin, cos]` at N
+  frequencies) for learned per-pixel / image-domain MLPs (e.g.
+  gain-MLP). It is the one expander variant: scalar `apply` /
+  `apply_with_params` **panic** rather than silently pass through (a
+  Sinusoidal bake fed through the scalar path is a caller bug), and a
+  parallel expanding pipeline reports per-feature output arity and
+  writes the multi-value output without breaking the scalar
+  `apply_feature_transforms` contract. `Predictor::predict_with_specs_transformed`
+  auto-routes expander bakes; the scalar path raises the new
+  `PredictError::UnexpectedExpanderInScalarPipeline { feature_index }`
+  (additive on the `#[non_exhaustive]` enum). (`11bc6c6`, `0bb5ddd`,
+  `dec3854`; PRs #77/#78)
 
 ### Fixed
 
