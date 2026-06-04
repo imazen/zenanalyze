@@ -1875,6 +1875,132 @@ pub(crate) const DERIVED_FEATURES: FeatureSet = FeatureSet::new();
 pub(crate) const T3_NEEDED_BY: FeatureSet = TIER3_FEATURES;
 pub(crate) const PAL_NEEDED_BY: FeatureSet = PALETTE_FEATURES;
 
+// --- Stage 1.5 dispatch-plan drop sets ------------------------------
+//
+// Used by [`crate::analyze_with_dispatch_plan`] to narrow the
+// remaining-tier query after Tier 1 + the strict-grayscale gate.
+// The drop sets are subtracted from the caller's [`FeatureSet`]
+// before Tier 2 / Tier 3 run, so the per-feature gating inside the
+// dispatcher skips the corresponding work without touching tier
+// internals. Crate-internal — the dispatch plan's narrowing logic
+// is not part of the public surface (callers just see `None` for
+// features they didn't explicitly request, and the analyzer chose
+// to skip because Tier 1 proved them inert).
+
+/// Features that depend on chroma signal and are dropped by the
+/// dispatch plan when the strict-grayscale classifier reports
+/// `is_grayscale = true`. On a true grayscale image (R == G == B
+/// for every pixel) these features either compute to ~0
+/// (mean-of-zero chroma gradients) or are definitionally zero
+/// (skin tones can't survive grayscaling). Skipping them on
+/// grayscale input avoids paying for the entire Tier 2 chroma pass,
+/// the chroma half of Tier 3, and the Tier 1 chroma accumulators.
+///
+/// Includes the Tier 1 chroma signals (`ChromaComplexity`,
+/// `CbSharpness`, `CrSharpness`, `Colourfulness`), every Tier 2 axis
+/// ([`TIER2_FEATURES`]), chroma DCT compressibility, the UV
+/// noise / quant percentile columns, and `SkinToneFraction`.
+///
+/// Validated safe against the imazen-26 corpus — see
+/// `benchmarks/dispatch_gate_validation_*.{tsv,meta}` and the PR #54
+/// discussion. Strict R==G==B grayscale ⇒ every member is bit-exactly
+/// its default on the gated images.
+#[allow(unused_mut, unused_assignments)]
+pub(crate) const CHROMA_DROP_FEATURES: FeatureSet = {
+    let mut s = FeatureSet::new();
+    // Tier 1 chroma.
+    s = s.with(AnalysisFeature::ChromaComplexity);
+    s = s.with(AnalysisFeature::CbSharpness);
+    s = s.with(AnalysisFeature::CrSharpness);
+    #[cfg(feature = "experimental")]
+    {
+        s = s.with(AnalysisFeature::Colourfulness);
+        s = s.with(AnalysisFeature::SkinToneFraction);
+    }
+    // Tier 2 (entire chroma-sharpness pass).
+    s = s.with(AnalysisFeature::CbHorizSharpness);
+    s = s.with(AnalysisFeature::CbVertSharpness);
+    s = s.with(AnalysisFeature::CbPeakSharpness);
+    s = s.with(AnalysisFeature::CrHorizSharpness);
+    s = s.with(AnalysisFeature::CrVertSharpness);
+    s = s.with(AnalysisFeature::CrPeakSharpness);
+    // Tier 3 chroma DCT compressibility + UV noise/quant columns.
+    #[cfg(feature = "experimental")]
+    {
+        s = s.with(AnalysisFeature::DctCompressibilityUV);
+        s = s.with(AnalysisFeature::NoiseFloorUV);
+        s = s.with(AnalysisFeature::NoiseFloorUvP25);
+        s = s.with(AnalysisFeature::NoiseFloorUvP50);
+        s = s.with(AnalysisFeature::NoiseFloorUvP75);
+        s = s.with(AnalysisFeature::NoiseFloorUvP90);
+        s = s.with(AnalysisFeature::QuantSurvivalUv);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP10);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP25);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP50);
+        s = s.with(AnalysisFeature::QuantSurvivalUvP75);
+    }
+    s
+};
+
+/// Features whose value saturates on near-uniform images and is
+/// dropped by the dispatch plan when Tier 1 reports `uniformity >
+/// 0.95`. Either they collapse to ~0 (Laplacian variance percentiles
+/// over flat blocks, `patch_fraction_fast`'s match-density score on
+/// near-identical blocks) or to the floor of their AQ-map range — in
+/// both cases the consumer learns nothing the cheap `uniformity`
+/// signal didn't already say.
+///
+/// `AqMapMean` / `AqMapStd` are intentionally *kept* (they're cheap
+/// byproducts of the same accumulator that produces the percentiles);
+/// only the percentile columns get dropped.
+///
+/// Note: `patch_fraction_fast` here is the *uniformity*-gate drop, a
+/// separate decision from the Stage 2 extended-budget retry. A
+/// near-uniform large image drops it (Stage 1.5) rather than
+/// re-sampling it (Stage 2) — the `uniformity > 0.95` test wins.
+#[allow(unused_mut, unused_assignments)]
+pub(crate) const SATURATING_DROP_FEATURES: FeatureSet = {
+    let mut s = FeatureSet::new();
+    #[cfg(feature = "experimental")]
+    {
+        s = s.with(AnalysisFeature::LaplacianVarianceP50);
+        s = s.with(AnalysisFeature::LaplacianVarianceP75);
+        s = s.with(AnalysisFeature::LaplacianVarianceP90);
+        s = s.with(AnalysisFeature::LaplacianVarianceP99);
+        s = s.with(AnalysisFeature::LaplacianVariancePeak);
+        s = s.with(AnalysisFeature::PatchFractionFast);
+        s = s.with(AnalysisFeature::AqMapP50);
+        s = s.with(AnalysisFeature::AqMapP75);
+        s = s.with(AnalysisFeature::AqMapP90);
+        s = s.with(AnalysisFeature::AqMapP95);
+        s = s.with(AnalysisFeature::AqMapP99);
+    }
+    s
+};
+
+/// Budget-sensitive Tier 3 DCT features the Stage 2 extended pass
+/// re-samples at a larger `hf_max_blocks` on large (≥
+/// [`crate::dispatch::LARGE_THRESHOLD`]) images. These three show the
+/// most variance versus an exhaustive scan when the default block cap
+/// is spread thin across a high-megapixel frame, so a second pass at a
+/// finer block stride buys a meaningfully more accurate value.
+///
+/// Members must all be produced by the Tier 3 DCT pass
+/// (`tier3::populate_tier3` with `run_dct = true`); they are part of
+/// [`DCT_NEEDED_BY`]. Re-running that pass at a higher cap and copying
+/// just these fields is the Stage 2 effect.
+#[allow(unused_mut, unused_assignments)]
+pub(crate) const EXTENDED_PASS_FEATURES: FeatureSet = {
+    let mut s = FeatureSet::new();
+    #[cfg(feature = "experimental")]
+    {
+        s = s.with(AnalysisFeature::PatchFractionFast);
+        s = s.with(AnalysisFeature::AqMapP99);
+        s = s.with(AnalysisFeature::NoiseFloorYP90);
+    }
+    s
+};
+
 // `RawAnalysis` and `into_results` are generated by the
 // `features_table!` invocation at the top of this file.
 
