@@ -1,8 +1,9 @@
 # Dispatch-plan gate validation — imazen/zenanalyze#53 / PR #54
 
 date_utc:        2026-06-04
-git_commit:      94086a4ba1bfbb55e86607be58539d6f6516f0c9 (Stage 1.5/2 impl; validation
-                 committed in the following commit on branch feat/dispatch-plan)
+git_commit:      3c6c2a0b747b9990a3414c58a9e354e070aaa96e (Stage 1.5/2 + naive
+                 validation; content-aware calibration + this regenerated
+                 artifact land in the following commit on feat/dispatch-plan)
 hostname:        lilith
 toolchain:       cargo (release profile, no target-cpu=native)
 features:        experimental,hdr
@@ -14,7 +15,7 @@ command:
     --example validate_dispatch_gates -- \
     --corpus /home/lilith/work/codec-corpus/imazen-26 \
     --output benchmarks/dispatch_gate_validation_2026-06-04.tsv \
-    --screen-n 50 --photo-n 100 --seed 1
+    --screen-n 50 --photo-n 100 --seed 1 --edge-density-max 0.0005
 
 ## Sample (deterministic seed=1 stride sample over sorted paths)
 
@@ -39,8 +40,13 @@ currently ACTS on that gate). Ground-truth chroma is measured directly
 from RGB8 bytes (max-min channel spread per pixel), independent of the
 analyzer's is_grayscale classifier, to detect grayscale-gate misfires.
 
-A gate is SAFE iff every would-drop feature is consistently negligible
-(|full value| < 1.0) on the images where its condition fired.
+A gate is SAFE iff every would-drop feature is consistently negligible on
+the images where its condition fired. "Negligible" uses a PER-FEATURE
+line: |full value| < 1.0 for unbounded features (laplacian/aq
+percentiles up to 255), and |full value| < 0.27 for [0,1]-valued
+fraction features (patch_fraction*) — 0.27 is feature.rs's documented
+screen-like operating threshold, so a 0.99 there is maximal signal, not
+noise. A flat 1.0 line would silently pass a maximal patch_fraction drop.
 
 ## Result (per the GATE VALIDATION SUMMARY on stderr)
 
@@ -53,11 +59,12 @@ GRAYSCALE gate (CHROMA_DROP_FEATURES) — VALIDATED-SAFE, shipped ENABLED
      bit-exactly their default; classifier never fired on coloured
      content. Safe to drop.
 
-UNIFORMITY gate (SATURATING_DROP_FEATURES) — UNSAFE on this sample,
-                                             correctly shipped DISABLED
+UNIFORMITY gate — NAIVE uniformity>0.95 (SATURATING_DROP_FEATURES) —
+                  UNSAFE on this sample, correctly shipped DISABLED
   condition fire rate:            10/147 (6.8%)
   worst-case would-drop magnitude: 255.000000 (laplacian_variance_peak)
-  meaningful would-drop events:   34
+  meaningful would-drop events:   42  (per-feature line: 1.0 unbounded,
+                                       0.27 for patch_fraction*)
   worst offending: laplacian_variance_peak=255.0 on
     screen/1440x900/proofwiki__pythagoras__1440x900__dpr1.png
   => The issue-#53 spec assumed uniformity>0.95 ⇒ Laplacian percentiles
@@ -68,17 +75,60 @@ UNIFORMITY gate (SATURATING_DROP_FEATURES) — UNSAFE on this sample,
      has laplacian_variance_peak=255, laplacian_variance_p99 up to 38,
      patch_fraction_fast≈0.99, aq_map_p99 up to 5.9. Dropping these
      discards the single most discriminating line-art / text signals —
-     exactly the screen-content class the picker most needs. Gate kept
-     OFF (ENABLE_UNIFORMITY_GATE=false in src/dispatch.rs) until a
-     content-aware threshold (uniformity AND low edge-peak) is
-     calibrated. SATURATING_DROP_FEATURES retained for that follow-up.
+     exactly the screen-content class the picker most needs.
+
+UNIFORMITY gate — CONTENT-AWARE uniformity>0.95 AND edge_density<tau
+                  (PR #54 calibration attempt) — NO SAFE THRESHOLD FOUND,
+                  shipped DISABLED
+  Hypothesis (PR brief): text/line-art keeps high tier1 edge_density even
+  when "uniform"; flat-photo goes to ~0. A gate of `uniformity>0.95 AND
+  edge_density<tau` would then fire only on safe flat-photo content.
+
+  REFUTED by the imazen-26 distribution on two counts:
+
+  (1) The uniformity>0.95 subset contains ZERO flat-photo images and
+      10/10 document/text/line-art images (ground-truth fingerprint:
+      laplacian_variance_peak>=64 OR patch_fraction_fast>=0.5). There is
+      no safe population for the gate to fire on — the naive gate is pure
+      information loss.
+        [TEXT/LINE-ART] n=10  edge_density min=0.00000 median=0.00424
+                              max=0.00940 ; variance min=0.001 median=78.6
+                              max=2280.8
+        [FLAT-PHOTO]    n=0
+
+  (2) edge_density does NOT separate the classes: the text-like set
+      spans edge_density [0.0, 0.0094], INCLUDING a near-blank page
+      (screen/1920x1080/wikipedia__einstein, edge_density=0.0,
+      variance=7e-4) whose ONE non-default signal is
+      patch_fraction_fast=0.994 — the documented AUC-0.880
+      screen-vs-photo discriminator (feature.rs §PatchFraction; screens
+      p50=0.726, photos p50=0.002). Any tau tight enough to fire on it
+      still drops the picker's single most discriminating feature.
+
+  Threshold sweep (edge_density_max, meaningful-drop events on fired set):
+        tau=1e-4 : fired 1, UNSAFE (drops patch_fraction_fast=0.994)
+        tau=5e-4 : fired 1, UNSAFE (same)
+        tau=1e-3 : fired 4, UNSAFE (drops laplacian_variance_peak=255)
+        tau=2e-3 : fired 4, UNSAFE
+        tau=5e-3 : fired 7, UNSAFE
+  Every tested tau is UNSAFE. VERDICT: no safe content-aware uniformity
+  gate on this corpus — keep ENABLE_UNIFORMITY_GATE=false (grayscale-gate
+  only). SATURATING_DROP_FEATURES retained for a future revisit on a
+  corpus that contains uniform PHOTOGRAPHIC content.
+
+  Note on the safety line: patch_fraction* is [0,1]-valued, so a flat
+  MEANINGFUL_MAGNITUDE=1.0 would mis-classify a maximal 0.99 drop as
+  "safe". meaningful_threshold() uses the operating threshold 0.27 for
+  patch_fraction* (feature.rs flags screen-like at >=0.27).
 
 ## TSV columns
 
-path, stratum, width, height, is_grayscale, uniformity, chroma_frac_gt2
-(fraction of sampled px with channel spread > 2 levels), max_channel_spread,
-gray_gate_fired, uniformity_gate_fired, n_chroma_dropped (plan actually
-dropped), n_saturating_dropped (plan actually dropped; 0 — gate disabled),
-gray_gate_misfire, then drop_C_<feature> columns (full value on
-grayscale-condition-fired images) and drop_S_<feature> columns (full
+path, stratum, width, height, is_grayscale, uniformity, edge_density,
+variance, chroma_frac_gt2 (fraction of sampled px with channel spread >
+2 levels), max_channel_spread, gray_gate_fired, uniformity_gate_fired
+(naive), content_unif_gate_fired (content-aware, uniformity>0.95 AND
+edge_density<tau), n_chroma_dropped (plan actually dropped),
+n_saturating_dropped (plan actually dropped; 0 — both uniformity gates
+disabled), gray_gate_misfire, then drop_C_<feature> columns (full value
+on grayscale-condition-fired images) and drop_S_<feature> columns (full
 value on uniformity-condition-fired images).

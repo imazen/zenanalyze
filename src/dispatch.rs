@@ -250,21 +250,42 @@ pub(crate) fn run(
         narrowed = narrowed.difference(feature::CHROMA_DROP_FEATURES);
     }
 
-    // UNIFORMITY gate — DISABLED PENDING DATA. The issue-#53 spec
-    // assumed `uniformity > 0.95` ⇒ the Laplacian percentiles pin to
-    // ~0 and `patch_fraction_fast` won't vary. That holds for
-    // *photographic* flat content but is VIOLATED on text / line-art /
-    // document / diagram screen content: a mostly-white page with
-    // sparse-but-maximally-sharp black text reports `uniformity > 0.95`
-    // yet has `laplacian_variance_peak = 255`, `laplacian_variance_p99`
-    // up to 38, `patch_fraction_fast ≈ 0.99`, `aq_map_p99` up to 5.9.
-    // The imazen-26 validation (benchmarks/dispatch_gate_validation_*)
-    // measured 34 meaningful-drop events across 10 gated images — every
-    // dropped saturating feature carried real signal on the screen-
-    // content class the picker most needs to distinguish. Dropping them
-    // is information loss, so the gate stays OFF until a content-aware
-    // threshold (e.g. uniformity-AND-low-edge-peak) is calibrated.
-    // `SATURATING_DROP_FEATURES` is retained for that follow-up.
+    // UNIFORMITY gate — DISABLED. Calibration on imazen-26 found NO safe
+    // tier1 discriminator (2026-06-04).
+    //
+    // The issue-#53 spec assumed `uniformity > 0.95` ⇒ the Laplacian
+    // percentiles pin to ~0 and `patch_fraction_fast` won't vary. That
+    // holds for *photographic* flat content but is VIOLATED on text /
+    // line-art / document / diagram screen content: a mostly-white page
+    // with sparse-but-maximally-sharp black text reports
+    // `uniformity > 0.95` yet has `laplacian_variance_peak = 255`,
+    // `laplacian_variance_p99` up to 38, `patch_fraction_fast ≈ 0.99`,
+    // `aq_map_p99` up to 5.9.
+    //
+    // The PR-#54 follow-up tried to rescue the gate with a content-aware
+    // tier1 condition (`uniformity > 0.95 AND edge_density < τ`) — the
+    // theory being text/line-art keeps high tier1 edge density while
+    // flat-photo goes to ~0. The imazen-26 calibration
+    // (benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta},
+    // `validate_dispatch_gates --edge-density-max τ`) refuted it on two
+    // counts:
+    //   1. The `uniformity > 0.95` regime in the corpus contains ZERO
+    //      flat-photo images and 10/10 document/screen images — there is
+    //      no safe population for the gate to fire on. The naive gate is
+    //      pure information loss (42 meaningful-drop events / 10 images).
+    //   2. `edge_density` does not separate the classes: the text-like
+    //      set spans edge_density ∈ [0.0, 0.0094], INCLUDING a near-blank
+    //      page (`wikipedia__einstein`, edge_density = 0.0, variance =
+    //      7e-4) whose ONE non-default signal is `patch_fraction_fast =
+    //      0.994` — the documented AUC-0.880 screen-vs-photo
+    //      discriminator (feature.rs §PatchFraction). Any threshold tight
+    //      enough to fire on it still drops the single most-discriminating
+    //      feature the picker needs; every τ tested (1e-4 … 5e-3) was
+    //      UNSAFE.
+    //
+    // Verdict: grayscale-gate-only. The uniformity gate stays OFF.
+    // `SATURATING_DROP_FEATURES` is retained for a future revisit on a
+    // corpus that actually contains uniform photographic content.
     const ENABLE_UNIFORMITY_GATE: bool = false;
     #[allow(clippy::overly_complex_bool_expr)]
     if ENABLE_UNIFORMITY_GATE && raw.uniformity > 0.95 {

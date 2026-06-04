@@ -110,7 +110,30 @@ const CHROMA_LEVEL_THRESHOLD: u8 = 2;
 /// above this on a gated image is the red flag the validation hunts
 /// for. Reported as raw magnitude regardless; this is just the
 /// safe/unsafe classifier line in the summary.
+///
+/// Default for unbounded-magnitude features (laplacian percentiles up to
+/// 255, aq_map percentiles). `[0, 1]`-valued FRACTION features need a
+/// far smaller line — `patch_fraction_fast` is the documented AUC-0.880
+/// screen-vs-photo discriminator (feature.rs §PatchFraction): screens
+/// p50 = 0.726, photos p50 = 0.002. A value of 0.99 there is the
+/// STRONGEST possible screen signal, not negligible, even though it
+/// never crosses a magnitude-1.0 bar. Using a flat 1.0 line would
+/// silently mis-classify a maximal-signal drop as "safe".
 const MEANINGFUL_MAGNITUDE: f32 = 1.0;
+
+/// Per-feature meaningfulness line. Fraction features (`patch_fraction*`)
+/// are bounded in `[0, 1]`; their "meaningful" line is the operating
+/// threshold from `feature.rs` (`patch_fraction >= 0.27` flags
+/// screen-like content). Anything at/above that carries real signal a
+/// codec picker uses, so dropping it is information loss. All other
+/// (unbounded) saturating features keep [`MEANINGFUL_MAGNITUDE`].
+fn meaningful_threshold(feature_name: &str) -> f32 {
+    if feature_name.starts_with("patch_fraction") {
+        0.27
+    } else {
+        MEANINGFUL_MAGNITUDE
+    }
+}
 
 struct Args {
     corpus: PathBuf,
@@ -118,6 +141,12 @@ struct Args {
     screen_n: usize,
     photo_n: usize,
     seed: u64,
+    /// Candidate content-aware uniformity-gate edge-density threshold.
+    /// The content-aware gate fires iff `uniformity > 0.95 AND
+    /// edge_density < edge_density_max`. Tunable so the separation can
+    /// be calibrated from the printed distribution before being baked
+    /// into `src/dispatch.rs`.
+    edge_density_max: f32,
 }
 
 impl Args {
@@ -127,6 +156,7 @@ impl Args {
         let mut screen_n = 50usize;
         let mut photo_n = 100usize;
         let mut seed = 1u64;
+        let mut edge_density_max = 0.02f32;
         let raw: Vec<String> = env::args().collect();
         let mut it = raw.iter().skip(1);
         while let Some(a) = it.next() {
@@ -161,6 +191,13 @@ impl Args {
                         .parse()
                         .map_err(|e| format!("{e}"))?
                 }
+                "--edge-density-max" => {
+                    edge_density_max = it
+                        .next()
+                        .ok_or("--edge-density-max")?
+                        .parse()
+                        .map_err(|e| format!("{e}"))?
+                }
                 other => return Err(format!("unknown arg {other}")),
             }
         }
@@ -170,6 +207,7 @@ impl Args {
             screen_n,
             photo_n,
             seed,
+            edge_density_max,
         })
     }
 }
@@ -289,7 +327,7 @@ impl GateStats {
         if mag > *slot {
             *slot = mag;
         }
-        if mag >= MEANINGFUL_MAGNITUDE {
+        if mag >= meaningful_threshold(feat) {
             self.meaningful_drop_events += 1;
             let replace = self
                 .worst_example
@@ -377,7 +415,9 @@ fn main() -> ExitCode {
     write!(
         w,
         "path\tstratum\twidth\theight\tis_grayscale\tuniformity\t\
+         edge_density\tvariance\t\
          chroma_frac_gt2\tmax_channel_spread\tgray_gate_fired\tuniformity_gate_fired\t\
+         content_unif_gate_fired\t\
          n_chroma_dropped\tn_saturating_dropped\tgray_gate_misfire"
     )
     .unwrap();
@@ -391,6 +431,14 @@ fn main() -> ExitCode {
 
     let mut gray_gate = GateStats::default();
     let mut unif_gate = GateStats::default();
+    let mut content_unif_gate = GateStats::default();
+    // Per-subset edge-density / variance distributions for the
+    // uniformity>0.95 subset, split by whether the image carries a
+    // meaningful saturating signal (laplacian_variance_peak >= 64 OR
+    // patch_fraction_fast >= 0.5 — the line-art / text fingerprint).
+    // These drive the threshold calibration printed at the end.
+    let mut unif_subset_textlike: Vec<(f32, f32, String)> = Vec::new(); // (edge_density, variance, path)
+    let mut unif_subset_flatphoto: Vec<(f32, f32, String)> = Vec::new();
     let mut n_images = 0u64;
     let mut n_failed = 0u64;
     // Gray gate accuracy cross-check.
@@ -439,8 +487,16 @@ fn main() -> ExitCode {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let uniformity = full.get_f32(AnalysisFeature::Uniformity).unwrap_or(0.0);
+        let edge_density = full.get_f32(AnalysisFeature::EdgeDensity).unwrap_or(0.0);
+        let variance = full.get_f32(AnalysisFeature::Variance).unwrap_or(0.0);
         let gray_gate_fired = is_gray;
+        // Naive (issue-#53) uniformity gate: uniformity alone.
         let unif_gate_fired = uniformity > 0.95;
+        // Content-aware uniformity gate: uniformity AND smooth (low
+        // tier1 edge density). Text/line-art keep high edge density
+        // even when "uniform" (mostly-white pages with sharp black
+        // glyphs); flat photographic content has near-zero edge density.
+        let content_unif_gate_fired = uniformity > 0.95 && edge_density < args.edge_density_max;
 
         // Ground-truth chroma (independent of the analyzer).
         // Step keeps the sample bounded on large images.
@@ -462,6 +518,33 @@ fn main() -> ExitCode {
         }
         if unif_gate_fired {
             unif_gate.fired += 1;
+        }
+        if content_unif_gate_fired {
+            content_unif_gate.fired += 1;
+        }
+
+        // Classify the uniformity>0.95 subset by the ground-truth
+        // saturating signal so the edge-density threshold can be
+        // calibrated to separate text/line-art from flat photo. The
+        // "text-like" fingerprint: a sharp peak (laplacian_variance_peak
+        // is the histogram-clamp ceiling 255 on hard glyph edges) OR a
+        // high patch fraction. These are the tier3 features the gate
+        // would drop — used HERE only as ground truth for calibration,
+        // never as a gate condition (that would be circular).
+        if unif_gate_fired {
+            let lap_peak = full
+                .get_f32(AnalysisFeature::LaplacianVariancePeak)
+                .unwrap_or(0.0);
+            let patch = full
+                .get_f32(AnalysisFeature::PatchFractionFast)
+                .unwrap_or(0.0);
+            let textlike = lap_peak >= 64.0 || patch >= 0.5;
+            let row = (edge_density, variance, path.display().to_string());
+            if textlike {
+                unif_subset_textlike.push(row);
+            } else {
+                unif_subset_flatphoto.push(row);
+            }
         }
 
         // Per-feature drop assessment. We measure the COUNTERFACTUAL:
@@ -510,6 +593,11 @@ fn main() -> ExitCode {
             if unif_gate_fired && let Some(fv) = full_v {
                 if !fv.is_nan() {
                     unif_gate.record_drop(f.name(), fv, &path_str);
+                    // Content-aware gate only records the drop when ITS
+                    // (stricter) condition also fired.
+                    if content_unif_gate_fired {
+                        content_unif_gate.record_drop(f.name(), fv, &path_str);
+                    }
                     sat_cells.push(format!("{fv:.6}"));
                 } else {
                     sat_cells.push(String::from("nan"));
@@ -521,17 +609,20 @@ fn main() -> ExitCode {
 
         write!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.6}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             path_str,
             stratum,
             wd,
             ht,
             is_gray as u8,
             uniformity,
+            edge_density,
+            variance,
             chroma_frac,
             max_spread,
             gray_gate_fired as u8,
             unif_gate_fired as u8,
+            content_unif_gate_fired as u8,
             n_chroma_dropped,
             n_saturating_dropped,
             gray_misfire as u8,
@@ -570,15 +661,116 @@ fn main() -> ExitCode {
     );
     eprintln!();
     summarize_gate(
-        "UNIFORMITY (SATURATING_DROP_FEATURES)",
+        "UNIFORMITY — NAIVE uniformity>0.95 (SATURATING_DROP_FEATURES)",
         &unif_gate,
+        n_images,
+        false,
+    );
+    eprintln!();
+    summarize_gate(
+        &format!(
+            "UNIFORMITY — CONTENT-AWARE uniformity>0.95 AND edge_density<{} (SATURATING_DROP_FEATURES)",
+            args.edge_density_max
+        ),
+        &content_unif_gate,
         n_images,
         false,
     );
     eprintln!("========================================================\n");
 
+    // ----- Threshold calibration: edge_density / variance separation --
+    eprintln!("======== UNIFORMITY>0.95 SUBSET CALIBRATION ========");
+    eprintln!(
+        "Goal: separate TEXT/LINE-ART (saturating signal present — gate \
+         MUST NOT fire) from FLAT-PHOTO (no signal — gate safe to fire) \
+         using a TIER1 discriminator (edge_density / variance)."
+    );
+    eprintln!(
+        "text-like fingerprint (ground truth, NOT a gate input): \
+         laplacian_variance_peak>=64 OR patch_fraction_fast>=0.5"
+    );
+    print_subset("TEXT/LINE-ART (unsafe to gate)", &mut unif_subset_textlike);
+    print_subset("FLAT-PHOTO (safe to gate)", &mut unif_subset_flatphoto);
+    eprintln!();
+    // Suggest a separating edge-density threshold WITH MARGIN: midpoint
+    // between max(flat-photo edge_density) and min(text-like
+    // edge_density), if they're separable.
+    let max_flat_ed = unif_subset_flatphoto
+        .iter()
+        .map(|(e, _, _)| *e)
+        .fold(f32::MIN, f32::max);
+    let min_text_ed = unif_subset_textlike
+        .iter()
+        .map(|(e, _, _)| *e)
+        .fold(f32::MAX, f32::min);
+    eprintln!(
+        "edge_density: max over FLAT-PHOTO = {:.5}; min over TEXT-LIKE = {:.5}",
+        if unif_subset_flatphoto.is_empty() {
+            f32::NAN
+        } else {
+            max_flat_ed
+        },
+        if unif_subset_textlike.is_empty() {
+            f32::NAN
+        } else {
+            min_text_ed
+        }
+    );
+    if !unif_subset_flatphoto.is_empty() && !unif_subset_textlike.is_empty() {
+        if max_flat_ed < min_text_ed {
+            let mid = (max_flat_ed + min_text_ed) / 2.0;
+            eprintln!(
+                "  => SEPARABLE. Margin = [{max_flat_ed:.5}, {min_text_ed:.5}], \
+                 suggested threshold (midpoint) edge_density_max = {mid:.5}"
+            );
+        } else {
+            eprintln!(
+                "  => NOT cleanly separable on edge_density alone (overlap). \
+                 A safe threshold must err toward NOT firing — pick \
+                 edge_density_max <= {max_flat_ed:.5} only if it still \
+                 excludes the text-like set; otherwise no safe gate."
+            );
+        }
+    }
+    eprintln!(
+        "current --edge-density-max = {} ; content-aware gate fired {} times",
+        args.edge_density_max, content_unif_gate.fired
+    );
+    eprintln!("====================================================\n");
+
     eprintln!("per-image TSV written to {}", args.output.display());
     ExitCode::from(0)
+}
+
+/// Print the edge_density / variance distribution of one subset of the
+/// uniformity>0.95 images: count, min/median/max edge_density and
+/// variance, and the exemplar with the highest edge_density (so the
+/// worst-case separation point is visible).
+fn print_subset(label: &str, rows: &mut [(f32, f32, String)]) {
+    eprintln!("\n  [{label}]  n={}", rows.len());
+    if rows.is_empty() {
+        return;
+    }
+    // edge_density stats
+    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let ed_min = rows.first().unwrap().0;
+    let ed_max = rows.last().unwrap().0;
+    let ed_med = rows[rows.len() / 2].0;
+    // variance stats
+    let mut vars: Vec<f32> = rows.iter().map(|(_, v, _)| *v).collect();
+    vars.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let v_min = vars.first().copied().unwrap_or(0.0);
+    let v_max = vars.last().copied().unwrap_or(0.0);
+    let v_med = vars[vars.len() / 2];
+    eprintln!("    edge_density: min={ed_min:.5} median={ed_med:.5} max={ed_max:.5}");
+    eprintln!("    variance    : min={v_min:.3} median={v_med:.3} max={v_max:.3}");
+    // Show the few highest-edge-density exemplars (the separation edge).
+    let show = rows.len().min(4);
+    eprintln!("    highest-edge_density exemplars:");
+    for (e, v, p) in rows.iter().rev().take(show) {
+        let name = p.rsplit('/').next().unwrap_or(p);
+        eprintln!("      edge_density={e:.5} variance={v:.2}  {name}");
+    }
 }
 
 fn summarize_gate(label: &str, g: &GateStats, n_images: u64, shipped_enabled: bool) {
@@ -614,7 +806,8 @@ fn summarize_gate(label: &str, g: &GateStats, n_images: u64, shipped_enabled: bo
         None => eprintln!("  worst-case would-drop magnitude: (condition never fired)"),
     }
     eprintln!(
-        "  meaningful would-drop events (|full value| >= {MEANINGFUL_MAGNITUDE}): {}",
+        "  meaningful would-drop events (|full value| >= per-feature line; \
+         {MEANINGFUL_MAGNITUDE} unbounded, 0.27 for patch_fraction*): {}",
         g.meaningful_drop_events
     );
     if let Some((p, f, v)) = &g.worst_example {

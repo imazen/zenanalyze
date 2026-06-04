@@ -50,16 +50,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (never fired on an image carrying real chroma), cross-checked
   against a ground-truth channel-spread measure. See
   `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}`.
-- **Stage 1.5 uniformity gate — shipped DISABLED.** The
+- **Stage 1.5 uniformity gate — shipped DISABLED; no safe
+  content-aware threshold exists on imazen-26 (PR #54).** The
   `uniformity > 0.95` → drop-saturating-Tier-3-percentiles gate from
-  the issue-#53 spec was found UNSAFE on the imazen-26 corpus: text /
-  line-art / document / diagram screen content reports
-  `uniformity > 0.95` yet carries meaningful sparse-edge signal
-  (`laplacian_variance_peak = 255`, `patch_fraction_fast ≈ 0.99`,
-  `aq_map_p99` up to 5.9). The gate is kept off
-  (`ENABLE_UNIFORMITY_GATE = false`) until a content-aware threshold
-  is calibrated; `SATURATING_DROP_FEATURES` is retained for that
-  follow-up.
+  the issue-#53 spec was found UNSAFE: text / line-art / document /
+  diagram screen content reports `uniformity > 0.95` yet carries
+  meaningful sparse-edge signal (`laplacian_variance_peak = 255`,
+  `patch_fraction_fast ≈ 0.99`, `aq_map_p99` up to 5.9). PR #54
+  calibrated a content-aware rescue (`uniformity > 0.95 AND tier1
+  edge_density < τ`) and **refuted it**: the `uniformity > 0.95`
+  regime in imazen-26 contains zero flat-photo images and 10/10
+  document/text images, and `edge_density` does not separate them — a
+  near-blank page with `edge_density = 0.0` still carries
+  `patch_fraction_fast = 0.994` (the AUC-0.880 screen discriminator),
+  so every tested τ (1e-4…5e-3) was unsafe. Gate kept off
+  (`ENABLE_UNIFORMITY_GATE = false`); `SATURATING_DROP_FEATURES`
+  retained for a future revisit on a corpus with uniform photographic
+  content. See `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}`.
+- **Dispatch-plan perf measured (issue #50, PR #54).** Interleaved
+  A/B timing (`analyze_features` vs `analyze_with_dispatch_plan`,
+  `FeatureSet::SUPPORTED`) on imazen-26, release / no target-cpu=native:
+  the gated path is **net SLOWER** — parity (−0.66%) on < 8 MP images
+  but −37.85% on ≥ 8 MP images. The regression is entirely Stage 2's
+  extended Tier-3 DCT re-walk (a deliberate accuracy-vs-speed
+  tradeoff), not the gating (the < 8 MP neither-fired control is
+  −0.66%, i.e. free). The grayscale gate's win is not isolable on this
+  corpus (all grayscale images are ≥ 8 MP). See
+  `benchmarks/dispatch_perf_2026-06-04.{tsv,meta}`.
 - **Stage 2 (extended-budget retry)**: on ≥ 8 MP images the
   budget-sensitive Tier 3 DCT features (`patch_fraction_fast`,
   `aq_map_p99`, `noise_floor_y_p90`) are re-sampled at 2× the DCT
