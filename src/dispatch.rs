@@ -206,12 +206,24 @@ pub(crate) fn run(
 }
 
 /// Mirror of the gate in `analyze_features`. Crate-internal helper
-/// so we don't drift from the canonical dispatch decision.
+/// so we don't drift from the canonical dispatch decision. The
+/// percentile variants (#42 / #49) gate the laplacian SIMD pass too
+/// — requesting only `LaplacianVarianceP90` must still run the
+/// histogram pass, or the dispatch plan would leave those features
+/// at zeros where `analyze_features` would populate them.
 #[inline]
 fn tier1_wants_laplacian(features: feature::FeatureSet) -> bool {
     #[cfg(feature = "experimental")]
     {
-        features.contains(feature::AnalysisFeature::LaplacianVariance)
+        features.intersects(
+            feature::FeatureSet::new()
+                .with(feature::AnalysisFeature::LaplacianVariance)
+                .with(feature::AnalysisFeature::LaplacianVarianceP50)
+                .with(feature::AnalysisFeature::LaplacianVarianceP75)
+                .with(feature::AnalysisFeature::LaplacianVarianceP90)
+                .with(feature::AnalysisFeature::LaplacianVarianceP99)
+                .with(feature::AnalysisFeature::LaplacianVariancePeak),
+        )
     }
     #[cfg(not(feature = "experimental"))]
     {
