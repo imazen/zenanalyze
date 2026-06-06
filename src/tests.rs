@@ -4401,12 +4401,13 @@ mod dispatch_plan {
         assert!(r.get(AnalysisFeature::Uniformity).is_some());
     }
 
-    /// Stage 2: on a ≥ 8 MP coloured, non-uniform image the three
-    /// budget-sensitive Tier 3 features (`EXTENDED_PASS_FEATURES`)
-    /// stay populated and are re-sampled at a finer block stride. The
-    /// extended value is allowed to differ from `analyze_features`
-    /// (that's the point of the retry); every *other* requested Tier 3
-    /// feature must still match the default-budget baseline exactly.
+    /// Stage 2 (opt-in): on a ≥ 8 MP coloured, non-uniform image with
+    /// the extended pass *enabled*, the three budget-sensitive Tier 3
+    /// features (`EXTENDED_PASS_FEATURES`) stay populated and are
+    /// re-sampled at a finer block stride. The extended value is
+    /// allowed to differ from `analyze_features` (that's the point of
+    /// the retry); every *other* requested Tier 3 feature must still
+    /// match the default-budget baseline exactly.
     #[cfg(feature = "experimental")]
     #[test]
     fn stage2_large_image_extended_pass_populates_and_diverges_only_on_target_features() {
@@ -4418,7 +4419,10 @@ mod dispatch_plan {
         let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
 
         let baseline = analyze_features(rgb_slice(&buf, w, h), &q).unwrap();
-        let plan = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, None).unwrap();
+        // Stage 2 is opt-in: must pass `with_extended_pass()` for the
+        // re-walk to fire.
+        let hints = DispatchHints::with_extended_pass();
+        let plan = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&hints)).unwrap();
 
         let extended = crate::feature::EXTENDED_PASS_FEATURES;
         // The three extended features must be present (not dropped).
@@ -4450,5 +4454,156 @@ mod dispatch_plan {
                 );
             }
         }
+    }
+
+    /// Stage 2 is OPT-IN: with default hints (`None`) on a ≥ 8 MP image
+    /// the extended-budget Tier 3 re-walk does NOT run, so the dispatch
+    /// plan is bit-for-bit `analyze_features` for *every* requested
+    /// feature — including the three `EXTENDED_PASS_FEATURES` that the
+    /// re-walk would otherwise refine. This is the load-bearing
+    /// "default path has no large-image regression / no divergence"
+    /// guarantee. Cross-checked: `DispatchHints::default()` and
+    /// `DispatchHints::empty()` behave identically to `None`.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage2_default_hints_skip_extended_pass_full_parity() {
+        // 4000 × 2001 = 8 004 000 px ≥ LARGE_THRESHOLD (8 MP), coloured
+        // and structured so the grayscale gate doesn't fire either —
+        // the *only* possible divergence on this image is Stage 2, and
+        // with it off the whole feature surface must match exactly.
+        let w = 4000u32;
+        let h = 2001u32;
+        let buf = synth_rgb(w, h, 23);
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, w, h), &q).unwrap();
+
+        // Default hints in all three spellings must reach full parity.
+        let none = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, None).unwrap();
+        let empty_hints = DispatchHints::empty();
+        let empty =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&empty_hints)).unwrap();
+        let default_hints = DispatchHints::default();
+        let dflt =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&default_hints)).unwrap();
+
+        for f in FeatureSet::SUPPORTED.iter() {
+            let b = baseline.get_f32(f);
+            for (label, got) in [
+                ("None", none.get_f32(f)),
+                ("empty()", empty.get_f32(f)),
+                ("default()", dflt.get_f32(f)),
+            ] {
+                assert_eq!(
+                    b.is_some(),
+                    got.is_some(),
+                    "presence mismatch for {f:?} with default hints ({label}): base={b:?} got={got:?}",
+                );
+                if let (Some(bv), Some(gv)) = (b, got) {
+                    assert_eq!(
+                        bv.to_bits(),
+                        gv.to_bits(),
+                        "value mismatch for {f:?} with default hints ({label}): base={bv} got={gv} — default path must NOT run Stage 2",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Per-block-varying RGB: each 8×8 block carries its own pseudo-
+    /// random high-frequency texture (hashed from its block coordinates),
+    /// so the *set* of blocks the Tier 3 DCT pass samples actually
+    /// changes the percentile features. A perfectly periodic synthetic
+    /// (like `synth_rgb`'s linear ramp) gives every block an identical
+    /// DCT signature, which makes any block-stride change a no-op — that
+    /// would hide whether Stage 2 ran. This generator does not.
+    #[cfg(feature = "experimental")]
+    fn synth_rgb_block_varying(w: u32, h: u32, seed: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; (w as usize) * (h as usize) * 3];
+        for y in 0..h {
+            for x in 0..w {
+                // Block-local seed: distinct per 8×8 block.
+                let bx = x / 8;
+                let by = y / 8;
+                let bs = seed
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(bx.wrapping_mul(40_503))
+                    .wrapping_add(by.wrapping_mul(2_246_822_519));
+                // Intra-block hash mixes pixel position with the block
+                // seed → high-frequency texture that differs per block.
+                let t = bs
+                    .wrapping_add((x & 7).wrapping_mul(1_103_515_245))
+                    .wrapping_add((y & 7).wrapping_mul(12_345))
+                    .wrapping_mul(2_654_435_761);
+                let i = ((y * w + x) * 3) as usize;
+                buf[i] = (t & 0xFF) as u8;
+                buf[i + 1] = ((t >> 8) & 0xFF) as u8;
+                buf[i + 2] = ((t >> 16) ^ 0x5A) as u8;
+            }
+        }
+        buf
+    }
+
+    /// Opt-in vs default divergence: on a ≥ 8 MP image whose 8×8 blocks
+    /// genuinely differ, enabling Stage 2 re-samples the budget-sensitive
+    /// features at a finer block stride, so at least one of the three
+    /// `EXTENDED_PASS_FEATURES` differs from the default-hints
+    /// (Stage-2-off) result. Proves the opt-in flag actually toggles the
+    /// re-walk (not a no-op), and that the divergence is confined to the
+    /// extended targets — every other feature is identical between the
+    /// two hint settings.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage2_opt_in_diverges_from_default_only_on_extended_features() {
+        let w = 4000u32;
+        let h = 2001u32;
+        // Per-block-varying texture so the block stride actually matters:
+        // default cap (1024 blocks) and extended cap (2048 blocks) sample
+        // different block sets, yielding different percentile values.
+        let buf = synth_rgb_block_varying(w, h, 23);
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let default_path = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, None).unwrap();
+        let opt_in_hints = DispatchHints::with_extended_pass();
+        let opt_in =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&opt_in_hints)).unwrap();
+
+        let extended = crate::feature::EXTENDED_PASS_FEATURES;
+
+        // Every NON-extended feature must be identical between the two.
+        for f in FeatureSet::SUPPORTED.iter() {
+            if extended.contains(f) {
+                continue;
+            }
+            let (d, o) = (default_path.get_f32(f), opt_in.get_f32(f));
+            assert_eq!(
+                d.is_some(),
+                o.is_some(),
+                "presence mismatch for non-extended {f:?} between default and opt-in",
+            );
+            if let (Some(dv), Some(ov)) = (d, o) {
+                assert_eq!(
+                    dv.to_bits(),
+                    ov.to_bits(),
+                    "non-extended {f:?} must NOT change when only Stage 2 is toggled: default={dv} opt-in={ov}",
+                );
+            }
+        }
+
+        // At least one extended feature must actually differ — the finer
+        // block stride samples a different block set, so the re-walk
+        // produces a different value (the whole point of opting in).
+        let mut diverged = false;
+        for f in extended.iter() {
+            if let (Some(dv), Some(ov)) = (default_path.get_f32(f), opt_in.get_f32(f))
+                && dv.to_bits() != ov.to_bits()
+            {
+                diverged = true;
+            }
+        }
+        assert!(
+            diverged,
+            "enabling Stage 2 must change at least one EXTENDED_PASS_FEATURE — the opt-in flag is a no-op otherwise",
+        );
     }
 }

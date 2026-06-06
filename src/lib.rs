@@ -674,28 +674,41 @@ pub(crate) fn analyze_specialized_raw<
 /// See issue [imazen/zenanalyze#53](https://github.com/imazen/zenanalyze/issues/53)
 /// for the full design and per-stage rationale.
 ///
-/// # Stages (this PR ships 0 only)
+/// # Stages
 ///
 /// - **Stage 0** (free, runs in <1 µs): empty-feature requests
 ///   short-circuit; ≤ 64 K-pixel images get the budget bumped to
 ///   exhaustive (the per-call fixed overhead dominates per-pixel
 ///   work below this size, so sampling buys nothing); ≥ 8 MP
-///   images record an internal flag for a future Stage 2 retry.
-/// - Stages 1+ run the same code path as [`analyze_features`],
-///   just with Stage 0's budget overrides applied.
-/// - **Stage 2** (extended-budget retry on budget-sensitive
-///   features when the ≥ 8 MP flag is set), **3** (selective Tier 3
-///   when content suggests it), and **4** (derived likelihoods)
-///   are deferred to follow-up PRs. None of them remove features
-///   the caller asked for either — the dispatch tree's job is to
-///   *spend more compute when it'll help*, not to skip work.
+///   images record an internal flag for the opt-in Stage 2 retry.
+/// - **Stage 1** runs the same Tier 1 + grayscale + alpha + depth
+///   code path as [`analyze_features`], with Stage 0's budget
+///   overrides applied.
+/// - **Stage 1.5** (content-class gating): the strict-grayscale gate
+///   drops the chroma features ([`feature::CHROMA_DROP_FEATURES`])
+///   when the image is bit-exactly grayscale — those features are
+///   definitionally inert on grayscale input, so they come back as
+///   `None`. The uniformity gate is disabled (no safe Tier 1
+///   discriminator on the calibration corpus).
+/// - **Stage 2** (extended-budget Tier 3 re-walk) is **opt-in** via
+///   [`DispatchHints::enable_extended_pass`]. With default hints it
+///   does not run, so the default path is bit-for-bit
+///   [`analyze_features`] for every feature the grayscale gate
+///   doesn't drop. When enabled on a ≥ 8 MP image it re-samples the
+///   three budget-sensitive Tier 3 features
+///   ([`feature::EXTENDED_PASS_FEATURES`]) at a finer block stride —
+///   the one deliberate divergence, traded for a second Tier 3 DCT
+///   scan.
 ///
 /// # Hints
 ///
-/// `hints` is advisory; pass `None` for safe defaults. Today
-/// [`DispatchHints`] has no fields — the `#[non_exhaustive]`
-/// attribute is the seat for future stages to add fields
-/// additively under 0.1.x without a public-signature change.
+/// `hints` is advisory; pass `None` for safe defaults (Stage 2 off).
+/// [`DispatchHints`] currently carries one opt-in field,
+/// [`DispatchHints::enable_extended_pass`]; the `#[non_exhaustive]`
+/// attribute is the seat for future stages to add fields additively
+/// under 0.2.x without a public-signature change. Construct via
+/// [`DispatchHints::empty`] / [`DispatchHints::default`] /
+/// [`DispatchHints::with_extended_pass`].
 ///
 /// # Stability
 ///

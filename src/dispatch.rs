@@ -60,23 +60,59 @@ use crate::{AnalyzeError, alpha, dimensions, grayscale, palette, tier1, tier2_ch
 
 /// Optional caller hints for [`crate::analyze_with_dispatch_plan`].
 ///
-/// Empty today — Stages 0 / 1.5 / 2 derive every decision from image
-/// dimensions and Tier 1 output, so no hint is consumed. The
-/// `#[non_exhaustive]` attribute is the seat: future stages add fields
-/// additively under 0.2.x without a public signature change to the
-/// entry function. Callers that hand a `&DispatchHints` today keep
+/// Stages 0 / 1.5 derive every decision from image dimensions and
+/// Tier 1 output, so no hint is consumed for them. Stage 2 (the
+/// extended-budget Tier 3 re-walk on ≥ 8 MP images) is **opt-in**:
+/// it runs only when [`DispatchHints::enable_extended_pass`] is set
+/// `true`. Default hints (`None`, [`DispatchHints::empty`], or
+/// [`DispatchHints::default`]) skip Stage 2 entirely, so the default
+/// dispatch path reaches numeric parity with
+/// [`crate::analyze_features`] (no extra Tier 3 pass, no large-image
+/// regression).
+///
+/// The `#[non_exhaustive]` attribute is the seat: future stages add
+/// fields additively under 0.2.x without a public signature change to
+/// the entry function. Callers that hand a `&DispatchHints` today keep
 /// compiling when fields land, since they construct via
-/// [`DispatchHints::empty`] / [`DispatchHints::default`] rather than
-/// struct-literal syntax. See issue imazen/zenanalyze#53.
+/// [`DispatchHints::empty`] / [`DispatchHints::default`] /
+/// [`DispatchHints::with_extended_pass`] rather than struct-literal
+/// syntax. See issue imazen/zenanalyze#53.
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Default)]
-pub struct DispatchHints {}
+pub struct DispatchHints {
+    /// Opt into the Stage 2 extended-budget Tier 3 re-walk.
+    ///
+    /// When `true` AND the image is ≥ [`LARGE_THRESHOLD`] (8 MP) AND
+    /// the narrowed query still asks for one of
+    /// [`feature::EXTENDED_PASS_FEATURES`], the dispatcher re-runs the
+    /// Tier 3 DCT pass at a finer block stride (2× the default cap) and
+    /// overwrites only the three budget-sensitive columns
+    /// (`patch_fraction_fast`, `aq_map_p99`, `noise_floor_y_p90`) with
+    /// the finer-sampled values.
+    ///
+    /// Defaults to `false`. The re-walk costs a second full Tier 3 DCT
+    /// scan over the image — measured at roughly a −38 % wall-time
+    /// regression on large (≥ 8 MP) images — so it is off unless the
+    /// caller explicitly wants the more accurate budget-sensitive
+    /// features and has budgeted for the extra scan.
+    pub enable_extended_pass: bool,
+}
 
 impl DispatchHints {
-    /// Construct an empty hint bag. Equivalent to passing `None` to
-    /// [`crate::analyze_with_dispatch_plan`].
+    /// Construct an empty hint bag (Stage 2 off). Equivalent to passing
+    /// `None` to [`crate::analyze_with_dispatch_plan`].
     pub const fn empty() -> Self {
-        Self {}
+        Self {
+            enable_extended_pass: false,
+        }
+    }
+
+    /// Construct a hint bag with the Stage 2 extended-budget Tier 3
+    /// re-walk enabled. See [`DispatchHints::enable_extended_pass`].
+    pub const fn with_extended_pass() -> Self {
+        Self {
+            enable_extended_pass: true,
+        }
     }
 }
 
@@ -151,8 +187,13 @@ impl DispatchPlan {
 pub(crate) fn run(
     slice: PixelSlice<'_>,
     query: &AnalysisQuery,
-    _hints: Option<&DispatchHints>,
+    hints: Option<&DispatchHints>,
 ) -> Result<AnalysisResults, AnalyzeError> {
+    // Stage 2 (the extended-budget Tier 3 re-walk) is opt-in. Default
+    // hints (`None` / `DispatchHints::default()`) leave it off, so the
+    // default path reaches numeric parity with `analyze_features`.
+    let enable_extended_pass = hints.is_some_and(|h| h.enable_extended_pass);
+
     let requested = query.features();
     let width = slice.width();
     let height = slice.rows();
@@ -304,12 +345,19 @@ pub(crate) fn run(
         if t3 && width >= 8 && height >= 8 {
             tier3::populate_tier3(&mut raw, &mut stream, plan.hf_max_blocks, dct);
 
-            // ----- Stage 2: extended-budget retry -------------------
+            // ----- Stage 2: extended-budget retry (OPT-IN) ----------
             // On a ≥ 8 MP image, the budget-sensitive Tier 3 DCT
             // features are the noisiest vs an exhaustive scan because
             // the default block cap is spread thin. If the narrowed
             // query still wants one of them, re-run the DCT pass at a
             // finer block stride and overwrite *only* those columns.
+            //
+            // This re-walk is a second full Tier 3 DCT scan and is a
+            // ~−38 % wall-time regression on large images, so it runs
+            // ONLY when the caller opts in via
+            // `DispatchHints::enable_extended_pass`. With default hints
+            // the dispatcher stops at the first Tier 3 pass and the
+            // path is bit-for-bit `analyze_features`.
             //
             // `dct` is already true here (EXTENDED_PASS_FEATURES ⊂
             // DCT_NEEDED_BY, and they all survived Stage 1.5 gating
@@ -317,7 +365,8 @@ pub(crate) fn run(
             // sample more blocks than the first pass already did
             // (`extended_hf_max_blocks <= hf_max_blocks` is impossible
             // here, but the saturating-mul guard keeps it honest).
-            if plan.flag_extended_pass
+            if enable_extended_pass
+                && plan.flag_extended_pass
                 && narrowed.intersects(feature::EXTENDED_PASS_FEATURES)
                 && plan.extended_hf_max_blocks() > plan.hf_max_blocks
             {
