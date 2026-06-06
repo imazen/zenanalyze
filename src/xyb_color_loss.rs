@@ -104,13 +104,13 @@ mod reference {
     const OPSIN_BIAS: f32 = 0.003_793_073_3;
     /// Inverse opsin matrix (row-major 3×3), from `xyb_to_linear_rgb`.
     const INV_OPSIN: [f32; 9] = [
-        11.031_567, -9.866_944, -0.164_623, -3.254_147, 4.418_770, -0.164_623, -3.658_851,
+        11.031_567, -9.866_944, -0.164_623, -3.254_147, 4.418_77, -0.164_623, -3.658_851,
         2.712_923, 1.945_928,
     ];
     /// Scaled-XYB offsets `[x, y, b]` (`scale_xyb`).
-    const SCALED_OFFSET: [f32; 3] = [0.015_386_134, 0.0, 0.277_704_59];
+    const SCALED_OFFSET: [f32; 3] = [0.015_386_134, 0.0, 0.277_704_6];
     /// Scaled-XYB scales `[x, y, b]` (`scale_xyb`).
-    const SCALED_SCALE: [f32; 3] = [22.995_788_804, 1.183_000_077, 1.502_141_333];
+    const SCALED_SCALE: [f32; 3] = [22.995_789, 1.183_000_1, 1.502_141_4];
 
     /// BT.601 RGB→YCbCr on `0..255`.
     fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
