@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AnalysisFeature::Xyb444ColorLoss` (id 138, `experimental`)** — the
+  favor-YCbCr color discriminant for the zenjpeg XYB-vs-YCbCr mode picker:
+  the fraction of an image's pixels whose color XYB's 4:4:4 (unsubsampled)
+  opsin → cube-root → 8-bit-sample round trip *sheds* while BT.601 YCbCr 4:4:4
+  *keeps* it. Orthogonal to the chroma-sharpness family (gamut/saturation
+  clipping in the unsubsampled transform, not chroma spatial detail). Runtime
+  is a strided sample of a 4 KiB offline-baked color-density LUT — no `cbrt`,
+  no allocation; the exact predicate + LUT regenerator are test-only. Validated
+  all-GPU (ssim2 + butteraugli, 459 images, 2026-06-05): a unique residual
+  −0.26 no existing feature provides. Four sibling subsampling-loss variants
+  the prototype explored were measured redundant with the chroma-sharpness
+  family and dropped (preserved on `abandoned/xyb-color-loss-features`).
+  Additive — no break; gated behind `experimental` like the other
+  picker-candidate features (ids 132–137).
 - **`AnalysisResults::pack` / `from_packed` / `require`** — a version-stable
   `(u16 stable_id, f32 value)` wire form for analysis output. `pack` emits
   id-sorted pairs (the lossless `to_f32` view); `from_packed` reconstructs a

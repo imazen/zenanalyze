@@ -171,6 +171,11 @@ pub(crate) mod tier2_chroma;
 pub(crate) mod tier3;
 #[cfg(feature = "hdr")]
 pub(crate) mod tier_depth;
+/// RGB8-only XYB color-conversion-loss feature
+/// ([`feature::AnalysisFeature::Xyb444ColorLoss`]). Populated as a
+/// post-step in [`analyze_features_rgb8`]; see the module docs.
+#[cfg(feature = "experimental")]
+pub(crate) mod xyb_color_loss;
 
 use core::fmt;
 
@@ -734,7 +739,21 @@ pub fn analyze_features_rgb8(
     let stride = w * 3;
     let slice = PixelSlice::new(rgb, width, height, stride, PixelDescriptor::RGB8_SRGB)
         .expect("RGB8 PixelSlice from packed buffer");
-    analyze_features(slice, query).expect("analyze never fails on RGB8")
+    #[allow(unused_mut)]
+    let mut results = analyze_features(slice, query).expect("analyze never fails on RGB8");
+    // `Xyb444ColorLoss` needs the contiguous RGB8 buffer (a color statistic,
+    // not a row/strip pass), which the generic analyzer moves into the row
+    // stream — so it is populated here as a post-step. `set` overwrites the
+    // into_results default and is a no-op when the id wasn't requested.
+    #[cfg(feature = "experimental")]
+    {
+        use feature::AnalysisFeature::Xyb444ColorLoss;
+        if w > 0 && h > 0 && query.features().contains(Xyb444ColorLoss) {
+            let loss = xyb_color_loss::xyb444_color_loss_rgb8(rgb, w, h);
+            results.set(Xyb444ColorLoss, loss);
+        }
+    }
+    results
 }
 
 /// Fallible parallel of [`analyze_features_rgb8`]. Returns

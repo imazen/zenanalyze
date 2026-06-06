@@ -1229,6 +1229,29 @@ features_table! {
     /// J. Opt. Soc. Am. A 1987.
     #[cfg(feature = "experimental")]
     SpectralSlopeY = 137 : f32 => spectral_slope_y,
+
+    /// `f32`. Fraction of an image's pixels whose color XYB's 4:4:4
+    /// (unsubsampled) opsin → cube-root → 8-bit-sample round trip *sheds*
+    /// while BT.601 YCbCr 4:4:4 *keeps* it — per pixel: `err_xyb444 > 8`
+    /// AND `err_ycbcr444 <= 3` (max-channel sRGB8 error). Range `[0, 1]`.
+    /// RGB8-only (computed in [`crate::analyze_features_rgb8`]; the generic
+    /// [`crate::analyze_features`] path returns the default for it).
+    ///
+    /// **Why:** the **favor-YCbCr** color discriminant for the zenjpeg
+    /// XYB-vs-YCbCr mode picker. XYB's transform clips a sliver of warm,
+    /// saturated gamut (red/orange/yellow) the well-conditioned BT.601
+    /// matrix preserves. This is *orthogonal* to the chroma-sharpness
+    /// family ([`Self::CbHorizSharpness`] et al.), which measure chroma
+    /// spatial detail (the subsampling axis) — `xyb444_color_loss` measures
+    /// gamut/saturation clipping in the unsubsampled transform. Validation
+    /// (all-GPU ssim2 + butteraugli, 459 images, 2026-06-05) found a unique
+    /// residual `-0.26` no existing feature provides.
+    ///
+    /// **Cost:** ~Tier-1. The opsin+cbrt predicate is baked offline into a
+    /// 4 KiB color-density LUT; runtime is a strided sample of table
+    /// lookups — no `cbrt`, no allocation (see the `xyb_color_loss` module).
+    #[cfg(feature = "experimental")]
+    Xyb444ColorLoss = 138 : f32 => xyb444_color_loss,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -2405,13 +2428,16 @@ mod tests {
                 assert_eq!(f.id(), id);
             }
         }
-        // First unused id past the HVS-feature block added 2026-05-17
-        // (ids 132..137; the SpectralSlopeY landing at 137). Bump
-        // when new ids land beyond 137.
+        // Reserved gaps + first unused id past the HVS-feature block
+        // (ids 132..137) and Xyb444ColorLoss at 138. Bump when new ids
+        // land beyond 138. Note 138 is itself experimental-gated, so
+        // it returns None on default builds and Some under `experimental`
+        // — the cfg-aware loop above covers it; here we only assert ids
+        // that are unused in BOTH builds.
         assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(123).is_none());
         assert!(AnalysisFeature::from_u16(124).is_none());
-        assert!(AnalysisFeature::from_u16(138).is_none());
+        assert!(AnalysisFeature::from_u16(139).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
