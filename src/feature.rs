@@ -1255,6 +1255,28 @@ features_table! {
     /// `cbrt`, no allocation (see the `xyb_color_loss` module).
     #[cfg(feature = "experimental")]
     Xyb444ColorLoss = 138 : f32 => xyb444_color_loss,
+
+    /// `f32`. Mean XYB-BQuarter B-channel **subsampling** loss: `J·|Δsb|`
+    /// averaged over 2×2 blocks, where `Δsb` is each pixel's scaled-B (XYB
+    /// blue-yellow) deviation from its 2×2 block mean and `J` is the per-color
+    /// RGB sensitivity to scaled-B (the cube-root pre-paid into a 12 KiB LUT).
+    /// High ⇒ the image has blue-yellow chroma detail XYB-BQuarter's 2× B
+    /// subsample would drop. RGB8-only (computed in
+    /// [`crate::analyze_features_rgb8`]).
+    ///
+    /// **Why:** the **favor-XYB-Full** discriminant for the XYB chroma-
+    /// subsampling decision (Full vs BQuarter). XYB-BQuarter wins on RD for
+    /// most images (B is perceptually cheap), so a picker defaults to BQuarter
+    /// and switches to Full only where this feature is high. *Distinct* from
+    /// the chroma-sharpness family (its strongest correlate is chroma noise,
+    /// not sharpness; ρ≈0.84 vs cb_sharpness). On the all-GPU butteraugli RD
+    /// target it cuts a lean-model's prediction RMSE 12–20% and still trims the
+    /// full-model RMSE 0.5–2.7% (2026-06-06).
+    ///
+    /// **Cost:** ~Tier-1. One pass over 2×2 blocks of cheap LUT reads — no
+    /// `cbrt`, no allocation (see the `xyb_color_loss` module).
+    #[cfg(feature = "experimental")]
+    XybBquarterChromaLoss = 139 : f32 => xyb_bquarter_chroma_loss,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -2432,15 +2454,15 @@ mod tests {
             }
         }
         // Reserved gaps + first unused id past the HVS-feature block
-        // (ids 132..137) and Xyb444ColorLoss at 138. Bump when new ids
-        // land beyond 138. Note 138 is itself experimental-gated, so
-        // it returns None on default builds and Some under `experimental`
-        // — the cfg-aware loop above covers it; here we only assert ids
-        // that are unused in BOTH builds.
+        // (ids 132..137), Xyb444ColorLoss at 138, XybBquarterChromaLoss at
+        // 139. Bump when new ids land beyond 139. Note 138/139 are
+        // experimental-gated, so they return None on default builds and Some
+        // under `experimental` — the cfg-aware loop above covers them; here
+        // we only assert ids that are unused in BOTH builds.
         assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(123).is_none());
         assert!(AnalysisFeature::from_u16(124).is_none());
-        assert!(AnalysisFeature::from_u16(139).is_none());
+        assert!(AnalysisFeature::from_u16(140).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 

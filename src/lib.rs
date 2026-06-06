@@ -741,16 +741,26 @@ pub fn analyze_features_rgb8(
         .expect("RGB8 PixelSlice from packed buffer");
     #[allow(unused_mut)]
     let mut results = analyze_features(slice, query).expect("analyze never fails on RGB8");
-    // `Xyb444ColorLoss` needs the contiguous RGB8 buffer (a color statistic,
-    // not a row/strip pass), which the generic analyzer moves into the row
-    // stream — so it is populated here as a post-step. `set` overwrites the
-    // into_results default and is a no-op when the id wasn't requested.
+    // `Xyb444ColorLoss` / `XybBquarterChromaLoss` need the contiguous RGB8
+    // buffer (color / 2×2-block statistics, not row/strip passes), which the
+    // generic analyzer moves into the row stream — so they are populated here
+    // as a post-step. `set` overwrites the into_results default and is a no-op
+    // when the id wasn't requested.
     #[cfg(feature = "experimental")]
     {
-        use feature::AnalysisFeature::Xyb444ColorLoss;
-        if w > 0 && h > 0 && query.features().contains(Xyb444ColorLoss) {
-            let loss = xyb_color_loss::xyb444_color_loss_rgb8(rgb, w, h);
-            results.set(Xyb444ColorLoss, loss);
+        use feature::AnalysisFeature::{Xyb444ColorLoss, XybBquarterChromaLoss};
+        let q = query.features();
+        if w > 0 && h > 0 && q.contains(Xyb444ColorLoss) {
+            results.set(
+                Xyb444ColorLoss,
+                xyb_color_loss::xyb444_color_loss_rgb8(rgb, w, h),
+            );
+        }
+        if w > 0 && h > 0 && q.contains(XybBquarterChromaLoss) {
+            results.set(
+                XybBquarterChromaLoss,
+                xyb_color_loss::xyb_bquarter_chroma_loss_rgb8(rgb, w, h),
+            );
         }
     }
     results

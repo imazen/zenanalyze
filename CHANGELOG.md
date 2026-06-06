@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AnalysisFeature::XybBquarterChromaLoss` (id 139, `experimental`)** — the
+  favor-XYB-Full discriminant for the XYB chroma-subsampling decision (Full vs
+  BQuarter): mean `J·|Δsb|` over 2×2 blocks, where `Δsb` is each pixel's scaled-B
+  (blue-yellow) deviation from its 2×2 block mean and `J = |∂RGB/∂scaled_b|` is the
+  per-color sensitivity (cube-root pre-paid into a 12 KiB LUT). High ⇒ blue-yellow
+  detail XYB-BQuarter's 2× B-subsample would drop. Distinct from the chroma-sharpness
+  family (strongest correlate is chroma *noise*, ρ≈0.84 vs cb_sharpness). Validated
+  all-GPU butteraugli (459 imgs, 2026-06-06): cuts a lean-model's prediction RMSE
+  12–20% and still trims the full-model RMSE 0.5–2.7% (Spearman alone hid the latter).
+  L2/RMSE pooling and a graded-perceptual (Oklab-ΔE) reformulation were both tested
+  and rejected — the L1 `J·|Δsb|` is best. Runtime: one 2×2-block pass of LUT reads —
+  no `cbrt`, no allocation. Additive — no break; experimental-gated.
 - **`AnalysisFeature::Xyb444ColorLoss` (id 138, `experimental`)** — the
   favor-YCbCr color signal for the zenjpeg XYB-vs-YCbCr mode picker: the mean
   perceptual **Oklab ΔE** between an image's colors and XYB's 4:4:4
