@@ -38,6 +38,8 @@
 //! no transfer-function dependency. The exact per-color predicate and the
 //! LUT regenerator live in the test module below.
 
+use crate::row_stream::RowStream;
+
 // ---- runtime path: graded ΔE LUT + strided sample (no cbrt, no alloc) ----
 
 /// Embedded XYB 4:4:4 color-round-trip noticeability LUT: 4 bits per channel
@@ -60,26 +62,55 @@ fn density_idx(r: u8, g: u8, b: u8) -> usize {
 /// tolerates strided sampling; this caps per-image cost near Tier-1.
 const SAMPLE_TARGET: usize = 1 << 16; // 65 536
 
-/// Mean XYB-round-trip noticeability over a strided sample of `rgb` (a
-/// tightly packed `w*h*3` sRGB8 buffer; `n = w*h` pixels). Returns the
-/// scaled-and-normalized mean Oklab ΔE in `[0, 1]` — the favor-YCbCr color
-/// signal. `0.0` for an empty image.
-pub(crate) fn xyb444_color_loss_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
+/// Mean XYB-round-trip noticeability over a strided sample of the image's
+/// RGB8 rows: every `stride`-th pixel in raster order — identical sampling to
+/// the contiguous `_rgb8` reference. Returns the scaled-and-normalized mean
+/// Oklab ΔE in `[0, 1]` — the favor-YCbCr color signal. `0.0` for an empty
+/// image. The `RowStream` yields RGB8 rows for any pixel format (native
+/// zero-copy on RGB8 sources), so this works on the generic analyzer path.
+pub(crate) fn xyb444_color_loss_from_stream(stream: &mut RowStream<'_>) -> f32 {
+    let w = stream.width() as usize;
+    let h = stream.height() as usize;
     let n = w * h;
-    debug_assert_eq!(rgb.len(), n * 3, "rgb buffer must be tightly packed w*h*3");
     if n == 0 {
         return 0.0;
     }
     let stride = (n / SAMPLE_TARGET).max(1);
     let (mut sum, mut cnt) = (0u64, 0u64);
-    let mut i = 0;
-    while i < n {
-        let base = i * 3;
-        sum += CONV_LOSS_DENSITY[density_idx(rgb[base], rgb[base + 1], rgb[base + 2])] as u64;
-        cnt += 1;
-        i += stride;
+    for y in 0..h {
+        // first sampled column in raster order: smallest x with (y*w + x) % stride == 0
+        let first = (stride - (y * w) % stride) % stride;
+        if first >= w {
+            continue;
+        }
+        let row = stream.borrow_row(y as u32);
+        let mut x = first;
+        while x < w {
+            let o = x * 3;
+            sum += CONV_LOSS_DENSITY[density_idx(row[o], row[o + 1], row[o + 2])] as u64;
+            cnt += 1;
+            x += stride;
+        }
     }
     sum as f32 / (cnt.max(1) as f32 * 255.0)
+}
+
+/// Contiguous-buffer reference for [`xyb444_color_loss_from_stream`] —
+/// test-only (the production path is the row stream). `0.0` for empty.
+#[cfg(test)]
+pub(crate) fn xyb444_color_loss_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
+    if w == 0 || h == 0 {
+        return 0.0;
+    }
+    let slice = zenpixels::PixelSlice::new(
+        rgb,
+        w as u32,
+        h as u32,
+        w * 3,
+        zenpixels::PixelDescriptor::RGB8_SRGB,
+    )
+    .unwrap();
+    xyb444_color_loss_from_stream(&mut RowStream::new(slice).unwrap())
 }
 
 // ---- runtime path: XYB-BQuarter B-channel subsample loss (J·|Δsb| B-LUT) ----
@@ -105,35 +136,70 @@ fn b_lut_read(r: u8, g: u8, b: u8) -> (f32, f32) {
 /// blocks: `J·|Δsb|`, where `Δsb` is each pixel's scaled-B deviation from its
 /// 2×2 block mean and `J` is the per-color RGB sensitivity to scaled-B. High ⇒
 /// the image has blue-yellow detail XYB-BQuarter's 2× B-subsample would drop —
-/// a favor-XYB-Full signal. `rgb` is a tightly packed `w*h*3` sRGB8 buffer;
-/// returns `0.0` for sub-2×2 images.
-pub(crate) fn xyb_bquarter_chroma_loss_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
+/// a favor-XYB-Full signal. Walks the `RowStream` two rows at a time; same
+/// block sampling as the contiguous `_rgb8` reference. `0.0` for sub-2×2.
+pub(crate) fn xyb_bquarter_chroma_loss_from_stream(stream: &mut RowStream<'_>) -> f32 {
+    let w = stream.width() as usize;
+    let h = stream.height() as usize;
     let (bw, bh) = (w / 2, h / 2);
     let nblocks = bw * bh;
     if nblocks == 0 {
         return 0.0;
     }
     let bstride = (nblocks / (SAMPLE_TARGET / 4)).max(1);
+    let row_bytes = w * 3;
+    let mut two = vec![0u8; 2 * row_bytes];
     let (mut xy_sum, mut samp) = (0.0f64, 0u64);
-    let mut bidx = 0;
-    while bidx < nblocks {
-        let (bx, by) = ((bidx % bw) * 2, (bidx / bw) * 2);
-        let mut sbs = [0f32; 4];
-        let mut js = [0f32; 4];
-        for (k, (dx, dy)) in [(0, 0), (1, 0), (0, 1), (1, 1)].into_iter().enumerate() {
-            let o = ((by + dy) * w + (bx + dx)) * 3;
-            let (sb, j) = b_lut_read(rgb[o], rgb[o + 1], rgb[o + 2]);
-            sbs[k] = sb;
-            js[k] = j;
+    for by in 0..bh {
+        // first sampled block in this block-row (raster block order)
+        let first = (bstride - (by * bw) % bstride) % bstride;
+        if first >= bw {
+            continue;
         }
-        let asb = (sbs[0] + sbs[1] + sbs[2] + sbs[3]) * 0.25;
-        for k in 0..4 {
-            xy_sum += (js[k] * (sbs[k] - asb).abs()) as f64;
-            samp += 1;
+        let y0 = (by * 2) as u32;
+        stream.fetch_range(y0..y0 + 2, &mut two);
+        let (r0, r1) = two.split_at(row_bytes);
+        let mut bx = first;
+        while bx < bw {
+            let px = bx * 2;
+            let mut sbs = [0f32; 4];
+            let mut js = [0f32; 4];
+            for (k, (row, dx)) in [(r0, 0usize), (r0, 1), (r1, 0), (r1, 1)]
+                .into_iter()
+                .enumerate()
+            {
+                let o = (px + dx) * 3;
+                let (sb, j) = b_lut_read(row[o], row[o + 1], row[o + 2]);
+                sbs[k] = sb;
+                js[k] = j;
+            }
+            let asb = (sbs[0] + sbs[1] + sbs[2] + sbs[3]) * 0.25;
+            for k in 0..4 {
+                xy_sum += (js[k] * (sbs[k] - asb).abs()) as f64;
+                samp += 1;
+            }
+            bx += bstride;
         }
-        bidx += bstride;
     }
     (xy_sum / (samp.max(1) as f64 * 3.0)) as f32
+}
+
+/// Contiguous-buffer reference for [`xyb_bquarter_chroma_loss_from_stream`] —
+/// test-only. `0.0` for sub-2×2 images.
+#[cfg(test)]
+pub(crate) fn xyb_bquarter_chroma_loss_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
+    if w < 2 || h < 2 {
+        return 0.0;
+    }
+    let slice = zenpixels::PixelSlice::new(
+        rgb,
+        w as u32,
+        h as u32,
+        w * 3,
+        zenpixels::PixelDescriptor::RGB8_SRGB,
+    )
+    .unwrap();
+    xyb_bquarter_chroma_loss_from_stream(&mut RowStream::new(slice).unwrap())
 }
 
 // ---- exact reference + LUT regenerator (test-only, f64) ------------------
@@ -452,5 +518,71 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/b_subsample_lut.bin");
         std::fs::write(path, &buf).unwrap();
         eprintln!("wrote {} bytes to {path}", buf.len());
+    }
+
+    /// The GENERIC `analyze_features` path (any pixel format → RowStream)
+    /// must produce both features — the whole point of computing them in the
+    /// tier stream rather than an RGB8-only post-step. Verifies a warm +
+    /// B-varied image yields meaningful values via the generic PixelSlice
+    /// entry AND via a non-RGB8 (RGBA8) input (RowConverter → RGB8 rows).
+    #[test]
+    fn generic_path_produces_features() {
+        use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+        let (w, h) = (32usize, 32usize);
+        let mut rgb = vec![0u8; w * h * 3];
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                // warm saturated + blue/yellow checkerboard (fires both features)
+                let c = if (x + y) & 1 == 0 {
+                    [240u8, 60, 0]
+                } else {
+                    [10, 10, 220]
+                };
+                let i = (y * w + x) * 3;
+                rgb[i..i + 3].copy_from_slice(&c);
+                let j = (y * w + x) * 4;
+                rgba[j..j + 3].copy_from_slice(&c);
+                rgba[j + 3] = 255;
+            }
+        }
+        let q = AnalysisQuery::new(
+            FeatureSet::new()
+                .with(AnalysisFeature::Xyb444ColorLoss)
+                .with(AnalysisFeature::XybBquarterChromaLoss),
+        );
+        let rgb_slice = zenpixels::PixelSlice::new(
+            &rgb,
+            w as u32,
+            h as u32,
+            w * 3,
+            zenpixels::PixelDescriptor::RGB8_SRGB,
+        )
+        .unwrap();
+        let res = crate::analyze_features(rgb_slice, &q).unwrap();
+        let v444 = res.get_f32(AnalysisFeature::Xyb444ColorLoss).unwrap();
+        let vbq = res.get_f32(AnalysisFeature::XybBquarterChromaLoss).unwrap();
+        assert!(v444.is_finite() && v444 >= 0.0, "xyb444 (generic): {v444}");
+        assert!(
+            vbq.is_finite() && vbq > 0.0,
+            "xyb_bquarter (generic) should fire: {vbq}"
+        );
+        // Non-RGB8 input must also produce the features (RowConverter path).
+        let rgba_slice = zenpixels::PixelSlice::new(
+            &rgba,
+            w as u32,
+            h as u32,
+            w * 4,
+            zenpixels::PixelDescriptor::RGBA8_SRGB,
+        )
+        .unwrap();
+        let res_rgba = crate::analyze_features(rgba_slice, &q).unwrap();
+        assert!(
+            res_rgba
+                .get_f32(AnalysisFeature::XybBquarterChromaLoss)
+                .unwrap()
+                > 0.0,
+            "xyb_bquarter must compute from non-RGB8 (RGBA8) input too"
+        );
     }
 }

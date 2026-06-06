@@ -171,9 +171,9 @@ pub(crate) mod tier2_chroma;
 pub(crate) mod tier3;
 #[cfg(feature = "hdr")]
 pub(crate) mod tier_depth;
-/// RGB8-only XYB color-conversion-loss feature
-/// ([`feature::AnalysisFeature::Xyb444ColorLoss`]). Populated as a
-/// post-step in [`analyze_features_rgb8`]; see the module docs.
+/// XYB color-loss features ([`feature::AnalysisFeature::Xyb444ColorLoss`] /
+/// [`feature::AnalysisFeature::XybBquarterChromaLoss`]). Computed from the
+/// tier [`row_stream::RowStream`] in [`analyze_features`]; see the module docs.
 #[cfg(feature = "experimental")]
 pub(crate) mod xyb_color_loss;
 
@@ -374,6 +374,19 @@ pub fn analyze_features(
     // first non-gray row; sub-microsecond on colored images.
     let run_strict_gray = features.contains(feature::AnalysisFeature::IsGrayscale);
 
+    // RGB8-derived XYB color-loss features (experimental). Computed from the
+    // tier `RowStream` (works for any pixel format), not a post-step — so the
+    // generic `analyze_features` path produces them too, not just the RGB8
+    // convenience wrapper. Runtime axes like `run_strict_gray`.
+    #[cfg(feature = "experimental")]
+    let run_xyb444 = features.contains(feature::AnalysisFeature::Xyb444ColorLoss);
+    #[cfg(not(feature = "experimental"))]
+    let run_xyb444 = false;
+    #[cfg(feature = "experimental")]
+    let run_xyb_bq = features.contains(feature::AnalysisFeature::XybBquarterChromaLoss);
+    #[cfg(not(feature = "experimental"))]
+    let run_xyb_bq = false;
+
     // Pick the palette path: full-precision scan if any "exact count"
     // palette feature was requested; otherwise the early-exit scan
     // (much faster on photographic content). Computed once per call;
@@ -447,6 +460,8 @@ pub fn analyze_features(
                 run_depth,
                 dct,
                 run_strict_gray,
+                run_xyb444,
+                run_xyb_bq,
             )?;
             Ok(raw.into_results(features, geometry, source_descriptor))
         }};
@@ -502,7 +517,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     run_depth: bool,
     run_dct: bool,
     run_strict_gray: bool,
+    run_xyb444: bool,
+    run_xyb_bq: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
+    #[cfg(not(feature = "experimental"))]
+    let _ = (run_xyb444, run_xyb_bq);
     let width = slice.width();
     let height = slice.rows();
     let geometry = feature::ImageGeometry::new(width, height);
@@ -586,6 +605,19 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         // on truly grayscale 4 MP images.
         if run_strict_gray {
             raw.is_grayscale = grayscale::scan_strict_grayscale(&mut stream);
+        }
+        // XYB color-loss features: re-walk the RowStream (random-access, same
+        // rows the tiers read — native zero-copy on RGB8). Strided sampling
+        // matches the contiguous reference exactly.
+        #[cfg(feature = "experimental")]
+        {
+            if run_xyb444 {
+                raw.xyb444_color_loss = xyb_color_loss::xyb444_color_loss_from_stream(&mut stream);
+            }
+            if run_xyb_bq {
+                raw.xyb_bquarter_chroma_loss =
+                    xyb_color_loss::xyb_bquarter_chroma_loss_from_stream(&mut stream);
+            }
         }
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
@@ -683,6 +715,8 @@ pub fn __analyze_internal(
         run_depth,
         true, // override path always runs the DCT pass (test/oracle wants every signal)
         true, // and the strict-grayscale classifier
+        true, // xyb444_color_loss
+        true, // xyb_bquarter_chroma_loss
     )?;
     Ok(raw.into_results(query.features, geometry, source_descriptor))
 }
@@ -709,7 +743,7 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth, true, true,
+        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true,
     )
 }
 
@@ -739,31 +773,10 @@ pub fn analyze_features_rgb8(
     let stride = w * 3;
     let slice = PixelSlice::new(rgb, width, height, stride, PixelDescriptor::RGB8_SRGB)
         .expect("RGB8 PixelSlice from packed buffer");
-    #[allow(unused_mut)]
-    let mut results = analyze_features(slice, query).expect("analyze never fails on RGB8");
-    // `Xyb444ColorLoss` / `XybBquarterChromaLoss` need the contiguous RGB8
-    // buffer (color / 2×2-block statistics, not row/strip passes), which the
-    // generic analyzer moves into the row stream — so they are populated here
-    // as a post-step. `set` overwrites the into_results default and is a no-op
-    // when the id wasn't requested.
-    #[cfg(feature = "experimental")]
-    {
-        use feature::AnalysisFeature::{Xyb444ColorLoss, XybBquarterChromaLoss};
-        let q = query.features();
-        if w > 0 && h > 0 && q.contains(Xyb444ColorLoss) {
-            results.set(
-                Xyb444ColorLoss,
-                xyb_color_loss::xyb444_color_loss_rgb8(rgb, w, h),
-            );
-        }
-        if w > 0 && h > 0 && q.contains(XybBquarterChromaLoss) {
-            results.set(
-                XybBquarterChromaLoss,
-                xyb_color_loss::xyb_bquarter_chroma_loss_rgb8(rgb, w, h),
-            );
-        }
-    }
-    results
+    // `Xyb444ColorLoss` / `XybBquarterChromaLoss` (experimental) are computed
+    // inside `analyze_features` from the tier RowStream now, so this wrapper
+    // needs no special handling — it just forwards.
+    analyze_features(slice, query).expect("analyze never fails on RGB8")
 }
 
 /// Fallible parallel of [`analyze_features_rgb8`]. Returns

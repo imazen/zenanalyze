@@ -1234,9 +1234,9 @@ features_table! {
     /// color round trip: the average **Oklab ΔE** between an image's colors
     /// and what XYB's opsin → cube-root → 8-bit-sample round trip turns them
     /// into, scaled into `[0, 1]`. High ⇒ the image lives in colors XYB
-    /// reproduces less faithfully. RGB8-only (computed in
-    /// [`crate::analyze_features_rgb8`]; the generic
-    /// [`crate::analyze_features`] path returns the default for it).
+    /// reproduces less faithfully. Computed from the tier `RowStream` in
+    /// [`crate::analyze_features`] — any pixel format produces it (RGB8
+    /// native or converted), not just the RGB8 convenience wrapper.
     ///
     /// **Why:** the **favor-YCbCr** color signal for the zenjpeg
     /// XYB-vs-YCbCr mode picker. XYB's transform clips a sliver of warm,
@@ -1261,8 +1261,8 @@ features_table! {
     /// blue-yellow) deviation from its 2×2 block mean and `J` is the per-color
     /// RGB sensitivity to scaled-B (the cube-root pre-paid into a 12 KiB LUT).
     /// High ⇒ the image has blue-yellow chroma detail XYB-BQuarter's 2× B
-    /// subsample would drop. RGB8-only (computed in
-    /// [`crate::analyze_features_rgb8`]).
+    /// subsample would drop. Computed from the tier `RowStream` in
+    /// [`crate::analyze_features`] (any pixel format).
     ///
     /// **Why:** the **favor-XYB-Full** discriminant for the XYB chroma-
     /// subsampling decision (Full vs BQuarter). XYB-BQuarter wins on RD for
