@@ -1230,26 +1230,29 @@ features_table! {
     #[cfg(feature = "experimental")]
     SpectralSlopeY = 137 : f32 => spectral_slope_y,
 
-    /// `f32`. Fraction of an image's pixels whose color XYB's 4:4:4
-    /// (unsubsampled) opsin → cube-root → 8-bit-sample round trip *sheds*
-    /// while BT.601 YCbCr 4:4:4 *keeps* it — per pixel: `err_xyb444 > 8`
-    /// AND `err_ycbcr444 <= 3` (max-channel sRGB8 error). Range `[0, 1]`.
-    /// RGB8-only (computed in [`crate::analyze_features_rgb8`]; the generic
+    /// `f32`. Mean perceptual noticeability of XYB's 4:4:4 (unsubsampled)
+    /// color round trip: the average **Oklab ΔE** between an image's colors
+    /// and what XYB's opsin → cube-root → 8-bit-sample round trip turns them
+    /// into, scaled into `[0, 1]`. High ⇒ the image lives in colors XYB
+    /// reproduces less faithfully. RGB8-only (computed in
+    /// [`crate::analyze_features_rgb8`]; the generic
     /// [`crate::analyze_features`] path returns the default for it).
     ///
-    /// **Why:** the **favor-YCbCr** color discriminant for the zenjpeg
+    /// **Why:** the **favor-YCbCr** color signal for the zenjpeg
     /// XYB-vs-YCbCr mode picker. XYB's transform clips a sliver of warm,
-    /// saturated gamut (red/orange/yellow) the well-conditioned BT.601
-    /// matrix preserves. This is *orthogonal* to the chroma-sharpness
-    /// family ([`Self::CbHorizSharpness`] et al.), which measure chroma
-    /// spatial detail (the subsampling axis) — `xyb444_color_loss` measures
-    /// gamut/saturation clipping in the unsubsampled transform. Validation
-    /// (all-GPU ssim2 + butteraugli, 459 images, 2026-06-05) found a unique
-    /// residual `-0.26` no existing feature provides.
+    /// saturated gamut (red/orange/yellow). Measured *vs the original* color
+    /// (not as a vs-YCbCr differential — YCbCr 4:4:4's own round-trip ΔE,
+    /// mean ~0.0013, is comparable to XYB's ~0.0012, so subtracting it injects
+    /// noise). *Orthogonal* to the chroma-sharpness family
+    /// ([`Self::CbHorizSharpness`] et al.), which measure chroma spatial
+    /// detail (the subsampling axis) — this measures gamut/saturation
+    /// clipping in the unsubsampled transform. Validation (all-GPU
+    /// butteraugli, 459 images, 2026-06-06) found a residual `+0.17`/`+0.22`
+    /// over a lean curated model the chroma-sharpness features don't provide.
     ///
-    /// **Cost:** ~Tier-1. The opsin+cbrt predicate is baked offline into a
-    /// 4 KiB color-density LUT; runtime is a strided sample of table
-    /// lookups — no `cbrt`, no allocation (see the `xyb_color_loss` module).
+    /// **Cost:** ~Tier-1. The opsin+cbrt+Oklab predicate is baked offline into
+    /// a 4 KiB ΔE LUT; runtime is a strided sample of table lookups — no
+    /// `cbrt`, no allocation (see the `xyb_color_loss` module).
     #[cfg(feature = "experimental")]
     Xyb444ColorLoss = 138 : f32 => xyb444_color_loss,
 }

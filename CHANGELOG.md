@@ -14,19 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`AnalysisFeature::Xyb444ColorLoss` (id 138, `experimental`)** — the
-  favor-YCbCr color discriminant for the zenjpeg XYB-vs-YCbCr mode picker:
-  the fraction of an image's pixels whose color XYB's 4:4:4 (unsubsampled)
-  opsin → cube-root → 8-bit-sample round trip *sheds* while BT.601 YCbCr 4:4:4
-  *keeps* it. Orthogonal to the chroma-sharpness family (gamut/saturation
-  clipping in the unsubsampled transform, not chroma spatial detail). Runtime
-  is a strided sample of a 4 KiB offline-baked color-density LUT — no `cbrt`,
-  no allocation; the exact predicate + LUT regenerator are test-only. Validated
-  all-GPU (ssim2 + butteraugli, 459 images, 2026-06-05): a unique residual
-  −0.26 no existing feature provides. Four sibling subsampling-loss variants
-  the prototype explored were measured redundant with the chroma-sharpness
-  family and dropped (preserved on `abandoned/xyb-color-loss-features`).
-  Additive — no break; gated behind `experimental` like the other
-  picker-candidate features (ids 132–137).
+  favor-YCbCr color signal for the zenjpeg XYB-vs-YCbCr mode picker: the mean
+  perceptual **Oklab ΔE** between an image's colors and XYB's 4:4:4
+  (unsubsampled) opsin → cube-root → 8-bit-sample round trip, scaled to
+  `[0, 1]`. Measured *vs the original* color, not as a vs-YCbCr differential
+  (YCbCr 4:4:4 is not lossless — its own round-trip ΔE is comparable to XYB's,
+  so subtracting it injects noise; the absolute ΔE is cleaner and predicts the
+  RD outcome better on a lean feature set). Orthogonal to the chroma-sharpness
+  family (gamut/saturation clipping, not chroma spatial detail). Runtime is a
+  strided sample of a 4 KiB offline-baked ΔE LUT — no `cbrt`, no allocation;
+  the exact f64 predicate + LUT regenerator are test-only. Validated all-GPU
+  (butteraugli, 459 images, 2026-06-06): residual +0.17/+0.22 over a lean
+  curated model (~2× the earlier binary predicate). Four sibling
+  subsampling-loss variants the prototype explored were measured redundant
+  with the chroma-sharpness family and dropped (preserved on
+  `research/xyb-color-loss-features`). Additive — no break; gated behind
+  `experimental` like the other picker-candidate features (ids 132–137).
 - **`AnalysisResults::pack` / `from_packed` / `require`** — a version-stable
   `(u16 stable_id, f32 value)` wire form for analysis output. `pack` emits
   id-sorted pairs (the lossless `to_f32` view); `from_packed` reconstructs a
