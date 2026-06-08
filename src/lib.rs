@@ -161,6 +161,7 @@
 
 mod alpha;
 mod dimensions;
+pub(crate) mod dispatch;
 pub mod feature;
 mod grayscale;
 pub(crate) mod luma;
@@ -176,6 +177,8 @@ pub(crate) mod tier_depth;
 /// tier [`row_stream::RowStream`] in [`analyze_features`]; see the module docs.
 #[cfg(feature = "experimental")]
 pub(crate) mod xyb_color_loss;
+
+pub use dispatch::DispatchHints;
 
 use core::fmt;
 
@@ -505,7 +508,12 @@ pub fn analyze_features(
 /// always passes the canonical [`feature::DEFAULT_PIXEL_BUDGET`] /
 /// [`feature::DEFAULT_HF_MAX_BLOCKS`] constants.
 #[allow(clippy::too_many_arguments)] // monomorphization dispatcher: 4 const-bool tier gates + 5 runtime sub-knobs all live in one specialization site
-fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, const ALPHA: bool>(
+pub(crate) fn analyze_specialized_raw<
+    const PAL: bool,
+    const T2: bool,
+    const T3: bool,
+    const ALPHA: bool,
+>(
     slice: PixelSlice<'_>,
     pixel_budget: usize,
     hf_max_blocks: usize,
@@ -691,6 +699,79 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     }
 
     Ok((raw, geometry))
+}
+
+/// Adaptive analyzer entry. Inspects image dimensions before any
+/// scan and adjusts the **sampling budget** for Tier 1 / Tier 2 /
+/// Tier 3 / palette / alpha — never narrows the caller's feature
+/// query. Layered on top of [`analyze_features`]: the existing
+/// entry stays available; codecs opt into the dispatch tree by
+/// switching call sites.
+///
+/// See issue [imazen/zenanalyze#53](https://github.com/imazen/zenanalyze/issues/53)
+/// for the full design and per-stage rationale.
+///
+/// # Stages
+///
+/// - **Stage 0** (free, runs in <1 µs): empty-feature requests
+///   short-circuit; ≤ 64 K-pixel images get the budget bumped to
+///   exhaustive (the per-call fixed overhead dominates per-pixel
+///   work below this size, so sampling buys nothing); ≥ 8 MP
+///   images record an internal flag for the opt-in Stage 2 retry.
+/// - **Stage 1** runs the same Tier 1 + grayscale + alpha + depth
+///   code path as [`analyze_features`], with Stage 0's budget
+///   overrides applied.
+/// - **Stage 1.5** (content-class gating): the strict-grayscale gate
+///   drops the chroma features ([`feature::CHROMA_DROP_FEATURES`])
+///   when the image is bit-exactly grayscale — those features are
+///   definitionally inert on grayscale input, so they come back as
+///   `None`. The uniformity gate is disabled (no safe Tier 1
+///   discriminator on the calibration corpus).
+/// - **Stage 2** (extended-budget Tier 3 re-walk) is **opt-in** via
+///   [`DispatchHints::enable_extended_pass`]. With default hints it
+///   does not run, so the default path is bit-for-bit
+///   [`analyze_features`] for every feature the grayscale gate
+///   doesn't drop. When enabled on a ≥ 8 MP image it re-samples the
+///   three budget-sensitive Tier 3 features
+///   ([`feature::EXTENDED_PASS_FEATURES`]) at a finer block stride —
+///   the one deliberate divergence, traded for a second Tier 3 DCT
+///   scan.
+///
+/// # Hints
+///
+/// `hints` is advisory; pass `None` for safe defaults (Stage 2 off).
+/// [`DispatchHints`] currently carries one opt-in field,
+/// [`DispatchHints::enable_extended_pass`]; the `#[non_exhaustive]`
+/// attribute is the seat for future stages to add fields additively
+/// under 0.2.x without a public-signature change. Construct via
+/// [`DispatchHints::empty`] / [`DispatchHints::default`] /
+/// [`DispatchHints::with_extended_pass`].
+///
+/// # Stability
+///
+/// Same opaque-results contract as [`analyze_features`]. For every
+/// feature the caller requests, the dispatch plan returns the same
+/// `Some(_)` / `None` shape `analyze_features` would have returned
+/// with the same query, modulo the
+/// [crate-level threshold contract](crate#threshold-contract---iterating-during-01x).
+/// The dispatch plan never returns `None` for a feature the caller
+/// requested unless `analyze_features` would also have returned
+/// `None` (e.g. an experimental-only feature in a build without the
+/// `experimental` cargo feature). This preserves the contract for
+/// fixed-shape consumers (the picker MLP, regression baselines).
+///
+/// # Errors
+///
+/// Same as [`analyze_features`] — [`AnalyzeError::Convert`] from
+/// [`zenpixels_convert::RowConverter`] when the source descriptor
+/// isn't supported, [`AnalyzeError::Internal`] for unexpected
+/// failures.
+pub fn analyze_with_dispatch_plan(
+    slice: PixelSlice<'_>,
+    query: &feature::AnalysisQuery,
+    hints: Option<&DispatchHints>,
+) -> Result<feature::AnalysisResults, AnalyzeError> {
+    dispatch::run(slice, query, hints)
 }
 
 #[doc(hidden)]

@@ -54,6 +54,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output as plain data rather than as a clashing `AnalysisResults` type. New
   public items: `feature::{PackError, MissingFeatures}`. Additive — no break.
 
+### Added — `analyze_with_dispatch_plan` (issue #53, stages 0 + 1.5 + 2)
+
+- **New public entry point `analyze_with_dispatch_plan`** alongside
+  the existing `analyze_features`. Existing `analyze_features` is
+  unchanged — codecs opt in by switching call sites.
+- **New public type `DispatchHints`** — an empty
+  `#[non_exhaustive]` seat. No stage consumes a hint yet (every
+  decision derives from image dimensions + Tier 1 output), so the
+  type ships with no fields. Future stages add fields additively
+  under 0.2.x without a public-signature change.
+- **Stage 0**: empty-feature requests short-circuit; ≤ 64 K-pixel
+  images get the budget bumped to exhaustive (per-call fixed
+  overhead dominates per-pixel work below this size); ≥ 8 MP images
+  set an extended-pass flag for Stage 2.
+- **Stage 1.5 (content-class gating)**: when the strict-grayscale
+  classifier reports `is_grayscale = true`, the chroma-dependent
+  features (Tier 1 chroma, all of Tier 2, chroma DCT
+  compressibility, UV noise/quant percentiles, skin-tone) are
+  dropped from the result and come back as `None` instead of their
+  inert default. **Validated safe against the imazen-26 corpus** —
+  on strict R==G==B grayscale every dropped chroma feature is
+  bit-exactly its default, and the classifier showed 0 misfires
+  (never fired on an image carrying real chroma), cross-checked
+  against a ground-truth channel-spread measure. See
+  `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}`.
+- **Stage 1.5 uniformity gate — shipped DISABLED; no safe
+  content-aware threshold exists on imazen-26 (PR #54).** The
+  `uniformity > 0.95` → drop-saturating-Tier-3-percentiles gate from
+  the issue-#53 spec was found UNSAFE: text / line-art / document /
+  diagram screen content reports `uniformity > 0.95` yet carries
+  meaningful sparse-edge signal (`laplacian_variance_peak = 255`,
+  `patch_fraction_fast ≈ 0.99`, `aq_map_p99` up to 5.9). PR #54
+  calibrated a content-aware rescue (`uniformity > 0.95 AND tier1
+  edge_density < τ`) and **refuted it**: the `uniformity > 0.95`
+  regime in imazen-26 contains zero flat-photo images and 10/10
+  document/text images, and `edge_density` does not separate them — a
+  near-blank page with `edge_density = 0.0` still carries
+  `patch_fraction_fast = 0.994` (the AUC-0.880 screen discriminator),
+  so every tested τ (1e-4…5e-3) was unsafe. Gate kept off
+  (`ENABLE_UNIFORMITY_GATE = false`); `SATURATING_DROP_FEATURES`
+  retained for a future revisit on a corpus with uniform photographic
+  content. See `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}`.
+- **Dispatch-plan perf measured (issue #50, PR #54).** Interleaved
+  A/B timing (`analyze_features` vs `analyze_with_dispatch_plan`,
+  `FeatureSet::SUPPORTED`) on imazen-26, release / no target-cpu=native:
+  the gated path is **net SLOWER** — parity (−0.66%) on < 8 MP images
+  but −37.85% on ≥ 8 MP images. The regression is entirely Stage 2's
+  extended Tier-3 DCT re-walk (a deliberate accuracy-vs-speed
+  tradeoff), not the gating (the < 8 MP neither-fired control is
+  −0.66%, i.e. free). The grayscale gate's win is not isolable on this
+  corpus (all grayscale images are ≥ 8 MP). See
+  `benchmarks/dispatch_perf_2026-06-04.{tsv,meta}`.
+- **Stage 2 (extended-budget retry)**: on ≥ 8 MP images the
+  budget-sensitive Tier 3 DCT features (`patch_fraction_fast`,
+  `aq_map_p99`, `noise_floor_y_p90`) are re-sampled at 2× the DCT
+  block cap and overwritten with the finer-sampled values — the one
+  deliberate divergence from `analyze_features` (a strictly more
+  accurate value where the default block cap is spread thinnest).
+- **Parity**: every feature *not* dropped by Stage 1.5 and *not* one
+  of the three Stage 2 targets on a ≥ 8 MP image matches
+  `analyze_features` bit-for-bit. Dropped features come back as
+  `None`, never a stale or zero-default `Some(_)`.
+
 ## [0.2.0] - 2026-06-01
 
 ### BREAKING (semver-correct minor bump; the "0.1.x-forever" freeze is retired for this release)

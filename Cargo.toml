@@ -95,6 +95,10 @@ name = "grayscale_perf"
 name = "extract_features_for_picker"
 
 [[example]]
+name = "validate_dispatch_gates"
+required-features = ["experimental", "hdr"]
+
+[[example]]
 name = "hvs_feature_smoke"
 required-features = ["experimental"]
 

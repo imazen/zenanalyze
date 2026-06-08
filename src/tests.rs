@@ -4091,3 +4091,519 @@ mod hvs {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Dispatch plan tests (issue #53), stages 0 + 1.5 + 2. Parity with
+// `analyze_features` is the load-bearing invariant: every feature the
+// plan *keeps* matches bit-for-bit. Stage 1.5 narrows the query on
+// grayscale / near-uniform content (dropped features come back as
+// `None`); Stage 2 re-samples three budget-sensitive Tier 3 features
+// at a finer block stride on ≥ 8 MP images (the one deliberate
+// divergence from `analyze_features`). Below-threshold tiny images
+// get an exhaustive budget override (Stage 0).
+// ---------------------------------------------------------------------
+
+#[cfg(test)]
+mod dispatch_plan {
+    use super::*;
+    use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+    use crate::{DispatchHints, analyze_features, analyze_with_dispatch_plan};
+
+    fn rgb_slice(buf: &[u8], w: u32, h: u32) -> PixelSlice<'_> {
+        let stride = (w as usize) * 3;
+        PixelSlice::new(buf, w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap()
+    }
+
+    /// Stage 0: empty feature request short-circuits without panicking
+    /// and returns an [`AnalysisResults`] whose `requested` set is
+    /// empty. No tier work runs (verified indirectly by the absence of
+    /// any `get(_)` returning `Some`).
+    #[test]
+    fn stage0_empty_query_short_circuits() {
+        let buf = vec![128u8; 32 * 32 * 3];
+        let slice = rgb_slice(&buf, 32, 32);
+        let q = AnalysisQuery::new(FeatureSet::new());
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        assert!(r.requested().is_empty(), "empty query → empty requested");
+        // Sample a few features the analyzer would otherwise compute —
+        // none should be present.
+        assert!(r.get(AnalysisFeature::Variance).is_none());
+        assert!(r.get(AnalysisFeature::Uniformity).is_none());
+        assert!(r.get(AnalysisFeature::HighFreqEnergyRatio).is_none());
+    }
+
+    /// On a coloured, non-uniform, sub-8-MP image no gate fires, so
+    /// the dispatch plan produces the same numerics as
+    /// `analyze_features` for every requested feature — same budgets,
+    /// same passes (just reordered against the random-access
+    /// `RowStream`), no Stage 1.5 drop, no Stage 2 retry. This is the
+    /// load-bearing parity test.
+    #[test]
+    fn stage0_above_threshold_matches_analyze_features_exactly() {
+        // 256 × 256 = 65 536 pixels > MIN_EXHAUSTIVE_THRESHOLD (64 000)
+        // and < LARGE_THRESHOLD (8 MP), so neither the exhaustive
+        // override nor the Stage 2 extended pass fires. synth_rgb
+        // produces per-channel-divergent (non-grayscale), structured
+        // (non-uniform) content, so Stage 1.5 drops nothing.
+        let buf = synth_rgb(256, 256, 7);
+        let slice = rgb_slice(&buf, 256, 256);
+
+        // Request a wide mix: Tier 1 luma + chroma, Tier 2, Tier 3,
+        // dimensions, alpha-irrelevant (RGB8). Use SUPPORTED so we
+        // exercise every cfg-enabled feature.
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, 256, 256), &q).unwrap();
+        let plan = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        // Every feature the baseline produced must be present in the
+        // dispatch-plan output, with bit-identical numerics.
+        for f in FeatureSet::SUPPORTED.iter() {
+            let b = baseline.get_f32(f);
+            let p = plan.get_f32(f);
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for {f:?}: baseline={b:?} plan={p:?}",
+            );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "value mismatch for {f:?}: baseline={bv} plan={pv}",
+                );
+            }
+        }
+    }
+
+    /// Stage 1.5 grayscale gate: a true grayscale image (R==G==B for
+    /// every pixel) drops the requested chroma features
+    /// (`CHROMA_DROP_FEATURES`) — they come back as `None` — while the
+    /// requested luma features stay populated. On grayscale input the
+    /// dropped chroma features are inert (~0 / definitionally zero), so
+    /// dropping them costs the consumer nothing the cheap
+    /// `is_grayscale` flag didn't already say. Validated against the
+    /// imazen-26 corpus before shipping.
+    #[test]
+    fn stage1_5_grayscale_drops_chroma_features() {
+        let w = 32;
+        let h = 32;
+        let mut buf = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 3) as usize;
+                let v = (((x + y) * 4) % 256) as u8;
+                buf[i] = v;
+                buf[i + 1] = v;
+                buf[i + 2] = v;
+            }
+        }
+        let slice = rgb_slice(&buf, w, h);
+
+        let requested = FeatureSet::new()
+            .with(AnalysisFeature::Variance)
+            .with(AnalysisFeature::EdgeDensity)
+            .with(AnalysisFeature::Uniformity)
+            .with(AnalysisFeature::CbSharpness)
+            .with(AnalysisFeature::CrSharpness)
+            .with(AnalysisFeature::ChromaComplexity)
+            .with(AnalysisFeature::CbHorizSharpness)
+            .with(AnalysisFeature::CrHorizSharpness)
+            .with(AnalysisFeature::IsGrayscale);
+        let q = AnalysisQuery::new(requested);
+
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        // Strict-grayscale gate fired.
+        let is_gray = r
+            .get(AnalysisFeature::IsGrayscale)
+            .and_then(|v| v.as_bool())
+            .unwrap();
+        assert!(is_gray, "diagonal R==G==B ramp must be is_grayscale=true");
+
+        // Luma + classifier features stay populated.
+        for f in [
+            AnalysisFeature::Variance,
+            AnalysisFeature::EdgeDensity,
+            AnalysisFeature::Uniformity,
+            AnalysisFeature::IsGrayscale,
+        ] {
+            assert!(
+                r.get(f).is_some(),
+                "{f:?} is not a chroma feature — must survive the grayscale gate",
+            );
+        }
+
+        // Chroma features in CHROMA_DROP_FEATURES are dropped → None.
+        for f in [
+            AnalysisFeature::CbSharpness,
+            AnalysisFeature::CrSharpness,
+            AnalysisFeature::ChromaComplexity,
+            AnalysisFeature::CbHorizSharpness,
+            AnalysisFeature::CrHorizSharpness,
+        ] {
+            assert!(
+                r.get(f).is_none(),
+                "{f:?} is chroma — Stage 1.5 must drop it on grayscale input (got {:?})",
+                r.get(f),
+            );
+            assert!(
+                crate::feature::CHROMA_DROP_FEATURES.contains(f),
+                "test invariant: {f:?} must be in CHROMA_DROP_FEATURES",
+            );
+        }
+    }
+
+    /// Stage 1.5 grayscale gate must NOT fire on coloured content —
+    /// the strict-equality classifier only reports `is_grayscale` when
+    /// every sampled pixel has R==G==B. A coloured image keeps all its
+    /// chroma features. Guards against the gate misfiring (the key
+    /// safety property the corpus validation also checks at scale).
+    #[test]
+    fn stage1_5_colour_keeps_chroma_features() {
+        // synth_rgb is per-channel-divergent ⇒ not grayscale.
+        let buf = synth_rgb(64, 64, 11);
+        let slice = rgb_slice(&buf, 64, 64);
+        let requested = FeatureSet::new()
+            .with(AnalysisFeature::Variance)
+            .with(AnalysisFeature::CbSharpness)
+            .with(AnalysisFeature::CrSharpness)
+            .with(AnalysisFeature::ChromaComplexity)
+            .with(AnalysisFeature::IsGrayscale);
+        let q = AnalysisQuery::new(requested);
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+
+        let is_gray = r
+            .get(AnalysisFeature::IsGrayscale)
+            .and_then(|v| v.as_bool())
+            .unwrap();
+        assert!(!is_gray, "coloured synth_rgb must be is_grayscale=false");
+        for f in [
+            AnalysisFeature::CbSharpness,
+            AnalysisFeature::CrSharpness,
+            AnalysisFeature::ChromaComplexity,
+        ] {
+            assert!(
+                r.get(f).is_some(),
+                "{f:?} must stay populated on coloured input — gate must not misfire",
+            );
+        }
+    }
+
+    /// Stage 1.5 uniformity gate is DISABLED pending data: the
+    /// imazen-26 validation found it drops meaningful signal
+    /// (`laplacian_variance_peak = 255`, `patch_fraction_fast ≈ 0.99`)
+    /// on text / line-art / document screen content that reports
+    /// `uniformity > 0.95`. So even on a flat image where the gate
+    /// *would* fire, every requested saturating feature must still be
+    /// KEPT (populated), and must match `analyze_features` exactly —
+    /// the disabled gate makes the path pure parity. See
+    /// `benchmarks/dispatch_gate_validation_2026-06-04.{tsv,meta}` and
+    /// the `UNIFORMITY gate — DISABLED PENDING DATA` block in
+    /// `src/dispatch.rs`.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage1_5_uniformity_gate_disabled_keeps_saturating_features() {
+        // Solid mid-gray 64×64 — flat luma ⇒ uniformity ≈ 1.0, the
+        // condition the gate *would* fire on if it were enabled.
+        let buf = vec![128u8; 64 * 64 * 3];
+        let q = AnalysisQuery::new(
+            FeatureSet::new()
+                .with(AnalysisFeature::Uniformity)
+                .with(AnalysisFeature::AqMapMean)
+                .with(AnalysisFeature::AqMapStd)
+                .with(AnalysisFeature::AqMapP99)
+                .with(AnalysisFeature::PatchFractionFast)
+                .with(AnalysisFeature::LaplacianVarianceP90),
+        );
+
+        let baseline = analyze_features(rgb_slice(&buf, 64, 64), &q).unwrap();
+        let r = analyze_with_dispatch_plan(rgb_slice(&buf, 64, 64), &q, None).unwrap();
+
+        let u = r.get_f32(AnalysisFeature::Uniformity).unwrap();
+        assert!(
+            u > 0.95,
+            "flat image must report uniformity > 0.95 (got {u})"
+        );
+
+        // Gate is OFF ⇒ pure parity with `analyze_features`: each
+        // saturating feature has the SAME presence as the un-gated
+        // baseline and the SAME value. (AqMapP99 may be `None` in both
+        // on a 64×64 image — below the #49 per-feature percentile
+        // sample-count floor — which is exactly the point: the plan
+        // must mirror the baseline, not force a value the gate would
+        // otherwise have dropped.)
+        for f in [
+            AnalysisFeature::AqMapMean,
+            AnalysisFeature::AqMapStd,
+            AnalysisFeature::AqMapP99,
+            AnalysisFeature::PatchFractionFast,
+            AnalysisFeature::LaplacianVarianceP90,
+        ] {
+            let (b, p) = (baseline.get_f32(f), r.get_f32(f));
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for {f:?} with the gate off: base={b:?} plan={p:?}",
+            );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "{f:?} must match baseline with the gate off: base={bv} plan={pv}",
+                );
+            }
+        }
+        // At least the floor-surviving features must be present (so the
+        // test isn't vacuously passing on an all-None set).
+        assert!(
+            r.get_f32(AnalysisFeature::AqMapMean).is_some()
+                && r.get_f32(AnalysisFeature::PatchFractionFast).is_some(),
+            "AqMapMean + PatchFractionFast survive the floor at 64×64 and must be present",
+        );
+    }
+
+    /// Stage 0: a 64 × 64 image is below [`MIN_EXHAUSTIVE_THRESHOLD`]
+    /// (4096 ≤ 64 000), so the dispatch plan promotes the budget to
+    /// exhaustive. Smoke test: full-feature surface runs without
+    /// panicking, hints are accepted in `Some` and `None` form.
+    #[test]
+    fn stage0_tiny_image_exhaustive_budget() {
+        let buf = synth_rgb(64, 64, 99);
+        let slice = rgb_slice(&buf, 64, 64);
+
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+        let hints = DispatchHints::empty();
+        let r = analyze_with_dispatch_plan(slice, &q, Some(&hints)).unwrap();
+
+        assert!(r.get(AnalysisFeature::Variance).is_some());
+        assert!(r.get(AnalysisFeature::EdgeDensity).is_some());
+        assert!(r.get(AnalysisFeature::Uniformity).is_some());
+        assert_eq!(r.geometry().width(), 64);
+        assert_eq!(r.geometry().height(), 64);
+    }
+
+    /// Stage 0/2: ≥ 8 MP image still produces results. (Flat content
+    /// here also exercises the uniformity gate path on a large image.)
+    #[test]
+    fn stage0_large_image_smoke() {
+        let w = 4000u32;
+        let h = 2001u32;
+        let buf = vec![64u8; (w as usize) * (h as usize) * 3];
+        let slice = rgb_slice(&buf, w, h);
+        let q = AnalysisQuery::new(
+            FeatureSet::new()
+                .with(AnalysisFeature::Variance)
+                .with(AnalysisFeature::Uniformity),
+        );
+        let r = analyze_with_dispatch_plan(slice, &q, None).unwrap();
+        assert!(r.get(AnalysisFeature::Variance).is_some());
+        assert!(r.get(AnalysisFeature::Uniformity).is_some());
+    }
+
+    /// Stage 2 (opt-in): on a ≥ 8 MP coloured, non-uniform image with
+    /// the extended pass *enabled*, the three budget-sensitive Tier 3
+    /// features (`EXTENDED_PASS_FEATURES`) stay populated and are
+    /// re-sampled at a finer block stride. The extended value is
+    /// allowed to differ from `analyze_features` (that's the point of
+    /// the retry); every *other* requested Tier 3 feature must still
+    /// match the default-budget baseline exactly.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage2_large_image_extended_pass_populates_and_diverges_only_on_target_features() {
+        // 4000 × 2001 = 8 004 000 px ≥ LARGE_THRESHOLD (8 MP), coloured
+        // and structured so neither Stage 1.5 gate fires.
+        let w = 4000u32;
+        let h = 2001u32;
+        let buf = synth_rgb(w, h, 23);
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, w, h), &q).unwrap();
+        // Stage 2 is opt-in: must pass `with_extended_pass()` for the
+        // re-walk to fire.
+        let hints = DispatchHints::with_extended_pass();
+        let plan = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&hints)).unwrap();
+
+        let extended = crate::feature::EXTENDED_PASS_FEATURES;
+        // The three extended features must be present (not dropped).
+        for f in extended.iter() {
+            assert!(
+                plan.get(f).is_some(),
+                "{f:?} (extended) must stay populated on a ≥ 8 MP image",
+            );
+        }
+
+        // Every Tier-3 feature that is NOT one of the three extended
+        // targets must match the default-budget baseline bit-for-bit:
+        // the extended pass only overwrites the three target columns.
+        for f in crate::feature::TIER3_FEATURES.iter() {
+            if extended.contains(f) {
+                continue;
+            }
+            let (b, p) = (baseline.get_f32(f), plan.get_f32(f));
+            assert_eq!(
+                b.is_some(),
+                p.is_some(),
+                "presence mismatch for non-extended Tier3 {f:?}",
+            );
+            if let (Some(bv), Some(pv)) = (b, p) {
+                assert_eq!(
+                    bv.to_bits(),
+                    pv.to_bits(),
+                    "non-extended Tier3 {f:?} must match baseline: base={bv} plan={pv}",
+                );
+            }
+        }
+    }
+
+    /// Stage 2 is OPT-IN: with default hints (`None`) on a ≥ 8 MP image
+    /// the extended-budget Tier 3 re-walk does NOT run, so the dispatch
+    /// plan is bit-for-bit `analyze_features` for *every* requested
+    /// feature — including the three `EXTENDED_PASS_FEATURES` that the
+    /// re-walk would otherwise refine. This is the load-bearing
+    /// "default path has no large-image regression / no divergence"
+    /// guarantee. Cross-checked: `DispatchHints::default()` and
+    /// `DispatchHints::empty()` behave identically to `None`.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage2_default_hints_skip_extended_pass_full_parity() {
+        // 4000 × 2001 = 8 004 000 px ≥ LARGE_THRESHOLD (8 MP), coloured
+        // and structured so the grayscale gate doesn't fire either —
+        // the *only* possible divergence on this image is Stage 2, and
+        // with it off the whole feature surface must match exactly.
+        let w = 4000u32;
+        let h = 2001u32;
+        let buf = synth_rgb(w, h, 23);
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let baseline = analyze_features(rgb_slice(&buf, w, h), &q).unwrap();
+
+        // Default hints in all three spellings must reach full parity.
+        let none = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, None).unwrap();
+        let empty_hints = DispatchHints::empty();
+        let empty =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&empty_hints)).unwrap();
+        let default_hints = DispatchHints::default();
+        let dflt =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&default_hints)).unwrap();
+
+        for f in FeatureSet::SUPPORTED.iter() {
+            let b = baseline.get_f32(f);
+            for (label, got) in [
+                ("None", none.get_f32(f)),
+                ("empty()", empty.get_f32(f)),
+                ("default()", dflt.get_f32(f)),
+            ] {
+                assert_eq!(
+                    b.is_some(),
+                    got.is_some(),
+                    "presence mismatch for {f:?} with default hints ({label}): base={b:?} got={got:?}",
+                );
+                if let (Some(bv), Some(gv)) = (b, got) {
+                    assert_eq!(
+                        bv.to_bits(),
+                        gv.to_bits(),
+                        "value mismatch for {f:?} with default hints ({label}): base={bv} got={gv} — default path must NOT run Stage 2",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Per-block-varying RGB: each 8×8 block carries its own pseudo-
+    /// random high-frequency texture (hashed from its block coordinates),
+    /// so the *set* of blocks the Tier 3 DCT pass samples actually
+    /// changes the percentile features. A perfectly periodic synthetic
+    /// (like `synth_rgb`'s linear ramp) gives every block an identical
+    /// DCT signature, which makes any block-stride change a no-op — that
+    /// would hide whether Stage 2 ran. This generator does not.
+    #[cfg(feature = "experimental")]
+    fn synth_rgb_block_varying(w: u32, h: u32, seed: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; (w as usize) * (h as usize) * 3];
+        for y in 0..h {
+            for x in 0..w {
+                // Block-local seed: distinct per 8×8 block.
+                let bx = x / 8;
+                let by = y / 8;
+                let bs = seed
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(bx.wrapping_mul(40_503))
+                    .wrapping_add(by.wrapping_mul(2_246_822_519));
+                // Intra-block hash mixes pixel position with the block
+                // seed → high-frequency texture that differs per block.
+                let t = bs
+                    .wrapping_add((x & 7).wrapping_mul(1_103_515_245))
+                    .wrapping_add((y & 7).wrapping_mul(12_345))
+                    .wrapping_mul(2_654_435_761);
+                let i = ((y * w + x) * 3) as usize;
+                buf[i] = (t & 0xFF) as u8;
+                buf[i + 1] = ((t >> 8) & 0xFF) as u8;
+                buf[i + 2] = ((t >> 16) ^ 0x5A) as u8;
+            }
+        }
+        buf
+    }
+
+    /// Opt-in vs default divergence: on a ≥ 8 MP image whose 8×8 blocks
+    /// genuinely differ, enabling Stage 2 re-samples the budget-sensitive
+    /// features at a finer block stride, so at least one of the three
+    /// `EXTENDED_PASS_FEATURES` differs from the default-hints
+    /// (Stage-2-off) result. Proves the opt-in flag actually toggles the
+    /// re-walk (not a no-op), and that the divergence is confined to the
+    /// extended targets — every other feature is identical between the
+    /// two hint settings.
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn stage2_opt_in_diverges_from_default_only_on_extended_features() {
+        let w = 4000u32;
+        let h = 2001u32;
+        // Per-block-varying texture so the block stride actually matters:
+        // default cap (1024 blocks) and extended cap (2048 blocks) sample
+        // different block sets, yielding different percentile values.
+        let buf = synth_rgb_block_varying(w, h, 23);
+        let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+        let default_path = analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, None).unwrap();
+        let opt_in_hints = DispatchHints::with_extended_pass();
+        let opt_in =
+            analyze_with_dispatch_plan(rgb_slice(&buf, w, h), &q, Some(&opt_in_hints)).unwrap();
+
+        let extended = crate::feature::EXTENDED_PASS_FEATURES;
+
+        // Every NON-extended feature must be identical between the two.
+        for f in FeatureSet::SUPPORTED.iter() {
+            if extended.contains(f) {
+                continue;
+            }
+            let (d, o) = (default_path.get_f32(f), opt_in.get_f32(f));
+            assert_eq!(
+                d.is_some(),
+                o.is_some(),
+                "presence mismatch for non-extended {f:?} between default and opt-in",
+            );
+            if let (Some(dv), Some(ov)) = (d, o) {
+                assert_eq!(
+                    dv.to_bits(),
+                    ov.to_bits(),
+                    "non-extended {f:?} must NOT change when only Stage 2 is toggled: default={dv} opt-in={ov}",
+                );
+            }
+        }
+
+        // At least one extended feature must actually differ — the finer
+        // block stride samples a different block set, so the re-walk
+        // produces a different value (the whole point of opting in).
+        let mut diverged = false;
+        for f in extended.iter() {
+            if let (Some(dv), Some(ov)) = (default_path.get_f32(f), opt_in.get_f32(f))
+                && dv.to_bits() != ov.to_bits()
+            {
+                diverged = true;
+            }
+        }
+        assert!(
+            diverged,
+            "enabling Stage 2 must change at least one EXTENDED_PASS_FEATURE — the opt-in flag is a no-op otherwise",
+        );
+    }
+}
