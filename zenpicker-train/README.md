@@ -33,6 +33,32 @@ Following zentrain's `build_dataset`, this trainer:
 
 The supervised target is per-cell `bytes_log`, not the achieved score.
 
+## Scalar hybrid heads (`--scalar-axes`)
+
+Some codec knobs are **continuous Pareto scalars**, not categorical
+choices — for zenjpeg, `chroma_scale` and the trellis `lambda`. The
+picker can regress these *within* a cell alongside the bytes-log argmin.
+With `--scalar-axes chroma_scale,lambda` (the zenjpeg pair):
+
+1. The scalar axes are **excluded from the cell key** (so the within-cell
+   variation the heads regress survives) and read from `knob_tuple_json`.
+2. The output widens to `n_cells · (1 + K)`: the `bytes_log` block plus
+   one block per scalar axis, each carrying the **within-cell-optimal**
+   config's knob value (sentinel-masked — e.g. `lambda = 0` = trellis-off
+   → no target).
+3. Each scalar block is standardized `(value − μ)/σ` for the fit so every
+   head shares a loss scale, then the search winner's final layer is
+   rescaled to emit **natural units** — mirroring zentrain's per-head
+   loss normalization.
+4. The bake carries per-output `output_specs` (bounds clamp + transform +
+   discrete-set snap + sentinel): `chroma_scale → [0.6,1.5]` identity;
+   `lambda → round to {0,8,14.5,25}`. The codec reads each knob via
+   zenpredict's `predict_with_specs` (the `advanced` feature); the
+   bytes-log argmin pick is unchanged (`predict`, block 0).
+
+Held-out per-axis MAE is reported in the panel. Categorical-only
+(`--scalar-axes` omitted) is the default and byte-for-byte unchanged.
+
 ## Model + search
 
 - **MLP** (default mode): LeakyReLU(0.01) hidden layers, identity

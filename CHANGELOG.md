@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`zenpicker-train` scalar hybrid heads (`--scalar-axes`)** — restores the
+  continuous-knob regression the Rust port had dropped vs zentrain's
+  hybrid-heads trainer. The picker can now regress per-cell *scalar* knobs
+  (zenjpeg `chroma_scale`, trellis `lambda`) alongside the bytes-log argmin:
+  the output widens to `n_cells·(1+K)`, each scalar block carries the
+  within-cell-optimal config's value (sentinel-masked), is standardized for
+  the fit then rescaled to natural units on the search winner, and bakes
+  per-output `output_specs` (bounds / discrete-snap / sentinel) that
+  zenpredict applies via `predict_with_specs`. New public API:
+  `ScalarAxisSpec`, `build_picker_dataset_with`, `Mlp::rescale_output_block`,
+  `ScalarHeadSpec`, `ScalarHeadEval` / `evaluate_scalar_heads`. The bytes-only
+  categorical path is the default and byte-for-byte unchanged. Real-data
+  parity vs the Python joint-trunk SOTA in
+  `benchmarks/zenpicker_scalar_parity_2026-06-09.md` (5d4e3c5, b313dfe,
+  61b760f, 7b4a734, 673bf0d).
+
 - **`AnalysisFeature::XybBquarterChromaLoss` (id 139, `experimental`)** — the
   favor-XYB-Full discriminant for the XYB chroma-subsampling decision (Full vs
   BQuarter): mean `J·|Δsb|` over 2×2 blocks, where `Δsb` is each pixel's scaled-B
