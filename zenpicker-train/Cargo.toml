@@ -22,6 +22,13 @@ exclude = [
 name = "zenpicker-train"
 path = "src/bin/zenpicker_train.rs"
 
+# Rust/linfa port of scripts/cluster_sources.py (sklearn k-means
+# stratified source picker). linfa is pure-Rust (no `blas` feature →
+# no system BLAS).
+[[bin]]
+name = "cluster_features"
+path = "src/bin/cluster_features.rs"
+
 [dependencies]
 # Runtime + bake-side composer. Path deps to the local siblings —
 # crates.io zenpredict 0.1.0 is v2-only; v3 lives here. (per
@@ -45,6 +52,16 @@ serde_json = "1.0.150"
 toml = "1.1.2"
 # Input-file provenance hashing for the manifest.
 sha2 = "0.11.0"
+# Pure-Rust k-means for the `cluster_features` source-picker binary
+# (port of scripts/cluster_sources.py). NO `blas` feature → no system
+# BLAS dependency; linfa-clustering 0.8.1 pins ndarray 0.16 /
+# ndarray-rand 0.15 / rand_xoshiro 0.6, matched here to keep the
+# lockfile single-version.
+linfa = { version = "0.8.1", default-features = false }
+linfa-clustering = { version = "0.8.1", default-features = false }
+ndarray = "0.16.1"
+ndarray-rand = "0.15.0"
+rand_xoshiro = "0.6.0"
 
 [dev-dependencies]
 # Mint a tiny synthetic parquet in the end-to-end test.
