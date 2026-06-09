@@ -58,6 +58,10 @@ struct RawRow {
     score: f64,
     bytes: f64,
     feat: Vec<f32>,
+    /// This config's value for each requested scalar axis, parallel to
+    /// the caller's `scalar_axes` order. `NaN` where the knob is absent
+    /// or equals the axis sentinel (so it never becomes a target).
+    scalar_vals: Vec<f64>,
 }
 
 /// The materialized picker dataset: per `(image, target_zq)` rows with
@@ -84,12 +88,78 @@ pub struct PickerDataset {
     pub feature_names: Vec<String>,
     /// The `target_zq` grid actually used.
     pub zq_targets: Vec<i64>,
+    /// Scalar prediction axes (empty = bytes-only categorical picker).
+    pub scalar_axes: Vec<String>,
+    /// Per-axis sentinel value (`NaN` = none), parallel to `scalar_axes`.
+    pub scalar_sentinels: Vec<f64>,
+    /// Per-axis row-major `n_rows × n_cells` within-cell-optimal scalar
+    /// target. `scalars[a]` has length `n_rows * n_cells`; entries are
+    /// `NaN` where the cell was unreachable OR the optimal config's value
+    /// was the axis sentinel (those are masked out of the head's loss).
+    pub scalars: Vec<Vec<f64>>,
 }
 
 impl PickerDataset {
     pub fn n_rows(&self) -> usize {
         self.target_zq.len()
     }
+}
+
+/// One scalar prediction axis: the `knob_tuple_json` key to read plus an
+/// optional `sentinel` (e.g. `lambda = 0.0` for trellis-off configs). A
+/// row whose value equals the sentinel contributes a `NaN` target so the
+/// head never trains on the placeholder, mirroring zentrain's
+/// `SCALAR_SENTINELS` masking.
+#[derive(Clone, Debug)]
+pub struct ScalarAxisSpec {
+    pub name: String,
+    pub sentinel: Option<f64>,
+}
+
+impl ScalarAxisSpec {
+    pub fn new(name: impl Into<String>, sentinel: Option<f64>) -> Self {
+        Self {
+            name: name.into(),
+            sentinel,
+        }
+    }
+}
+
+/// Decode a JSON scalar (number / bool / numeric-string) to `f64`.
+fn json_as_f64(v: &serde_json::Value) -> Option<f64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        serde_json::Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Pull this row's scalar-axis values from its `knob_tuple_json`. A
+/// missing key, an unparseable value, or a value equal to the axis
+/// sentinel all map to `NaN` (a masked target).
+fn scalars_from_knob(knob_json: &str, axes: &[ScalarAxisSpec]) -> Vec<f64> {
+    if axes.is_empty() {
+        return Vec::new();
+    }
+    let obj = serde_json::from_str::<serde_json::Value>(knob_json)
+        .ok()
+        .and_then(|v| v.as_object().cloned());
+    axes.iter()
+        .map(|ax| {
+            let raw = obj
+                .as_ref()
+                .and_then(|o| o.get(&ax.name))
+                .and_then(json_as_f64);
+            match raw {
+                Some(v) => match ax.sentinel {
+                    Some(s) if (v - s).abs() <= f64::EPSILON => f64::NAN,
+                    _ => v,
+                },
+                None => f64::NAN,
+            }
+        })
+        .collect()
 }
 
 /// zentrain's `ZQ_TARGETS` for zenjpeg: step 5 from 0..70 then step 2
@@ -145,11 +215,14 @@ fn push_strings(batch: &RecordBatch, col: usize, out: &mut Vec<String>) -> Optio
 /// Derive the categorical cell key from a zenjpeg `knob_tuple_json`.
 ///
 /// The discrete knob axes are the categorical cell; `effort` is treated
-/// as categorical too (it's a small enum, not a continuous Pareto
-/// scalar like chroma_scale/lambda in the older sweep). This mirrors
-/// zentrain's `categorical_key(parse_config_name(name))` — the cell is
-/// the tuple of discrete axes.
-fn cell_key_from_knob(knob_json: &str) -> String {
+/// as categorical too (it's a small enum). Any key named in
+/// `scalar_axes` is EXCLUDED from the cell key — those are continuous
+/// Pareto axes (chroma_scale, lambda) the scalar heads regress WITHIN a
+/// cell, so folding them into the key would collapse the within-cell
+/// variation the hybrid-heads formulation depends on. This mirrors
+/// zentrain's `categorical_key(parse_config_name(name))`, where the cell
+/// is `CATEGORICAL_AXES` only and `SCALAR_AXES` are separate.
+fn cell_key_from_knob(knob_json: &str, scalar_axes: &[ScalarAxisSpec]) -> String {
     // Parse the small flat JSON object without a serde struct so any
     // knob ordering / subset works. We extract the recognized keys in a
     // canonical order so the cell label is stable.
@@ -161,18 +234,22 @@ fn cell_key_from_knob(knob_json: &str) -> String {
         Some(o) => o,
         None => return format!("raw:{knob_json}"),
     };
+    let is_scalar = |k: &str| scalar_axes.iter().any(|a| a.name == k);
     let mut parts: Vec<String> = Vec::new();
     // Canonical order: subsampling, progressive, sharp_yuv, effort,
-    // then any remaining keys sorted.
+    // then any remaining non-scalar keys sorted.
     let canonical = ["subsampling", "progressive", "sharp_yuv", "effort"];
     for k in canonical {
+        if is_scalar(k) {
+            continue;
+        }
         if let Some(val) = obj.get(k) {
             parts.push(format!("{k}={}", render_json_scalar(val)));
         }
     }
     let mut rest: Vec<&String> = obj
         .keys()
-        .filter(|k| !canonical.contains(&k.as_str()))
+        .filter(|k| !canonical.contains(&k.as_str()) && !is_scalar(k))
         .collect();
     rest.sort();
     for k in rest {
@@ -199,6 +276,21 @@ pub fn build_picker_dataset(
     path: &Path,
     codec_filter: Option<&str>,
     zq_targets: &[i64],
+) -> Result<PickerDataset, TrainError> {
+    build_picker_dataset_with(path, codec_filter, zq_targets, &[])
+}
+
+/// Like [`build_picker_dataset`] but ALSO captures per-cell scalar
+/// prediction targets for each axis in `scalar_axes`: the
+/// within-cell-optimal config's value for that knob (sentinel-masked to
+/// `NaN`). Passing an empty `scalar_axes` reproduces the bytes-only
+/// categorical picker exactly. The scalar values are read from each
+/// row's `knob_tuple_json`.
+pub fn build_picker_dataset_with(
+    path: &Path,
+    codec_filter: Option<&str>,
+    zq_targets: &[i64],
+    scalar_axes: &[ScalarAxisSpec],
 ) -> Result<PickerDataset, TrainError> {
     let file = File::open(path).map_err(|e| TrainError::Io(format!("{}: {e}", path.display())))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
@@ -314,7 +406,7 @@ pub fn build_picker_dataset(
         if !ok {
             continue;
         }
-        let cell_key = cell_key_from_knob(&knobs[r]);
+        let cell_key = cell_key_from_knob(&knobs[r], scalar_axes);
         cell_set.insert(cell_key.clone());
         let _ = qs[r]; // q is intentionally NOT used as a feature (no leakage)
         raw.push(RawRow {
@@ -323,6 +415,7 @@ pub fn build_picker_dataset(
             score: s,
             bytes: b,
             feat,
+            scalar_vals: scalars_from_knob(&knobs[r], scalar_axes),
         });
     }
 
@@ -354,21 +447,32 @@ pub fn build_picker_dataset(
     let mut reach: Vec<bool> = Vec::new();
     let mut image_ids: Vec<String> = Vec::new();
     let mut target_zq: Vec<i64> = Vec::new();
+    let n_axes = scalar_axes.len();
+    // Per-axis accumulator, row-major `n_rows × n_cells`, parallel to
+    // `bytes_log`/`reach`.
+    let mut scalars: Vec<Vec<f64>> = vec![Vec::new(); n_axes];
 
     for (image, rows) in &by_image {
         // Per-image feature vector (constant across configs).
         let f = &rows[0].feat;
         for &zq in zq_targets {
             // Within-cell optimal: min bytes over rows in the cell with
-            // score >= zq.
+            // score >= zq. `cell_scalar[a][c]` tracks the scalar value of
+            // that same min-bytes winner, so the scalar head learns the
+            // Pareto-optimal knob per cell (NaN if the winner's value was
+            // the axis sentinel).
             let mut cell_min_bytes = vec![f64::INFINITY; n_cells];
             let mut cell_reach = vec![false; n_cells];
+            let mut cell_scalar = vec![vec![f64::NAN; n_cells]; n_axes];
             for rr in rows {
                 if rr.score >= zq as f64 {
                     let c = cell_index[rr.cell_key.as_str()];
                     if rr.bytes < cell_min_bytes[c] {
                         cell_min_bytes[c] = rr.bytes;
                         cell_reach[c] = true;
+                        for a in 0..n_axes {
+                            cell_scalar[a][c] = rr.scalar_vals[a];
+                        }
                     }
                 }
             }
@@ -390,6 +494,13 @@ pub fn build_picker_dataset(
                     bytes_log.push(f64::NAN);
                 }
                 reach.push(cell_reach[c]);
+                for a in 0..n_axes {
+                    scalars[a].push(if cell_reach[c] {
+                        cell_scalar[a][c]
+                    } else {
+                        f64::NAN
+                    });
+                }
             }
             image_ids.push((*image).to_string());
             target_zq.push(zq);
@@ -413,6 +524,12 @@ pub fn build_picker_dataset(
         target_zq,
         feature_names,
         zq_targets: zq_targets.to_vec(),
+        scalar_axes: scalar_axes.iter().map(|a| a.name.clone()).collect(),
+        scalar_sentinels: scalar_axes
+            .iter()
+            .map(|a| a.sentinel.unwrap_or(f64::NAN))
+            .collect(),
+        scalars,
     })
 }
 
@@ -486,4 +603,40 @@ pub fn standardize_all(features: &[f64], n_in: usize, mean: &[f64], scale: &[f64
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scalars_from_knob_parses_decodes_and_masks_sentinel() {
+        let axes = vec![
+            ScalarAxisSpec::new("chroma_scale", None),
+            ScalarAxisSpec::new("lambda", Some(0.0)),
+        ];
+        // Both present, lambda non-sentinel → both pass through.
+        let v = scalars_from_knob(r#"{"chroma_scale":0.8,"lambda":14.5}"#, &axes);
+        assert_eq!(v.len(), 2);
+        assert!((v[0] - 0.8).abs() < 1e-12);
+        assert!((v[1] - 14.5).abs() < 1e-12);
+        // lambda == sentinel (trellis-off) → masked to NaN.
+        let v = scalars_from_knob(r#"{"chroma_scale":1.0,"lambda":0.0}"#, &axes);
+        assert!((v[0] - 1.0).abs() < 1e-12);
+        assert!(v[1].is_nan());
+        // Missing key → NaN.
+        let v = scalars_from_knob(r#"{"lambda":8.0}"#, &axes);
+        assert!(v[0].is_nan());
+        assert!((v[1] - 8.0).abs() < 1e-12);
+        // Numeric-string + bool values still decode.
+        let axes2 = vec![
+            ScalarAxisSpec::new("x", None),
+            ScalarAxisSpec::new("flag", None),
+        ];
+        let v = scalars_from_knob(r#"{"x":"2.5","flag":true}"#, &axes2);
+        assert!((v[0] - 2.5).abs() < 1e-12);
+        assert!((v[1] - 1.0).abs() < 1e-12);
+        // No axes requested → empty (bytes-only path).
+        assert!(scalars_from_knob("{}", &[]).is_empty());
+    }
 }

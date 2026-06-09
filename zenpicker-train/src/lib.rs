@@ -68,8 +68,8 @@ pub use input_shaping::{FittedTransforms, ShapingMode, apply_inplace, fit_transf
 pub use mlp::{Mlp, MlpConfig, train_mlp};
 pub use model::{RidgeModel, Standardizer, train_ridge};
 pub use pareto_dataset::{
-    PickerDataset, build_picker_dataset, default_zq_targets, fit_standardizer,
-    grouped_split_picker, standardize_all,
+    PickerDataset, ScalarAxisSpec, build_picker_dataset, build_picker_dataset_with,
+    default_zq_targets, fit_standardizer, grouped_split_picker, standardize_all,
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
 pub use picker_eval::{PickerEval, evaluate_picker, evaluate_picker_bake};
