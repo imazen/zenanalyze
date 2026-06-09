@@ -277,6 +277,7 @@ fn teacher_export_roundtrips_and_soft_targets_distill() {
             distillation,
             transforms: None,
             shaping_mode: "none",
+            scalar_heads: &[],
         },
     )
     .expect("bake distilled picker");

@@ -53,6 +53,14 @@ arrow = { version = "58.3.0", default-features = false }
 # Confirm the bake loads through the consumer that will use per-codec
 # picker bakes (the meta-picker wraps the same zenpredict::Predictor).
 zenpicker = { path = "../zenpicker", default-features = false, features = ["std"] }
+# Enable zenpredict's `advanced` runtime API in tests only, so the scalar
+# round-trip can verify the baked `output_specs` clamp/snap at load time
+# via `predict_with_specs`. Production trainer builds stay on `std` —
+# applying output specs is the codec runtime's job, not the trainer's.
+zenpredict = { path = "../zenpredict", default-features = false, features = [
+    "std",
+    "advanced",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"

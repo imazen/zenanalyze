@@ -470,8 +470,8 @@ pub fn build_picker_dataset_with(
                     if rr.bytes < cell_min_bytes[c] {
                         cell_min_bytes[c] = rr.bytes;
                         cell_reach[c] = true;
-                        for a in 0..n_axes {
-                            cell_scalar[a][c] = rr.scalar_vals[a];
+                        for (cell_a, &val) in cell_scalar.iter_mut().zip(&rr.scalar_vals) {
+                            cell_a[c] = val;
                         }
                     }
                 }

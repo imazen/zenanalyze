@@ -565,8 +565,7 @@ mod panel_parity_tests {
             for n in [5usize, 23, 128, 400] {
                 let mut rng = Lcg(seed);
                 let humans: Vec<f64> = (0..n).map(|_| rng.next_f64() * 90.0 + 5.0).collect();
-                let scores: Vec<f64> =
-                    humans.iter().map(|&h| h + 25.0 * rng.next_f64()).collect();
+                let scores: Vec<f64> = humans.iter().map(|&h| h + 25.0 * rng.next_f64()).collect();
                 assert_panel_eq(&scores, &humans, &format!("rand seed={seed} n={n}"));
             }
         }

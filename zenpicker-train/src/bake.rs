@@ -265,14 +265,87 @@ pub fn bake_ridge_to_znpr_v3(
     Ok(bytes)
 }
 
+/// One scalar prediction head's runtime output spec — the natural-unit
+/// clamp / snap zenpredict applies to that head's `n_cells` outputs.
+/// Mirrors zentrain `zenjpeg_picker_config.py` `OUTPUT_SPECS`.
+#[derive(Clone, Debug)]
+pub struct ScalarHeadSpec {
+    /// Knob name; must match the dataset scalar-axis name AND order.
+    pub name: String,
+    /// Optional `[low, high]` clamp applied to the head output.
+    pub bounds: Option<[f32; 2]>,
+    /// zenpredict transform: `"identity"`, `"round"`, `"sigmoid_scaled"`,
+    /// `"exp"`, or `"sigmoid"`. Default `"identity"`.
+    pub transform: String,
+    /// Params for `sigmoid_scaled` (`[low, high]`); empty otherwise.
+    pub params: Vec<f32>,
+    /// Snap the post-transform output to the nearest of these values.
+    pub discrete_set: Option<Vec<f32>>,
+    /// Sentinel value passed through verbatim (e.g. `lambda = 0.0` =
+    /// trellis-off); `None` = no sentinel.
+    pub sentinel: Option<f32>,
+}
+
+impl ScalarHeadSpec {
+    /// The per-output JSON spec zenpredict-bake consumes (one entry,
+    /// replicated across the head's `n_cells` outputs by the baker).
+    fn to_json(&self) -> serde_json::Value {
+        let mut o = serde_json::Map::new();
+        if let Some(b) = self.bounds {
+            o.insert("bounds".into(), serde_json::json!(b));
+        }
+        o.insert("transform".into(), serde_json::json!(self.transform));
+        if !self.params.is_empty() {
+            o.insert("params".into(), serde_json::json!(self.params));
+        }
+        if let Some(ds) = &self.discrete_set {
+            o.insert("discrete_set".into(), serde_json::json!(ds));
+        }
+        if let Some(s) = self.sentinel {
+            o.insert("sentinel".into(), serde_json::json!(s));
+        }
+        serde_json::Value::Object(o)
+    }
+
+    /// zenjpeg's standard scalar head for a known axis name, matching
+    /// zentrain's `OUTPUT_SPECS`: `chroma_scale` is bounded-continuous in
+    /// `[0.6, 1.5]`; `lambda` rounds to the trellis grid `{0, 8, 14.5,
+    /// 25}` (0 = trellis-off sentinel). Returns `None` for an unknown
+    /// axis so the caller can reject / supply its own.
+    pub fn zenjpeg(name: &str) -> Option<Self> {
+        match name {
+            "chroma_scale" => Some(Self {
+                name: name.to_string(),
+                bounds: Some([0.6, 1.5]),
+                transform: "identity".to_string(),
+                params: Vec::new(),
+                discrete_set: None,
+                sentinel: None,
+            }),
+            "lambda" => Some(Self {
+                name: name.to_string(),
+                bounds: Some([0.0, 25.0]),
+                transform: "round".to_string(),
+                params: Vec::new(),
+                discrete_set: Some(vec![0.0, 8.0, 14.5, 25.0]),
+                sentinel: Some(0.0),
+            }),
+            _ => None,
+        }
+    }
+}
+
 /// Build the ZNPR v3 bake JSON for the within-cell-optimal MLP picker.
 ///
 /// The MLP maps standardized `[image_features, zq_norm]` →
-/// `bytes_log[0..n_cells]`. The input standardizer (`scaler_mean` /
-/// `scaler_scale`) is folded into the bake so the runtime applies it
-/// for free. Layers: `n_in → h0 → … → n_cells`, LeakyReLU on hidden
-/// layers, identity on the output layer. The codec runtime selects the
-/// config via `argmin(output, mask=reach)`.
+/// `bytes_log[0..n_cells]`, optionally followed by one standardized-then-
+/// rescaled scalar block per entry in `scalar_heads` (natural units).
+/// The input standardizer (`scaler_mean` / `scaler_scale`) is folded into
+/// the bake so the runtime applies it for free. Layers: `n_in → h0 → … →
+/// n_cells·(1+K)`, LeakyReLU on hidden layers, identity on the output
+/// layer. The codec runtime selects the config via `argmin(output[0..
+/// n_cells], mask=reach)` and reads each scalar knob from its block (via
+/// `predict_with_specs`, which applies the per-head bounds/snap/sentinel).
 #[allow(clippy::too_many_arguments)]
 pub fn bake_mlp_picker_to_znpr_v3(
     mlp: &Mlp,
@@ -284,6 +357,7 @@ pub fn bake_mlp_picker_to_znpr_v3(
     zq_targets: &[i64],
     distilled: bool,
     transforms: Option<&crate::FittedTransforms>,
+    scalar_heads: &[ScalarHeadSpec],
 ) -> Result<Vec<u8>, TrainError> {
     let baked = mlp.layers_for_bake();
     let n_layers = baked.len();
@@ -331,22 +405,65 @@ pub fn bake_mlp_picker_to_znpr_v3(
     // Input shaping: emit `zentrain.feature_transforms` (+ params) so the
     // runtime's `predict_transformed` reproduces the per-feature shaping
     // applied at train time. Skipped entirely when every input is Identity.
-    if let Some(ft) = transforms {
-        if !ft.is_all_identity() {
-            metadata.push(serde_json::json!({
-                "key": "zentrain.feature_transforms",
-                "type": "utf8",
-                "text": ft.transforms_text(),
-            }));
-            metadata.push(serde_json::json!({
-                "key": "zentrain.feature_transform_params",
-                "type": "utf8",
-                "text": ft.params_text(),
-            }));
-        }
+    if let Some(ft) = transforms
+        && !ft.is_all_identity()
+    {
+        metadata.push(serde_json::json!({
+            "key": "zentrain.feature_transforms",
+            "type": "utf8",
+            "text": ft.transforms_text(),
+        }));
+        metadata.push(serde_json::json!({
+            "key": "zentrain.feature_transform_params",
+            "type": "utf8",
+            "text": ft.params_text(),
+        }));
     }
 
-    let doc = serde_json::json!({
+    // Hybrid heads: emit per-output specs (length n_out) so zenpredict
+    // clamps/snaps each scalar knob to natural units, plus self-
+    // describing layout metadata. The bytes_log block (outputs
+    // `0..n_cells`) is identity; each scalar block gets its head spec.
+    let n_cells = cell_labels.len();
+    let mut output_specs: Option<Vec<serde_json::Value>> = None;
+    if !scalar_heads.is_empty() {
+        let k = scalar_heads.len();
+        let expected = n_cells.saturating_mul(1 + k);
+        if mlp.n_out != expected {
+            return Err(TrainError::Bake(format!(
+                "hybrid bake: mlp.n_out={} but n_cells({n_cells})*(1+{k} scalar heads)={expected}",
+                mlp.n_out
+            )));
+        }
+        let bytes_spec = serde_json::json!({ "bounds": [0.0, 30.0], "transform": "identity" });
+        let mut specs: Vec<serde_json::Value> = Vec::with_capacity(expected);
+        specs.resize(n_cells, bytes_spec);
+        for h in scalar_heads {
+            let hs = h.to_json();
+            for _ in 0..n_cells {
+                specs.push(hs.clone());
+            }
+        }
+        output_specs = Some(specs);
+
+        // Self-describing block layout: one `name:start:len` line each.
+        let mut layout = vec![format!("bytes_log:0:{n_cells}")];
+        for (i, h) in scalar_heads.iter().enumerate() {
+            layout.push(format!("{}:{}:{}", h.name, n_cells * (1 + i), n_cells));
+        }
+        metadata.push(serde_json::json!({
+            "key": "zenpicker_train.scalar_axes",
+            "type": "utf8",
+            "text": scalar_heads.iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(","),
+        }));
+        metadata.push(serde_json::json!({
+            "key": "zenpicker_train.output_layout",
+            "type": "utf8",
+            "text": layout.join("\n"),
+        }));
+    }
+
+    let mut doc = serde_json::json!({
         "schema_hash": SCHEMA_HASH,
         "flags": 0,
         "scaler_mean": scaler_mean_f32,
@@ -354,6 +471,11 @@ pub fn bake_mlp_picker_to_znpr_v3(
         "layers": layers_json,
         "metadata": metadata,
     });
+    if let Some(specs) = output_specs {
+        doc.as_object_mut()
+            .expect("doc is a JSON object")
+            .insert("output_specs".to_string(), serde_json::Value::Array(specs));
+    }
 
     let json =
         serde_json::to_string(&doc).map_err(|e| TrainError::Bake(format!("json encode: {e}")))?;
@@ -477,6 +599,10 @@ pub struct MlpPickerManifestInputs<'a> {
     pub transforms: Option<&'a crate::FittedTransforms>,
     /// Human-readable shaping mode for the manifest (e.g. "auto", "yeo").
     pub shaping_mode: &'a str,
+    /// Scalar prediction heads (chroma_scale, lambda, …) in output order.
+    /// Empty = bytes-only categorical picker. Each head adds an `n_cells`
+    /// output block with its natural-unit `output_spec`.
+    pub scalar_heads: &'a [ScalarHeadSpec],
 }
 
 /// Full MLP picker bake step: serialize → write → sibling TOML manifest.
@@ -497,6 +623,7 @@ pub fn bake_mlp_picker(
         inputs.zq_targets,
         inputs.distillation.is_some(),
         inputs.transforms,
+        inputs.scalar_heads,
     )?;
     fs::write(out_path, &bytes)
         .map_err(|e| TrainError::Io(format!("write {}: {e}", out_path.display())))?;
@@ -522,7 +649,9 @@ pub fn bake_mlp_picker(
         val_rows: inputs.val_rows,
         n_image_features: inputs.n_image_features,
         n_inputs: mlp.n_in,
-        n_cells: mlp.n_out,
+        // Categorical cell count — NOT mlp.n_out, which is
+        // n_cells*(1 + n_scalar_heads) for a hybrid bake.
+        n_cells: inputs.cell_labels.len(),
         cell_labels: inputs.cell_labels.to_vec(),
         feature_names: inputs.feature_names.to_vec(),
         q_is_input: false,
@@ -564,14 +693,25 @@ pub fn bake_mlp_picker(
             log-spaced sizes) before treating this as a production picker — coarse sweeps \
             cap held-out decision quality regardless of architecture/shaping."
             .to_string(),
-        follow_ons: vec![
-            "Dense q (≈30 points) + log-spaced size sweep before any production bake.".to_string(),
-            "Scalar prediction heads (chroma_scale/lambda) for sweeps that carry continuous \
-             Pareto axes — this parquet's knobs are all categorical."
-                .to_string(),
-            "CubeCL GPU acceleration of the inner MLP training loop.".to_string(),
-            "Cross-codec MetaPicker auto-regeneration when a per-codec bake updates.".to_string(),
-        ],
+        follow_ons: {
+            let mut f = vec![
+                "Dense q (≈30 points) + log-spaced size sweep before any production bake."
+                    .to_string(),
+            ];
+            if inputs.scalar_heads.is_empty() {
+                f.push(
+                    "Scalar prediction heads (chroma_scale/lambda) for sweeps that carry \
+                     continuous Pareto axes — this parquet's knobs are all categorical."
+                        .to_string(),
+                );
+            }
+            f.push("CubeCL GPU acceleration of the inner MLP training loop.".to_string());
+            f.push(
+                "Cross-codec MetaPicker auto-regeneration when a per-codec bake updates."
+                    .to_string(),
+            );
+            f
+        },
     };
     let toml =
         toml::to_string_pretty(&man).map_err(|e| TrainError::Bake(format!("toml encode: {e}")))?;

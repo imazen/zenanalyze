@@ -55,8 +55,8 @@ mod search;
 
 pub use bake::{
     BakeOutcome, DistillManifest, HeldoutManifest, MlpModelManifest, MlpPickerManifest,
-    MlpPickerManifestInputs, ModelManifest, PickerManifest, PickerManifestInputs, SearchCandidate,
-    SearchManifest, bake_mlp_picker, bake_mlp_picker_to_znpr_v3, bake_picker,
+    MlpPickerManifestInputs, ModelManifest, PickerManifest, PickerManifestInputs, ScalarHeadSpec,
+    SearchCandidate, SearchManifest, bake_mlp_picker, bake_mlp_picker_to_znpr_v3, bake_picker,
     bake_ridge_to_znpr_v3, file_sha256,
 };
 pub use distill::{

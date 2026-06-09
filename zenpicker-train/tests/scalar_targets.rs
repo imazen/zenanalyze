@@ -19,8 +19,9 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_writer::ArrowWriter;
 
 use zenpicker_train::{
-    MlpConfig, ScalarAxisSpec, build_picker_dataset_with, default_grid, fit_standardizer,
-    grouped_split_picker, run_search, standardize_all,
+    MlpConfig, ScalarAxisSpec, ScalarHeadSpec, bake_mlp_picker_to_znpr_v3,
+    build_picker_dataset_with, default_grid, fit_standardizer, grouped_split_picker, run_search,
+    standardize_all,
 };
 
 /// One image, one categorical cell (`subsampling=420`). Four configs,
@@ -106,7 +107,10 @@ fn within_cell_optimal_scalar_capture_and_sentinel_mask() {
     assert_eq!(ds.n_cells, 1, "chroma_scale/lambda must not form cells");
     assert_eq!(ds.scalar_axes, vec!["chroma_scale", "lambda"]);
     assert_eq!(ds.scalar_sentinels.len(), 2);
-    assert!(ds.scalar_sentinels[0].is_nan(), "chroma_scale has no sentinel");
+    assert!(
+        ds.scalar_sentinels[0].is_nan(),
+        "chroma_scale has no sentinel"
+    );
     assert_eq!(ds.scalar_sentinels[1], 0.0, "lambda sentinel = 0.0");
 
     // 4 reachable targets × 1 cell.
@@ -127,13 +131,19 @@ fn within_cell_optimal_scalar_capture_and_sentinel_mask() {
     let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
 
     assert!(near(cs[0], 0.6), "T=40 chroma_scale (config A)");
-    assert!(lam[0].is_nan(), "T=40 lambda sentinel-masked (config A λ=0.0)");
+    assert!(
+        lam[0].is_nan(),
+        "T=40 lambda sentinel-masked (config A λ=0.0)"
+    );
 
     assert!(near(cs[1], 1.0), "T=45 chroma_scale (config B)");
     assert!(near(lam[1], 8.0), "T=45 lambda (config B)");
 
     assert!(near(cs[2], 1.0), "T=80 chroma_scale (config D)");
-    assert!(near(lam[2], 25.0), "T=80 lambda (config D beats C on bytes)");
+    assert!(
+        near(lam[2], 25.0),
+        "T=80 lambda (config D beats C on bytes)"
+    );
 
     assert!(near(cs[3], 1.0), "T=85 chroma_scale (config D)");
     assert!(near(lam[3], 25.0), "T=85 lambda (config D)");
@@ -169,11 +179,14 @@ fn write_multi_scalar_sweep(path: &std::path::Path, n_images: usize) {
                     image_basename.push(format!("img_{img:03}.png"));
                     codec.push("zenjpeg".to_string());
                     q.push(qq);
-                    knob.push(format!("{{\"subsampling\":\"{sub}\",\"chroma_scale\":{cs}}}"));
+                    knob.push(format!(
+                        "{{\"subsampling\":\"{sub}\",\"chroma_scale\":{cs}}}"
+                    ));
                     f0.push(a);
                     score.push(20.0 + 0.7 * qq as f64 + 6.0 * cs + 2.0 * cbias + 5.0 * a as f64);
-                    enc_bytes
-                        .push((800.0 + 30.0 * qq as f64) * (1.0 + 0.4 * (cs - 0.6)) * (1.0 + 0.2 * cbias));
+                    enc_bytes.push(
+                        (800.0 + 30.0 * qq as f64) * (1.0 + 0.4 * (cs - 0.6)) * (1.0 + 0.2 * cbias),
+                    );
                 }
             }
         }
@@ -260,5 +273,188 @@ fn scalar_heads_train_and_emit_natural_units() {
     assert!(
         chroma_mean > 0.3 && chroma_mean < 1.8,
         "rescaled chroma_scale head emits natural units (got mean {chroma_mean})"
+    );
+}
+
+/// Two scalar axes in `knob_tuple_json` (chroma_scale + lambda), 2 cells.
+fn write_two_axis_sweep(path: &std::path::Path, n_images: usize) {
+    let cells = [("420", 0.0f64), ("444", 1.0f64)];
+    let css = [0.6f64, 1.0, 1.5];
+    let lams = [8.0f64, 14.5, 25.0];
+    let qs = [30i64, 60, 90];
+
+    let mut image_basename = Vec::new();
+    let mut codec = Vec::new();
+    let mut q = Vec::new();
+    let mut knob = Vec::new();
+    let mut enc_bytes = Vec::new();
+    let mut score = Vec::new();
+    let mut f0 = Vec::new();
+
+    for img in 0..n_images {
+        let a = (img as f32) * 0.05 - 0.5;
+        for (sub, cbias) in cells {
+            for &cs in &css {
+                for &lam in &lams {
+                    for &qq in &qs {
+                        image_basename.push(format!("img_{img:03}.png"));
+                        codec.push("zenjpeg".to_string());
+                        q.push(qq);
+                        knob.push(format!(
+                            "{{\"subsampling\":\"{sub}\",\"chroma_scale\":{cs},\"lambda\":{lam}}}"
+                        ));
+                        f0.push(a);
+                        score.push(
+                            20.0 + 0.6 * qq as f64
+                                + 5.0 * cs
+                                + 0.3 * lam
+                                + 2.0 * cbias
+                                + 4.0 * a as f64,
+                        );
+                        enc_bytes.push(
+                            (700.0 + 25.0 * qq as f64)
+                                * (1.0 + 0.3 * (cs - 0.6))
+                                * (1.0 + 0.01 * (lam - 8.0))
+                                * (1.0 + 0.2 * cbias),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("image_basename", DataType::Utf8, false),
+        Field::new("codec", DataType::Utf8, false),
+        Field::new("q", DataType::Int64, false),
+        Field::new("knob_tuple_json", DataType::Utf8, false),
+        Field::new("encoded_bytes", DataType::Float64, false),
+        Field::new("score_zensim", DataType::Float64, false),
+        Field::new("feat_0", DataType::Float32, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(image_basename)),
+            Arc::new(StringArray::from(codec)),
+            Arc::new(Int64Array::from(q)),
+            Arc::new(StringArray::from(knob)),
+            Arc::new(Float64Array::from(enc_bytes)),
+            Arc::new(Float64Array::from(score)),
+            Arc::new(Float32Array::from(f0)),
+        ],
+    )
+    .unwrap();
+    let file = std::fs::File::create(path).unwrap();
+    let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
+#[test]
+fn scalar_bake_roundtrips_through_zenpredict() {
+    let dir = std::env::temp_dir().join(format!("zpt_scalar_bake_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pq = dir.join("two_axis.parquet");
+    write_two_axis_sweep(&pq, 36);
+
+    let zq_targets = vec![30i64, 40, 50, 60, 70];
+    let axes = vec![
+        ScalarAxisSpec::new("chroma_scale", None),
+        ScalarAxisSpec::new("lambda", Some(0.0)),
+    ];
+    let ds = build_picker_dataset_with(&pq, Some("zenjpeg"), &zq_targets, &axes).unwrap();
+    assert_eq!(ds.n_cells, 2, "subsampling cells only");
+    assert_eq!(ds.scalar_axes, vec!["chroma_scale", "lambda"]);
+
+    let (train, val) = grouped_split_picker(&ds, 0.25);
+    let (mean, scale) = fit_standardizer(&ds.features, ds.n_in, &train);
+    let x_std = standardize_all(&ds.features, ds.n_in, &mean, &scale);
+    let base = MlpConfig {
+        max_iter: 50,
+        ..Default::default()
+    };
+    let res = run_search(&ds, &x_std, &train, &val, &default_grid(), &base, |_| {}).unwrap();
+    let model = &res.best_model;
+    assert_eq!(model.n_out, ds.n_cells * 3, "bytes + 2 scalar blocks");
+
+    // Bake with zenjpeg's standard output specs (chroma identity [0.6,1.5];
+    // lambda round + discrete {0,8,14.5,25} + sentinel 0).
+    let heads = vec![
+        ScalarHeadSpec::zenjpeg("chroma_scale").unwrap(),
+        ScalarHeadSpec::zenjpeg("lambda").unwrap(),
+    ];
+    let bytes = bake_mlp_picker_to_znpr_v3(
+        model,
+        &mean,
+        &scale,
+        &ds.feature_names,
+        &ds.cell_labels,
+        "zenjpeg",
+        &ds.zq_targets,
+        false,
+        None,
+        &heads,
+    )
+    .expect("hybrid bake");
+    assert_eq!(&bytes[0..4], b"ZNPR");
+    assert_eq!(bytes[4], 0x03, "ZNPR v3");
+
+    let zmodel = zenpredict::Model::from_bytes(&bytes).expect("load bake");
+    assert_eq!(
+        zmodel.n_outputs(),
+        ds.n_cells * 3,
+        "bake carries the wide output"
+    );
+    let mut predictor = zenpredict::Predictor::new(&zmodel);
+
+    let n_cells = ds.n_cells;
+    let n_in = ds.n_in;
+    let mut pick_matches = 0usize;
+    let mut checked = 0usize;
+    for &r in val.iter().take(20) {
+        // The bake folds the input standardizer, so it takes RAW features
+        // and must reproduce the in-process (standardized-input) forward.
+        let raw: Vec<f32> = ds.features[r * n_in..(r + 1) * n_in]
+            .iter()
+            .map(|&v| v as f32)
+            .collect();
+        let in_proc = model.predict(&x_std[r * n_in..(r + 1) * n_in]);
+
+        // RAW predict: the bytes-block argmin pick must survive the bake.
+        let loaded = predictor.predict(&raw).expect("predict").to_vec();
+        assert_eq!(loaded.len(), n_cells * 3);
+        let argmin = |v: &[f64]| (0..n_cells).min_by(|&a, &b| v[a].total_cmp(&v[b])).unwrap();
+        let argmin_f32 = |v: &[f32]| (0..n_cells).min_by(|&a, &b| v[a].total_cmp(&v[b])).unwrap();
+        if argmin(&in_proc) == argmin_f32(&loaded) {
+            pick_matches += 1;
+        }
+        checked += 1;
+
+        // SPEC predict: chroma_scale clamped to [0.6,1.5]; lambda snapped
+        // to the trellis grid (or Default on the 0.0 sentinel).
+        let ov = predictor
+            .predict_with_specs(&raw)
+            .expect("predict_with_specs");
+        for c in 0..n_cells {
+            if let Some(v) = ov[n_cells + c].value() {
+                assert!(
+                    (0.6..=1.5).contains(&v),
+                    "chroma_scale clamped to bounds, got {v}"
+                );
+            }
+            if let Some(v) = ov[2 * n_cells + c].value() {
+                assert!(
+                    [0.0f32, 8.0, 14.5, 25.0]
+                        .iter()
+                        .any(|g| (v - g).abs() < 1e-4),
+                    "lambda snapped to the discrete grid, got {v}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        pick_matches, checked,
+        "loaded-bake argmin pick must match the in-process pick on every probe row"
     );
 }

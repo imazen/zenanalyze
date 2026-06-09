@@ -26,12 +26,12 @@ use std::process::ExitCode;
 use serde::Deserialize;
 
 use zenpicker_train::{
-    CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, SearchCandidate,
-    SearchManifest, ShapingMode, TeacherParams, TrainError, apply_inplace, bake_mlp_picker,
-    bake_picker, build_picker_dataset, default_grid, default_zq_targets, evaluate,
-    evaluate_picker_bake, export_teacher_dataset, fit_standardizer, fit_transforms,
-    grouped_split_picker, load_soft_targets, load_training_rows, run_search, run_search_distill,
-    standardize_all, teacher_params_fingerprint, train_ridge,
+    CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, ScalarAxisSpec,
+    ScalarHeadSpec, SearchCandidate, SearchManifest, ShapingMode, TeacherParams, TrainError,
+    apply_inplace, bake_mlp_picker, bake_picker, build_picker_dataset, build_picker_dataset_with,
+    default_grid, default_zq_targets, evaluate, evaluate_picker_bake, export_teacher_dataset,
+    fit_standardizer, fit_transforms, grouped_split_picker, load_soft_targets, load_training_rows,
+    run_search, run_search_distill, standardize_all, teacher_params_fingerprint, train_ridge,
 };
 
 const USAGE: &str = "\
@@ -55,6 +55,12 @@ OPTIONS:
                             disables the search and trains exactly this topology.
     --seed <N>              (mlp) Seed override (default 0). With --hidden, a single
                             deterministic fit.
+    --scalar-axes <CSV>     (mlp) Hybrid scalar prediction heads, e.g.
+                            'chroma_scale,lambda'. Each adds a per-cell regression
+                            head predicting the within-cell-optimal knob value in
+                            natural units (bounds/snap baked as output_specs). The
+                            knob values are read from knob_tuple_json. Omit for the
+                            bytes-only categorical picker. (zenjpeg axes only today.)
 
   mlp distillation (zentrain teacher -> student recipe):
     --distill               Distill the MLP student against a per-cell HistGB
@@ -127,6 +133,9 @@ struct Args {
     soft_weight: Option<f64>,
     input_shaping: Option<String>,
     eval_bake: Option<String>,
+    /// `--scalar-axes` CSV (e.g. "chroma_scale,lambda") → hybrid scalar
+    /// prediction heads. Empty = bytes-only categorical picker.
+    scalar_axes: Option<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
@@ -150,6 +159,7 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         soft_weight: None,
         input_shaping: None,
         eval_bake: None,
+        scalar_axes: None,
     };
     let mut it = argv.iter();
     while let Some(arg) = it.next() {
@@ -197,6 +207,7 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
                 )
             }
             "--input-shaping" => a.input_shaping = Some(next_val(&mut it, "--input-shaping")?),
+            "--scalar-axes" => a.scalar_axes = Some(next_val(&mut it, "--scalar-axes")?),
             "--eval-bake" => a.eval_bake = Some(next_val(&mut it, "--eval-bake")?),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -290,6 +301,7 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             args.input_shaping
                 .or(recipe.input_shaping)
                 .unwrap_or_else(|| "none".to_string()),
+            args.scalar_axes,
         ),
         "ridge" => run_ridge(
             &input,
@@ -374,6 +386,7 @@ fn run_mlp(
     seed_override: Option<u64>,
     distill_opts: DistillOpts,
     shaping_mode_str: String,
+    scalar_axes_csv: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let codec_family = codec.clone().unwrap_or_else(|| "unknown".to_string());
     eprintln!(
@@ -385,8 +398,43 @@ fn run_mlp(
     );
     eprintln!("[zenpicker-train] inputs = image feat_* + zq_norm; q is NOT an input (no leakage)");
 
+    // Scalar prediction heads (hybrid-heads). `--scalar-axes` parses into
+    // per-axis natural-unit output specs + dataset axes; empty = the
+    // bytes-only categorical picker. Only zenjpeg axes are defined today.
+    let scalar_heads: Vec<ScalarHeadSpec> = match scalar_axes_csv {
+        Some(csv) => csv
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|name| {
+                ScalarHeadSpec::zenjpeg(name).ok_or_else(|| {
+                    format!("--scalar-axes: unknown axis '{name}' (known: chroma_scale, lambda)")
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        None => Vec::new(),
+    };
+    let dataset_axes: Vec<ScalarAxisSpec> = scalar_heads
+        .iter()
+        .map(|h| ScalarAxisSpec::new(h.name.clone(), h.sentinel.map(|s| s as f64)))
+        .collect();
+    if !scalar_heads.is_empty() {
+        eprintln!(
+            "[zenpicker-train] hybrid heads: [{}] (within-cell-optimal scalar regression, natural-unit output_specs)",
+            scalar_heads
+                .iter()
+                .map(|h| h.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     let zq_targets = default_zq_targets();
-    let mut ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
+    let mut ds = if dataset_axes.is_empty() {
+        build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?
+    } else {
+        build_picker_dataset_with(input_path, codec.as_deref(), &zq_targets, &dataset_axes)?
+    };
     eprintln!(
         "[zenpicker-train] built picker dataset: {} (image,target_zq) rows | {} image features (+zq_norm = {} inputs) | {} categorical cells",
         ds.n_rows(),
@@ -659,6 +707,7 @@ fn run_mlp(
                 Some(&fitted)
             },
             shaping_mode: &shaping_mode_str,
+            scalar_heads: &scalar_heads,
         },
     )?;
 
