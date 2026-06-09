@@ -251,7 +251,12 @@ pub fn evaluate_picker(
     for &r in val_rows {
         let x = &x_std[r * n_in..(r + 1) * n_in];
         let pred = model.predict(x);
-        debug_assert_eq!(pred.len(), n_cells);
+        // Hybrid-heads models append scalar blocks after the bytes_log
+        // block; the picker argmin only reads `pred[0..n_cells]`.
+        debug_assert!(
+            pred.len() >= n_cells,
+            "model output must contain at least the bytes_log block"
+        );
 
         // Collect reachable cells for this row.
         let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];

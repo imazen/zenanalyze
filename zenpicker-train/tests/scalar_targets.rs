@@ -18,7 +18,10 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_writer::ArrowWriter;
 
-use zenpicker_train::{ScalarAxisSpec, build_picker_dataset_with};
+use zenpicker_train::{
+    MlpConfig, ScalarAxisSpec, build_picker_dataset_with, default_grid, fit_standardizer,
+    grouped_split_picker, run_search, standardize_all,
+};
 
 /// One image, one categorical cell (`subsampling=420`). Four configs,
 /// each `(chroma_scale, q, lambda, score_zensim, encoded_bytes)`:
@@ -140,4 +143,122 @@ fn within_cell_optimal_scalar_capture_and_sentinel_mask() {
     assert!(near(ds.bytes_log[0], 1000.0_f64.ln()), "T=40 min bytes = A");
     assert!(near(ds.bytes_log[1], 1100.0_f64.ln()), "T=45 min bytes = B");
     assert!(near(ds.bytes_log[2], 1900.0_f64.ln()), "T=80 min bytes = D");
+}
+
+/// Multi-image sweep: 2 cells (`subsampling` 420/444), `chroma_scale` ∈
+/// {0.6,1.0,1.5} × q ∈ {30,60,90} per cell, per image. Score/bytes rise
+/// with q + chroma_scale so the within-cell-optimal scalar varies.
+fn write_multi_scalar_sweep(path: &std::path::Path, n_images: usize) {
+    let cells = [("420", 0.0f64), ("444", 1.0f64)];
+    let css = [0.6f64, 1.0, 1.5];
+    let qs = [30i64, 60, 90];
+
+    let mut image_basename = Vec::new();
+    let mut codec = Vec::new();
+    let mut q = Vec::new();
+    let mut knob = Vec::new();
+    let mut enc_bytes = Vec::new();
+    let mut score = Vec::new();
+    let mut f0 = Vec::new();
+
+    for img in 0..n_images {
+        let a = (img as f32) * 0.05 - 0.5;
+        for (sub, cbias) in cells {
+            for &cs in &css {
+                for &qq in &qs {
+                    image_basename.push(format!("img_{img:03}.png"));
+                    codec.push("zenjpeg".to_string());
+                    q.push(qq);
+                    knob.push(format!("{{\"subsampling\":\"{sub}\",\"chroma_scale\":{cs}}}"));
+                    f0.push(a);
+                    score.push(20.0 + 0.7 * qq as f64 + 6.0 * cs + 2.0 * cbias + 5.0 * a as f64);
+                    enc_bytes
+                        .push((800.0 + 30.0 * qq as f64) * (1.0 + 0.4 * (cs - 0.6)) * (1.0 + 0.2 * cbias));
+                }
+            }
+        }
+    }
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("image_basename", DataType::Utf8, false),
+        Field::new("codec", DataType::Utf8, false),
+        Field::new("q", DataType::Int64, false),
+        Field::new("knob_tuple_json", DataType::Utf8, false),
+        Field::new("encoded_bytes", DataType::Float64, false),
+        Field::new("score_zensim", DataType::Float64, false),
+        Field::new("feat_0", DataType::Float32, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(image_basename)),
+            Arc::new(StringArray::from(codec)),
+            Arc::new(Int64Array::from(q)),
+            Arc::new(StringArray::from(knob)),
+            Arc::new(Float64Array::from(enc_bytes)),
+            Arc::new(Float64Array::from(score)),
+            Arc::new(Float32Array::from(f0)),
+        ],
+    )
+    .unwrap();
+    let file = std::fs::File::create(path).unwrap();
+    let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
+#[test]
+fn scalar_heads_train_and_emit_natural_units() {
+    let dir = std::env::temp_dir().join(format!("zpt_scalar_train_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pq = dir.join("multi_scalar.parquet");
+    write_multi_scalar_sweep(&pq, 40);
+
+    let zq_targets = vec![30i64, 40, 50, 60, 70];
+    let axes = vec![ScalarAxisSpec::new("chroma_scale", None)];
+    let ds = build_picker_dataset_with(&pq, Some("zenjpeg"), &zq_targets, &axes)
+        .expect("build scalar dataset");
+    assert_eq!(ds.n_cells, 2, "two subsampling cells");
+    assert_eq!(ds.scalar_axes, vec!["chroma_scale"]);
+
+    let (train, val) = grouped_split_picker(&ds, 0.25);
+    let (mean, scale) = fit_standardizer(&ds.features, ds.n_in, &train);
+    let x_std = standardize_all(&ds.features, ds.n_in, &mean, &scale);
+
+    let grid = default_grid();
+    let base = MlpConfig {
+        max_iter: 60,
+        ..Default::default()
+    };
+    let res = run_search(&ds, &x_std, &train, &val, &grid, &base, |_| {}).expect("search result");
+    let m = &res.best_model;
+
+    // Output widened: bytes_log block + one scalar block.
+    assert_eq!(
+        m.n_out,
+        ds.n_cells * 2,
+        "n_out = n_cells*(1 + n_scalar_axes)"
+    );
+
+    // Predict over held-out rows; the scalar block must be finite AND in
+    // natural units (data is 0.6..1.5). A non-rescaled standardized head
+    // would center near 0.0 — the per-head rescale folds μ/σ back so the
+    // head centers near the data mean (~1.0).
+    let mut chroma_sum = 0.0f64;
+    let mut cnt = 0usize;
+    for &r in val.iter().take(30) {
+        let x = &x_std[r * ds.n_in..(r + 1) * ds.n_in];
+        let p = m.predict(x);
+        assert_eq!(p.len(), ds.n_cells * 2);
+        assert!(p.iter().all(|v| v.is_finite()), "all predictions finite");
+        for c in 0..ds.n_cells {
+            chroma_sum += p[ds.n_cells + c]; // scalar block follows bytes_log block
+            cnt += 1;
+        }
+    }
+    let chroma_mean = chroma_sum / cnt as f64;
+    assert!(
+        chroma_mean > 0.3 && chroma_mean < 1.8,
+        "rescaled chroma_scale head emits natural units (got mean {chroma_mean})"
+    );
 }

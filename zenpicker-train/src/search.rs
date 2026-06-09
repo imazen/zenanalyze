@@ -97,11 +97,22 @@ pub fn run_search(
         return None;
     }
     let n_in = ds.n_in;
-    let n_out = ds.n_cells;
+    let n_cells = ds.n_cells;
+    let n_axes = ds.scalar_axes.len();
+    // Hybrid heads: a `bytes_log` block (cells) plus one standardized
+    // scalar block (cells) per scalar axis. `n_axes == 0` reproduces the
+    // bytes-only categorical picker exactly.
+    let n_out = n_cells * (1 + n_axes);
+
+    // Single per-axis (μ, σ) over the training rows' finite scalar
+    // targets — the per-head loss normalization. Folded back out of the
+    // WINNER's final layer below so the returned model emits natural
+    // units.
+    let (scalar_mu, scalar_sigma) = scalar_head_stats(ds, train_rows);
 
     // Pack the training rows into a contiguous matrix so the MLP trainer
     // sees rows 0..n_train. (The MLP's internal val split keys off this.)
-    let (x_tr, y_tr) = pack_rows(ds, x_std, train_rows);
+    let (x_tr, y_tr) = pack_rows_hybrid(ds, x_std, train_rows, &scalar_mu, &scalar_sigma);
     let n_train = train_rows.len();
 
     let mut best: Option<(usize, Mlp, MlpConfig, PickerEval, f64)> = None;
@@ -146,26 +157,99 @@ pub fn run_search(
         }
     }
 
-    best.map(|(idx, model, cfg, eval, _)| SearchResult {
-        best_model: model,
-        best_cfg: cfg,
-        best_eval: eval,
-        trail,
-        selected_index: idx,
+    best.map(|(idx, mut model, cfg, eval, _)| {
+        // Un-standardize the scalar heads on the WINNING model so
+        // `predict()` (and the bake) emit natural-unit knob values. The
+        // bytes_log block (a == implicit 0) is never standardized, so
+        // only the scalar blocks are folded.
+        for a in 0..n_axes {
+            model.rescale_output_block(n_cells * (1 + a), n_cells, scalar_mu[a], scalar_sigma[a]);
+        }
+        SearchResult {
+            best_model: model,
+            best_cfg: cfg,
+            best_eval: eval,
+            trail,
+            selected_index: idx,
+        }
     })
 }
 
-/// Pack the given rows of the standardized feature matrix + the target
-/// matrix into contiguous `0..rows.len()` arrays. Returns
-/// `(x_packed[rows*n_in], y_packed[rows*n_cells])`.
-fn pack_rows(ds: &PickerDataset, x_std: &[f64], rows: &[usize]) -> (Vec<f64>, Vec<f64>) {
+/// Per-axis single `(μ, σ)` over the training rows' finite (reachable,
+/// non-sentinel) scalar targets — the per-head loss normalization that
+/// puts every head on a comparable loss scale. A constant or all-NaN
+/// axis gets `σ = 1` (pass-through). Empty when the dataset has no
+/// scalar axes.
+fn scalar_head_stats(ds: &PickerDataset, rows: &[usize]) -> (Vec<f64>, Vec<f64>) {
+    let n_cells = ds.n_cells;
+    let n_axes = ds.scalar_axes.len();
+    let mut mu = vec![0.0f64; n_axes];
+    let mut sigma = vec![1.0f64; n_axes];
+    for a in 0..n_axes {
+        let col = &ds.scalars[a];
+        let mut sum = 0.0;
+        let mut cnt = 0usize;
+        for &r in rows {
+            for c in 0..n_cells {
+                let v = col[r * n_cells + c];
+                if v.is_finite() {
+                    sum += v;
+                    cnt += 1;
+                }
+            }
+        }
+        if cnt == 0 {
+            continue;
+        }
+        let m = sum / cnt as f64;
+        let mut var = 0.0;
+        for &r in rows {
+            for c in 0..n_cells {
+                let v = col[r * n_cells + c];
+                if v.is_finite() {
+                    let d = v - m;
+                    var += d * d;
+                }
+            }
+        }
+        let s = (var / cnt as f64).sqrt();
+        mu[a] = m;
+        sigma[a] = if s > 1e-9 { s } else { 1.0 };
+    }
+    (mu, sigma)
+}
+
+/// Pack `rows` into contiguous `(x[rows*n_in], y[rows*n_out])` where
+/// `n_out = n_cells * (1 + n_scalar_axes)`: the `bytes_log` block first,
+/// then one standardized `(value − μ_a)/σ_a` block per scalar axis.
+/// Unreachable / sentinel cells stay `NaN` (masked by the MSE). With no
+/// scalar axes this is exactly the bytes-only categorical packing.
+fn pack_rows_hybrid(
+    ds: &PickerDataset,
+    x_std: &[f64],
+    rows: &[usize],
+    mu: &[f64],
+    sigma: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
     let n_in = ds.n_in;
     let n_cells = ds.n_cells;
+    let n_axes = ds.scalar_axes.len();
+    let n_out = n_cells * (1 + n_axes);
     let mut x = Vec::with_capacity(rows.len() * n_in);
-    let mut y = Vec::with_capacity(rows.len() * n_cells);
+    let mut y = Vec::with_capacity(rows.len() * n_out);
     for &r in rows {
         x.extend_from_slice(&x_std[r * n_in..(r + 1) * n_in]);
         y.extend_from_slice(&ds.bytes_log[r * n_cells..(r + 1) * n_cells]);
+        for a in 0..n_axes {
+            for c in 0..n_cells {
+                let v = ds.scalars[a][r * n_cells + c];
+                y.push(if v.is_finite() {
+                    (v - mu[a]) / sigma[a]
+                } else {
+                    f64::NAN
+                });
+            }
+        }
     }
     (x, y)
 }
