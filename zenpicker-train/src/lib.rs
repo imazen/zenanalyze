@@ -72,7 +72,9 @@ pub use pareto_dataset::{
     default_zq_targets, fit_standardizer, grouped_split_picker, standardize_all,
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
-pub use picker_eval::{PickerEval, evaluate_picker, evaluate_picker_bake};
+pub use picker_eval::{
+    PickerEval, ScalarHeadEval, evaluate_picker, evaluate_picker_bake, evaluate_scalar_heads,
+};
 pub use search::{GridPoint, SearchResult, default_grid, run_search, run_search_distill};
 
 /// Errors surfaced by the training pipeline.

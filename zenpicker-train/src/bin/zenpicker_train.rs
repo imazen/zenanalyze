@@ -29,7 +29,8 @@ use zenpicker_train::{
     CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, ScalarAxisSpec,
     ScalarHeadSpec, SearchCandidate, SearchManifest, ShapingMode, TeacherParams, TrainError,
     apply_inplace, bake_mlp_picker, bake_picker, build_picker_dataset, build_picker_dataset_with,
-    default_grid, default_zq_targets, evaluate, evaluate_picker_bake, export_teacher_dataset,
+    default_grid, default_zq_targets, evaluate, evaluate_picker_bake, evaluate_scalar_heads,
+    export_teacher_dataset,
     fit_standardizer, fit_transforms, grouped_split_picker, load_soft_targets, load_training_rows,
     run_search, run_search_distill, standardize_all, teacher_params_fingerprint, train_ridge,
 };
@@ -661,6 +662,14 @@ fn run_mlp(
         "    byte overhead   = mean {:.3} | p50 {:.3} | p90 {:.3}",
         eval.overhead_mean, eval.overhead_p50, eval.overhead_p90
     );
+    // Per-axis held-out MAE for the scalar heads (natural units), on the
+    // rescaled winner. Empty for a bytes-only categorical picker.
+    for se in evaluate_scalar_heads(&model, &ds, &x_std, &val_rows) {
+        eprintln!(
+            "    scalar[{}] MAE  = {:.4} ({} held-out targets, natural units)",
+            se.axis, se.mae, se.n
+        );
+    }
 
     let input_sha = zenpicker_train::file_sha256(input_path)?;
     let heldout = zenpicker_train::HeldoutManifest {

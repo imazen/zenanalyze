@@ -20,8 +20,8 @@ use parquet::arrow::arrow_writer::ArrowWriter;
 
 use zenpicker_train::{
     MlpConfig, ScalarAxisSpec, ScalarHeadSpec, bake_mlp_picker_to_znpr_v3,
-    build_picker_dataset_with, default_grid, fit_standardizer, grouped_split_picker, run_search,
-    standardize_all,
+    build_picker_dataset_with, default_grid, evaluate_scalar_heads, fit_standardizer,
+    grouped_split_picker, run_search, standardize_all,
 };
 
 /// One image, one categorical cell (`subsampling=420`). Four configs,
@@ -273,6 +273,18 @@ fn scalar_heads_train_and_emit_natural_units() {
     assert!(
         chroma_mean > 0.3 && chroma_mean < 1.8,
         "rescaled chroma_scale head emits natural units (got mean {chroma_mean})"
+    );
+
+    // Held-out per-axis MAE is finite, scored over real targets, and in a
+    // sane natural-unit range (chroma_scale spans 0.6..1.5, so MAE < 1).
+    let evals = evaluate_scalar_heads(m, &ds, &x_std, &val);
+    assert_eq!(evals.len(), 1);
+    assert_eq!(evals[0].axis, "chroma_scale");
+    assert!(evals[0].n > 0, "scalar MAE scored some held-out targets");
+    assert!(
+        evals[0].mae.is_finite() && evals[0].mae < 1.0,
+        "chroma_scale held-out MAE finite + sane (got {})",
+        evals[0].mae
     );
 }
 

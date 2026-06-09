@@ -456,6 +456,69 @@ pub fn evaluate_picker_bake(
     }))
 }
 
+/// Held-out evaluation of one scalar prediction head.
+#[derive(Clone, Debug)]
+pub struct ScalarHeadEval {
+    /// Knob name (matches the dataset scalar-axis name).
+    pub axis: String,
+    /// Mean absolute error between predicted and within-cell-optimal knob
+    /// value, over reachable + non-sentinel `(row, cell)` targets.
+    pub mae: f64,
+    /// Number of scored `(row, cell)` targets (`mae` is `NaN` when 0).
+    pub n: usize,
+}
+
+/// Held-out per-axis MAE for the scalar heads.
+///
+/// `model` must be the search WINNER — its scalar blocks already rescaled
+/// to natural units by [`crate::run_search`] — so the predictions are in
+/// the same units as the within-cell-optimal targets in `ds.scalars`. For
+/// each scalar axis, over every held-out `(row, reachable + non-sentinel
+/// cell)`, the mean absolute error between the model's prediction and the
+/// target knob value. Returns one entry per `ds.scalar_axes` (empty for a
+/// bytes-only categorical picker).
+pub fn evaluate_scalar_heads(
+    model: &Mlp,
+    ds: &PickerDataset,
+    x_std: &[f64],
+    val_rows: &[usize],
+) -> Vec<ScalarHeadEval> {
+    let n_cells = ds.n_cells;
+    let n_axes = ds.scalar_axes.len();
+    if n_axes == 0 {
+        return Vec::new();
+    }
+    let mut sum = vec![0.0f64; n_axes];
+    let mut cnt = vec![0usize; n_axes];
+    for &r in val_rows {
+        let pred = model.predict(&x_std[r * ds.n_in..(r + 1) * ds.n_in]);
+        for (a, (sum_a, cnt_a)) in sum.iter_mut().zip(cnt.iter_mut()).enumerate() {
+            let block = n_cells * (1 + a);
+            let col = &ds.scalars[a];
+            for c in 0..n_cells {
+                let t = col[r * n_cells + c];
+                if t.is_finite() {
+                    *sum_a += (pred[block + c] - t).abs();
+                    *cnt_a += 1;
+                }
+            }
+        }
+    }
+    ds.scalar_axes
+        .iter()
+        .enumerate()
+        .map(|(a, axis)| ScalarHeadEval {
+            axis: axis.clone(),
+            mae: if cnt[a] > 0 {
+                sum[a] / cnt[a] as f64
+            } else {
+                f64::NAN
+            },
+            n: cnt[a],
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod panel_parity_tests {
     //! Prove [`compute_panel_lowmem`] reproduces `zenstats::compute_panel`
