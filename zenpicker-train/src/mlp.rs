@@ -211,6 +211,32 @@ impl Mlp {
             })
             .collect()
     }
+
+    /// Bake an inverse per-head standardization into the FINAL (output)
+    /// layer: for the output block `[start, start+len)`, rewrite the
+    /// layer so `predict` emits `out·scale + mean` for those outputs
+    /// instead of `out`. Concretely it multiplies that block's
+    /// final-layer weight rows by `scale` and sets `b = b·scale + mean`.
+    ///
+    /// Used by the hybrid-heads trainer to fit a scalar head on
+    /// standardized targets `(label − μ)/σ` (so all heads share a loss
+    /// scale) and then return natural-unit predictions — mirrors
+    /// zentrain's per-head loss-normalization that mutates the final
+    /// layer post-fit. A no-op when the block is empty or `scale == 1,
+    /// mean == 0`. Out-of-range outputs are clamped to `out_dim`.
+    pub fn rescale_output_block(&mut self, start: usize, len: usize, mean: f64, scale: f64) {
+        let Some(last) = self.layers.last_mut() else {
+            return;
+        };
+        let in_dim = last.in_dim;
+        let end = (start + len).min(last.out_dim);
+        for o in start..end {
+            for i in 0..in_dim {
+                last.w[o * in_dim + i] *= scale;
+            }
+            last.b[o] = last.b[o] * scale + mean;
+        }
+    }
 }
 
 /// Train an MLP on standardized inputs `x_std` (row-major
@@ -501,5 +527,62 @@ fn masked_mse(
         f64::INFINITY
     } else {
         sum / cnt as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A small deterministic fit whose final layer we can mutate.
+    fn tiny_fit() -> Mlp {
+        let n = 24usize;
+        let n_in = 2usize;
+        let n_out = 4usize;
+        let mut x = Vec::with_capacity(n * n_in);
+        let mut y = Vec::with_capacity(n * n_out);
+        for r in 0..n {
+            let a = (r as f64) * 0.13 - 1.5;
+            let b = ((r * 7) % 11) as f64 * 0.1 - 0.5;
+            x.push(a);
+            x.push(b);
+            y.push(a + b);
+            y.push(a - b);
+            y.push(2.0 * a);
+            y.push(0.5 * b);
+        }
+        let cfg = MlpConfig {
+            hidden: vec![6],
+            max_iter: 15,
+            ..Default::default()
+        };
+        train_mlp(&x, &y, n, n_in, n_out, &cfg)
+    }
+
+    #[test]
+    fn rescale_output_block_applies_affine_to_block_only() {
+        let mut m = tiny_fit();
+        let probe = [0.3f64, -0.2];
+        let before = m.predict(&probe);
+        // Rewrite outputs [2,4) as out*3 + 10; [0,2) must stay untouched.
+        m.rescale_output_block(2, 2, 10.0, 3.0);
+        let after = m.predict(&probe);
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(near(after[0], before[0]), "output 0 unchanged");
+        assert!(near(after[1], before[1]), "output 1 unchanged");
+        assert!(near(after[2], before[2] * 3.0 + 10.0), "output 2 affine");
+        assert!(near(after[3], before[3] * 3.0 + 10.0), "output 3 affine");
+    }
+
+    #[test]
+    fn rescale_output_block_identity_is_noop() {
+        let mut m = tiny_fit();
+        let probe = [0.1f64, 0.4];
+        let before = m.predict(&probe);
+        m.rescale_output_block(0, m.n_out, 0.0, 1.0);
+        let after = m.predict(&probe);
+        for (a, b) in after.iter().zip(&before) {
+            assert!((a - b).abs() < 1e-12, "identity rescale is a no-op");
+        }
     }
 }
