@@ -173,7 +173,10 @@ fn read_tsv(path: &Path) -> Result<RawInput, String> {
     {
         return Err("empty TSV (no header)".into());
     }
-    let header: Vec<&str> = header_line.trim_end_matches(['\n', '\r']).split('\t').collect();
+    let header: Vec<&str> = header_line
+        .trim_end_matches(['\n', '\r'])
+        .split('\t')
+        .collect();
 
     let path_col = header
         .iter()
@@ -194,7 +197,12 @@ fn read_tsv(path: &Path) -> Result<RawInput, String> {
     // Map each feature (in final matrix-column order) to its header index.
     let feat_header_idx: Vec<usize> = feat_names
         .iter()
-        .map(|n| header.iter().position(|h| h == n).expect("feat discovered from header"))
+        .map(|n| {
+            header
+                .iter()
+                .position(|h| h == n)
+                .expect("feat discovered from header")
+        })
         .collect();
 
     let mut paths: Vec<String> = Vec::new();
@@ -235,7 +243,11 @@ fn read_tsv(path: &Path) -> Result<RawInput, String> {
 fn numeric_col_to_f64(arr: &dyn Array, out: &mut Vec<f64>) -> bool {
     if let Some(a) = arr.as_any().downcast_ref::<Float32Array>() {
         for i in 0..a.len() {
-            out.push(if a.is_null(i) { f64::NAN } else { a.value(i) as f64 });
+            out.push(if a.is_null(i) {
+                f64::NAN
+            } else {
+                a.value(i) as f64
+            });
         }
         true
     } else if let Some(a) = arr.as_any().downcast_ref::<Float64Array>() {
@@ -245,7 +257,11 @@ fn numeric_col_to_f64(arr: &dyn Array, out: &mut Vec<f64>) -> bool {
         true
     } else if let Some(a) = arr.as_any().downcast_ref::<Int64Array>() {
         for i in 0..a.len() {
-            out.push(if a.is_null(i) { f64::NAN } else { a.value(i) as f64 });
+            out.push(if a.is_null(i) {
+                f64::NAN
+            } else {
+                a.value(i) as f64
+            });
         }
         true
     } else {
@@ -259,8 +275,7 @@ fn numeric_col_to_f64(arr: &dyn Array, out: &mut Vec<f64>) -> bool {
 /// filtering — clustering has no target); missing cells become NaN.
 fn read_parquet(path: &Path) -> Result<RawInput, String> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let builder =
-        ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
     let schema = builder.schema().clone();
 
     let mut feat_names: Vec<String> = schema
@@ -304,7 +319,10 @@ fn read_parquet(path: &Path) -> Result<RawInput, String> {
         }
         for (slot, &ci) in feat_idx.iter().enumerate() {
             if !numeric_col_to_f64(batch.column(ci), &mut feat_cols[slot]) {
-                return Err(format!("feature column `{}` is not numeric", feat_names[slot]));
+                return Err(format!(
+                    "feature column `{}` is not numeric",
+                    feat_names[slot]
+                ));
             }
         }
     }
@@ -514,16 +532,14 @@ fn run(args: &Args) -> Result<(), String> {
 
     // --- Write outputs. ---
     {
-        let mut f =
-            File::create(&args.out_list).map_err(|e| format!("{}: {e}", args.out_list))?;
+        let mut f = File::create(&args.out_list).map_err(|e| format!("{}: {e}", args.out_list))?;
         for p in &chosen {
             writeln!(f, "{p}").map_err(|e| e.to_string())?;
         }
     }
     {
         let json = build_json(k, n_rows, n_kept, &kept_names, &clusters);
-        let mut f =
-            File::create(&args.out_json).map_err(|e| format!("{}: {e}", args.out_json))?;
+        let mut f = File::create(&args.out_json).map_err(|e| format!("{}: {e}", args.out_json))?;
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
     }
 
@@ -605,8 +621,14 @@ fn build_json(
             s.push_str("    {\n");
             s.push_str(&format!("      \"cluster\": {},\n", c.id()));
             s.push_str(&format!("      \"size\": {},\n", c.size()));
-            s.push_str(&format!("      \"rep_path\": {},\n", json_string(c.rep_path())));
-            s.push_str(&format!("      \"rep_dist\": {}\n", json_number(c.rep_dist())));
+            s.push_str(&format!(
+                "      \"rep_path\": {},\n",
+                json_string(c.rep_path())
+            ));
+            s.push_str(&format!(
+                "      \"rep_dist\": {}\n",
+                json_number(c.rep_dist())
+            ));
             s.push_str("    }");
             if i + 1 < clusters.len() {
                 s.push(',');
@@ -655,7 +677,11 @@ fn json_number(x: f64) -> String {
     if x.is_nan() {
         "NaN".to_string()
     } else if x.is_infinite() {
-        if x > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
+        if x > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        }
     } else {
         // Ensure a decimal point so it reads as a float (Python floats
         // always serialize with one, e.g. `0.0`).

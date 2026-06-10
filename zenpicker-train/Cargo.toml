@@ -29,6 +29,14 @@ path = "src/bin/zenpicker_train.rs"
 name = "cluster_features"
 path = "src/bin/cluster_features.rs"
 
+# A/B experiment: GBDT/RF tabular pickers vs the MLP picker (does a tree model
+# beat the hand-trained MLP on the codec-config pick?). Behind `tree-ab` so the
+# tree deps don't burden default builds.
+[[bin]]
+name = "picker_tree_ab"
+path = "src/bin/picker_tree_ab.rs"
+required-features = ["tree-ab"]
+
 [dependencies]
 # Runtime + bake-side composer. Path deps to the local siblings —
 # crates.io zenpredict 0.1.0 is v2-only; v3 lives here. (per
@@ -62,6 +70,17 @@ linfa-clustering = { version = "0.8.1", default-features = false }
 ndarray = "0.16.1"
 ndarray-rand = "0.15.0"
 rand_xoshiro = "0.6.0"
+# A/B experiment only (`--features tree-ab`): tabular tree pickers vs the MLP.
+# gbdt = stable pure-Rust GBDT (Config + fit/predict, SquaredError loss);
+# smartcore = pure-Rust RandomForestRegressor (no system BLAS). Optional so
+# default builds stay lean. (forust-ml is the production GBDT follow-up if
+# trees win the A/B.)
+gbdt = { version = "0.1.3", optional = true }
+smartcore = { version = "0.5.0", optional = true }
+
+[features]
+# A/B experiment binary only (picker_tree_ab) — off by default.
+tree-ab = ["dep:gbdt", "dep:smartcore"]
 
 [dev-dependencies]
 # Mint a tiny synthetic parquet in the end-to-end test.

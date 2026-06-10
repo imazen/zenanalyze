@@ -30,9 +30,9 @@ use zenpicker_train::{
     ScalarHeadSpec, SearchCandidate, SearchManifest, ShapingMode, TeacherParams, TrainError,
     apply_inplace, bake_mlp_picker, bake_picker, build_picker_dataset, build_picker_dataset_with,
     default_grid, default_zq_targets, evaluate, evaluate_picker_bake, evaluate_scalar_heads,
-    export_teacher_dataset,
-    fit_standardizer, fit_transforms, grouped_split_picker, load_soft_targets, load_training_rows,
-    run_search, run_search_distill, standardize_all, teacher_params_fingerprint, train_ridge,
+    export_teacher_dataset, fit_standardizer, fit_transforms, grouped_split_picker,
+    load_soft_targets, load_training_rows, run_search, run_search_distill, standardize_all,
+    teacher_params_fingerprint, train_ridge,
 };
 
 const USAGE: &str = "\
