@@ -128,6 +128,20 @@ inversion target, not the legacy piecemeal pattern.
 Picker work has shipped two key infrastructure additions. Read these
 before training a new picker tier.
 
+**Before scoping a picker, read the feature/knob ABLATION design:**
+`../zenmetrics/docs/ML_FRAMEWORK_AND_PICKER_ABLATION_2026-06-09.md` (in the
+zenmetrics repo). Key points: feature relevance is a conditional
+**features × knobs × zq-band × mode** matrix — there is no global feature
+ranking; ablate **inputs by redundancy cluster** (the `benchmarks/feature_groups_*`
+ρ≥0.95 dendrogram) with permutation/LOGO importance, not gain; ablate **outputs**
+by RD-spread + content-dependence and **pin knobs that don't earn a head**; use a
+GBDT (forust) as the feature-selection instrument (per-knob importance + RD spread);
+do **output ablation first** (bigger lever). Stratified-sampling corpus selector:
+`zenpicker-train/src/bin/cluster_features.rs` (linfa k-means, commit `96ccf86`).
+That doc also holds the candle/burn/linfa 3-layer verdict and the GBDT-teacher /
+GD-MLP-student framing (GBDT model 975 KB / 109 KB gz vs ~27 KB ZNPR MLP →
+distill teacher→student rather than ship trees).
+
 ### `train_hybrid.py --safety-default-cell` flag
 
 Per-row mask in `build_dataset` that hides any alternative cell whose
