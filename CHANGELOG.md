@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Versioned public-API surface snapshots at `docs/public-api/<crate>.txt`
+  for zenanalyze / zenpredict / zenpicker / zenpredict-bake, regenerated on
+  every `cargo test` by `tests/public_api_doc.rs` (`ZEN_API_DOC=check`
+  verifies in CI's lint leg, `=off` skips elsewhere); `just api-doc` /
+  `api-doc-check` recipes.
+
 - **`zenpicker-train` scalar hybrid heads (`--scalar-axes`)** — restores the
   continuous-knob regression the Rust port had dropped vs zentrain's
   hybrid-heads trainer. The picker can now regress per-cell *scalar* knobs

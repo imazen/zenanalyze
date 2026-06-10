@@ -29,6 +29,9 @@ exclude = [
   "scripts/**",
   "tools/**",
   "zentrain/**",
+  # Public-API snapshot regen test — dev-only (the snapshots live under
+  # docs/public-api/, already excluded via docs/** above)
+  "tests/public_api_doc.rs",
 ]
 
 [lib]
@@ -67,6 +70,7 @@ linear-srgb = { version = "0.6.12", features = ["transfer"] }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+serde_json = "1.0.150"
 
 [[example]]
 name = "corpus_eval"
