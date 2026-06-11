@@ -85,7 +85,7 @@ The `argmin` family is generic — it's "argmin over a slice with a boolean filt
 
 Default-on: `argmin_masked`, `argmin_masked_in_range`.
 
-Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_confidence*`, `argmin_masked_with_scorer*`, `threshold_mask`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and `bounds::*_out_of_distribution`. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
+Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_confidence*`, `argmin_masked_with_scorer*`, `threshold_mask`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and the output-space OOD check (`OutputBound`, `output_first_out_of_distribution`). The feature-space OOD check (`FeatureBound`, `first_out_of_distribution`) is default-on. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
 
 ## Features
 

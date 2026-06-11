@@ -21,7 +21,7 @@ default = ["std"]
 std = ["zenpredict/std"]
 
 [dependencies]
-zenpredict = { version = "0.2", path = "../zenpredict", default-features = false }
+zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -13,7 +13,7 @@
 
 ### Added
 
-## [0.2.0] - 2026-06-01
+## [0.2.0] - 2026-06-11
 
 First crates.io publish of the **ZNPR v3** format and the runtime /
 bake-tool crate split. `0.1.0` shipped the v2 format with the baker

@@ -309,11 +309,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > shipping. Most QUEUED items have shipped — moved to the
 > per-crate "Changed (breaking — landed since 0.1.0)" sections.
 
-## zenpredict (Unreleased)
+## [zenpredict 0.2.0] - 2026-06-11
 
 ### Changed (breaking — landed since 0.1.0)
 
-> The 0.1.0 → next-patch transition is structurally breaking on the
+> The 0.1.0 → 0.2.0 transition is structurally breaking on the
 > binary wire format and on a small number of public types. zenpredict
 > shipped on 2026-05-01; downstream consumers are still all in-tree at
 > the time of writing, so the break is contained — but a one-time
