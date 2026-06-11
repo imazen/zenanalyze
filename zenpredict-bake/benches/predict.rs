@@ -88,7 +88,7 @@ zenbench::main!(|suite| {
     suite.group("zensim_v018_228_384_1_i8", |g| {
         g.bench("predict", move |b| {
             let model = Model::from_bytes(zensim_bytes).expect("parse zensim");
-            let mut predictor = Predictor::new(model);
+            let mut predictor = Predictor::new(&model);
             let mut i = 0usize;
             b.iter(move || {
                 let out = predictor
@@ -103,7 +103,7 @@ zenbench::main!(|suite| {
     suite.group("zenwebp_picker_51_64_24_f16", |g| {
         g.bench("predict", move |b| {
             let model = Model::from_bytes(webp_bytes).expect("parse webp");
-            let mut predictor = Predictor::new(model);
+            let mut predictor = Predictor::new(&model);
             let mut i = 0usize;
             b.iter(move || {
                 let out = predictor
