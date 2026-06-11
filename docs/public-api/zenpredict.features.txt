@@ -1,0 +1,122 @@
+# zenpredict public API — additions from non-default features
+# features: advanced,std
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)        12
+#   free functions                             19
+#   inherent methods                           23
+#   struct fields                              23
+#   enum variants                              14
+#   trait roster entries (type × trait)        40
+#   auto-trait-complete types                   7
+#
+# per-module pub lines:
+#   (root)                           72
+#   argmin                            7
+#   rescue                           13
+
+## items (81 lines)
+
+pub mod rescue
+pub rescue::RescueDecision::Rescue
+pub rescue::RescueDecision::Ship
+pub rescue::RescueStrategy::ConservativeBump
+pub rescue::RescueStrategy::KnownGoodFallback
+pub rescue::RescueStrategy::SecondBestPick
+pub rescue::RescuePolicy::rescue_threshold: f32
+pub rescue::RescuePolicy::strategy: rescue::RescueStrategy
+pub fn rescue::RescuePolicy::from_bake(&Model, bool) -> Self
+#[non_exhaustive] pub enum OutputValue
+pub OutputValue::Default
+pub OutputValue::Override(f32)
+pub enum RescueDecision [also: rescue]
+pub RescueDecision::Rescue
+pub RescueDecision::Ship
+#[non_exhaustive] pub enum RescueStrategy [also: rescue]
+pub RescueStrategy::ConservativeBump
+pub RescueStrategy::KnownGoodFallback
+pub RescueStrategy::SecondBestPick
+#[non_exhaustive] pub enum SafetyProfile
+pub SafetyProfile::SizeOptimal = 0
+pub SafetyProfile::ZensimStrict = 1
+#[repr(C)] pub struct CellHint
+pub CellHint::expected_rescue_rate: u8
+pub CellHint::flags: u8
+pub CellHint::p99_shortfall_pp: u8
+pub CellHint::suggested_strategy: u8
+pub fn CellHint::is_dead(&self) -> bool
+pub fn CellHint::is_degenerate(&self) -> bool
+pub fn CellHint::is_high_variance(&self) -> bool
+pub fn CellHint::strategy(&self) -> core::option::Option<rescue::RescueStrategy>
+#[repr(C)] pub struct FallbackEntry
+pub FallbackEntry::fallback_cell: u8
+pub FallbackEntry::flags: u8
+pub FallbackEntry::quality_bump_pp: i8
+pub FallbackEntry::zq_target: u8
+pub fn FallbackEntry::is_verified(&self) -> bool
+pub fn Model::cell_rescue_hints(&self) -> alloc::vec::Vec<CellHint>
+pub fn Model::output_bounds(&self) -> alloc::vec::Vec<OutputBound>
+pub fn Model::safety_compact(&self) -> core::option::Option<SafetyCompact>
+pub fn Model::zq_fallback_table(&self) -> alloc::vec::Vec<FallbackEntry>
+pub fn Predictor<'a>::argmin_masked_top_k<const K: usize>(&mut self, &[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<[core::option::Option<usize>; K], PredictError>
+pub fn Predictor<'a>::argmin_masked_top_k_in_range<const K: usize>(&mut self, &[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<[core::option::Option<usize>; K], PredictError>
+pub fn Predictor<'a>::argmin_masked_top_k_with_scorer<const K: usize, F>(&mut self, &[f32], &argmin::AllowedMask<'_>, F) -> core::result::Result<[core::option::Option<usize>; K], PredictError> where F: core::ops::function::Fn(&[f32], usize) -> f32
+pub fn Predictor<'a>::argmin_masked_top_k_with_scorer_in_range<const K: usize, F>(&mut self, &[f32], (usize, usize), &argmin::AllowedMask<'_>, F) -> core::result::Result<[core::option::Option<usize>; K], PredictError> where F: core::ops::function::Fn(&[f32], usize) -> f32
+pub fn Predictor<'a>::argmin_masked_with_scorer<F>(&mut self, &[f32], &argmin::AllowedMask<'_>, F) -> core::result::Result<core::option::Option<usize>, PredictError> where F: core::ops::function::Fn(&[f32], usize) -> f32
+pub fn Predictor<'a>::argmin_masked_with_scorer_in_range<F>(&mut self, &[f32], (usize, usize), &argmin::AllowedMask<'_>, F) -> core::result::Result<core::option::Option<usize>, PredictError> where F: core::ops::function::Fn(&[f32], usize) -> f32
+pub fn Predictor<'a>::pick_with_confidence(&mut self, &[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<core::option::Option<(usize, f32)>, PredictError>
+pub fn Predictor<'a>::pick_with_confidence_in_range(&mut self, &[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<core::option::Option<(usize, f32)>, PredictError>
+pub fn Predictor<'a>::predict_with_specs(&mut self, &[f32]) -> core::result::Result<&[output_spec::OutputValue], PredictError>
+pub fn Predictor<'a>::predict_with_specs_transformed(&mut self, &[f32]) -> core::result::Result<&[output_spec::OutputValue], PredictError>
+#[non_exhaustive] pub struct RescuePolicy [also: rescue]
+pub RescuePolicy::rescue_threshold: f32
+pub RescuePolicy::strategy: rescue::RescueStrategy
+pub fn rescue::RescuePolicy::from_bake(&Model, bool) -> Self
+#[repr(C)] pub struct SafetyCompact
+pub SafetyCompact::_reserved: [u8; 8]
+pub SafetyCompact::argmin_acc: f32
+pub SafetyCompact::corpus_hash: u32
+pub SafetyCompact::flags: u16
+pub SafetyCompact::mean_overhead_pct: f32
+pub SafetyCompact::n_violations: u8
+pub SafetyCompact::p99_shortfall_pp: f32
+pub SafetyCompact::passed: u8
+pub SafetyCompact::safety_profile: u8
+pub SafetyCompact::threshold_set_version: u8
+pub SafetyCompact::version: u16
+pub fn SafetyCompact::profile(&self) -> core::option::Option<SafetyProfile>
+pub fn SafetyCompact::strict_certified(&self) -> bool
+pub fn apply_spec(&output_spec::OutputSpec, f32, &[f32]) -> output_spec::OutputValue
+pub fn argmin_masked_top_k<const K: usize>(&[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> [core::option::Option<usize>; K] [also: argmin]
+pub fn argmin_masked_top_k_in_range<const K: usize>(&[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> [core::option::Option<usize>; K] [also: argmin]
+pub fn argmin_masked_top_k_with_scorer<const K: usize, F>(usize, &argmin::AllowedMask<'_>, F) -> [core::option::Option<usize>; K] where F: core::ops::function::Fn(usize) -> f32 [also: argmin]
+pub fn argmin_masked_with_scorer<F>(usize, &argmin::AllowedMask<'_>, F) -> core::option::Option<usize> where F: core::ops::function::Fn(usize) -> f32 [also: argmin]
+pub fn fallback_for(f32, &[FallbackEntry]) -> core::option::Option<&FallbackEntry>
+pub fn output_first_out_of_distribution(&[f32], &[OutputBound]) -> core::option::Option<usize>
+pub fn pick_with_confidence(&[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::option::Option<(usize, f32)> [also: argmin]
+pub fn pick_with_confidence_in_range(&[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::option::Option<(usize, f32)> [also: argmin]
+pub fn should_rescue(f32, f32, &rescue::RescuePolicy) -> rescue::RescueDecision [also: rescue]
+pub fn threshold_mask(&[f32], f32, &mut [bool]) [also: argmin]
+pub type OutputBound = FeatureBound
+
+## trait impls (7 types)
+
+CellHint: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+FallbackEntry: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+SafetyCompact: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+SafetyProfile: Clone, Copy, Debug, Eq, PartialEq
+rescue::RescueDecision: Clone, Copy, Debug, Eq, PartialEq
+rescue::RescuePolicy: Clone, Copy, Debug, Default
+rescue::RescueStrategy: Clone, Copy, Debug, Eq, PartialEq
+
+## auto traits
+
+7 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

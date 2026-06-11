@@ -1,0 +1,36 @@
+# zenanalyze public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         1
+#   free functions                              1
+#   inherent methods                            5
+#   trait roster entries (type × trait)         4
+#
+# per-module pub lines:
+#   (root)                            1
+#   feature                           6
+
+## items (7 lines)
+
+pub fn __analyze_internal(zenpixels::buffer::PixelSlice<'_>, &feature::InternalQuery) -> core::result::Result<feature::AnalysisResults, AnalyzeError>
+pub fn feature::AnalysisFeature::assert_fields_are_eq(&self)
+pub fn feature::AnalysisQuery::__internal_with_overrides(feature::FeatureSet, usize, usize) -> feature::InternalQuery
+pub fn feature::FeatureSet::assert_fields_are_eq(&self)
+pub fn feature::MissingFeatures::assert_fields_are_eq(&self)
+pub fn feature::PackError::assert_fields_are_eq(&self)
+pub struct feature::InternalQuery
+
+## trait impls (4 types)
+
+feature::AnalysisFeature: TrivialClone
+feature::FeatureSet: TrivialClone
+feature::FeatureValue: TrivialClone
+feature::ImageGeometry: TrivialClone

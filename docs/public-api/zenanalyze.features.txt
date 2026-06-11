@@ -1,0 +1,95 @@
+# zenanalyze public API — additions from non-default features
+# features: experimental,hdr
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   enum variants                              77
+#
+# per-module pub lines:
+#   feature                          77
+
+## items (77 lines)
+
+pub feature::AnalysisFeature::AqMapMean = 41
+pub feature::AnalysisFeature::AqMapP1 = 108
+pub feature::AnalysisFeature::AqMapP10 = 110
+pub feature::AnalysisFeature::AqMapP5 = 109
+pub feature::AnalysisFeature::AqMapP50 = 68
+pub feature::AnalysisFeature::AqMapP75 = 69
+pub feature::AnalysisFeature::AqMapP90 = 70
+pub feature::AnalysisFeature::AqMapP95 = 71
+pub feature::AnalysisFeature::AqMapP99 = 72
+pub feature::AnalysisFeature::AqMapStd = 42
+pub feature::AnalysisFeature::ChromaLumaCovarianceCb = 132
+pub feature::AnalysisFeature::ChromaLumaCovarianceCr = 133
+pub feature::AnalysisFeature::Colourfulness = 7
+pub feature::AnalysisFeature::DctCompressibilityUV = 22
+pub feature::AnalysisFeature::DctCompressibilityY = 21
+pub feature::AnalysisFeature::EdgeSlopeStdev = 50
+pub feature::AnalysisFeature::EffectiveBitDepth = 38
+pub feature::AnalysisFeature::GamutCoverageP3 = 47
+pub feature::AnalysisFeature::GamutCoverageSrgb = 46
+pub feature::AnalysisFeature::GradientFraction = 48
+pub feature::AnalysisFeature::GradientFractionSmooth = 120
+pub feature::AnalysisFeature::GrayscaleScore = 40
+pub feature::AnalysisFeature::HdrHeadroomStops = 34
+pub feature::AnalysisFeature::HdrPixelFraction = 35
+pub feature::AnalysisFeature::HdrPresent = 39
+pub feature::AnalysisFeature::InfoWeightMean = 134
+pub feature::AnalysisFeature::InfoWeightP90 = 135
+pub feature::AnalysisFeature::LaplacianVariance = 8
+pub feature::AnalysisFeature::LaplacianVarianceP1 = 105
+pub feature::AnalysisFeature::LaplacianVarianceP10 = 107
+pub feature::AnalysisFeature::LaplacianVarianceP5 = 106
+pub feature::AnalysisFeature::LaplacianVarianceP50 = 81
+pub feature::AnalysisFeature::LaplacianVarianceP75 = 82
+pub feature::AnalysisFeature::LaplacianVarianceP90 = 83
+pub feature::AnalysisFeature::LaplacianVarianceP99 = 84
+pub feature::AnalysisFeature::LaplacianVariancePeak = 85
+pub feature::AnalysisFeature::LumaKurtosis = 116
+pub feature::AnalysisFeature::NoiseFloorUV = 44
+pub feature::AnalysisFeature::NoiseFloorUvP25 = 77
+pub feature::AnalysisFeature::NoiseFloorUvP50 = 78
+pub feature::AnalysisFeature::NoiseFloorUvP75 = 79
+pub feature::AnalysisFeature::NoiseFloorUvP90 = 80
+pub feature::AnalysisFeature::NoiseFloorY = 43
+pub feature::AnalysisFeature::NoiseFloorYP1 = 111
+pub feature::AnalysisFeature::NoiseFloorYP10 = 113
+pub feature::AnalysisFeature::NoiseFloorYP25 = 73
+pub feature::AnalysisFeature::NoiseFloorYP5 = 112
+pub feature::AnalysisFeature::NoiseFloorYP50 = 74
+pub feature::AnalysisFeature::NoiseFloorYP75 = 75
+pub feature::AnalysisFeature::NoiseFloorYP90 = 76
+pub feature::AnalysisFeature::OrientationEnergyRatio = 136
+pub feature::AnalysisFeature::P99LuminanceNits = 33
+pub feature::AnalysisFeature::PaletteDensity = 12
+pub feature::AnalysisFeature::PaletteFitsIn256 = 31
+pub feature::AnalysisFeature::PaletteLog2Size = 121
+pub feature::AnalysisFeature::PatchFraction = 23
+pub feature::AnalysisFeature::PatchFractionFast = 52
+pub feature::AnalysisFeature::PeakLuminanceNits = 32
+pub feature::AnalysisFeature::QuantSurvivalUv = 54
+pub feature::AnalysisFeature::QuantSurvivalUvP10 = 90
+pub feature::AnalysisFeature::QuantSurvivalUvP25 = 91
+pub feature::AnalysisFeature::QuantSurvivalUvP50 = 92
+pub feature::AnalysisFeature::QuantSurvivalUvP75 = 93
+pub feature::AnalysisFeature::QuantSurvivalY = 53
+pub feature::AnalysisFeature::QuantSurvivalYP1 = 114
+pub feature::AnalysisFeature::QuantSurvivalYP10 = 86
+pub feature::AnalysisFeature::QuantSurvivalYP25 = 87
+pub feature::AnalysisFeature::QuantSurvivalYP5 = 115
+pub feature::AnalysisFeature::QuantSurvivalYP50 = 88
+pub feature::AnalysisFeature::QuantSurvivalYP75 = 89
+pub feature::AnalysisFeature::SkinToneFraction = 49
+pub feature::AnalysisFeature::SpectralSlopeY = 137
+pub feature::AnalysisFeature::VarianceSpread = 9
+pub feature::AnalysisFeature::WideGamutFraction = 37
+pub feature::AnalysisFeature::WideGamutPeak = 36
+pub feature::AnalysisFeature::Xyb444ColorLoss = 138
+pub feature::AnalysisFeature::XybBquarterChromaLoss = 139

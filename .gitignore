@@ -1,5 +1,10 @@
 /target
 Cargo.lock
+# apidoc/ is workspace-excluded so it has its own lockfile; commit it for
+# reproducible snapshot tooling (negation must follow the Cargo.lock ignore —
+# gitignore is last-match-wins).
+!apidoc/Cargo.lock
+apidoc/target/
 .workongoing
 .idea/
 .vscode/

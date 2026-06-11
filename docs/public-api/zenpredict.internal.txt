@@ -1,0 +1,59 @@
+# zenpredict public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   inherent methods                           11
+#   trait roster entries (type × trait)        23
+#
+# per-module pub lines:
+#   (root)                            7
+#   argmin                            1
+#   output_spec                       1
+#   rescue                            2
+
+## items (11 lines)
+
+pub fn Activation::assert_fields_are_eq(&self)
+pub fn FeatureTransform::assert_fields_are_eq(&self)
+pub fn MetadataType::assert_fields_are_eq(&self)
+pub fn PredictError::assert_fields_are_eq(&self)
+pub fn SafetyProfile::assert_fields_are_eq(&self)
+pub fn Section::assert_fields_are_eq(&self)
+pub fn WeightDtype::assert_fields_are_eq(&self)
+pub fn argmin::ScoreTransform::assert_fields_are_eq(&self)
+pub fn output_spec::OutputTransform::assert_fields_are_eq(&self)
+pub fn rescue::RescueDecision::assert_fields_are_eq(&self)
+pub fn rescue::RescueStrategy::assert_fields_are_eq(&self)
+
+## trait impls (23 types)
+
+Activation: TrivialClone
+CellHint: TrivialClone
+FallbackEntry: TrivialClone
+FeatureBound: TrivialClone
+FeatureTransform: TrivialClone
+Header: TrivialClone
+LayerEntry: TrivialClone
+MetadataEntry<'a>: TrivialClone
+MetadataType: TrivialClone
+SafetyCompact: TrivialClone
+SafetyProfile: TrivialClone
+Section: TrivialClone
+WeightDtype: TrivialClone
+argmin::AllowedMask<'a>: TrivialClone
+argmin::ArgminOffsets<'a>: TrivialClone
+argmin::ScoreTransform: TrivialClone
+output_spec::OutputSpec: TrivialClone
+output_spec::OutputTransform: TrivialClone
+output_spec::OutputValue: TrivialClone
+output_spec::SparseOverride: TrivialClone
+rescue::RescueDecision: TrivialClone
+rescue::RescuePolicy: TrivialClone
+rescue::RescueStrategy: TrivialClone

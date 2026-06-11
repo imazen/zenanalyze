@@ -29,9 +29,6 @@ exclude = [
   "scripts/**",
   "tools/**",
   "zentrain/**",
-  # Public-API snapshot regen test — dev-only (the snapshots live under
-  # docs/public-api/, already excluded via docs/** above)
-  "tests/public_api_doc.rs",
 ]
 
 [lib]
@@ -70,7 +67,6 @@ linear-srgb = { version = "0.6.12", features = ["transfer"] }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-serde_json = "1.0.150"
 
 [[example]]
 name = "corpus_eval"
@@ -152,5 +148,8 @@ members = ["zenpicker", "zenpredict", "zenpredict-bake", "zenpredict-viz"]
 # not present on CI, so excluding it keeps the workspace manifest
 # loadable in CI. Build it on demand with
 # `cargo build --manifest-path zenpicker-train/Cargo.toml`.
-exclude = ["zenpicker-train"]
+# `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
+# `cargo test` and every CI job never compile its dependency tree or run
+# rustdoc. Regenerate via `just api-doc`.
+exclude = ["zenpicker-train", "apidoc"]
 resolver = "3"
