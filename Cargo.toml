@@ -79,6 +79,9 @@ zenresize = "0.3.1"
 name = "render_imazen26_variants"
 
 [[example]]
+name = "extract_hdr_features"
+
+[[example]]
 name = "corpus_eval"
 required-features = ["experimental"]
 
