@@ -1,0 +1,82 @@
+{
+  "_about": "Per-codec feature redundancy clusters at rho>=0.90, transcribed 2026-06-13 from the 2026-05-02 feature_groups dendrogram TSVs + the 2026-06-09 zenjpeg picker_tree_ab importance run. Each inner list is one cluster's member feature names with the 'feat_' prefix DROPPED. ADVISORY ONLY: redundancy is per-codec; this guides KEEP_FEATURES selection, it does not gate features. Human-readable narrative + citations: feature_redundancy_clusters_2026-06-13.md. Consumed by zentrain/tools/lint_keep_features.py.",
+  "_sources": {
+    "zenwebp": "feature_groups_zenwebp_clusters_2026-05-02.tsv (cluster_at_0_90)",
+    "zenjxl_lossy": "feature_groups_zenjxl_lossy_clusters_2026-05-02.tsv (cluster_at_0_90); byte-identical to lossless",
+    "zenjxl_lossless": "feature_groups_zenjxl_lossless_clusters_2026-05-02.tsv (cluster_at_0_90); byte-identical to lossy",
+    "zenjpeg": "picker_tree_ab_importance_2026-06-09.md (Grouped by rho>=0.9 redundancy cluster; NAMED members only -- the source's '+N' members are not enumerated, so zenjpeg coverage is partial)",
+    "cross_codec": "feature_groups_cross_codec_2026-05-02.md (6 perfect-Jaccard + 3 strong clusters; chroma_complexity/colourfulness deliberately omitted -- deferred pending more corpora)"
+  },
+  "zenwebp": [
+    ["aspect_min_over_max", "log_aspect_abs"],
+    ["block_misalignment_8", "block_misalignment_16"],
+    ["indexed_palette_width", "palette_fits_in_256"],
+    ["chroma_complexity", "colourfulness"],
+    ["cr_sharpness", "cr_horiz_sharpness"],
+    ["dct_compressibility_uv", "quant_survival_uv"],
+    ["cb_sharpness", "cb_horiz_sharpness"],
+    ["uniformity", "aq_map_mean", "noise_floor_y"],
+    ["flat_color_block_ratio", "screen_content_likelihood"],
+    ["edge_density", "quant_survival_y"],
+    ["aq_map_p1", "aq_map_p5", "aq_map_p10", "noise_floor_y_p1", "noise_floor_y_p5", "noise_floor_y_p10", "noise_floor_y_p25"],
+    ["aq_map_p50", "noise_floor_y_p50", "quant_survival_y_p50"],
+    ["noise_floor_uv_p25", "noise_floor_uv_p50"],
+    ["noise_floor_uv_p75", "noise_floor_uv_p90", "quant_survival_uv_p75"],
+    ["aq_map_p75", "noise_floor_y_p75", "quant_survival_y_p75"],
+    ["aq_map_p90", "aq_map_p95", "aq_map_p99"],
+    ["pixel_count", "bitmap_bytes", "log_pixels", "log2_pixels", "log10_pixels", "log_pixels_rounded", "sqrt_pixels", "log_bitmap_bytes", "min_dim", "max_dim", "log_min_dim", "log_max_dim", "log_padded_pixels_8", "log_padded_pixels_16", "log_padded_pixels_32", "log_padded_pixels_64"]
+  ],
+  "zenjxl_lossy": [
+    ["aspect_min_over_max", "log_aspect_abs"],
+    ["chroma_complexity", "colourfulness"],
+    ["dct_compressibility_y", "aq_map_p90"],
+    ["indexed_palette_width", "palette_fits_in_256"],
+    ["pixel_count", "bitmap_bytes", "log_pixels", "min_dim", "max_dim"],
+    ["aq_map_p50", "noise_floor_y_p50", "quant_survival_y_p50", "uniformity", "uniformity_smooth", "aq_map_mean"],
+    ["aq_map_p75", "noise_floor_y_p75", "quant_survival_y_p75"],
+    ["edge_density", "quant_survival_y", "laplacian_variance_p90", "luma_kurtosis"],
+    ["noise_floor_uv_p75", "quant_survival_uv_p75"],
+    ["dct_compressibility_uv", "quant_survival_uv", "noise_floor_uv_p90"],
+    ["cb_sharpness", "cr_sharpness"],
+    ["cr_horiz_sharpness", "cr_vert_sharpness"],
+    ["cb_horiz_sharpness", "cb_vert_sharpness"],
+    ["noise_floor_uv", "noise_floor_uv_p25", "noise_floor_uv_p50"],
+    ["aq_map_p1", "noise_floor_y_p1"],
+    ["flat_color_block_ratio", "flat_color_smooth", "aq_map_p5", "aq_map_p10", "noise_floor_y_p5", "noise_floor_y_p10", "noise_floor_y", "noise_floor_y_p25"]
+  ],
+  "zenjxl_lossless": [
+    ["aspect_min_over_max", "log_aspect_abs"],
+    ["chroma_complexity", "colourfulness"],
+    ["dct_compressibility_y", "aq_map_p90"],
+    ["indexed_palette_width", "palette_fits_in_256"],
+    ["pixel_count", "bitmap_bytes", "log_pixels", "min_dim", "max_dim"],
+    ["aq_map_p50", "noise_floor_y_p50", "quant_survival_y_p50", "uniformity", "uniformity_smooth", "aq_map_mean"],
+    ["aq_map_p75", "noise_floor_y_p75", "quant_survival_y_p75"],
+    ["edge_density", "quant_survival_y", "laplacian_variance_p90", "luma_kurtosis"],
+    ["noise_floor_uv_p75", "quant_survival_uv_p75"],
+    ["dct_compressibility_uv", "quant_survival_uv", "noise_floor_uv_p90"],
+    ["cb_sharpness", "cr_sharpness"],
+    ["cr_horiz_sharpness", "cr_vert_sharpness"],
+    ["cb_horiz_sharpness", "cb_vert_sharpness"],
+    ["noise_floor_uv", "noise_floor_uv_p25", "noise_floor_uv_p50"],
+    ["aq_map_p1", "noise_floor_y_p1"],
+    ["flat_color_block_ratio", "flat_color_smooth", "aq_map_p5", "aq_map_p10", "noise_floor_y_p5", "noise_floor_y_p10", "noise_floor_y", "noise_floor_y_p25"]
+  ],
+  "zenjpeg": [
+    ["cr_sharpness", "dct_compressibility_uv", "quant_survival_uv", "noise_floor_uv_p50"],
+    ["edge_density", "noise_floor_y", "quant_survival_y", "noise_floor_y_p25"],
+    ["distinct_color_bins", "palette_density"],
+    ["uniformity", "aq_map_mean", "aq_map_p50", "noise_floor_y_p50"]
+  ],
+  "cross_codec": [
+    ["aq_map_p50", "noise_floor_y_p50", "quant_survival_y_p50"],
+    ["aspect_min_over_max", "log_aspect_abs"],
+    ["indexed_palette_width", "palette_fits_in_256"],
+    ["dct_compressibility_uv", "quant_survival_uv"],
+    ["edge_density", "quant_survival_y"],
+    ["aq_map_p1", "noise_floor_y_p1"],
+    ["aq_map_p5", "aq_map_p10", "noise_floor_y_p5", "noise_floor_y_p10"],
+    ["aq_map_p75", "noise_floor_y_p75", "quant_survival_y_p75"],
+    ["aq_map_mean", "uniformity", "uniformity_smooth"]
+  ]
+}
