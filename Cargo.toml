@@ -71,6 +71,12 @@ linear-srgb = { version = "0.6.12", features = ["transfer"] }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Mitchell-sharp renditioning for the imazen-26 training-corpus build
+# (render_imazen26_variants example). Example-only.
+zenresize = "0.3.1"
+
+[[example]]
+name = "render_imazen26_variants"
 
 [[example]]
 name = "corpus_eval"
