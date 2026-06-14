@@ -36,13 +36,17 @@ name = "zenanalyze"
 
 [features]
 default = []
-# Opt-in to features whose mathematical definition or numeric scale
-# may change in 0.1.x patches. Stable features (those with at least
-# one in-tree consumer in coefficient / zenjpeg / zenwebp as of
-# 0.1.0) ship without this flag; numeric drift on stable features is
-# governed by the crate-level threshold contract — `experimental` is
-# for *structural* uncertainty (no consumer pinned the meaning yet,
-# or the metric is research-stage).
+# Opt-in to features whose *structural definition* (not just numeric
+# scale) is not yet settled. As of 2026-06-13 this gate is narrow:
+# only `palette_density` (id 12, `#[deprecated]`, being retired) and
+# the XYB color-loss pair `xyb444_color_loss` / `xyb_bquarter_chroma_loss`
+# (ids 138/139 — 138's definition was rebaked within the last month;
+# they share one compute module). Everything else that used to live
+# here was promoted to the default surface on 2026-06-13 (its
+# definition is pinned; redundancy/usefulness is a per-codec consumer
+# concern, surfaced via docs + the KEEP_FEATURES lint, not this gate).
+# Numeric drift on promoted features stays governed by the crate-level
+# threshold contract.
 experimental = []
 # Opt-in to HDR / wide-gamut / depth features (10 features, ids
 # 32–39, 46, 47). Off by default — every default sweep corpus is

@@ -285,13 +285,10 @@ features_table! {
     /// `f32`. Fraction of 8×8 blocks with R, G, B ranges all ≤ 4.
     FlatColorBlockRatio = 6 : f32 => flat_color_block_ratio,
     /// `f32`. Hasler-Süsstrunk M3 colourfulness.
-    #[cfg(feature = "experimental")]
     Colourfulness = 7 : f32 => colourfulness,
     /// `f32`. Variance of the 5-tap Laplacian over sampled luma.
-    #[cfg(feature = "experimental")]
     LaplacianVariance = 8 : f32 => laplacian_variance,
     /// `f32`. `log10(1 + max_var / max(1, mean_var))` over 8×8 blocks.
-    #[cfg(feature = "experimental")]
     VarianceSpread = 9 : f32 => variance_spread,
 
     // ---------------- Palette: always full-scan ----------------------
@@ -397,13 +394,11 @@ features_table! {
     /// / max_count`; on real photo corpora the median sits at ~16,
     /// p90 at ~30. Downstream calibration must NOT clamp / normalise
     /// against 255 (earlier docs were wrong about that).
-    #[cfg(feature = "experimental")]
     DctCompressibilityY = 21 : f32 => dct_compressibility_y,
     /// `f32`. Same shape on chroma DCT blocks, `max(α_cb, α_cr)` per
     /// block. Same `[0, ~8064]` theoretical range; chroma values run
     /// lower in practice (median ~5 on photos). Scale matches
     /// [`Self::DctCompressibilityY`].
-    #[cfg(feature = "experimental")]
     DctCompressibilityUV = 22 : f32 => dct_compressibility_uv,
     /// `f32`. Fraction `[0, 1]` of sampled blocks matching another.
     /// Strongest single photo-vs-screen-content discriminator on
@@ -432,9 +427,9 @@ features_table! {
     /// `docs/calibration-corpus-2026-04-27.md` for the full
     /// per-class distribution and AUC ranking.
     ///
-    /// Gated behind `experimental` for 0.1.0 because no in-tree
-    /// codec consumes it yet; promote when a consumer wires up.
-    #[cfg(feature = "experimental")]
+    /// Promoted to the default surface 2026-06-13 — consumed by
+    /// zenjpeg's screen-content heuristic (`encode/adaptive.rs`) and
+    /// the zenwebp picker.
     PatchFraction = 23 : f32 => patch_fraction,
 
     // ---------------- Alpha (always full-scan when present) ----------
@@ -454,7 +449,7 @@ features_table! {
     /// "encode as indexed?" decision when the caller doesn't care
     /// about palette size. Computed via an early-exit scan that bails
     /// at the 257th distinct bin (~half-image walk on truecolor, full
-    /// walk on indexed-class content). Gated behind `experimental`.
+    /// walk on indexed-class content).
     ///
     /// **Bin-storage bias.** Inherits the under-count bias documented
     /// on [`Self::DistinctColorBins`]: this can return `true` for
@@ -464,7 +459,6 @@ features_table! {
     /// truecolor on the failed fit — correct, but slightly wasteful.
     /// Callers who can't tolerate the false-positive rate should
     /// run their own exact-8-bit pass on the borderline cases.
-    #[cfg(feature = "experimental")]
     PaletteFitsIn256 = 31 : bool => palette_fits_in_256,
 
     // ---------------- Depth tier (source-direct HDR / bit-depth) -----
@@ -534,7 +528,6 @@ features_table! {
     /// from `high_freq_energy_ratio` (global mean): this is per-
     /// block-thresholded, robust to a few high-detail blocks dragging
     /// the mean.
-    #[cfg(feature = "experimental")]
     GradientFraction = 48 : f32 => gradient_fraction,
 
     // ---------------- Tier 1 piggyback: cheap secondary signals -----
@@ -542,30 +535,25 @@ features_table! {
     /// `max(|R-G|, |G-B|, |R-B|) ≤ 4`. ≥ 0.99 ⇒ effectively grayscale.
     /// Drives zenjpeg `ColorMode::Grayscale`, png/avif/jxl single-
     /// channel encode paths.
-    #[cfg(feature = "experimental")]
     GrayscaleScore = 40 : f32 => grayscale_score,
 
     // ---------------- Tier 3 piggyback: AQ-map signals --------------
     /// `f32`. Mean of `log10(1 + Σ AC²)` over sampled luma 8×8 blocks.
     /// Image-average busyness signal; AQ orchestrators read this for
     /// the global "how textured is the image" baseline.
-    #[cfg(feature = "experimental")]
     AqMapMean = 41 : f32 => aq_map_mean,
     /// `f32`. Standard deviation of the same per-block log-AC-energy.
     /// Drives zenjpeg hybrid trellis lambda scaling, webp
     /// segments+sns_strength, avif vaq_strength — high std ⇒
     /// heterogeneous content where AQ pays off.
-    #[cfg(feature = "experimental")]
     AqMapStd = 42 : f32 => aq_map_std,
     /// `f32`. Robust luma noise floor estimate, normalized to
     /// `[0, 1]`. 10th percentile of √(low-AC-energy / 15) across
     /// sampled luma 8×8 blocks ÷ 32. Drives zenjpeg `pre_blur`,
     /// jxl `noise/denoise`, webp `sns_strength`.
-    #[cfg(feature = "experimental")]
     NoiseFloorY = 43 : f32 => noise_floor_y,
     /// `f32`. Same on chroma — `max(p10_cb, p10_cr)`. Drives chroma-
     /// channel denoise scheduling.
-    #[cfg(feature = "experimental")]
     NoiseFloorUV = 44 : f32 => noise_floor_uv,
 
     /// `f32`. Fraction `[0, 1]` of sampled pixels in the canonical
@@ -619,7 +607,6 @@ features_table! {
     /// map in videophone applications", IEEE TCSVT 1999;
     /// Vezhnevets et al., "A Survey on Pixel-Based Skin Color
     /// Detection Techniques", Graphicon 2003.
-    #[cfg(feature = "experimental")]
     SkinToneFraction = 49 : f32 => skin_tone_fraction,
 
     /// `f32`. Standard deviation of luma gradient magnitudes across
@@ -664,14 +651,13 @@ features_table! {
     ///   (illustrations or low-detail photos overlap here, ~13–27)
     ///
     /// Tracks the issue #123 proposal `EdgeSlopeStdev`.
-    #[cfg(feature = "experimental")]
     EdgeSlopeStdev = 50 : f32 => edge_slope_stdev,
 
     // ---------------- Tier 3 patch-fingerprint experiments ----------
     // id 51 reserved (was `PatchFractionWht`, removed pre-stabilization
     // because dHash dominated it on cost without AUC loss; ablation
     // results in imazen/zenanalyze#1).
-    /// `f32`. **Experimental.** Cost-efficient sibling of
+    /// `f32`. Cost-efficient sibling of
     /// [`Self::PatchFraction`]: same sort-and-sweep collision-fraction
     /// construction, but the per-block fingerprint is the 64-bit dHash
     /// of raw 8×8 luma (`bit[i*8+j] = pixels[i][j+1] > pixels[i][j]`)
@@ -686,24 +672,21 @@ features_table! {
     /// Pearson correlation with `patch_fraction`: 0.99 — same content
     /// signal, different cost / noise-floor profile. See zenanalyze#1
     /// for the full ablation.
-    #[cfg(feature = "experimental")]
     PatchFractionFast = 52 : f32 => patch_fraction_fast,
 
     // ---------------- Tier 3 quant-survival compressibility ---------
-    /// `f32`. **Experimental.** Mean fraction of luma AC coefficients
+    /// `f32`. Mean fraction of luma AC coefficients
     /// (zigzag 1..63) that survive jpegli-default quantization at
     /// distance 2.0 (q=75 area). Approximates per-block JPEG file-size
     /// cost. Photos: ~0.10–0.25; UI / text edges: ~0.30–0.50; flat
     /// regions: ~0.0. Drives codec dispatch decisions about whether
     /// JPEG-style quantization will preserve content (high survival ⇒
     /// JPEG keeps the detail) vs other codecs.
-    #[cfg(feature = "experimental")]
     QuantSurvivalY = 53 : f32 => quant_survival_y,
-    /// `f32`. **Experimental.** Same for chroma — `max(survival_cb,
+    /// `f32`. Same for chroma — `max(survival_cb,
     /// survival_cr)` per block, mean across blocks. Useful for
     /// separating low-chroma photos (clear sky) from high-chroma
     /// screens (UI accent colors).
-    #[cfg(feature = "experimental")]
     QuantSurvivalUv = 54 : f32 => quant_survival_uv,
 
     // ---------------- Strict-equality grayscale classifier ----------
@@ -820,23 +803,18 @@ features_table! {
     /// `f32`. log10 AC energy at the 50th percentile (median) over
     /// 8×8 blocks. See [`Self::AqMapMean`] for the underlying
     /// per-block accumulator.
-    #[cfg(feature = "experimental")]
     AqMapP50 = 68 : f32 => aq_map_p50,
     /// `f32`. log10 AC energy p75. Detail-floor signal —
     /// distinguishes "uniformly busy" (high p75) from "mostly flat
     /// with a few hard blocks" (low p75) where mean alone collapses
     /// both into one number.
-    #[cfg(feature = "experimental")]
     AqMapP75 = 69 : f32 => aq_map_p75,
     /// `f32`. log10 AC energy p90.
-    #[cfg(feature = "experimental")]
     AqMapP90 = 70 : f32 => aq_map_p90,
     /// `f32`. log10 AC energy p95.
-    #[cfg(feature = "experimental")]
     AqMapP95 = 71 : f32 => aq_map_p95,
     /// `f32`. log10 AC energy p99 — peak-block detail. Picks up
     /// localized hard blocks that drive the worst-case JPEG cost.
-    #[cfg(feature = "experimental")]
     AqMapP99 = 72 : f32 => aq_map_p99,
 
     // ---------------- NoiseFloor percentiles ------------------------
@@ -849,31 +827,23 @@ features_table! {
     /// `f32`. Noise floor (Y) at the 25th percentile of per-block
     /// low-AC energy. Same `[0, 1]` scaling as
     /// [`Self::NoiseFloorY`] (which is p10).
-    #[cfg(feature = "experimental")]
     NoiseFloorYP25 = 73 : f32 => noise_floor_y_p25,
     /// `f32`. Noise floor (Y) at the 50th percentile (median).
-    #[cfg(feature = "experimental")]
     NoiseFloorYP50 = 74 : f32 => noise_floor_y_p50,
     /// `f32`. Noise floor (Y) at the 75th percentile.
-    #[cfg(feature = "experimental")]
     NoiseFloorYP75 = 75 : f32 => noise_floor_y_p75,
     /// `f32`. Noise floor (Y) at the 90th percentile — top-quartile
     /// busy blocks. Higher = noisier in the dirtiest regions of the
     /// image.
-    #[cfg(feature = "experimental")]
     NoiseFloorYP90 = 76 : f32 => noise_floor_y_p90,
     /// `f32`. Noise floor (UV) at p25 — `max(noise_floor_cb_p25,
     /// noise_floor_cr_p25)`, same shape as [`Self::NoiseFloorUV`].
-    #[cfg(feature = "experimental")]
     NoiseFloorUvP25 = 77 : f32 => noise_floor_uv_p25,
     /// `f32`. Noise floor (UV) at p50.
-    #[cfg(feature = "experimental")]
     NoiseFloorUvP50 = 78 : f32 => noise_floor_uv_p50,
     /// `f32`. Noise floor (UV) at p75.
-    #[cfg(feature = "experimental")]
     NoiseFloorUvP75 = 79 : f32 => noise_floor_uv_p75,
     /// `f32`. Noise floor (UV) at p90.
-    #[cfg(feature = "experimental")]
     NoiseFloorUvP90 = 80 : f32 => noise_floor_uv_p90,
 
     // ---------------- LaplacianVariance percentiles -----------------
@@ -885,21 +855,17 @@ features_table! {
     // scatter); no per-pixel branching, no allocation.
     /// `f32`. `|∇²L|` at the 50th percentile (median) over interior
     /// pixels. Range `[0, 255]` (saturated at the ceiling).
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP50 = 81 : f32 => laplacian_variance_p50,
     /// `f32`. `|∇²L|` p75. Sharpness floor — distinguishes "single
     /// sharp edge in a smooth image" (low p75 + high p99) from
     /// "uniformly textured" (high p75) where the variance alone
     /// can't tell them apart.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP75 = 82 : f32 => laplacian_variance_p75,
     /// `f32`. `|∇²L|` p90.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP90 = 83 : f32 => laplacian_variance_p90,
     /// `f32`. `|∇²L|` p99 — peak-edge magnitude. Picks up the
     /// rare-but-loud sharpness events that drive the codec's
     /// per-block trellis decision.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP99 = 84 : f32 => laplacian_variance_p99,
     /// `f32`. Highest histogram bin (`0`–`255`) with at least one
     /// observation. Saturates at `255` when any pixel hit the
@@ -907,7 +873,6 @@ features_table! {
     /// present somewhere in the image". Size-dependent (larger
     /// images roll more chances at extremes); see issue #42 size
     /// features for cross-term cushioning.
-    #[cfg(feature = "experimental")]
     LaplacianVariancePeak = 85 : f32 => laplacian_variance_peak,
 
     // ---------------- QuantSurvival percentiles ---------------------
@@ -917,21 +882,13 @@ features_table! {
     // once at end of pass, indexed at fixed quantiles. p10 ⇒
     // worst-block survival ⇒ trellis ROI proxy; p75 ⇒ best-block
     // survival ⇒ compression ceiling.
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP10 = 86 : f32 => quant_survival_y_p10,
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP25 = 87 : f32 => quant_survival_y_p25,
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP50 = 88 : f32 => quant_survival_y_p50,
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP75 = 89 : f32 => quant_survival_y_p75,
-    #[cfg(feature = "experimental")]
     QuantSurvivalUvP10 = 90 : f32 => quant_survival_uv_p10,
-    #[cfg(feature = "experimental")]
     QuantSurvivalUvP25 = 91 : f32 => quant_survival_uv_p25,
-    #[cfg(feature = "experimental")]
     QuantSurvivalUvP50 = 92 : f32 => quant_survival_uv_p50,
-    #[cfg(feature = "experimental")]
     QuantSurvivalUvP75 = 93 : f32 => quant_survival_uv_p75,
 
     // ---------------- Dimension log/derivative variants -------------
@@ -992,42 +949,31 @@ features_table! {
     /// smooth regions even when the rest of the image is busy.
     /// Codec-relevant — flat blocks compress to ~few bits via DC +
     /// early-zero AC.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP1 = 105 : f32 => laplacian_variance_p1,
     /// `f32`. `|∇²L|` p5.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP5 = 106 : f32 => laplacian_variance_p5,
     /// `f32`. `|∇²L|` p10.
-    #[cfg(feature = "experimental")]
     LaplacianVarianceP10 = 107 : f32 => laplacian_variance_p10,
     /// `f32`. AC-energy log10 p1. Encoder-floor signal — blocks the
     /// encoder treats as easiest. May saturate at the AQ floor on
     /// most images (hypothesis to validate via ablation).
-    #[cfg(feature = "experimental")]
     AqMapP1 = 108 : f32 => aq_map_p1,
     /// `f32`. AC-energy log10 p5.
-    #[cfg(feature = "experimental")]
     AqMapP5 = 109 : f32 => aq_map_p5,
     /// `f32`. AC-energy log10 p10.
-    #[cfg(feature = "experimental")]
     AqMapP10 = 110 : f32 => aq_map_p10,
     /// `f32`. Y noise floor at p1.
-    #[cfg(feature = "experimental")]
     NoiseFloorYP1 = 111 : f32 => noise_floor_y_p1,
     /// `f32`. Y noise floor at p5.
-    #[cfg(feature = "experimental")]
     NoiseFloorYP5 = 112 : f32 => noise_floor_y_p5,
     /// `f32`. Y noise floor at p10. Same scaling as parent
     /// [`Self::NoiseFloorY`] (which is also p10) — reserved as a
     /// distinct slot in case the parent's scaling drifts.
-    #[cfg(feature = "experimental")]
     NoiseFloorYP10 = 113 : f32 => noise_floor_y_p10,
     /// `f32`. Y quant-survival at p1 — the worst-block tail. Sharper
     /// trellis-ROI signal than [`Self::QuantSurvivalYP10`].
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP1 = 114 : f32 => quant_survival_y_p1,
     /// `f32`. Y quant-survival at p5.
-    #[cfg(feature = "experimental")]
     QuantSurvivalYP5 = 115 : f32 => quant_survival_y_p5,
 
     // ---------------- Distribution-shape (kurtosis) signals ----------
@@ -1045,7 +991,6 @@ features_table! {
     /// content (heavy tail from sharp transitions on flat backgrounds).
     /// Complementary to `LaplacianVariance` (which measures spread, not
     /// shape).
-    #[cfg(feature = "experimental")]
     LumaKurtosis = 116 : f32 => luma_kurtosis,
 
     // ---------------- Smooth replacements for hard thresholds --------
@@ -1060,7 +1005,6 @@ features_table! {
     /// continuous ratio for every block. Captures "what fraction of
     /// luma AC energy lives in the low-zigzag positions" as a smooth
     /// signal — drives JXL DCT16/DCT32 enable decisions.
-    #[cfg(feature = "experimental")]
     GradientFractionSmooth = 120 : f32 => gradient_fraction_smooth,
 
     // ---------------- Palette: ceiling-log2 of distinct-bin count ----
@@ -1111,14 +1055,13 @@ features_table! {
     ///
     /// Drives PNG-indexed bit-width choice (round up to {1, 2, 4, 8}),
     /// GIF LZW initial-code-size (matches BPP exactly), JXL Modular
-    /// palette/delta-palette enable decisions. Gated behind
-    /// `experimental` for 0.1.0; promote when a consumer wires up.
+    /// palette/delta-palette enable decisions. Promoted to the
+    /// default surface 2026-06-13.
     ///
     /// Replaces the pre-2026-05-02 `IndexedPaletteWidth` (id 30,
     /// codomain `{0, 2, 4, 8}`) which lacked the 1-BPP case for
     /// binary content and didn't surface JXL's high-cap breakpoints.
     /// That id is reserved retired.
-    #[cfg(feature = "experimental")]
     PaletteLog2Size = 121 : u32 => palette_log2_size,
 
     // ---------------- HVS-derived features (proposal 2026-05-17) ----
@@ -1147,13 +1090,11 @@ features_table! {
     /// region.
     ///
     /// Cite: Bross et al., AV1 CfL design, IEEE TIP 2018.
-    #[cfg(feature = "experimental")]
     ChromaLumaCovarianceCb = 132 : f32 => chroma_luma_covariance_cb,
 
     /// `f32`. Pearson correlation between luma `Y` and `Cr = (R − Y) /
     /// 255` — same construction as
     /// [`Self::ChromaLumaCovarianceCb`].
-    #[cfg(feature = "experimental")]
     ChromaLumaCovarianceCr = 133 : f32 => chroma_luma_covariance_cr,
 
     /// `f32`. Mean of the Wang-Li 2011 IW-SSIM local-information
@@ -1171,7 +1112,6 @@ features_table! {
     /// **Cost:** ~1.5 ms/MP — piggybacks on the Tier-3 sampled-block
     /// DCT pass that already computes per-block luma values.
     /// Cite: Wang & Li, IEEE TIP 2011.
-    #[cfg(feature = "experimental")]
     InfoWeightMean = 134 : f32 => info_weight_mean,
 
     /// `f32`. 90th-percentile of the same per-block IW-SSIM weight as
@@ -1179,7 +1119,6 @@ features_table! {
     /// content (a few highly-informative blocks among many flat ones)
     /// — AQ pays off. Returns `f32::NAN` below the Tier-3
     /// minimum-blocks-for-percentile floor.
-    #[cfg(feature = "experimental")]
     InfoWeightP90 = 135 : f32 => info_weight_p90,
 
     /// `f32`. Anisotropy of the luma gradient field, computed as
@@ -1197,7 +1136,6 @@ features_table! {
     /// gradient sweep. Discrete kernels: `0°: L_right − L_left`,
     /// `90°: L_down − L_up`, `45°: L_dr − L_ul`, `135°: L_dl − L_ur`.
     /// Cite: Freeman & Adelson, IEEE TPAMI 1991.
-    #[cfg(feature = "experimental")]
     OrientationEnergyRatio = 136 : f32 => orientation_energy_ratio,
 
     /// `f32`. Mean spectral-slope exponent β per sampled 8×8 luma DCT
@@ -1227,7 +1165,6 @@ features_table! {
     /// Cite: Field, "Relations between the statistics of natural
     /// images and the response properties of cortical cells",
     /// J. Opt. Soc. Am. A 1987.
-    #[cfg(feature = "experimental")]
     SpectralSlopeY = 137 : f32 => spectral_slope_y,
 
     /// `f32`. Mean perceptual noticeability of XYB's 4:4:4 (unsubsampled)
@@ -1628,6 +1565,20 @@ impl Default for FeatureSet {
 pub(crate) const PALETTE_FULL_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::DistinctColorBins);
+    // GrayscaleScore is computed on the same full-scan walk that
+    // builds the palette histogram. It needs 100 % coverage —
+    // stripe-sampling at ~5 % budget would let a single colour
+    // pixel slip past the gate ~95 % of the time and produce a
+    // false-positive grayscale classification.
+    s = s.with(AnalysisFeature::GrayscaleScore);
+    // PaletteLog2Size's full codomain (1..15 ∪ 24) requires an
+    // exact distinct count — the quick-path scan saturates at 8
+    // (early-exit at 257 bins) and can't surface JXL palette
+    // breakpoints at 9..15 or the truecolor saturation sentinel
+    // at 24. Including it here forces the full-scan path so
+    // callers get the resolution the feature promises without
+    // having to manually co-request `DistinctColorBins`.
+    s = s.with(AnalysisFeature::PaletteLog2Size);
     #[cfg(feature = "experimental")]
     {
         // PaletteDensity is `#[deprecated]` (2026-05-02) but still
@@ -1635,20 +1586,6 @@ pub(crate) const PALETTE_FULL_FEATURES: FeatureSet = {
         // here so PALETTE_FULL_FEATURES continues to include it for
         // existing pickers that haven't migrated yet.
         s = s.with(AnalysisFeature::PaletteDensity);
-        // GrayscaleScore is computed on the same full-scan walk that
-        // builds the palette histogram. It needs 100 % coverage —
-        // stripe-sampling at ~5 % budget would let a single colour
-        // pixel slip past the gate ~95 % of the time and produce a
-        // false-positive grayscale classification.
-        s = s.with(AnalysisFeature::GrayscaleScore);
-        // PaletteLog2Size's full codomain (1..15 ∪ 24) requires an
-        // exact distinct count — the quick-path scan saturates at 8
-        // (early-exit at 257 bins) and can't surface JXL palette
-        // breakpoints at 9..15 or the truecolor saturation sentinel
-        // at 24. Including it here forces the full-scan path so
-        // callers get the resolution the feature promises without
-        // having to manually co-request `DistinctColorBins`.
-        s = s.with(AnalysisFeature::PaletteLog2Size);
     }
     s
 };
@@ -1661,7 +1598,6 @@ pub(crate) const PALETTE_FULL_FEATURES: FeatureSet = {
 #[allow(unused_mut, unused_assignments)]
 pub(crate) const PALETTE_QUICK_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::PaletteFitsIn256);
     }
@@ -1692,7 +1628,6 @@ pub(crate) const PALETTE_FEATURES: FeatureSet = PALETTE_FULL_FEATURES.union(PALE
 pub(crate) const TIER1_EXTRAS_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::Variance);
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::Colourfulness);
         s = s.with(AnalysisFeature::LaplacianVariance);
@@ -1721,7 +1656,6 @@ pub(crate) const TIER1_EXTRAS_FEATURES: FeatureSet = {
 pub(crate) const TIER1_FULL_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::Variance);
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::Colourfulness);
         s = s.with(AnalysisFeature::LaplacianVariance);
@@ -1744,7 +1678,6 @@ pub(crate) const TIER1_FULL_FEATURES: FeatureSet = {
 #[allow(unused_mut, unused_assignments)]
 pub(crate) const TIER1_SKIN_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::SkinToneFraction);
     }
@@ -1764,7 +1697,6 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::HighFreqEnergyRatio);
     s = s.with(AnalysisFeature::LumaHistogramEntropy);
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::DctCompressibilityY);
         s = s.with(AnalysisFeature::DctCompressibilityUV);
@@ -1831,7 +1763,6 @@ pub(crate) const TIER3_FEATURES: FeatureSet = {
 pub(crate) const DCT_NEEDED_BY: FeatureSet = {
     let mut s = FeatureSet::new();
     s = s.with(AnalysisFeature::HighFreqEnergyRatio);
-    #[cfg(feature = "experimental")]
     {
         s = s.with(AnalysisFeature::DctCompressibilityY);
         s = s.with(AnalysisFeature::DctCompressibilityUV);

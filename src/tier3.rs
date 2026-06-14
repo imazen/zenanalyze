@@ -92,7 +92,6 @@ pub fn populate_tier3(
         // The libwebp α metrics and patch_fraction land in cfg-gated
         // RawAnalysis fields; the DCT pass that produces them runs
         // only when the dispatcher set DCT=true.
-        #[cfg(feature = "experimental")]
         {
             out.dct_compressibility_y = dct.compressibility_y;
             out.dct_compressibility_uv = dct.compressibility_uv;
@@ -138,25 +137,6 @@ pub fn populate_tier3(
             out.info_weight_mean = dct.info_weight_mean;
             out.info_weight_p90 = dct.info_weight_p90;
             out.spectral_slope_y = dct.spectral_slope_y;
-        }
-        #[cfg(not(feature = "experimental"))]
-        {
-            let _ = (
-                dct.compressibility_y,
-                dct.compressibility_uv,
-                dct.patch_fraction,
-                dct.aq_map_mean,
-                dct.aq_map_std,
-                dct.noise_floor_y,
-                dct.noise_floor_uv,
-                dct.gradient_fraction,
-                dct.patch_fraction_fast,
-                dct.quant_survival_y,
-                dct.quant_survival_uv,
-                dct.info_weight_mean,
-                dct.info_weight_p90,
-                dct.spectral_slope_y,
-            );
         }
     }
 }
@@ -407,7 +387,6 @@ fn block_signature_dct(coeffs: &[[f32; 8]; 8]) -> u32 {
 /// the same coefficient values, so AUC parity vs the full-DCT version
 /// is exact. The win is purely in the per-block compute cost upstream.
 #[inline(always)]
-#[cfg(feature = "experimental")]
 fn block_signature_truncated_dct(zz_acs: &[f32; 16]) -> u32 {
     let mut peak: f32 = 0.0;
     for &c in zz_acs.iter() {
@@ -442,7 +421,6 @@ fn block_signature_truncated_dct(zz_acs: &[f32; 16]) -> u32 {
 /// and edge layout; less discriminative on smooth photo content but
 /// works well on the structural patterns that dominate UI / text /
 /// chart screen content.
-#[cfg(feature = "experimental")]
 fn block_signature_dhash(pixels: &[[f32; 8]; 8]) -> u32 {
     incant!(block_signature_dhash_simd(pixels))
 }
@@ -463,7 +441,6 @@ fn block_signature_dhash(pixels: &[[f32; 8]; 8]) -> u32 {
 /// always 0). Folded to u32 by XORing high and low halves of the 64
 /// bits.
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-#[cfg(feature = "experimental")]
 fn block_signature_dhash_simd(_token: Token, pixels: &[[f32; 8]; 8]) -> u32 {
     // Horizontal diffs: 8 rows × 7 diffs = 56 bits. The fixed-array
     // shape and small rep count let LLVM, under the per-arch
@@ -502,7 +479,6 @@ fn block_signature_dhash_simd(_token: Token, pixels: &[[f32; 8]; 8]) -> u32 {
 /// At `d=2.0` (~q75 area) every entry is doubled. At `d=4.0` (~q50)
 /// quadrupled. The current implementation uses `d=2.0` as a typical
 /// production-quality reference point.
-#[cfg(feature = "experimental")]
 const JPEGLI_QUANT_Y_D2: [f32; 64] = [
     16.0, 22.0, 26.0, 28.0, 32.0, 38.0, 42.0, 50.0, 22.0, 24.0, 28.0, 30.0, 36.0, 42.0, 46.0, 54.0,
     26.0, 28.0, 32.0, 38.0, 42.0, 50.0, 58.0, 66.0, 28.0, 30.0, 38.0, 46.0, 54.0, 62.0, 70.0, 78.0,
@@ -514,7 +490,6 @@ const JPEGLI_QUANT_Y_D2: [f32; 64] = [
 /// jpegli-default Cb/Cr quant table at d=2.0. Chroma quantization is
 /// flatter than luma — saturates near 64 across the whole table at
 /// q=75 — capturing the human-vision low-chroma sensitivity.
-#[cfg(feature = "experimental")]
 const JPEGLI_QUANT_C_D2: [f32; 64] = [
     18.0, 22.0, 30.0, 56.0, 64.0, 64.0, 64.0, 64.0, 22.0, 26.0, 32.0, 60.0, 64.0, 64.0, 64.0, 64.0,
     30.0, 32.0, 50.0, 64.0, 64.0, 64.0, 64.0, 64.0, 56.0, 60.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
@@ -533,7 +508,6 @@ const JPEGLI_QUANT_C_D2: [f32; 64] = [
 ///
 /// Cost: 63 divides + 63 round-and-compare per block. Fast — no
 /// transcendentals or branches in the hot loop.
-#[cfg(feature = "experimental")]
 fn quant_survival(coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
     incant!(quant_survival_simd(coeffs, qtable))
 }
@@ -556,7 +530,6 @@ fn quant_survival(coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
 /// vs round-to-nearest-half-up could disagree — but those values
 /// are a measure-zero set on real DCT outputs).
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-#[cfg(feature = "experimental")]
 fn quant_survival_simd(token: Token, coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
     let half = f32x8::splat(token, 0.5);
     let one = f32x8::splat(token, 1.0);
@@ -1031,19 +1004,13 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let mut signatures: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
     // Experimental fingerprint variants: separate signature buffers so
     // the same sort-and-sweep collision-counting can be reused for each.
-    #[cfg(feature = "experimental")]
-    #[cfg(feature = "experimental")]
     let mut signatures_fast: Vec<u32> = Vec::with_capacity(max_blocks.min(2048));
     // Per-block quant-survival accumulators (mean across blocks) +
     // per-block buffers for percentile reduction (issue #42 →
     // distributional features analysis 2026-04-30 → Batch 3).
-    #[cfg(feature = "experimental")]
     let mut quant_y_sum: f64 = 0.0;
-    #[cfg(feature = "experimental")]
     let mut quant_uv_sum: f64 = 0.0;
-    #[cfg(feature = "experimental")]
     let mut quant_y_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
-    #[cfg(feature = "experimental")]
     let mut quant_uv_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
     // HVS info-weight (Wang-Li 2011): per-block
     // `w = log2(1 + σ²_p / σ²_e)` where σ²_p is the 8×8 luma variance
@@ -1051,16 +1018,13 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // luma units on the 0-255 scale) matches the `Uniformity` flat-
     // block threshold — a block at the noise floor reads `w ≈ 1.0`,
     // a busy block lifts toward `log2(σ²_p/25)`.
-    #[cfg(feature = "experimental")]
     let mut info_weight_blocks: Vec<f32> = Vec::with_capacity(max_blocks.min(4096));
     // Spectral-slope β accumulator (Field 1987 1/f^β model): per
     // sampled block, regress `log|F(r)| = a − β · log r` across 5
     // radial bins of the AC coefficients. Blocks where < 2 bins are
     // populated above the energy floor don't contribute. Reduced as
     // `Σ β / count` at end-of-pass.
-    #[cfg(feature = "experimental")]
     let mut spectral_slope_sum: f64 = 0.0;
-    #[cfg(feature = "experimental")]
     let mut spectral_slope_count: u32 = 0;
     let row_bytes = width * 3;
     let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
@@ -1205,7 +1169,6 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             alpha_uv_sum += a_cb.max(a_cr) as u64;
             // Patch-detection signature on luma DCT coefficients.
             signatures.push(block_signature_dct(&coeffs_y));
-            #[cfg(feature = "experimental")]
             {
                 // WHT and dHash signatures operate on raw 8×8 luma
                 // (pre-DCT). The DCT was already paid for by the
@@ -1390,16 +1353,12 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
         matched as f32 / n as f32
     }
     let patch_fraction = collision_fraction(&mut signatures, blocks_sampled);
-    #[cfg(feature = "experimental")]
-    #[cfg(feature = "experimental")]
     let patch_fraction_fast = collision_fraction(&mut signatures_fast, blocks_sampled);
-    #[cfg(feature = "experimental")]
     let quant_survival_y = if blocks_sampled > 0 {
         (quant_y_sum / blocks_sampled as f64) as f32
     } else {
         0.0
     };
-    #[cfg(feature = "experimental")]
     let quant_survival_uv = if blocks_sampled > 0 {
         (quant_uv_sum / blocks_sampled as f64) as f32
     } else {
@@ -1409,27 +1368,16 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // Per-block quant-survival percentiles. Sort once per channel,
     // read at p10/p25/p50/p75. p10 = "worst-block survival" — directly
     // proxies trellis ROI; high-survival p75 ⇒ uniformly compressible.
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p1: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p5: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p10: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p25: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p50: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_y_p75: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_uv_p10: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_uv_p25: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_uv_p50: f32;
-    #[cfg(feature = "experimental")]
     let quant_survival_uv_p75: f32;
-    #[cfg(feature = "experimental")]
     {
         let sort_f32 = |arr: &mut [f32]| {
             arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
@@ -1589,7 +1537,6 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     // The p90 takes the same `MIN_BLOCKS_FOR_PERCENTILE` floor (#49)
     // as the other Tier-3 percentile features — small block counts
     // make the high-tail read meaningless.
-    #[cfg(feature = "experimental")]
     let (info_weight_mean, info_weight_p90) = {
         if info_weight_blocks.is_empty() {
             (0.0f32, 0.0f32)
@@ -1610,37 +1557,17 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
             (mean, p90)
         }
     };
-    #[cfg(not(feature = "experimental"))]
-    let (info_weight_mean, info_weight_p90) = (0.0f32, 0.0f32);
 
     // Spectral-slope mean β across populated blocks. Sentinel
     // `f32::NAN` when no block produced a fit (flat content / tiny
     // image / sub-block degenerate); `set` drops NaN from the result
     // map so downstream callers see "absent" rather than a poisoned 0.
-    #[cfg(feature = "experimental")]
     let spectral_slope_y = if spectral_slope_count > 0 {
         (spectral_slope_sum / spectral_slope_count as f64) as f32
     } else {
         f32::NAN
     };
-    #[cfg(not(feature = "experimental"))]
-    let spectral_slope_y = 0.0f32;
 
-    #[cfg(not(feature = "experimental"))]
-    let (patch_fraction_fast, quant_survival_y, quant_survival_uv) = (0.0, 0.0, 0.0);
-    #[cfg(not(feature = "experimental"))]
-    let (
-        quant_survival_y_p1,
-        quant_survival_y_p5,
-        quant_survival_y_p10,
-        quant_survival_y_p25,
-        quant_survival_y_p50,
-        quant_survival_y_p75,
-        quant_survival_uv_p10,
-        quant_survival_uv_p25,
-        quant_survival_uv_p50,
-        quant_survival_uv_p75,
-    ) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     Tier3DctStats {
         high_freq_ratio,
         compressibility_y,

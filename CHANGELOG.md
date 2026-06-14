@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Promote 58 mature image features out of the `experimental` cargo
+  feature onto the default surface** (additive — `cargo semver-checks`:
+  no breaking changes). These had pinned, deterministic definitions and
+  a month-plus of multi-codec ablation; the gate was being used to
+  encode per-codec signal / redundancy / unproven-usefulness, which are
+  consumer-selection concerns, not definition maturity. Covers the
+  `aq_map_*`, `noise_floor_*`, `quant_survival_*`, `laplacian_variance_*`
+  families (incl. percentiles), `dct_compressibility_y/uv`,
+  `patch_fraction(_fast)`, `gradient_fraction(_smooth)`, `colourfulness`,
+  `variance_spread`, `edge_slope_stdev`, `grayscale_score`,
+  `skin_tone_fraction`, `luma_kurtosis`, `palette_fits_in_256`,
+  `palette_log2_size`, and the HVS/spectral pack (`chroma_luma_covariance_*`,
+  `info_weight_*`, `orientation_energy_ratio`, `spectral_slope_y`). The
+  `experimental` gate now scopes to only `palette_density` (deprecated)
+  and the still-settling XYB color-loss pair (`xyb444_color_loss`,
+  `xyb_bquarter_chroma_loss`). Provenance: `benchmarks/experimental_maturity_audit_2026-06-13.md`.
+  Fixes a latent `PALETTE_FULL_FEATURES` dispatch bug that left
+  `grayscale_score` / `palette_log2_size` silent-zero on default builds.
+- Per-codec feature redundancy reference + advisory KEEP_FEATURES lint
+  (`benchmarks/feature_redundancy_clusters_2026-06-13.{md,json}`,
+  `zentrain/tools/lint_keep_features.py`) — guides selection away from
+  ρ≥0.9 twins without gating features.
 - Trim published package contents: exclude benchmarks/, docs/, scripts/, tools/, zentrain/, .github/, and dev-only root markdown files from the `zenanalyze` crate tarball; exclude tests/, benches/ from `zenpredict-bake` and `zenpicker-train`; exclude fuzz/ and deny.toml from `zenpredict`. No Rust source, examples, or model bakes were touched.
 
 ### Added

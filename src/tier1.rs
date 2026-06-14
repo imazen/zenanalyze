@@ -617,7 +617,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // (lane-parallel — skipping individual lanes wouldn't save work)
     // but the field doesn't exist when `experimental` is off, so the
     // store is gated to match.
-    #[cfg(feature = "experimental")]
     {
         out.colourfulness = (sigma_term + 0.3 * mu_term) as f32;
     }
@@ -625,7 +624,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // Pixel-scale dependent: a sharp content edge spans more pixels
     // at higher resolution, so the per-pixel ∇² magnitude is smaller.
     // Compensate by scaling by sqrt(megapixels).
-    #[cfg(feature = "experimental")]
     {
         out.laplacian_variance = if stats.laplacian_count > 0 {
             let lc = stats.laplacian_count as f64;
@@ -759,7 +757,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     }
     // Variance heterogeneity: log10(1 + max_var / max(1, mean_var)).
     // Captures how much louder the loudest block is than typical.
-    #[cfg(feature = "experimental")]
     {
         out.variance_spread = if total_blocks > 0 {
             let mean_var = (block_var_sum / total_blocks as f64) as f32;
@@ -773,7 +770,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // Skin-tone fraction: pigmentation-invariant chroma classifier
     // (Chai & Ngan 1999). Computed lane-wise inside the SIMD stats
     // pass — see `accumulate_row_simd::skin_count_v`.
-    #[cfg(feature = "experimental")]
     {
         out.skin_tone_fraction = if sampled_pixels > 0 {
             (stats.skin_count as f64 / sampled_pixels as f64) as f32
@@ -785,7 +781,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // among pixels that crossed `|∇L| > 20`. Folded branchlessly
     // into the SIMD edge inner loop — see
     // `accumulate_row_simd::edge_grad_*`.
-    #[cfg(feature = "experimental")]
     {
         out.edge_slope_stdev = if stats.edge_grad_count >= 2 {
             let n = stats.edge_grad_count as f64;
@@ -807,7 +802,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // (grayscale → Cb=Cr=0 → zero Cb variance → undefined Pearson;
     // 0.0 is the right fallback for the picker — "no exploitable
     // chroma-luma signal").
-    #[cfg(feature = "experimental")]
     {
         if n >= 2.0 && dispatch.wants_full_kernel {
             let lc = stats.luma_sum;
@@ -850,7 +844,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     // max well above the mean. Mean instead of min avoids the
     // degenerate "min = 0" case on perfectly axis-aligned synthetic
     // patterns (horizontal stripes have G_90 ≫ 0 but G_0 ≈ 0).
-    #[cfg(feature = "experimental")]
     {
         out.orientation_energy_ratio = if stats.orient_count > 0 && dispatch.wants_full_kernel {
             let s0 = stats.orient_sum_0;
@@ -873,16 +866,6 @@ pub(crate) fn extract_tier1_into_dispatch(
     }
     // Suppress "unused variable" warnings on the always-computed
     // accumulators when the experimental writes are gated out.
-    #[cfg(not(feature = "experimental"))]
-    {
-        let _ = (
-            sigma_term,
-            mu_term,
-            block_var_max,
-            block_var_sum,
-            total_blocks,
-        );
-    }
 }
 
 fn compute_stripe_step(width: usize, height: usize, pixel_budget: usize) -> usize {

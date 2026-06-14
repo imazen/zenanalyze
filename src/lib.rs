@@ -395,10 +395,7 @@ pub fn analyze_features(
     // GrayscaleScore lives on the palette tier (full-scan, 100 %
     // coverage) but its per-pixel max/min gate isn't free — only run
     // the gate when the caller actually requested it.
-    #[cfg(feature = "experimental")]
     let palette_wants_grayscale = features.contains(feature::AnalysisFeature::GrayscaleScore);
-    #[cfg(not(feature = "experimental"))]
-    let palette_wants_grayscale = false;
 
     // Tier 1 dispatch: skip the separate Laplacian SIMD row pass
     // when LaplacianVariance isn't requested. Load-bearing for
@@ -410,7 +407,6 @@ pub fn analyze_features(
     // additions, requesting only `LaplacianVariancePeak` would skip
     // the whole histogram pass and leave RawAnalysis at zeros,
     // bypassing the per-feature minimum-sample-count floor (#49).
-    #[cfg(feature = "experimental")]
     let tier1_wants_laplacian = features.intersects(
         feature::FeatureSet::new()
             .with(feature::AnalysisFeature::LaplacianVariance)
@@ -420,8 +416,6 @@ pub fn analyze_features(
             .with(feature::AnalysisFeature::LaplacianVarianceP99)
             .with(feature::AnalysisFeature::LaplacianVariancePeak),
     );
-    #[cfg(not(feature = "experimental"))]
-    let tier1_wants_laplacian = false;
 
     // Tier 1 full-kernel gate: flip on for `Variance` /
     // `Colourfulness` / `EdgeSlopeStdev` / `LaplacianVariance` — the
@@ -632,41 +626,37 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     }
 
     if PAL {
-        // Quick-path signals — populated by both scan paths but the
-        // RawAnalysis fields are gated behind `experimental` since
-        // no in-tree codec consumes them yet.
-        #[cfg(feature = "experimental")]
-        {
-            raw.palette_log2_size = palette_stats.palette_log2_size;
-            raw.palette_fits_in_256 = palette_stats.fits_in_256;
-        }
+        // Quick-path signals — populated by both scan paths.
+        raw.palette_log2_size = palette_stats.palette_log2_size;
+        raw.palette_fits_in_256 = palette_stats.fits_in_256;
         // Full-path-only signals — quick-path leaves these at 0; the
         // `into_results` filter drops them so callers who didn't ask
         // for them get `None` instead of a misleading 0.
         if palette_full_required {
             raw.distinct_color_bins = palette_stats.distinct;
-            // PaletteDensity is experimental (derived from the
-            // unflagged DistinctColorBins; no consumer wires it yet).
+            // GrayscaleScore is computed on the same full-scan walk
+            // as the distinct-bin histogram. 100 % coverage is
+            // load-bearing — the score is used downstream as a
+            // binary classifier (`>= 0.99` ⇒ encode as grayscale),
+            // and stripe-sampling at ~5 % budget would let one
+            // colour pixel slip past the gate ~95 % of the time.
+            raw.grayscale_score = if palette_stats.total_pixels > 0 {
+                let gray = palette_stats
+                    .total_pixels
+                    .saturating_sub(palette_stats.non_grayscale);
+                (gray as f64 / palette_stats.total_pixels as f64) as f32
+            } else {
+                0.0
+            };
+            // PaletteDensity is `#[deprecated]` + experimental — still
+            // computed during the deprecation window for un-migrated
+            // pickers; derived from the always-on DistinctColorBins.
             #[cfg(feature = "experimental")]
             {
                 let pixel_count = (width as f64) * (height as f64);
                 let denom = pixel_count.clamp(1.0, 32_768.0);
                 raw.palette_density =
                     (raw.distinct_color_bins as f64 / denom).clamp(0.0, 1.0) as f32;
-                // GrayscaleScore is computed on the same full-scan walk
-                // as the distinct-bin histogram. 100 % coverage is
-                // load-bearing — the score is used downstream as a
-                // binary classifier (`>= 0.99` ⇒ encode as grayscale),
-                // and stripe-sampling at ~5 % budget would let one
-                // colour pixel slip past the gate ~95 % of the time.
-                raw.grayscale_score = if palette_stats.total_pixels > 0 {
-                    let gray = palette_stats
-                        .total_pixels
-                        .saturating_sub(palette_stats.non_grayscale);
-                    (gray as f64 / palette_stats.total_pixels as f64) as f32
-                } else {
-                    0.0
-                };
             }
         }
         let _ = palette_stats; // silence unused on the all-experimental-off path

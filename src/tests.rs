@@ -959,7 +959,6 @@ fn alpha_works_on_rgba16() {
 // ---------------------------------------------------------------------
 
 #[test]
-#[cfg(feature = "experimental")]
 fn colourfulness_zero_for_grayscale() {
     // All-gray RGB: rg = R-G = 0, yb = 0.5(R+G)-B = 0. Both means
     // and variances zero ⇒ M3 = 0.
@@ -974,7 +973,6 @@ fn colourfulness_zero_for_grayscale() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn colourfulness_high_for_saturated_colour() {
     // Pure saturated red: rg = 255, yb = 127.5. Big mean term, big M3.
     let mut rgb = vec![0u8; 256 * 64 * 3];
@@ -991,7 +989,6 @@ fn colourfulness_high_for_saturated_colour() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn laplacian_variance_zero_for_flat_image() {
     let rgb = vec![80u8; 64 * 64 * 3];
     let s = PixelSlice::new(&rgb, 64, 64, 64 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
@@ -1004,7 +1001,6 @@ fn laplacian_variance_zero_for_flat_image() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn laplacian_variance_high_for_checkerboard() {
     let w = 64;
     let h = 64;
@@ -1031,7 +1027,6 @@ fn laplacian_variance_high_for_checkerboard() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn variance_spread_zero_for_flat() {
     let rgb = vec![100u8; 256 * 256 * 3];
     let out = analyze_rgb8(&rgb, 256, 256);
@@ -1043,7 +1038,6 @@ fn variance_spread_zero_for_flat() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn variance_spread_nonzero_for_heterogeneous_content() {
     // Half flat, half checkerboard ⇒ block variances span ~0..16 k.
     // log10(1 + max/mean) = log10(1 + 2) ≈ 0.48 — substantial.
@@ -1068,7 +1062,6 @@ fn variance_spread_nonzero_for_heterogeneous_content() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn dct_compressibility_low_for_flat_image() {
     let rgb = vec![100u8; 64 * 64 * 3];
     let s = PixelSlice::new(&rgb, 64, 64, 64 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
@@ -1081,7 +1074,6 @@ fn dct_compressibility_low_for_flat_image() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn dct_compressibility_high_for_checkerboard() {
     let w = 64;
     let h = 64;
@@ -1170,7 +1162,6 @@ fn palette_density_zero_for_solid_color() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn patch_fraction_high_for_few_distinct_colors() {
     // Two-color checkerboard ⇒ 2 distinct color bins ⇒ very high patch_fraction.
     let w = 256;
@@ -1195,7 +1186,6 @@ fn patch_fraction_high_for_few_distinct_colors() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn patch_fraction_high_for_repeat_pattern() {
     // 2-color checkerboard at 256×256: every 8×8 block has the
     // same low-AC content (essentially flat or 1-pixel checker
@@ -1381,7 +1371,6 @@ fn analyze_features_returns_only_requested_features() {
 }
 
 #[test]
-#[cfg(feature = "experimental")]
 fn quick_palette_matches_full_path_when_both_requested() {
     // When the caller asks for both quick and full features, the
     // dispatcher routes through scan_palette (full). The values for
@@ -2453,7 +2442,6 @@ fn sdr_srgb_does_not_trip_hdr_present() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 #[ignore] // run with `cargo test --release --features experimental -- perf_strip_alpha_vs_convert --ignored --nocapture`
 fn perf_strip_alpha_vs_convert() {
@@ -2504,7 +2492,6 @@ fn perf_strip_alpha_vs_convert() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 #[ignore] // run with `cargo test --release --features experimental -- perf_full_feature_set --ignored --nocapture`
 fn perf_full_feature_set() {
@@ -2536,7 +2523,6 @@ fn perf_full_feature_set() {
     }
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn gradient_fraction_high_for_smooth_low_for_noise() {
     // Smooth horizontal gradient: most blocks have AC energy
@@ -2659,7 +2645,6 @@ fn gamut_coverage_zero_for_saturated_rec2020_green() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn noise_floor_low_for_solid_high_for_pure_noise() {
     // A solid image has zero AC ⇒ noise floor = 0.
@@ -2690,7 +2675,6 @@ fn noise_floor_low_for_solid_high_for_pure_noise() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn aq_map_std_low_for_uniform_high_for_heterogeneous() {
     // A solid image has zero AC energy variance ⇒ std ≈ 0.
@@ -2727,7 +2711,6 @@ fn aq_map_std_low_for_uniform_high_for_heterogeneous() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn skin_tone_fraction_fires_on_skin_colored_pixels_zero_on_neutral() {
     // The Chai-Ngan YCbCr classifier (Cb [77,127], Cr [133,173], Y [40,240])
@@ -2784,7 +2767,6 @@ fn skin_tone_fraction_fires_on_skin_colored_pixels_zero_on_neutral() {
     assert!(f < 0.01, "saturated blue ⇒ ~0.0, got {f}");
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn edge_slope_stdev_low_for_uniform_high_for_varied_edges() {
     // Synthetic two-tone bands at one luma step (all crossings have the
@@ -2838,7 +2820,6 @@ fn edge_slope_stdev_low_for_uniform_high_for_varied_edges() {
     );
 }
 
-#[cfg(feature = "experimental")]
 #[test]
 fn grayscale_score_one_for_neutral_image_zero_for_saturated() {
     // Neutral (R=G=B) ⇒ score = 1.0; saturated colour ⇒ score ≈ 0.
