@@ -14,21 +14,16 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
-# Fuzz both default-features and --features compressed-weights via
-# separate fuzz target invocations; depend on the feature here so
-# the lz4 path is reachable when this fuzz crate is built with
-# `--features compressed-weights`.
-zenpredict = { path = "..", features = ["std", "advanced", "compressed-weights"] }
+# `advanced` pulls in the typed multi-output / scorer API exercised by
+# predictor_predict. The lz4 whole-bake decompression path is no longer
+# feature-gated (lz4_flex is an unconditional dep; the compressed flag is
+# checked at runtime in `Model::load`), so it's fuzzed unconditionally via
+# the parser_from_bytes target's `Model::from_bytes` call.
+zenpredict = { path = "..", features = ["std", "advanced"] }
 
 [[bin]]
 name = "parser_from_bytes"
 path = "fuzz_targets/parser_from_bytes.rs"
-test = false
-doc = false
-
-[[bin]]
-name = "lz4_decompress"
-path = "fuzz_targets/lz4_decompress.rs"
 test = false
 doc = false
 
