@@ -82,6 +82,9 @@ name = "render_imazen26_variants"
 name = "extract_hdr_features"
 
 [[example]]
+name = "extract_hdr_size_grid"
+
+[[example]]
 name = "corpus_eval"
 required-features = ["experimental"]
 
