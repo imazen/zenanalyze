@@ -4,12 +4,13 @@
 //! (the squared term widens i16→i64); minmax/linearize were already decisive.
 //!
 //! Variants (all on the same i12-range luma plane, 0..4095):
-//!  - `f32_serial`     — single accumulator (LLVM can't reassociate FP → serial)
-//!  - `f32_multi16`    — 16 independent accumulators (≈ tier1's hand-tuned f32x8)
-//!  - `i16_i64_direct` — widen each to i64, 16 accumulators (simple integer)
-//!  - `i16_i32_flush`  — i32 accumulators, flush to i64 every 120 chunks (i16's
-//!                       best: hot loop stays i32, no per-element i64 widen)
-//!  - `u16_i64_direct` — unsigned counterpart
+//!
+//! - `f32_serial` — single accumulator (LLVM can't reassociate FP → serial)
+//! - `f32_multi16` — 16 independent accumulators (≈ tier1's hand-tuned f32x8)
+//! - `i16_i64_direct` — widen each to i64, 16 accumulators (simple integer)
+//! - `i16_i32_flush` — i32 accumulators, flush to i64 every 120 chunks (i16's
+//!   best: hot loop stays i32, no per-element i64 widen)
+//! - `u16_i64_direct` — unsigned counterpart
 //!
 //! Run: cargo run --release --example bench_repr_handtuned
 
@@ -143,7 +144,7 @@ fn main() {
             let mut s: u32 = 0xC0FFEE ^ n as u32;
             let mut next = || {
                 s = s.wrapping_mul(1103515245).wrapping_add(12345);
-                (s >> 12 & 0xFFF) as u32 // i12 range 0..4095
+                s >> 12 & 0xFFF // i12 range 0..4095
             };
             let lf = leak((0..n).map(|_| next() as f32).collect::<Vec<_>>());
             let li = leak(lf.iter().map(|&x| x as i16).collect::<Vec<_>>());
