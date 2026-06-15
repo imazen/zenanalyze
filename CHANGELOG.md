@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in linear-light analysis** — `AnalysisQuery::with_linear_light(bool)`
+  + `linear_light()` accessor (additive; `cargo semver-checks`: no breaking
+  changes). Off by default; when set, the analyzer recomputes the supported
+  tier-1 feature in **linear light** (linearizing the source through the sRGB
+  EOTF before the statistic) instead of the default transfer-blind / gamma
+  path. Prototype scope: only `Variance`, scalar, RGB8-layout sources (other
+  layouts keep the gamma value); coverage grows as the linear kernels land.
+  Flipping it changes feature *values* and would invalidate fitted
+  thresholds/models, so it's per-call opt-in and gated on a downstream picker
+  A/B before any default flip. Provenance: the review + A/B + representation
+  bench at `benchmarks/linear_light_precision_review_2026-06-14.md`,
+  `benchmarks/linear_light_ab_2026-06-14.md`,
+  `benchmarks/linear_repr_bench_2026-06-14.md` (verdict: i16/i12 linear
+  intermediate for the production kernel).
+
 ### Changed
 
 - **Promote 58 mature image features out of the `experimental` cargo

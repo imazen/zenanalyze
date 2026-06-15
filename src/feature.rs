@@ -1877,6 +1877,7 @@ pub(crate) const PAL_NEEDED_BY: FeatureSet = PALETTE_FEATURES;
 #[derive(Clone, Debug)]
 pub struct AnalysisQuery {
     features: FeatureSet,
+    linear_light: bool,
 }
 
 impl AnalysisQuery {
@@ -1885,12 +1886,38 @@ impl AnalysisQuery {
     /// `features` typically comes from `const`-context union of each
     /// codec's preset, e.g. `JPEG_FEATURES.union(WEBP_FEATURES)`.
     pub const fn new(features: FeatureSet) -> Self {
-        Self { features }
+        Self {
+            features,
+            linear_light: false,
+        }
     }
 
     /// The feature set this query asks for.
     pub const fn features(&self) -> FeatureSet {
         self.features
+    }
+
+    /// Opt into **linear-light** computation of the supported SDR
+    /// tier-1 features (currently [`AnalysisFeature::Variance`]).
+    ///
+    /// **Prototype / opt-in (2026-06-14).** The default analyzer runs
+    /// tier 1/2/3 on gamma-encoded code values (transfer-blind); this
+    /// flag linearizes the source first so those features describe the
+    /// scene in linear light. It is **off by default** — flipping it
+    /// changes feature *values* and would invalidate fitted thresholds
+    /// / models, so callers opt in per-call and re-validate.
+    ///
+    /// Coverage grows as the linear kernels land: today only `Variance`
+    /// is recomputed (scalar, RGB8-layout sources); other features stay
+    /// gamma. See the linear-light bench / A-B notes in `benchmarks/`.
+    pub const fn with_linear_light(mut self, on: bool) -> Self {
+        self.linear_light = on;
+        self
+    }
+
+    /// Whether [`Self::with_linear_light`] was requested.
+    pub const fn linear_light(&self) -> bool {
+        self.linear_light
     }
 }
 

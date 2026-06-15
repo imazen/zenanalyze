@@ -163,6 +163,7 @@ mod alpha;
 mod dimensions;
 pub mod feature;
 mod grayscale;
+pub(crate) mod linear_tier;
 pub(crate) mod luma;
 mod palette;
 pub(crate) mod row_stream;
@@ -435,6 +436,12 @@ pub fn analyze_features(
     // tier reads source bytes directly, no shared inner loop with
     // T1/T2/T3 to specialize, so a runtime branch costs nothing.
     let run_depth = features.intersects(feature::DEPTH_FEATURES);
+    // Linear-light opt-in (prototype). Runtime axis like `run_depth` — recomputes
+    // the supported tier-1 features in linear light. Off unless the caller asked
+    // AND a linear-affected feature is requested (only Variance today), so the
+    // default path and other callers pay nothing.
+    let run_linear_light =
+        query.linear_light() && features.contains(feature::AnalysisFeature::Variance);
     // Source descriptor — captured up front so we can hand it back to
     // codecs verbatim via `AnalysisResults::source_descriptor()` even
     // after the analyzer's RowConverter / RowStream consumes the slice.
@@ -456,6 +463,7 @@ pub fn analyze_features(
                 run_strict_gray,
                 run_xyb444,
                 run_xyb_bq,
+                run_linear_light,
             )?;
             Ok(raw.into_results(features, geometry, source_descriptor))
         }};
@@ -513,6 +521,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     run_strict_gray: bool,
     run_xyb444: bool,
     run_xyb_bq: bool,
+    run_linear_light: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
     #[cfg(not(feature = "experimental"))]
     let _ = (run_xyb444, run_xyb_bq);
@@ -541,6 +550,15 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     };
     // Suppress unused-var warning when hdr is off.
     let _ = run_depth;
+
+    // Linear-light Variance override (prototype, opt-in). Computed source-direct
+    // BEFORE `slice` is moved into the RowStream (like the depth tier), so it can
+    // linearize the original pixels. `None` for non-RGB8 layouts → keep gamma.
+    let linear_variance = if run_linear_light {
+        linear_tier::linear_variance_rgb8(&slice, pixel_budget)
+    } else {
+        None
+    };
 
     let mut stream = RowStream::new(slice).map_err(AnalyzeError::Convert)?;
 
@@ -585,6 +603,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             wants_skin: tier1_wants_skin,
         };
         tier1::extract_tier1_into_dispatch(&mut raw, &mut stream, pixel_budget, t1_dispatch);
+        // Linear-light override: replace the gamma Variance with the linear-light
+        // value computed source-direct above. Only Some when opt-in + RGB8 layout.
+        if let Some(lv) = linear_variance {
+            raw.variance = lv;
+        }
         if T2 && width >= 3 && height >= 3 {
             tier2_chroma::populate_tier2(&mut raw, &mut stream, pixel_budget);
         }
@@ -703,10 +726,11 @@ pub fn __analyze_internal(
         true, // and the Tier 1 full kernel (luma stats / Hasler M3 / edge slope)
         true, // and the Tier 1 skin gate
         run_depth,
-        true, // override path always runs the DCT pass (test/oracle wants every signal)
-        true, // and the strict-grayscale classifier
-        true, // xyb444_color_loss
-        true, // xyb_bquarter_chroma_loss
+        true,  // override path always runs the DCT pass (test/oracle wants every signal)
+        true,  // and the strict-grayscale classifier
+        true,  // xyb444_color_loss
+        true,  // xyb_bquarter_chroma_loss
+        false, // run_linear_light — oracle / dense extraction stays gamma
     )?;
     Ok(raw.into_results(query.features, geometry, source_descriptor))
 }
@@ -733,7 +757,7 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true,
+        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, false,
     )
 }
 
