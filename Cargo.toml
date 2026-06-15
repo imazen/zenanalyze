@@ -95,6 +95,9 @@ required-features = ["experimental"]
 name = "bench_linear_repr"
 
 [[example]]
+name = "bench_repr_handtuned"
+
+[[example]]
 name = "corpus_eval"
 required-features = ["experimental"]
 

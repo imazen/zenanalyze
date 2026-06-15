@@ -103,6 +103,35 @@ analysis is acceptable, `pq_direct` is ~3× faster but is *not* linear light.
 say "integer is at least as good and free," not "f32 is 7× worse." That
 bake-off + the downstream picker A/B gate the default flip.
 
+## Addendum — hand-tuned variance bake-off (`bench_repr_handtuned`)
+
+Tested whether a *multi-accumulator* f32 closes the gap (variance is the
+contested widening case). 1MP+4MP, consistent:
+
+| variant | Gops/s |
+|---|--:|
+| f32_serial | 0.45 |
+| f32_multi16 (16 accumulators) | **0.63** |
+| i16_i64_direct | 3.5 |
+| i16_i32_flush | 3.3 |
+| u16_i64_direct | 4.4 |
+
+Sixteen independent f32 accumulators gained only **+40%** — they did NOT
+vectorize. Likely the explicit `mul_add` intrinsic plus LLVM's refusal to
+reassociate FP; integer adds are associative so the same plain-array pattern
+auto-vectorizes to 3–4G. **Honest caveat:** this means f32 needs an *explicit*
+`f32x8` SIMD kernel (tier1 ships those) to compete — my plain `f32_multi16` is a
+floor, not f32's ceiling, so the literal 5.6× is not the hand-tuned-vs-hand-tuned
+ratio.
+
+**It does not change the decision, though:** i16/i12 wins regardless because
+(1) **signedness is decisive** — laplacian/edge are signed, u16 can't and f32's
+only path to parity is explicit SIMD; (2) i16 reaches 3.5G from *plain*
+maintainable code while f32 demands careful explicit SIMD to not be reduction-
+bound; (3) headroom + i12 round-trip + precision-irrelevance all hold. f32 has no
+advantage that overrides signedness. **Verdict locked: i16/i12.** Build the
+production kernel there; the explicit-`f32x8` ceiling is moot for the choice.
+
 ## Reproduce
 
 ```bash
