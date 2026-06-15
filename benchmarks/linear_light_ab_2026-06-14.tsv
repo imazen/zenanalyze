@@ -1,0 +1,13 @@
+axis	feature	pearson	median_rel_delta	max_rel_delta	n
+sdr_fidelity_gamma_vs_shipped	variance	0.9945	0.0160	0.4368	200
+sdr_fidelity_gamma_vs_shipped	edge_density	0.9985	0.0283	0.6792	200
+sdr_fidelity_gamma_vs_shipped	uniformity	0.9971	0.0142	0.3904	200
+sdr_fidelity_gamma_vs_shipped	laplacian_variance	0.9985	0.0303	0.4669	200
+sdr_linear_effect_gamma_vs_linear	variance	0.8715	0.2147	0.8166	200
+sdr_linear_effect_gamma_vs_linear	edge_density	0.9587	0.2589	0.7877	200
+sdr_linear_effect_gamma_vs_linear	uniformity	0.9166	0.1879	0.8301	200
+sdr_linear_effect_gamma_vs_linear	laplacian_variance	0.9786	0.1907	0.8497	200
+hdr_precision_full16_vs_narrow8	variance	1.0000	0.0003	0.0100	76
+hdr_precision_full16_vs_narrow8	edge_density	0.9971	0.0000	0.2222	76
+hdr_precision_full16_vs_narrow8	uniformity	1.0000	0.0000	0.0000	76
+hdr_precision_full16_vs_narrow8	laplacian_variance	0.9999	0.0349	0.5512	76

@@ -85,6 +85,10 @@ name = "extract_hdr_features"
 name = "extract_hdr_size_grid"
 
 [[example]]
+name = "linear_light_ab"
+required-features = ["experimental"]
+
+[[example]]
 name = "corpus_eval"
 required-features = ["experimental"]
 
