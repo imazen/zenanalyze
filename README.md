@@ -3,34 +3,53 @@
 Streaming image content analyzer for adaptive codec pipelines. One pass over a
 `zenpixels::PixelSlice` extracts the numeric features that decision trees,
 selectors, and per-image encoder configurators consume — variance, edge density,
-chroma sharpness, palette population, DCT energy, alpha statistics, and (behind
-opt-in cargo features) classifier-style content-class likelihoods plus
-source-direct HDR / wide-gamut / bit-depth signals that codecs use to **detect
-when a descriptor over-promises and the actual pixel content is encodable in
-something smaller**.
+chroma sharpness, palette population, DCT energy, alpha statistics, AQ-map and
+noise-floor estimates, and (behind the opt-in `hdr` cargo feature) source-direct
+HDR / wide-gamut / bit-depth signals that codecs use to **detect when a
+descriptor over-promises and the actual pixel content is encodable in something
+smaller**.
 
 ```toml
 [dependencies]
-zenanalyze = "0.2"
-# Opt in to research-stage signals (PatchFraction, AqMap*, NoiseFloor*, …):
-# zenanalyze = { version = "0.2", features = ["experimental"] }
-# Opt in to HDR / wide-gamut / bit-depth signals (source-direct depth tier):
-# zenanalyze = { version = "0.2", features = ["experimental", "hdr"] }
+zenanalyze = "0.2.0"
+# Naming the source PixelDescriptor / ColorPrimaries off a result needs zenpixels too:
+zenpixels = { version = "0.2.11", default-features = false }
+# Opt in to the still-settling XYB color-loss + deprecated palette-density signals:
+# zenanalyze = { version = "0.2.0", features = ["experimental"] }
+# Opt in to source-direct HDR / wide-gamut / bit-depth signals (the depth tier):
+# zenanalyze = { version = "0.2.0", features = ["experimental", "hdr"] }
 ```
+
+> **Versioning:** zenanalyze is on the **0.2.x** line (standard 0.x semver —
+> breaking changes bump the minor `0.2 → 0.3`, additive changes bump the patch
+> `0.2.0 → 0.2.1`). The Rust library surface in this source tree is `0.2.0`.
+> The convenience entries `analyze_features_rgb8` and its fallible parallel
+> `try_analyze_features_rgb8` both exist on this surface. (An earlier "0.1.x
+> forever, additive-only" policy was retired; if you still see that claim
+> anywhere, it is stale — trust the version in `Cargo.toml`.)
 
 ## Cargo features
 
-| feature | what it gates | stability |
-|---|---|---|
-| _(default)_ | Stable raw signals: variance, edge density, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, etc. | Numeric drift in 0.x bounded by the threshold contract; signatures frozen |
-| `experimental` | Research-stage signals: PatchFraction, AqMapMean/Std, NoiseFloorY/UV, GradientFraction | Metric definition or scale may change; opt in only if you re-validate per patch |
-| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals (10 features, the depth tier). With `experimental + hdr`, `FeatureSet::SUPPORTED` is the full 108-feature set the codec quality pickers consume. | Off by default (SDR hot path skips the tier); definitions may change per patch |
+| feature | what it gates | count | stability |
+|---|---|---|---|
+| _(default)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | **97** | Numeric drift bounded by the threshold contract; signatures semver-governed |
+| `experimental` | Two still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss`, `XybBquarterChromaLoss`) plus the deprecated `PaletteDensity`. | +3 → 100 | Metric definition or scale may still change; opt in only if you re-validate per patch |
+| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals — 10 features, the depth tier (ids 32–39, 46, 47). | +10 → **110** | Off by default (SDR hot path skips the tier); definitions may change per patch |
 
-> **0.2.0 removed the `composites` feature** and retired all four composite
-> likelihoods it gated — `TextLikelihood`, `ScreenContentLikelihood`,
-> `NaturalLikelihood`, `LineArtScore`. Their `AnalysisFeature` variants are gone
-> (ids 27 / 28 / 29 / 45 stay reserved for ABI stability). Consume the stable raw
-> signals directly, or the research-stage ones under `experimental`.
+> **As of the 0.2.x line, `experimental` is narrow.** ~58 features that used to
+> sit behind it (the `AqMap*`, `NoiseFloor*`, `QuantSurvival*`,
+> `LaplacianVariance*` families, `GradientFraction`, `PatchFraction`,
+> `GrayscaleScore`, `SkinToneFraction`, `EdgeSlopeStdev`, the HVS/spectral pack,
+> etc.) were **promoted to the default surface** once their definitions pinned —
+> they need no feature flag now. The gate now scopes to only the three signals
+> above, whose structural definition is still settling.
+>
+> **Retired likelihoods:** the four composite likelihoods `TextLikelihood`,
+> `ScreenContentLikelihood`, `NaturalLikelihood`, `LineArtScore` were removed;
+> their ids (27 / 28 / 29 / 45) stay reserved and are never re-used, so the wire
+> format (`AnalysisFeature::id`) is stable. The "Empirical operating thresholds"
+> section below still references them as historical calibration data — those
+> rows describe a prior surface and no longer map to live variants.
 
 ## Why
 
@@ -75,10 +94,12 @@ let alpha    = results.get(AnalysisFeature::AlphaPresent)
 ```
 
 `AnalysisFeature` is `#[non_exhaustive]` with stable `u16` discriminants —
-retired ids stay reserved, new ids are sequential, the wire format never breaks.
-`FeatureSet` has full `const fn` set math (`union`, `intersect`, `difference`)
-so per-codec presets compose at compile time. `AnalysisQuery` is intentionally
-opaque: sampling budgets are crate invariants, not per-call knobs.
+retired ids stay reserved (the id sequence has gaps where features were removed),
+new features get fresh ids, and an id is never re-used, so the `id()`-keyed wire
+format stays stable across versions. `FeatureSet` has full `const fn` set math
+(`union`, `intersect`, `difference`) so per-codec presets compose at compile
+time. `AnalysisQuery` is intentionally opaque: sampling budgets are crate
+invariants, not per-call knobs.
 
 For a packed RGB8 buffer the convenience entry skips the `PixelSlice` ceremony:
 
@@ -110,25 +131,113 @@ match descriptor.primaries {
 order — convenient for sidecars, harnesses, and Python fitters that need to
 enumerate the surface without hand-listing variants.
 
+## The picker feature vector
+
+A codec picker (decision tree, MLP, GBDT) consumes a **fixed-shape feature
+vector** — a known count of features in a known column order. zenanalyze's job
+is to produce exactly that vector. The canonical "all features" set is the
+`FeatureSet::SUPPORTED` const, and the column order is `AnalysisFeature::id()`
+ascending (the same order `FeatureSet::iter()` and `AnalysisResults::pack()`
+emit). Recipe:
+
+```rust
+use zenanalyze::{analyze_features, feature::{AnalysisFeature, AnalysisQuery, FeatureSet}};
+
+// SUPPORTED is the full set THIS BUILD can compute. Always public — it just
+// shrinks if you disable a cargo feature. On the default build it has 97
+// features; with `experimental` 100; with `experimental + hdr` 110.
+let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
+let results = analyze_features(slice, &q)?;
+
+// `pack()` is the canonical emit: id-sorted `(u16 stable_id, f32 value)` pairs.
+// This IS the training/inference vector — column i is the i-th feature in
+// id() order, value already coerced to f32. Integral/bool features round-trip
+// losslessly (Bool(true) -> 1.0, U32(n) -> n as f32).
+let vector: Vec<(u16, f32)> = results.pack();
+
+// To name the columns (for a sidecar header, a fitter, a schema):
+let column_order: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
+//   column_order[i].id()  is the stable id; .name() is the snake_case string.
+```
+
+The emitted order is **stable across versions**: ids follow a
+retired-keeps-its-slot rule (a removed feature's id is never re-used, new
+features get fresh ids), so a vector packed by one zenanalyze version is
+re-readable by another via `AnalysisResults::from_packed`, and
+`AnalysisResults::require(set)` asserts a fixed input set is present (returns
+the missing ids rather than silently zero-filling). **Pin to a specific patch
+when you compile-in a fitted model** — feature *values* drift within a minor
+per the threshold contract, even though the id order doesn't.
+
+Because `SUPPORTED` membership depends on enabled cargo features, a model
+trained against the `experimental + hdr` 110-feature surface must be consumed by
+a build with the same features on. If you want a feature-flag-independent vector,
+request an explicit named set instead of `SUPPORTED`.
+
+**Per-codec subsets are cheaper.** A picker rarely needs all 97. Request only
+the features the model uses and the analyzer skips whole passes. The crate ships
+one such const — `FeatureSet::ZENJPEG_PICKER_V1_1` (8 features: `Variance`,
+`EdgeDensity`, `Uniformity`, `ChromaComplexity`, `CbSharpness`, `CrSharpness`,
+`HighFreqEnergyRatio`, `LumaHistogramEntropy`, ids `[0,1,2,3,4,5,19,20]`), which
+lets the analyzer skip the Tier 2, Palette, and Alpha passes entirely.
+
+### Reading individual feature values
+
+| accessor | behavior |
+|---|---|
+| `results.get(f)` | `Option<FeatureValue>` — `None` if `f` wasn't requested or its computation failed. The typed enum (`F32` / `U32` / `U64` / `Bool`). |
+| `results.get_f32(f)` | `Option<f32>` — **coerces** any type: `Bool(false) → 0.0`, `Bool(true) → 1.0`, `U32(n) → n as f32`. Never panics, never returns `NaN` for a present integral/bool value. `None` only when absent. This is what you want when building a flat vector. |
+| `FeatureValue::as_f32()` / `as_u32()` / `as_bool()` / `as_u64()` | strict typed access — `Some` **only** if the value is that exact variant, else `None`. Use when you know the underlying type and want a type mismatch to surface. |
+
+So for the non-f32 default features there is no guesswork: `get_f32(DistinctColorBins)`
+returns the count as an `f32` (e.g. `Some(412.0)`), and `get_f32(AlphaPresent)`
+returns `Some(0.0)` / `Some(1.0)`. For their native types use
+`get(DistinctColorBins).and_then(FeatureValue::as_u32)` (a `u32`) and
+`get(AlphaPresent).and_then(FeatureValue::as_bool)` (a `bool`).
+
 ## What it computes
 
-**Default features** (every codec gets these):
+The default surface is 97 features. The table below names the most commonly
+consumed ones with their **real `AnalysisFeature` variant identifiers** (no
+globs — every name is a literal variant). Enumerate the complete set in id order
+with `FeatureSet::SUPPORTED.iter()`.
 
-| Feature | Type | Description |
+| Feature(s) | Type | Description |
 |---|---|---|
 | `Variance` | f32 | Luma variance on the BT.601 [0, 255] scale. |
 | `EdgeDensity` | f32 | Fraction of sampled interior pixels with `\|∇L\| > 20`. |
 | `ChromaComplexity` | f32 | `√(Var(Cb) + Var(Cr))` over sampled pixels. |
-| `CbSharpness` / `CrSharpness` | f32 | Mean per-axis chroma gradient. |
+| `CbSharpness`, `CrSharpness` | f32 | Mean `\|∇Cb\|` / `\|∇Cr\|` over horizontally-paired sampled pixels. |
+| `CbHorizSharpness`, `CbVertSharpness`, `CbPeakSharpness` | f32 | Per-axis Cb chroma sharpness (horizontal / vertical / peak). |
+| `CrHorizSharpness`, `CrVertSharpness`, `CrPeakSharpness` | f32 | Per-axis Cr chroma sharpness (horizontal / vertical / peak). |
 | `Uniformity` | f32 | Fraction of 8×8 blocks with luma variance < 25. |
 | `FlatColorBlockRatio` | f32 | Fraction of 8×8 blocks with R/G/B ranges all ≤ 4. |
 | `DistinctColorBins` | u32 | Distinct 5-bit-per-channel RGB bins observed. |
-| `Cb*Sharpness` / `Cr*Sharpness` (Horiz/Vert/Peak) | f32 | Per-channel per-axis chroma sharpness. |
+| `PaletteFitsIn256`, `PaletteLog2Size` | bool, u32 | Palette-size signals (≤256 colours; log2 of the distinct count). |
 | `HighFreqEnergyRatio` | f32 | DCT AC energy ratio over sampled 8×8 luma blocks. |
 | `LumaHistogramEntropy` | f32 | Shannon entropy of a 32-bin luma histogram (bits). |
-| `AlphaPresent` / `AlphaUsedFraction` / `AlphaBimodalScore` | bool / f32 / f32 | Straight-alpha statistics. |
+| `GrayscaleScore` | f32 | Fraction of pixels with R≈G≈B (grayscale gap-filler; near-binary on true grayscale). |
+| `AlphaPresent`, `AlphaUsedFraction`, `AlphaBimodalScore` | bool, f32, f32 | Straight-alpha statistics. |
+| `AqMapMean`, `AqMapStd`, `AqMapP1/P5/P10/P50/P75/P90/P95/P99` | f32 | Adaptive-quant map statistics + percentiles. |
+| `NoiseFloorY`, `NoiseFloorUV` (+ Y/Uv percentile families) | f32 | Per-channel noise-floor estimates. |
+| `GradientFraction`, `GradientFractionSmooth`, `PatchFraction`, `PatchFractionFast` | f32 | Smooth-region / flat-patch fractions (large-DCT & screen-vs-photo signals). |
+| `SkinToneFraction`, `EdgeSlopeStdev` | f32 | Photo-vs-screen dispatch signals. |
+| `IsGrayscale` | bool | Hard grayscale flag. |
+| `PixelCount`, `MinDim`, `MaxDim`, `ChannelCount` | u32 | Geometry. `LogPixels`, `AspectMinOverMax`, … (f32) round these out. |
 
-**Behind the `experimental` cargo feature**, organised by what they drive:
+(The full id table — including the `QuantSurvival*`, `LaplacianVariance*`,
+`LogPaddedPixels*`, `ChromaLumaCovariance*`, `InfoWeight*`, `SpectralSlopeY`,
+`OrientationEnergyRatio`, `BlockMisalignment*` families — is enumerable from
+`FeatureSet::SUPPORTED`; each variant carries a one-line docstring on
+`AnalysisFeature`.)
+
+**Behind the `experimental` cargo feature** are only `Xyb444ColorLoss` /
+`XybBquarterChromaLoss` (XYB-vs-YCbCr and XYB chroma-subsampling discriminants)
+and the deprecated `PaletteDensity`. The rest of this section's
+formerly-experimental families are on the **default** surface now.
+
+The signals below are grouped by what they drive (all on the default surface
+unless noted):
 
 ### Codec-orchestrator gap-fillers
 
@@ -141,9 +250,10 @@ enumerate the surface without hand-listing variants.
 | `SkinToneFraction` | photo-vs-other dispatch (one-direction signal, AUC 0.80) — webp `Preset::Photo`, jxl perceptual presets, jpeg chroma-aware quant |
 | `EdgeSlopeStdev` | screen-vs-photo dispatch (AUC 0.84, second only to `PatchFraction`) — webp `Preset::Drawing` vs `Photo`, jxl modular vs VarDCT |
 
-### Source-direct HDR / wide-gamut / bit-depth tier
+### Source-direct HDR / wide-gamut / bit-depth tier (`hdr` feature)
 
-These read source samples without going through `RowConverter`, since
+These 10 features are gated behind the `hdr` cargo feature (ids 32–39, 46, 47).
+They read source samples without going through `RowConverter`, since
 `RowConverter` doesn't tonemap — a 4000-nit PQ source and a 100-nit-clipped
 SDR source would otherwise produce byte-identical RGB8 streams.
 
@@ -156,12 +266,17 @@ SDR source would otherwise produce byte-identical RGB8 streams.
 | `EffectiveBitDepth` | AVIF / JXL `bit_depth`, png `near_lossless_bits` (catches u8-promoted u16) |
 | `HdrPresent` | Composite "transfer claims HDR AND pixels are actually bright" — catches stale HDR flags |
 
-### Research-stage
+### Still-settling (`experimental` feature)
 
-`Colourfulness`, `LaplacianVariance`, `VarianceSpread`, `PaletteDensity`,
-`DctCompressibilityY`, `DctCompressibilityUV`, `PatchFraction`,
-`PaletteLog2Size`, `PaletteFitsIn256`. Numeric scale or definition may
-change in 0.1.x patches.
+Only three signals remain gated behind `experimental` because their structural
+definition is still being refined: `Xyb444ColorLoss` and `XybBquarterChromaLoss`
+(the XYB-vs-YCbCr and XYB chroma-subsampling discriminants for the zenjpeg colour
+picker) and `PaletteDensity` (deprecated, being retired). Numeric scale or
+definition of these may change between 0.2.x patches; opt in only if you
+re-validate. Everything else that used to live here — `Colourfulness`,
+`LaplacianVariance` (+ percentiles), `VarianceSpread`, `DctCompressibilityY/UV`,
+`PatchFraction`, `PaletteLog2Size`, `PaletteFitsIn256` — is now on the default
+surface.
 
 ## Descriptor-gap detection
 
@@ -223,7 +338,7 @@ Gamma 2.2 / Linear / PQ / HLG — to linear nits. Two views of the same
 source: the SDR-display view for trained thresholds, the source-direct view
 for HDR / wide-gamut signal.
 
-The `tier_depth` reference convention is stable across 0.1.x:
+The `tier_depth` reference convention is stable across the 0.2.x line:
 
 | Transfer | Linear 1.0 maps to | Convention |
 |---|---|---|
@@ -341,19 +456,27 @@ The full per-class distributions, ROC-AUC ranking for every feature,
 Spearman redundancy matrix, and the recalibration findings that were
 considered and rejected are recorded in
 [`docs/calibration-corpus-2026-04-27.md`](docs/calibration-corpus-2026-04-27.md).
-That file is the pre-0.1.0-ship empirical baseline; subsequent 0.1.x
-patches that drift numerics should compare against it.
+That file is the original pre-ship empirical baseline (it predates several
+features now on the default surface, and the four composite `*_likelihood`
+signals referenced in the table above were since retired); patches that drift
+numerics should compare against it.
 
 ## Threshold contract
 
-Numeric thresholds and normalisation scales drift during 0.1.x. Downstream
-consumers that compile-in fitted models (oracle decision trees, content
-selectors) must pin to a specific zenanalyze patch version and re-validate
-when they bump it.
+Numeric thresholds and normalisation scales drift between patch releases.
+Downstream consumers that compile-in fitted models (oracle decision trees,
+content selectors, MLPs) must pin to a specific zenanalyze patch version and
+re-validate when they bump it.
 
-**There is no 0.2.x.** Every change in 0.1.x is additive — new variants on
-`#[non_exhaustive]` enums, new parallel functions, never a signature change to
-a shipped item. See `CLAUDE.md`.
+**Versioning is standard 0.x semver on the 0.2.x line.** A *breaking* change to
+the library API (renaming/removing an item, changing a signature) bumps the
+minor (`0.2 → 0.3`); *additive* changes (new `AnalysisFeature` variants — the
+enum is `#[non_exhaustive]` — new functions, new consts) bump the patch (`0.2.0
+→ 0.2.1`); numeric/behavioural drift is allowed within a minor and is governed
+by this threshold contract. The wire format is independent of the semver
+version: `AnalysisFeature::id()` follows a retired-keeps-its-slot rule (ids are
+never re-used), so `pack()`/`from_packed` output round-trips across versions
+regardless of minor bumps.
 
 ## Test surface
 
