@@ -13,6 +13,22 @@
 
 ### Added
 
+### Fixed
+
+- **README: the flagship codec-picker example is now compilable and the
+  predict input/output contract is stated.** An insulated external-developer
+  test (given only the README) found the picker example uncompilable because
+  three types were never documented: the `from_bytes_with_schema` schema-hash
+  arg (`u64`), the `AllowedMask::new` element type (`&[bool]`), and the
+  `argmin_masked` return type (`Option<usize>`, a full-output-space index).
+  Also: stated that `predict`/`argmin_masked` take **raw** `&[f32]` features of
+  length `n_inputs()` (the embedded scaler standardizes internally) and that
+  `Predictor::new` borrows `&Model`; reconciled the contradictory alignment
+  guidance (`from_bytes` copies into an owned buffer, so `include_bytes!` needs
+  no `#[repr(C, align(16))]` and the input need not outlive the `Model` — but
+  the `Model` must outlive the `Predictor`); and pinned the `ArgminOffsets`
+  fields + `ScoreTransform::Exp` (log-domain) semantics. Docs-only.
+
 ## [0.2.0] - 2026-06-11
 
 First crates.io publish of the **ZNPR v3** format and the runtime /
