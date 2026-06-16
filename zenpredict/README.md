@@ -28,25 +28,64 @@ All version independently. The binary format (ZNPR v3) is the contract between t
 ```rust,ignore
 use zenpredict::{AllowedMask, ArgminOffsets, Model, Predictor, ScoreTransform};
 
-#[repr(C, align(16))]
-struct Aligned<const N: usize>([u8; N]);
-const MODEL: &[u8] = &Aligned(*include_bytes!("zenjpeg_picker_v3.bin")).0;
+// The bake compiled in. `Model::from_bytes*` copies it into an owned,
+// internally-aligned buffer (see "Alignment" below), so a plain
+// `include_bytes!` works as-is — the `#[repr(C, align(16))]` wrapper is
+// optional and only matters for the runtime-file-load path.
+const MODEL_BYTES: &[u8] = include_bytes!("zenjpeg_picker_v3.bin");
 
-let model = Model::from_bytes_with_schema(MODEL, MY_SCHEMA_HASH)?;
-let mut predictor = Predictor::new(model);
+// The schema hash is a plain `u64` chosen at bake time and stored in the
+// header. Compile-in the value the bake was produced with (read it via
+// `zenpredict-inspect`, or `model.schema_hash()` on a known-good build) so a
+// stale/mismatched bake fails loudly at load instead of silently mispicking.
+const MY_SCHEMA_HASH: u64 = 0x0123_4567_89ab_cdef;
 
-let features = my_codec::extract_features(&analysis, target_zq);
-let mask = AllowedMask::new(&my_codec::allowed_cells(&caller_constraints));
+// `Model` owns its copy of the bake. `Predictor` BORROWS the `Model`, so the
+// `Model` must outlive the `Predictor` (here both are locals; for a process-
+// wide singleton put the `Model` in a `static OnceLock<Model>`).
+let model: Model = Model::from_bytes_with_schema(MODEL_BYTES, MY_SCHEMA_HASH)?;
+let mut predictor = Predictor::new(&model); // note: &model — `new` takes `&Model`
 
-let pick = predictor.argmin_masked(
+// RAW features — pass them un-normalized. The bake's embedded scaler
+// standardizes internally (`x' = (x - mean) / scale`) before the first layer.
+// Length MUST equal `model.n_inputs()`, in the `zentrain.feature_columns`
+// order the bake was trained with (a wrong length is a `FeatureLenMismatch`).
+let features: Vec<f32> = my_codec::extract_features(&analysis, target_zq);
+
+// `AllowedMask::new` takes `&[bool]`: one flag per output/config cell, `true`
+// = "this config may be picked". It must be at least `model.n_outputs()` long
+// (a short mask panics). `&[true; N]` admits every cell.
+let allowed: Vec<bool> = my_codec::allowed_cells(&caller_constraints);
+let mask = AllowedMask::new(&allowed);
+
+// `Predictor::argmin_masked` runs the forward pass for `features`, then
+// argmins the outputs under the mask. Returns `Result<Option<usize>, _>`:
+//   - `Err(..)`   — bad feature length, offsets-length mismatch, etc.
+//   - `Ok(None)`  — no cell allowed by the mask (or every allowed cell scored
+//                   NaN) — fall back to a default config.
+//   - `Ok(Some(i))` — `i` indexes the FULL output space (same indexing as
+//                   `allowed` and the model's config table); map it back with
+//                   your own config table, e.g. `my_codec::CONFIGS[i]`.
+let pick: Option<usize> = predictor.argmin_masked(
     &features,
     &mask,
-    ScoreTransform::Exp,
+    ScoreTransform::Exp, // model emits log-bytes → exponentiate so argmin is
+                         // in raw-byte space and mixes with byte-space offsets
     Some(&ArgminOffsets {
+        // `uniform: f32` is added to every cell's post-transform score (same
+        // for all cells, so it can't change the pick on its own)...
         uniform: caller_icc_size as f32,
+        // ...but `per_output: Option<&[f32]>` (per-cell additive overhead,
+        // here per-config container/ICC bytes) can. When `Some`, its length
+        // must equal the argmin's working slice — full `n_outputs` here.
         per_output: Some(&FORMAT_OVERHEAD),
     }),
 )?;
+
+let config = match pick {
+    Some(i) => my_codec::CONFIGS[i], // the chosen encoder configuration
+    None => my_codec::DEFAULT_CONFIG, // mask admitted nothing — use a default
+};
 ```
 
 **Perceptual scorer** — single forward pass, read first output:
@@ -54,16 +93,40 @@ let pick = predictor.argmin_masked(
 ```rust,ignore
 use zenpredict::{Model, Predictor};
 
+// `predict` takes RAW features `&[f32]` of length `model.n_inputs()` (the
+// embedded scaler standardizes them) and returns `Result<&[f32], _>` borrowing
+// the predictor's internal output buffer (one f32 per model output). A scorer
+// bake has a single output, so index `[0]`. `include_bytes!` is fine —
+// `from_bytes` copies into an internally-aligned buffer.
 let model = Model::from_bytes(include_bytes!("zensim_v018.bin"))?;
-let mut predictor = Predictor::new(model);
-let distance = predictor.predict(&features)?[0];
+let mut predictor = Predictor::new(&model); // &model — `new` borrows the Model
+let distance: f32 = predictor.predict(&features)?[0];
 ```
+
+> **Picking from `predict` directly.** `Predictor::argmin_masked` is just
+> `predict` + `argmin::argmin_masked` rolled together. If you want the raw
+> scores too, call `predictor.predict(&features)?` to get `&[f32]`, then
+> `zenpredict::argmin::argmin_masked(scores, &mask, transform, offsets)` — that
+> free function returns the same `Option<usize>` (full-output-space index;
+> `None` when no cell is allowed). Same `ScoreTransform` / `ArgminOffsets`
+> semantics either way.
 
 ## Format (ZNPR v3)
 
-Fixed-shape `#[repr(C)]` header (128 bytes) + offset-table `LayerEntry[n_layers]` (48 bytes each) + aligned data sections + a typed-TLV metadata blob + optional `output_specs` / `discrete_sets` / `sparse_overrides` sections. Every weight slice is a zero-copy borrow into the input bytes — wrap `include_bytes!` in `#[repr(C, align(16))]` (see example above) to satisfy alignment.
+Fixed-shape `#[repr(C)]` header (128 bytes) + offset-table `LayerEntry[n_layers]` (48 bytes each) + aligned data sections + a typed-TLV metadata blob + optional `output_specs` / `discrete_sets` / `sparse_overrides` sections.
 
 Wire layout: [`src/model.rs`](src/model.rs) (byte-by-byte). Shared offset constants: [`src/wire.rs`](src/wire.rs). Detailed format notes: [`docs/ZNPR_V3.md`](docs/ZNPR_V3.md).
+
+### Alignment & lifetime
+
+`Model::from_bytes` / `from_bytes_with_schema` **copy the input into an owned, heap-allocated `Box<[u8]>`** at construction (decompressing first for a compressed bake). Two consequences:
+
+- **The input slice has no alignment requirement** — `include_bytes!(...)` can be passed straight to `from_bytes`. Misaligned input is *not* UB and does *not* panic; it's copied like any other. The `#[repr(C, align(16))]` wrapper used in some examples is therefore **optional** for the compile-in case.
+- **The input bytes do not need to outlive the `Model`.** The `Model` owns its copy; weight/scaler/metadata slices are zero-copy borrows into **`self.bytes`** (the owned buffer), not into the original input. You may drop the input immediately after `from_bytes` returns.
+
+The lifetime that *does* matter is the other one: **`Predictor<'a>` borrows `&'a Model`, so the `Model` must outlive the `Predictor`.** For a process-wide singleton, park the `Model` in a `static OnceLock<Model>` (it's `Send + Sync`) and give each thread its own `Predictor` over a `&'static Model` — no `Mutex` needed.
+
+One subtlety for the **runtime-file-load** path (`std::fs::read` → `Vec<u8>`): the owned buffer is cast in place to typed slices, and a `Vec<u8>` allocation isn't *guaranteed* to be 4/8-byte aligned. If the allocator ever hands back a misaligned buffer, the typed-slice cast fails cleanly with `PredictError::SectionMisaligned` (again, an error — never UB). In practice global allocators return ≥16-aligned blocks so this is rare, but if you hit it, re-align into a `u64`-backed buffer before parsing — see [`examples/load_baked_model.rs`](examples/load_baked_model.rs) for the pattern.
 
 Three weight dtypes:
 
@@ -81,7 +144,14 @@ Three value types: `bytes`, `utf8`, `numeric`. Numeric width is implied by `valu
 
 ## Decision math
 
-The `argmin` family is generic — it's "argmin over a slice with a boolean filter," not codec-specific. `ScoreTransform::Exp` lets log-domain regressors mix with linear-domain offsets when the codec wants raw-byte argmin. `ArgminOffsets` carries uniform + per-output additive offsets in the post-transform score space.
+The `argmin` family is generic — it's "argmin over a slice with a boolean filter," not codec-specific.
+
+- **`AllowedMask::new(&[bool])`** — one flag per output cell; `true` = pickable. Must be ≥ the scored slice length (a short mask panics in debug *and* release).
+- **`argmin_masked(...) -> Option<usize>`** (free fn) / **`Predictor::argmin_masked(...) -> Result<Option<usize>, _>`** (method, which runs `predict` first). `Some(i)` is an index into the **full output/config space** (the same indexing as the mask and your config table); `None` means no allowed cell (or all allowed cells scored NaN — NaN is silently skipped). Ties break to the **lowest index**. Use `*_in_range` to argmin over a sub-slice of the outputs (hybrid-heads bakes that pack `[bytes.., scalar1.., …]`); for those the returned index is into the sub-range.
+- **`ScoreTransform`** (applied per score *before* offsets and argmin): `Identity` (default — outputs are already in argmin-target space, e.g. perceptual distances) or `Exp` (the model emits **log-domain** values, typically log-bytes; `exp` brings them into raw-byte space so a byte-space `ArgminOffsets` table mixes correctly). `Exp` clamps its input to `[-30, 30]` and uses a true `exp` under both `std` and `no_std` (via `libm`), so the linear-space argmin is identical across build configs.
+- **`ArgminOffsets<'a>`** — additive cost adjustments in the post-transform score space, fields:
+  - `uniform: f32` — added to every cell's score. Same for all cells, so on its own it never changes the pick (e.g. caller-side ICC/EXIF overhead).
+  - `per_output: Option<&'a [f32]>` — per-cell additive (e.g. per-config container/ICC bytes). When `Some`, its length **must equal the argmin's working slice** (full `n_outputs` for `argmin_masked`, the sub-range length for `*_in_range`), else `PredictError::OffsetsLenMismatch`. This is the term that can actually shift the pick. Pass `None` (or `ArgminOffsets::uniform(x)` for uniform-only) when you have no per-cell table.
 
 Default-on: `argmin_masked`, `argmin_masked_in_range`.
 
