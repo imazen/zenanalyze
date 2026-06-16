@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ρ≥0.9 twins without gating features.
 - Trim published package contents: exclude benchmarks/, docs/, scripts/, tools/, zentrain/, .github/, and dev-only root markdown files from the `zenanalyze` crate tarball; exclude tests/, benches/ from `zenpredict-bake` and `zenpicker-train`; exclude fuzz/ and deny.toml from `zenpredict`. No Rust source, examples, or model bakes were touched.
 
+### Fixed
+
+- **README no longer contradicts itself on versioning and now defines the
+  picker output-vector shape** (docs only; found via an insulated
+  external-developer usability test). The prose claimed "There is no 0.2.x —
+  0.1.x forever, additive only" while the crate is on `0.2.0`; replaced with the
+  actual 0.2.x semver policy. Added a "The picker feature vector" section
+  documenting `FeatureSet::SUPPORTED` (97 default / 100 `experimental` / 110
+  `experimental + hdr`) as the canonical set, `AnalysisFeature::id()`-ascending
+  column order, and `AnalysisResults::pack()` as the emit method. Corrected the
+  stale "experimental gates AqMap*/NoiseFloor*/etc." and "108-feature set"
+  claims to match the 2026-06-13 promotion (experimental now scopes to
+  `Xyb444ColorLoss` / `XybBquarterChromaLoss` / `PaletteDensity`). Documented
+  the `zenpixels = "0.2.11"` direct dep needed to name `source_descriptor()`'s
+  return type, `get_f32`'s coercion of bool/u32 values, and the real
+  `Cb/Cr*Sharpness` variant identifiers (was globbed).
+
 ### Added
 
 - Versioned public-API surface snapshots at `docs/public-api/<crate>.txt`
