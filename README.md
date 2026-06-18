@@ -160,6 +160,56 @@ let column_order: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
 //   column_order[i].id()  is the stable id; .name() is the snake_case string.
 ```
 
+### Low-coupling picker boundary
+
+Use `analyze_features` / `AnalysisResults::pack()` when the caller is already a
+zenanalyze-aware tool, trainer, or test harness. Use the `feature_*` facade when
+the caller is a codec crate that wants to ship a baked `zenpredict` model without
+leaking zenanalyze's typed API through its own public surface.
+
+That facade keeps the cross-crate contract to primitive schema data:
+
+- `u16` feature ids define the model input columns.
+- `f32` values fill the input vector.
+- Unknown, retired, cfg-disabled, or image-undefined ids become `f32::NAN`.
+- The codec still owns its model `schema_hash` check; `feature_count()` is only a
+  sizing helper for the current build.
+
+```rust
+// Stored next to the baked model, or derived from model metadata at load time.
+const MODEL_FEATURE_IDS: &[u16] = &[0, 1, 2, 19, 20];
+
+let mut input = vec![0.0f32; MODEL_FEATURE_IDS.len()];
+if !zenanalyze::feature_vector(slice, MODEL_FEATURE_IDS, &mut input) {
+    // invalid pixel slice / conversion failure / output buffer too small
+    return Err(MyPickerError::FeatureExtraction);
+}
+
+let decision = predictor.predict(&input)?;
+```
+
+For the common packed-8-bit case, `feature_vector_packed8` avoids naming
+`zenpixels::PixelSlice` at the codec picker boundary:
+
+```rust
+let mut input = vec![0.0f32; MODEL_FEATURE_IDS.len()];
+let ok = zenanalyze::feature_vector_packed8(
+    rgb_or_rgba_bytes,
+    width,
+    height,
+    row_stride_bytes, // 0 means tightly packed
+    channels,         // 1 gray, 3 RGB, 4 RGBA
+    MODEL_FEATURE_IDS,
+    &mut input,
+);
+```
+
+For higher bit depth, non-sRGB transfer functions, wide-gamut descriptors, or
+HDR feature ids, build a `zenpixels::PixelSlice` and call `feature_vector`. The
+typed zenanalyze API remains available, but codec crates do not need to re-export
+`AnalysisFeature`, `FeatureSet`, `AnalysisQuery`, or `AnalysisResults` just to
+run inference.
+
 The emitted order is **stable across versions**: ids follow a
 retired-keeps-its-slot rule (a removed feature's id is never re-used, new
 features get fresh ids), so a vector packed by one zenanalyze version is

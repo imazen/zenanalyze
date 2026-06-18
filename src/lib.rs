@@ -33,6 +33,15 @@
 //!   `zenpixels` descriptor: RGBA/BGRA u8/u16, GRAY u8/u16, RGB/RGBA
 //!   f32 linear, PQ/HLG/Bt709, BT.709/DisplayP3/BT.2020/AdobeRGB).
 //! - [`analyze_features_rgb8`] — convenience for packed RGB8 buffers.
+//! - [`feature_vector`] / [`feature_vector_all`] and
+//!   [`feature_vector_packed8`] / [`feature_vector_packed8_all`] — low-coupling
+//!   picker-facing facade. These functions use stable `u16` feature ids and
+//!   caller-owned `&mut [f32]` buffers instead of exposing
+//!   [`feature::AnalysisQuery`], [`feature::AnalysisResults`],
+//!   [`feature::FeatureSet`], or [`feature::AnalysisFeature`] in downstream
+//!   codec signatures. Use them when a codec wants to ship a baked
+//!   `zenpredict` model without re-exporting zenanalyze's typed analysis API
+//!   through its own public surface.
 //!
 //! # Composition pattern
 //!
@@ -551,11 +560,12 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     // Suppress unused-var warning when hdr is off.
     let _ = run_depth;
 
-    // Linear-light Variance override (prototype, opt-in). Computed source-direct
-    // BEFORE `slice` is moved into the RowStream (like the depth tier), so it can
-    // linearize the original pixels. `None` for non-RGB8 layouts → keep gamma.
+    // Diffuse-white-normalized linear-light Variance override (opt-in). Computed
+    // BEFORE `slice` is moved into the RowStream (so it sees the original samples
+    // + ColorContext anchor), via zenpixels-convert → RGBF32_LINEAR + the
+    // diffuse-white scale. Handles any format / bit depth / HDR transfer.
     let linear_variance = if run_linear_light {
-        linear_tier::linear_variance_rgb8(&slice, pixel_budget)
+        linear_tier::linear_variance(&slice, pixel_budget)
     } else {
         None
     };
@@ -846,6 +856,472 @@ pub fn try_analyze_features_rgb8(
     analyze_features(slice, query)
 }
 
+// ============================================================================
+// Feature-vector API for the codec-picking crate tree
+// ============================================================================
+//
+// This facade is deliberately lower-coupling than `analyze_features`. Codec
+// crates can keep their public picker/config APIs in terms of primitive schema
+// data (`u16` feature ids + `f32` vectors) instead of re-exporting or naming
+// zenanalyze's typed analysis surface. That avoids making codec semver depend
+// on `AnalysisQuery`, `AnalysisResults`, `FeatureSet`, or `AnalysisFeature`
+// appearing in their public signatures.
+//
+// The general entry points still take the shared `PixelSlice` type because
+// zenpixels is the common pixel currency across the zen tree. That preserves
+// the full image contract: u8/u16/f32, RGB/RGBA/BGRA/gray, explicit stride,
+// transfer/primaries, and HDR. The packed8 helpers are raw-byte conveniences for
+// the common std-only buffer case.
+
+/// Number of features the canonical vector carries in this build — every feature
+/// [`feature::FeatureSet::SUPPORTED`] computes.
+///
+/// This count is build-feature dependent (`experimental` / `hdr` add columns)
+/// but stable within a build and equal to the number of ids [`feature_ids`]
+/// writes. Codecs that compile in a baked model should store/check the model's
+/// schema hash separately; this count is a sizing helper, not a compatibility
+/// proof.
+pub fn feature_count() -> usize {
+    feature::FeatureSet::SUPPORTED.iter().count()
+}
+
+/// Write the canonical feature ids — the order [`feature_vector_packed8_all`]
+/// fills — into `out`, returning how many were written. Align a model's input
+/// schema to this order. If `out` is shorter than [`feature_count`] it's filled
+/// to its length and the truncated count returned.
+///
+/// The ids are the low-coupling schema contract. Downstream crates can persist
+/// or embed these ids without naming [`feature::AnalysisFeature`] in their own
+/// public API.
+pub fn feature_ids(out: &mut [u16]) -> usize {
+    let mut n = 0;
+    for f in feature::FeatureSet::SUPPORTED.iter() {
+        if n >= out.len() {
+            break;
+        }
+        out[n] = f.id();
+        n += 1;
+    }
+    n
+}
+
+/// Stable snake_case name for a feature id, or `None` if no feature in this build
+/// has that id (retired / cfg-disabled / unknown).
+pub fn feature_name(id: u16) -> Option<&'static str> {
+    feature::AnalysisFeature::from_u16(id).map(|f| f.name())
+}
+
+/// Whether this build computes the feature with the given stable id.
+pub fn feature_id_supported(id: u16) -> bool {
+    match feature::AnalysisFeature::from_u16(id) {
+        Some(f) => feature::FeatureSet::SUPPORTED.contains(f),
+        None => false,
+    }
+}
+
+/// Extract a **model-aligned** feature vector from any [`PixelSlice`] into `out`.
+/// `out[i]` receives the feature whose stable id is `ids[i]` (`f32::NAN` for an
+/// id unknown in this build or undefined for the image). Only the analyzer
+/// passes the requested ids need are run.
+///
+/// Works on **any bit depth / format the slice carries** — u8 / u16 / f32,
+/// RGB / RGBA / BGRA / gray, sRGB / linear / PQ / HLG, SDR or HDR. HDR / wide-
+/// gamut / bit-depth features (ids 32–39, 46, 47) are computed from the source
+/// samples and require the `hdr` cargo feature; without it those ids read back
+/// `NaN`. Returns `false` (leaving `out` untouched) when `out.len() < ids.len()`
+/// or the analyzer's row conversion fails.
+///
+/// This is the preferred entry point for codec crates that already traffic in
+/// `zenpixels` image descriptors. It keeps the codec's picker boundary to
+/// `&[u16]` + `&mut [f32]`: callers do not need to import, re-export, or expose
+/// zenanalyze's typed feature/query/result API.
+///
+/// Feed `out[..ids.len()]` straight to `zenpredict::Predictor::predict`.
+pub fn feature_vector(slice: PixelSlice<'_>, ids: &[u16], out: &mut [f32]) -> bool {
+    if out.len() < ids.len() {
+        return false;
+    }
+    // Minimal FeatureSet covering the requested ids — gates the passes.
+    let mut fs = feature::FeatureSet::new();
+    for &id in ids {
+        if let Some(f) = feature::AnalysisFeature::from_u16(id) {
+            fs = fs.with(f);
+        }
+    }
+    let query = feature::AnalysisQuery::new(fs);
+    let Ok(results) = analyze_features(slice, &query) else {
+        return false;
+    };
+    for (i, &id) in ids.iter().enumerate() {
+        out[i] = feature::AnalysisFeature::from_u16(id)
+            .and_then(|f| results.get_f32(f))
+            .unwrap_or(f32::NAN);
+    }
+    true
+}
+
+/// Extract the **full canonical** feature vector (every supported feature, in
+/// [`feature_ids`] order) from any [`PixelSlice`]. `out.len()` must be `>=`
+/// [`feature_count`]. Same bit-depth generality and return-value contract as
+/// [`feature_vector`].
+pub fn feature_vector_all(slice: PixelSlice<'_>, out: &mut [f32]) -> bool {
+    if out.len() < feature_count() {
+        return false;
+    }
+    let query = feature::AnalysisQuery::new(feature::FeatureSet::SUPPORTED);
+    let Ok(results) = analyze_features(slice, &query) else {
+        return false;
+    };
+    for (i, f) in feature::FeatureSet::SUPPORTED.iter().enumerate() {
+        out[i] = results.get_f32(f).unwrap_or(f32::NAN);
+    }
+    true
+}
+
+/// Packed 8-bit descriptor for a channel count: 1 = gray, 3 = RGB, 4 = RGBA.
+fn descriptor_for_channels(channels: u8) -> Option<PixelDescriptor> {
+    match channels {
+        1 => Some(PixelDescriptor::GRAY8_SRGB),
+        3 => Some(PixelDescriptor::RGB8_SRGB),
+        4 => Some(PixelDescriptor::RGBA8_SRGB),
+        _ => None,
+    }
+}
+
+/// Build a `PixelSlice` over packed 8-bit `bytes`. `row_stride == 0` ⇒ tightly
+/// packed (`width * channels`); a non-zero stride must be pixel-aligned.
+fn packed8_slice(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    row_stride: usize,
+    channels: u8,
+) -> Option<PixelSlice<'_>> {
+    let desc = descriptor_for_channels(channels)?;
+    let stride = if row_stride == 0 {
+        width as usize * channels as usize
+    } else {
+        row_stride
+    };
+    PixelSlice::new(bytes, width, height, stride, desc).ok()
+}
+
+/// Raw-bytes convenience for [`feature_vector`] on packed 8-bit pixels.
+///
+/// This is the std-only-buffer shape for callers that do not want `PixelSlice`
+/// in their own picker plumbing. It builds a `PixelSlice` internally:
+/// `channels` 1 (gray) / 3 (RGB) / 4 (RGBA),
+/// `row_stride` bytes per row (`0` ⇒ packed). Returns `false` on an unsupported
+/// channel count, a misaligned/too-small buffer, or `out.len() < ids.len()`.
+/// **8-bit only** — for higher bit depth (u16 / f32) or other formats, build a
+/// [`PixelSlice`] and use [`feature_vector`].
+pub fn feature_vector_packed8(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    row_stride: usize,
+    channels: u8,
+    ids: &[u16],
+    out: &mut [f32],
+) -> bool {
+    match packed8_slice(bytes, width, height, row_stride, channels) {
+        Some(slice) => feature_vector(slice, ids, out),
+        None => false,
+    }
+}
+
+/// Raw-bytes convenience for [`feature_vector_all`] on packed 8-bit pixels.
+///
+/// Same `channels` / `row_stride` contract as [`feature_vector_packed8`];
+/// **8-bit only** (use [`feature_vector`] with a [`PixelSlice`] for higher bit
+/// depth).
+pub fn feature_vector_packed8_all(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    row_stride: usize,
+    channels: u8,
+    out: &mut [f32],
+) -> bool {
+    match packed8_slice(bytes, width, height, row_stride, channels) {
+        Some(slice) => feature_vector_all(slice, out),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 #[allow(deprecated)] // tests cover composites variants slated for removal next major
 mod tests;
+
+#[cfg(test)]
+mod feature_vector_tests {
+    use super::*;
+    use feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+
+    fn rgb8_image(w: u32, h: u32) -> Vec<u8> {
+        let mut v = vec![0u8; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let p = ((y * w + x) * 3) as usize;
+                v[p] = (x % 256) as u8;
+                v[p + 1] = (y % 256) as u8;
+                v[p + 2] = ((x + y) % 256) as u8;
+            }
+        }
+        v
+    }
+
+    /// The full canonical vector equals the typed `get_f32` extraction, in the
+    /// same order — the core API is a faithful facade, not a reimplementation.
+    #[test]
+    fn full_vector_matches_typed_extraction() {
+        let (w, h) = (96u32, 64u32);
+        let img = rgb8_image(w, h);
+        let mut vec = vec![0.0f32; feature_count()];
+        assert!(feature_vector_packed8_all(&img, w, h, 0, 3, &mut vec));
+
+        let results = analyze_features_rgb8(&img, w, h, &AnalysisQuery::new(FeatureSet::SUPPORTED));
+        for (i, f) in FeatureSet::SUPPORTED.iter().enumerate() {
+            let typed = results.get_f32(f).unwrap_or(f32::NAN);
+            let a = vec[i];
+            assert!(
+                (a.is_nan() && typed.is_nan()) || a == typed,
+                "feature {} ({}): vector {a} != typed {typed}",
+                f.id(),
+                f.name()
+            );
+        }
+    }
+
+    /// Model-aligned extraction returns exactly the requested ids, in order.
+    #[test]
+    fn ids_aligned_returns_requested_order() {
+        let (w, h) = (80u32, 48u32);
+        let img = rgb8_image(w, h);
+        let ids = [
+            AnalysisFeature::EdgeDensity.id(),
+            AnalysisFeature::Variance.id(),
+            AnalysisFeature::Uniformity.id(),
+        ];
+        let mut out = [0.0f32; 3];
+        assert!(feature_vector_packed8(&img, w, h, 0, 3, &ids, &mut out));
+
+        let results = analyze_features_rgb8(&img, w, h, &AnalysisQuery::new(FeatureSet::SUPPORTED));
+        for (i, &id) in ids.iter().enumerate() {
+            let f = AnalysisFeature::from_u16(id).unwrap();
+            assert_eq!(out[i], results.get_f32(f).unwrap(), "{}", f.name());
+        }
+    }
+
+    /// Unknown ids → NaN (not an error); the rest still fill.
+    #[test]
+    fn unknown_id_is_nan() {
+        let (w, h) = (32u32, 32u32);
+        let img = rgb8_image(w, h);
+        let ids = [AnalysisFeature::Variance.id(), 60000u16];
+        let mut out = [1.0f32; 2];
+        assert!(feature_vector_packed8(&img, w, h, 0, 3, &ids, &mut out));
+        assert!(out[0].is_finite());
+        assert!(out[1].is_nan());
+    }
+
+    /// Invalid input → `false`, never panics.
+    #[test]
+    fn invalid_input_returns_false() {
+        let img = rgb8_image(16, 16);
+        let mut out = vec![0.0f32; feature_count()];
+        assert!(!feature_vector_packed8_all(&img, 16, 16, 0, 2, &mut out)); // bad channels
+        assert!(!feature_vector_packed8_all(
+            &img,
+            16,
+            16,
+            0,
+            3,
+            &mut out[..1]
+        )); // out too small
+        assert!(!feature_vector_packed8_all(&img, 999, 999, 0, 3, &mut out)); // buffer too small for dims
+        let ids = [0u16];
+        assert!(!feature_vector_packed8(&img, 16, 16, 0, 3, &ids, &mut [])); // out < ids
+    }
+
+    /// RGBA8 input is accepted (alpha-aware features populate, no panic).
+    #[test]
+    fn rgba8_accepted() {
+        let (w, h) = (40u32, 40u32);
+        let mut img = vec![0u8; (w * h * 4) as usize];
+        for (i, px) in img.chunks_exact_mut(4).enumerate() {
+            px[0] = (i % 256) as u8;
+            px[1] = 128;
+            px[2] = 64;
+            px[3] = if i % 2 == 0 { 255 } else { 100 }; // varying alpha
+        }
+        let mut out = vec![0.0f32; feature_count()];
+        assert!(feature_vector_packed8_all(&img, w, h, 0, 4, &mut out));
+    }
+
+    /// Metadata is self-consistent and aligns the vector.
+    #[test]
+    fn metadata_consistency() {
+        let n = feature_count();
+        let mut ids = vec![0u16; n];
+        assert_eq!(feature_ids(&mut ids), n);
+        // ids match the SUPPORTED iteration order, names resolve, all supported.
+        for (i, f) in FeatureSet::SUPPORTED.iter().enumerate() {
+            assert_eq!(ids[i], f.id());
+            assert_eq!(feature_name(ids[i]), Some(f.name()));
+            assert!(feature_id_supported(ids[i]));
+        }
+        assert!(!feature_id_supported(60000));
+        assert_eq!(feature_name(60000), None);
+    }
+
+    /// Explicit row stride (padded rows) gives the same result as packed.
+    #[test]
+    fn explicit_stride_matches_packed() {
+        let (w, h) = (50u32, 30u32);
+        let packed = rgb8_image(w, h);
+        let pad = 12usize; // must keep stride pixel-aligned (multiple of bpp=3)
+        let stride = w as usize * 3 + pad;
+        let mut padded = vec![7u8; stride * h as usize];
+        for y in 0..h as usize {
+            let src = &packed[y * w as usize * 3..(y + 1) * w as usize * 3];
+            padded[y * stride..y * stride + w as usize * 3].copy_from_slice(src);
+        }
+        let mut a = vec![0.0f32; feature_count()];
+        let mut b = vec![0.0f32; feature_count()];
+        assert!(feature_vector_packed8_all(&packed, w, h, 0, 3, &mut a));
+        assert!(feature_vector_packed8_all(&padded, w, h, stride, 3, &mut b));
+        for i in 0..a.len() {
+            assert!(
+                (a[i].is_nan() && b[i].is_nan()) || a[i] == b[i],
+                "feature {i}: packed {} != strided {}",
+                a[i],
+                b[i]
+            );
+        }
+    }
+
+    /// The `PixelSlice` primary path equals the packed-8-bit convenience for
+    /// the same RGB8 bytes (the convenience is a thin wrapper).
+    #[test]
+    fn pixelslice_path_matches_packed8() {
+        let (w, h) = (72u32, 56u32);
+        let img = rgb8_image(w, h);
+        let slice =
+            PixelSlice::new(&img, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+        let mut a = vec![0.0f32; feature_count()];
+        let mut b = vec![0.0f32; feature_count()];
+        assert!(feature_vector_all(slice, &mut a));
+        assert!(feature_vector_packed8_all(&img, w, h, 0, 3, &mut b));
+        for i in 0..a.len() {
+            assert!(
+                (a[i].is_nan() && b[i].is_nan()) || a[i] == b[i],
+                "feature {i}"
+            );
+        }
+    }
+
+    /// Higher bit depth: a u16 RGB16 source is accepted (proving the API isn't
+    /// 8-bit-bound — it inherits PixelSlice's bit-depth generality), and a
+    /// lossless 8→16 promotion `(c<<8)|c` reads back the same SDR features as
+    /// the 8-bit original (the converter narrows both to the same RGB8).
+    #[test]
+    fn u16_source_matches_8bit_promotion() {
+        use feature::{AnalysisFeature, FeatureSet};
+        let (w, h) = (64u32, 48u32);
+        let img8 = rgb8_image(w, h);
+        let u16s: Vec<u16> = img8.iter().map(|&c| ((c as u16) << 8) | c as u16).collect();
+        let bytes16: Vec<u8> = u16s.iter().flat_map(|&v| v.to_ne_bytes()).collect();
+        let s16 = PixelSlice::new(
+            &bytes16,
+            w,
+            h,
+            (w * 6) as usize,
+            PixelDescriptor::RGB16_SRGB,
+        )
+        .unwrap();
+        let s8 =
+            PixelSlice::new(&img8, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+
+        // SDR *content* features only. Exclude the depth tier (needs the `hdr`
+        // feature) and `BitmapBytes` (source byte count — legitimately 2× for a
+        // 16-bit source; it's format metadata, not content).
+        let ids: Vec<u16> = FeatureSet::SUPPORTED
+            .iter()
+            .filter(|f| !feature::DEPTH_FEATURES.contains(*f) && *f != AnalysisFeature::BitmapBytes)
+            .map(AnalysisFeature::id)
+            .collect();
+        let mut a = vec![0.0f32; ids.len()];
+        let mut b = vec![0.0f32; ids.len()];
+        assert!(feature_vector(s16, &ids, &mut a), "u16 RGB16 accepted");
+        assert!(feature_vector(s8, &ids, &mut b));
+        for i in 0..ids.len() {
+            assert!(
+                (a[i].is_nan() && b[i].is_nan())
+                    || (a[i] - b[i]).abs() <= 1e-4 * a[i].abs().max(1.0),
+                "feature id {}: u16 {} vs u8 {}",
+                ids[i],
+                a[i],
+                b[i]
+            );
+        }
+    }
+
+    /// SDR content carried inside an HDR (PQ) envelope ≡ SDR-normal, through the
+    /// **diffuse-white-normalized linear path** (`with_linear_light`). Same scene,
+    /// SDR-white at the BT.2408 diffuse-white level (203 nits) in PQ. The
+    /// normalization (anchor → 1.0, no tone curve) makes the Variance match by
+    /// construction. The default gamma path does NOT hold — it treats the PQ peak
+    /// (10000 nits) as display white and crushes the content to near-black; the
+    /// second half of this test pins that contrast. (Other content features join
+    /// as their linear kernels land; today the linear path normalizes Variance.)
+    #[test]
+    fn sdr_in_hdr_envelope_matches_sdr_normal() {
+        use feature::{AnalysisFeature as AF, AnalysisQuery, FeatureSet};
+        use linear_srgb::tf::{linear_to_pq, srgb_to_linear};
+        use zenpixels::TransferFunction;
+
+        let (w, h) = (96u32, 64u32);
+        let sdr = rgb8_image(w, h);
+
+        // The SAME content as PQ u16, SDR-white anchored at diffuse white.
+        const DIFFUSE_NITS: f32 = 203.0;
+        const PQ_PEAK_NITS: f32 = 10000.0;
+        let pq16: Vec<u16> = sdr
+            .iter()
+            .map(|&c| {
+                let lin = srgb_to_linear(c as f32 / 255.0); // SDR white → 1.0
+                let pq = linear_to_pq(lin * DIFFUSE_NITS / PQ_PEAK_NITS);
+                (pq.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16
+            })
+            .collect();
+        let pq_bytes: Vec<u8> = pq16.iter().flat_map(|&v| v.to_ne_bytes()).collect();
+
+        let mk_sdr =
+            || PixelSlice::new(&sdr, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+        let hdr_desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+        let mk_hdr = || PixelSlice::new(&pq_bytes, w, h, (w * 6) as usize, hdr_desc).unwrap();
+        let var = |slice, ll: bool| {
+            let q = AnalysisQuery::new(FeatureSet::just(AF::Variance));
+            let q = if ll { q.with_linear_light(true) } else { q };
+            analyze_features(slice, &q)
+                .unwrap()
+                .get_f32(AF::Variance)
+                .unwrap()
+        };
+
+        // Normalized linear light: SDR-in-HDR ≡ SDR-normal.
+        let (ls, lh) = (var(mk_sdr(), true), var(mk_hdr(), true));
+        assert!(
+            (ls - lh).abs() <= 0.02 * ls.abs().max(1.0),
+            "linear-light: SDR-in-HDR Variance {lh} must match SDR-normal {ls}"
+        );
+        // Default gamma path: the PQ envelope collapses to near-black — the bug
+        // the normalization fixes.
+        let (gs, gh) = (var(mk_sdr(), false), var(mk_hdr(), false));
+        assert!(
+            gh < 0.2 * gs,
+            "gamma path should crush the PQ envelope: hdr {gh} vs sdr {gs}"
+        );
+    }
+}
