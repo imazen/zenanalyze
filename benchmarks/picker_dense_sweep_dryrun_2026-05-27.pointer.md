@@ -20,7 +20,7 @@ files live on block storage, NOT in git (CLAUDE.md >30 KB rule).
 - Source pool: `/mnt/v/input/zensim/sources/` (17,083 PNGs; 512sq variants)
 - zenmetrics commit (sweep tooling): `aa3be124`
 - zenanalyze commit (picker + scripts): see this commit
-- zen-metrics built with `--features sweep,gpu,gpu-cuda`; local RTX 5070 CUDA
+- zenmetrics built with `--features sweep,gpu,gpu-cuda`; local RTX 5070 CUDA
 - score_zensim = batch ssim2-gpu (reach-ladder; zensim metric has a
   photo-content non-monotonicity defect — see methodology doc)
 

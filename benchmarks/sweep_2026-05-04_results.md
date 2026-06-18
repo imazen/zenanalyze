@@ -1,10 +1,10 @@
-# zen-metrics sweep — 2026-05-04 results
+# zenmetrics sweep — 2026-05-04 results
 
 External codec-driving Pareto sweep across the
 `zentrain-corpus/mlp-tune-fast` corpus (587 source images, 247 MB,
 deduped via behavioural clustering). Driven by the new
-`zen-metrics sweep` subcommand
-([`zen-metrics-cli` 0.3.0](https://github.com/imazen/turbo-metrics/releases/tag/zen-metrics-v0.3.0))
+`zenmetrics sweep` subcommand
+([`zenmetrics-cli` 0.3.0](https://github.com/imazen/turbo-metrics/releases/tag/zen-metrics-v0.3.0))
 hitting each codec's published encoder API + `__expert` knobs from
 outside the codec source tree (no in-codec picker glue, no `.bin`
 shipped alongside encoders).
@@ -55,7 +55,7 @@ image_path codec q knob_tuple_json encoded_bytes encode_ms decode_ms \
     score_zensim score_ssim2 score_dssim
 ```
 
-The metric column names match `zen-metrics-cli`'s
+The metric column names match `zenmetrics-cli`'s
 `MetricKind::column_name()` so existing Pareto/picker tooling
 consumes them without reshape.
 
@@ -102,7 +102,7 @@ a fresh SKU should boot cleanly.
 1. Build the sweep CLI from
    [`zen-metrics-v0.3.0`](https://github.com/imazen/turbo-metrics/releases/tag/zen-metrics-v0.3.0):
    ```bash
-   cargo build --release -p zen-metrics-cli --features sweep
+   cargo build --release -p zenmetrics-cli --features sweep
    ```
 2. Generate the JSONL chunk list:
    ```bash
@@ -126,7 +126,7 @@ a fresh SKU should boot cleanly.
   (the existing `butteraugli-gpu` works on wgpu/CUDA) or accept the
   longer wall-clock. The CLI already wires `--metric butteraugli`.
 * Densify the q-grid back to the 19-step `5,10,…,95` schedule once a
-  GPU backend is online (zen-metrics CLI's `gpu-wgpu` build produces
+  GPU backend is online (zenmetrics CLI's `gpu-wgpu` build produces
   a matching `*-linux-x86_64-cuda` artifact via `--features
   gpu,gpu-wgpu`).
 * Add `zenjpeg` to the codec set once `zenjpeg 0.8.4` (with

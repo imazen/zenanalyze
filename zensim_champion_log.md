@@ -9485,7 +9485,7 @@ correctly. Zero within-curve reversals to fix.
 | AIC-4 | 10.0 pts/curve | none | no-op |
 
 **Soft-iso's use case is now precisely defined**: dense codec-sweep
-evaluation (e.g., zen-metrics batch over a full q-curve per image).
+evaluation (e.g., zenmetrics batch over a full q-curve per image).
 Doesn't help on human-rated evaluation corpora where curves are
 sparser and naturally cleaner.
 
@@ -13423,7 +13423,7 @@ explicitly indexed as either "canonical" or "superseded".
 **Tick log accumulated**: this is tick 481. The cron-driven /loop
 4m has produced 39 ticks over the past ~3 hours (442 → 481), most
 of which advanced the comparison-site build OR corrected the
-zen-metrics-CLI V0_2-mislabeling cascade.
+zenmetrics-CLI V0_2-mislabeling cascade.
 
 The recovery cycle (started 2026-05-10) is now CLOSED on cycle 6:
 - 2026-05-10 cycle 5: V0_5 stays ship
@@ -13579,7 +13579,7 @@ entry. Documents:
 - The TRUE V0_16 cross-corpus picture (wins fast-ssim2 by +0.0024
   to +0.0048 on AIC-3 / AIC-4 / CID22).
 - Per-codec scorecard (14 wins/ties of 21 across 3 corpora).
-- The zen-metrics-CLI bug that mislabeled V0_2 outputs as V0_16 in
+- The zenmetrics-CLI bug that mislabeled V0_2 outputs as V0_16 in
   ticks 455-462; correction documented and the TRUE V0_16 numbers
   are now in the parquets.
 - Comparison-site state: 5 parquets in-repo, 4 V_X bakes shipped,
@@ -13805,7 +13805,7 @@ AIC-4 | 300 | V0_2 0.9107 | V0_4 0.9175 | ssim2 0.9127 | butter 0.8652 |
 **V0_16 wins fast-ssim2 on ALL THREE corpora.** Goal #1 (match-or-
 exceed fast-ssim2) is EMPIRICALLY MET on every public corpus we
 ship parquets for. The earlier AIC-3/AIC-4 ticks reporting V0_16
-"tied" or "lost" were V0_2 numbers (zen-metrics CLI bug).
+"tied" or "lost" were V0_2 numbers (zenmetrics CLI bug).
 
 **Cross-corpus pattern revisited** (CORRECTED):
 
@@ -13866,7 +13866,7 @@ CID22 (n=4292): | V0_2 0.8676 | V0_4 0.8919 | ssim2 0.8895 | butter 0.7412 |
 **Merged into cid22.parquet**: new `score_zensim_v0_16` column
 holds the TRUE V0_4-bake distance (V0_16 MLP path output). The
 existing `score_zensim` column stays as V0_2 output for clarity
-about what zen-metrics CLI emits.
+about what zenmetrics CLI emits.
 
 Verified post-merge: `score_zensim_v0_16` SROCC vs MCOS on n=4292
 = **0.8919** — matches the harness directly, confirms the merge is
@@ -13874,7 +13874,7 @@ correct (rank-preserving).
 
 **Site update** (`compare.js`):
 - `score_zensim` relabeled "zensim V0_2 linear (sweep-time /
-  zen-metrics CLI default)" so users aren't misled about what it is.
+  zenmetrics CLI default)" so users aren't misled about what it is.
 - `score_zensim_v0_16` added as a Y-axis option: "zensim V0_16 SHIP
   (TRUE MLP via dataset_metric_baseline)" — the goal-#1-satisfying
   number renders directly from the parquet column.
@@ -13900,7 +13900,7 @@ Big retraction. After tick 472 published "V0_16 trails fast-ssim2 by
 measurement bug:
 
 **`ZensimProfile::latest()` in `zensim/src/profile.rs:48-50` returns
-`Self::PreviewV0_2`**, NOT `PreviewV0_4`. So `zen-metrics batch
+`Self::PreviewV0_2`**, NOT `PreviewV0_4`. So `zenmetrics batch
 --metric zensim` (which uses `Zensim::new(ZensimProfile::latest())`)
 runs the V0_2 LINEAR weights, not the V0_16 trained MLP.
 
@@ -13917,9 +13917,9 @@ predecessor. This is confirmed by:
 |---|---:|---|
 | **zensim V0_16 (MLP)**     | **0.8919** | dataset_metric_baseline + v0_16 bake |
 | fast-ssim2-gpu             | 0.8895 | both harnesses agree |
-| dssim-gpu                  | 0.8722 | zen-metrics |
-| V0_2 (linear, ≠ V0_16)     | 0.8676 | zen-metrics `--metric zensim` (default) |
-| butter pnorm3              | 0.7911 | zen-metrics |
+| dssim-gpu                  | 0.8722 | zenmetrics |
+| V0_2 (linear, ≠ V0_16)     | 0.8676 | zenmetrics `--metric zensim` (default) |
+| butter pnorm3              | 0.7911 | zenmetrics |
 
 **V0_16 IS +0.0024 above fast-ssim2** — CLAUDE.md goal #1 (match-or-
 exceed fast-ssim2) is empirically MET on the full 4292-pair CID22 set.
@@ -13927,7 +13927,7 @@ Earlier "0.022 LOSS" was wrong; the actual story is V0_16 wins by
 +0.002.
 
 **Same correction applies to AIC-3 / AIC-4 numbers I posted earlier**:
-those zen-metrics-CLI-`--metric zensim` numbers were V0_2 outputs too.
+those zenmetrics-CLI-`--metric zensim` numbers were V0_2 outputs too.
 True V0_16 on those corpora needs re-measurement via
 `dataset_metric_baseline`. Filed as a follow-up.
 
@@ -13941,7 +13941,7 @@ True V0_16 on those corpora needs re-measurement via
 **Outstanding fixes**:
 1. `dataset_metric_baseline` doesn't emit per-pair TSV; need to add
    that so the comparison-site can use V0_16 outputs.
-2. `zen-metrics batch --metric zensim` defaults to V0_2; either
+2. `zenmetrics batch --metric zensim` defaults to V0_2; either
    add `--profile preview-v0-4` flag OR flip `latest()` to V0_4
    (with AGPL gating). The site currently surfaces V0_2 in
    `score_zensim` columns — misleadingly labeled.
@@ -13994,7 +13994,7 @@ HEVC/AV1-derived codecs).
 
 **Reconciliation with ship-doc 0.8919**: ship eval uses the 49-ref
 validation subset via `dataset_metric_baseline` (affine-calibrated,
-score-mapped); `zen-metrics batch` hits raw MLP output on full
+score-mapped); `zenmetrics batch` hits raw MLP output on full
 4292-row set. Both are valid measurements of different things. The
 **comparison-site renders the full-set number** (no cherry-picked
 subset), which is the honest goal #1 check.
@@ -14102,7 +14102,7 @@ structural win.
 **Note** on the 0.8919 vs 0.8674 discrepancy: ship docs cite
 V0_16 CID22 SROCC = 0.8919, but that's on the 49-ref
 validation subset (one row per ref, with a different scoring
-path than `zen-metrics batch`'s raw MLP output). The 4292-row
+path than `zenmetrics batch`'s raw MLP output). The 4292-row
 paired-comparison set is a different statistic — both are
 valid CID22 numbers measuring different things.
 
@@ -14132,7 +14132,7 @@ for the first time.
 
 ### Tick 469 — 2026-05-12T21:42Z — CID22 metrics chain launched (workaround for 16-bit PNGs)
 
-Launched the CID22 metric backfill but immediately hit `zen-metrics`
+Launched the CID22 metric backfill but immediately hit `zenmetrics`
 CLI limitation: 539 of 3805 CID22 distorted PNGs are 16-bit
 (all `cld_avif/`-encoder outputs, which decoded the AVIF to 16-bit
 PNG sidecars). The CLI errored on the first 16-bit row with:
@@ -14179,7 +14179,7 @@ now queryable from the comparison-site without R2.
 
 **Files added**:
 - `scripts/v_next/export_human_corpora_to_parquet.py` — one script with
-  three loaders + shared `merge_metric_tsv` for later zen-metrics overlay.
+  three loaders + shared `merge_metric_tsv` for later zenmetrics overlay.
 - `site/data/parquet/cid22.parquet` — 4341 rows × 11 cols, 122 KB.
   Schema: corpus / ref_path / dist_path / image_name / codec
   (encoder string: JPEG / JPEG_XL / AVIF_aom_s1 / AVIF_aom_s7 /
@@ -14215,9 +14215,9 @@ Total addition: ~193 KB. Repository remains way under gh-pages caps.
 - Combined: select multiple corpora; worker concats their parquets
   and the table shows pooled per-band SROCC.
 
-**Note on per-corpus zen-metrics scoring**: The new parquets carry
-human labels + bpp only. zen-metrics columns (score_zensim,
-score_ssim2, etc.) require running `zen-metrics batch` over each
+**Note on per-corpus zenmetrics scoring**: The new parquets carry
+human labels + bpp only. zenmetrics columns (score_zensim,
+score_ssim2, etc.) require running `zenmetrics batch` over each
 corpus's (ref, dist) pair list — multi-hour for CID22 / KADID at
 their sizes. That's a follow-up cycle, not blocking the site.
 
@@ -14227,7 +14227,7 @@ their sizes. That's a follow-up cycle, not blocking the site.
 - 14 (dssim on unified parquets — needs full re-encode sweep)
 - 15 (2023 paper figure reproduction)
 
-**Next concrete tick (469)**: run `zen-metrics batch` on CID22 (4341
+**Next concrete tick (469)**: run `zenmetrics batch` on CID22 (4341
 pairs, ~30 min GPU) in background. Output cols: score_dssim,
 score_ssim2_gpu, score_butter_max, score_butter_p3, score_zensim
 (via the V0_16-ship-time runtime which is the live `zensim` crate).
@@ -14448,10 +14448,10 @@ unblocked without needing R2.
 
 **Shipped parquets** under `site/data/parquet/`:
 - `aic3_ctc_epfl.parquet` — 26 KB (600 rows × 12 cols: human JND +
-  zen-metrics dssim/ssim2/butter/zensim)
+  zenmetrics dssim/ssim2/butter/zensim)
 - `aic4_sample.parquet` — 32 KB (300 rows × 23 cols: human JND with CI
   bounds + paper PSNR/SSIM/MS-SSIM/IW-SSIM/VMAF-neg/SSIMULACRA2/HDR-VDP/
-  CVVDP + our zen-metrics outputs)
+  CVVDP + our zenmetrics outputs)
 
 Total: 58 KB — trivial gh-pages footprint.
 
@@ -14729,7 +14729,7 @@ column coverage.
 (600 rows × 14 cols).
 **AIC-4 parquet** at `/tmp/aic4_metrics/aic4_sample.parquet`
 (300 rows × 23 cols — includes paper-pre-computed metrics +
-our zen-metrics outputs + human JND with CI bounds).
+our zenmetrics outputs + human JND with CI bounds).
 
 zensim commit `6c4fbd59` finalizes
 `benchmarks/aic4_zensim_vs_paper_metrics_2026-05-12.md`.
@@ -14771,7 +14771,7 @@ zensim commit `6c4fbd59` finalizes
    parquets too).
 
 2. **Our ssim2-gpu reproduces paper SSIMULACRA2** within Δ=0.0002
-   (0.9127 vs 0.9125 on AIC-4). zen-metrics CLI is producing correct
+   (0.9127 vs 0.9125 on AIC-4). zenmetrics CLI is producing correct
    canonical numbers.
 
 3. **Butteraugli is weak** on both AIC corpora — pnorm3 hits 0.7571 on
@@ -14953,7 +14953,7 @@ zensim commits this tick:
 - `2a262cbf` — `scripts/v_next/export_aic4_to_parquet.py` (300
   rows × 18 base cols including paper pre-computed PSNR-Y, SSIM,
   MS-SSIM, IW-SSIM, VMAF-neg, SSIMULACRA2, HDR-VDP-2/3, CVVDP +
-  reconstructed JND with CI bounds; merges zen-metrics outputs
+  reconstructed JND with CI bounds; merges zenmetrics outputs
   by `(codec, image_name, dlevel)`).
 - `240fec26` — fixed both export scripts: added `RENAME_ZEN_METRICS`
   map so `dssim_gpu`→`score_dssim`, `butteraugli_max_gpu`→
@@ -14981,8 +14981,8 @@ metrics.sh`, PID 3521421):
 
 **Next tick (455)** once chain finishes: re-run both exports
 with all metric TSVs merged, producing aic3_ctc_epfl.parquet
-(~13 cols including all 4 zen-metrics) and aic4_sample.parquet
-(~22 cols, paper + zen-metrics + JND-CI). Then upload to R2
+(~13 cols including all 4 zenmetrics) and aic4_sample.parquet
+(~22 cols, paper + zenmetrics + JND-CI). Then upload to R2
 (blocked on user enabling public-read URL).
 
 ### Tick 453 — 2026-05-12T20:38Z — AIC-3 export script + dssim-gpu backfill launched
@@ -14995,18 +14995,18 @@ dssim gpu backfill in the bg". Acted on it:
   codecs {AVIF, HM, JPEG-1, JPEG-2000, JPEGXL, VVC} × 10 quality
   levels = 600).
 - Launched
-  `/home/lilith/work/zen/zenmetrics/target/release/zen-metrics
+  `/home/lilith/work/zen/zenmetrics/target/release/zenmetrics
   batch --metric dssim-gpu --pairs … --output
   /tmp/aic3_dssim/scored_dssim.tsv` as bash background (PID
   3519745); log at `/tmp/aic3_dssim/dssim_run.log`.
 - Progress as of tick close: 219 / 600 rows scored (~1/3, fast
   GPU pass).
-- Output column: `dssim_gpu` (per zen-metrics batch convention).
+- Output column: `dssim_gpu` (per zenmetrics batch convention).
 
 **AIC-3 → parquet export script** (zensim `33d576ed`):
 - `scripts/v_next/export_aic3_to_parquet.py` reads
   `/mnt/v/dataset/aic3_ctc_epfl/decoded/info_with_bitrates.csv`
-  and merges in zen-metrics batch output TSVs by
+  and merges in zenmetrics batch output TSVs by
   `(codec, image_name, quality)` join key.
 - Schema: `corpus / ref_path / dist_path / image_name / codec /
   q / quality_index / bpp / human_jnd` + optional `score_dssim
@@ -15449,7 +15449,7 @@ state before duplicating work.
 - C.1 Inventory the 6 codec classes CID22 uses (from `zensim/docs/CID22_PAPER_NOTES_2026-05-07.md`).
 - C.2 Inventory non-CID22 sources we have (clic2025/training, kodak, gb82-sc, corpus-builder/source_jpegs).
 - C.3 Generate per-source distortions matching CID22's 6×{8-11 q} grid using `coefficient/examples/generate_zensim_training` (or write a new generator if needed).
-- C.4 Score every distortion pair via zen-metrics CLI (CPU first; GPU vast.ai if needed for scale).
+- C.4 Score every distortion pair via zenmetrics CLI (CPU first; GPU vast.ai if needed for scale).
 - C.5 Append to `training_safe_synthetic_cid22like.csv`. Keep separate from existing safe-synthetic; train mixed.
 
 ### Phase D — Train V_NEW

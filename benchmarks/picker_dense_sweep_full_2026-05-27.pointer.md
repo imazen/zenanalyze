@@ -57,7 +57,7 @@ content-addressed encodes).
 
 ## cvvdp backfill (deferred)
 
-To add cvvdp scores later, run `zen-metrics batch --metric cvvdp
+To add cvvdp scores later, run `zenmetrics batch --metric cvvdp
 --gpu-runtime cuda` over a pairs TSV built from `artifacts/<sha>.jpg` +
 their source refs, then join into the parquet on `encoded_sha256`. No
 re-encode needed — the bytes are persisted.

@@ -23,12 +23,12 @@ full (user-greenlit) run demonstrates.
 ```
 sources (clustered)
   └─ resize (Lanczos, downscale-only)         → size variants
-       └─ zen-metrics sweep (encode + score + persist)
+       └─ zenmetrics sweep (encode + score + persist)
             ├─ encode: zenjpeg × dense-q × knob-cells
             ├─ score:  zensim-gpu + ssim2-gpu (ALL variants, local CUDA)
             ├─ persist: encoded bytes + 372-feat zensim parquet + Pareto TSV
             └─ pairs TSV
-       └─ zen-metrics batch ssim2-gpu (correct-monotone reach-ladder score)
+       └─ zenmetrics batch ssim2-gpu (correct-monotone reach-ladder score)
   └─ build_picker_parquet.py (join + content-address sha256 + all metrics)
        └─ zenpicker-train (MLP, no q-leakage, grouped-by-image holdout)
             └─ ZNPR v3 bake (loads via zenpredict::Model / MetaPicker)
@@ -63,7 +63,7 @@ prefixes are self-documenting; cluster sizes are recorded in
 ### 2. Encode dense-q
 
 `scripts/sweep/picker_dense_sweep_dryrun.sh` (zenmetrics) drives
-`zen-metrics sweep --codec zenjpeg`:
+`zenmetrics sweep --codec zenjpeg`:
 
 - **q grid (dense):** step 5 in 5..69 + step 2 in 70..100 = **29 levels**
   (matches the picker's `ZQ_TARGETS` density).

@@ -34,7 +34,7 @@ Root-level: `analyze_features`, `analyze_features_rgb8`, `try_analyze_features_r
 feature variants — all intentional.
 
 External consumers confirmed (grep): jxl-encoder (`analyze_features_rgb8`, `AnalysisFeature`,
-`AnalysisQuery`, `FeatureSet`, `AnalysisResults`, `FeatureValue`), zenmetrics/zen-cloud-vastai
+`AnalysisQuery`, `FeatureSet`, `AnalysisResults`, `FeatureValue`), zenmetrics/zenfleet-vastai
 (`AnalysisQuery`, `FeatureSet`). PackError + MissingFeatures used by zenjpeg picker.
 
 ---

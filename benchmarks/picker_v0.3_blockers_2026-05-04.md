@@ -1,7 +1,7 @@
 # Picker v0.3 train arc — structural blockers, 2026-05-04
 
 Investigation of the "train + bake + A/B + ship v0.3 picker for zenwebp,
-zenavif, zenjxl" mission, against the fresh 2026-05-03 zen-metrics
+zenavif, zenjxl" mission, against the fresh 2026-05-03 zenmetrics
 sweep TSVs at `s3://zentrain/sweep-2026-05-03/` (also local at
 `~/work/zen/<codec>/benchmarks/<codec>_pareto_2026-05-04_extended.tsv`).
 
@@ -18,7 +18,7 @@ image_path, size_class, width, height, config_id, config_name,
 bytes, <METRIC_COLUMN>  (default "zensim")
 ```
 
-The fresh sweep TSV (`zen-metrics-cli` 0.3.0 `sweep` subcommand)
+The fresh sweep TSV (`zenmetrics-cli` 0.3.0 `sweep` subcommand)
 produces:
 
 ```
@@ -125,7 +125,7 @@ In the order they unblock the next step:
      from `(width, height)` bucketing. `bytes` aliased from
      `encoded_bytes`. `zensim` aliased from `score_zensim`.
    - Or extend `train_hybrid.py::load_pareto` to consume the new
-     schema natively (zen-metrics 0.3.0+ format).
+     schema natively (zenmetrics 0.3.0+ format).
 
 2. **Refresh features TSVs** to cover the full `mlp-tune-fast` corpus
    (587 images, 7 sub-corpora). Each codec's feature extractor must

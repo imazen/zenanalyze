@@ -621,12 +621,12 @@ unlocks the documented 2-bake +0.0100 combined gain.
 │   ├── tools/                     Python picker trainers (per-codec + meta-picker variants)
 │   ├── benchmarks/                Picker bakes (.bin/.manifest.json), training results, audit MDs
 │   └── docs/                      RECOVERY_REGISTER_2026-05-08.md, HANDOFF-2026-05-04.md, r2-zentrain-layout.md
-├── zenmetrics/                    GPU metric crates + zen-metrics CLI + sweep infra (vast.ai + Docker)
+├── zenmetrics/                    GPU metric crates + zenmetrics CLI + sweep infra (vast.ai + Docker)
 │   ├── crates/butteraugli-gpu/    CubeCL multi-vendor butteraugli (max + pnorm3)
 │   ├── crates/dssim-gpu/          CubeCL DSSIM
 │   ├── crates/ssim2-gpu/          CubeCL SSIMULACRA2
 │   ├── crates/zensim-gpu/         CubeCL zensim 228-feature extractor
-│   ├── crates/zen-metrics-cli/    Unified score / batch / compare / sweep CLI (binary `zen-metrics`)
+│   ├── crates/zenmetrics-cli/    Unified score / batch / compare / sweep CLI (binary `zenmetrics`)
 │   ├── crates/zenmetrics-corpus/  Test image corpus
 │   ├── scripts/sweep/             vast.ai launcher, onstart_v3.sh worker, janitor, atomic chunk claim
 │   ├── Dockerfile.sweep.v13       Latest sweep image (build context = ~/work/zen for sibling path-deps)
@@ -733,7 +733,7 @@ bake → zensim `include_bytes!` loads it under `__experimental_versions`.
 ### `zenmetrics` (the GPU metric + sweep crate, separate repo)
 Owns: the path from `(reference_image, distorted_image) →
 metric_values` plus the orchestrator that drives a codec-grid sweep on
-vast.ai. Specifically: (a) the unified `zen-metrics` CLI
+vast.ai. Specifically: (a) the unified `zenmetrics` CLI
 (score/batch/compare/sweep), (b) four CubeCL-based multi-vendor GPU
 metric crates (butteraugli-gpu, ssim2-gpu, dssim-gpu, zensim-gpu), (c)
 the docker image and onstart script that workers run, (d) the
@@ -860,15 +860,15 @@ then, zenpredict 0.1.0 stays on crates.io as v2-only.
 
 ### Docker image
 - **Current**: `Dockerfile.sweep.v13` (commit `aba984c`, 2026-05-08, on local `master` only)
-- Image: `ghcr.io/imazen/zen-metrics-sweep:0.6.3`
+- Image: `ghcr.io/imazen/zenmetrics-sweep:0.6.3`
 - Build context: **`~/work/zen` (parent of zenmetrics + zenjpeg + zenanalyze)** — required for sibling path-deps
   ```
   docker build -f zenmetrics/Dockerfile.sweep.v13 \
-               -t ghcr.io/imazen/zen-metrics-sweep:0.6.3 \
+               -t ghcr.io/imazen/zenmetrics-sweep:0.6.3 \
                ~/work/zen
   ```
-- Baked binary: `/usr/local/bin/zen-metrics`
-- ENTRYPOINT: `/usr/local/bin/zen-metrics-worker` (= `onstart_v3.sh`)
+- Baked binary: `/usr/local/bin/zenmetrics`
+- ENTRYPOINT: `/usr/local/bin/zenmetrics-worker` (= `onstart_v3.sh`)
 - Env defaults: `WORKDIR=/workspace/sweep`, `SWEEP_GPU_RUNTIME=cpu`
   (overridable per-worker; v15 launcher passes `-e SWEEP_GPU_RUNTIME=cuda`)
 
@@ -885,7 +885,7 @@ then, zenpredict 0.1.0 stays on crates.io as v2-only.
 7. **Atomic-ish chunk claim**: skip if `s3://zentrain/<run>/<codec>/<chunk_id>.tsv`
    present; read-back-verify own claim token after 1.5s settle; drops
    duplicate-work to <1% (vs ~22% with prior plain-cp claim).
-8. Stages images, invokes `zen-metrics sweep` with feature-output parquet.
+8. Stages images, invokes `zenmetrics sweep` with feature-output parquet.
 9. Mid-chunk partial flush every 60s to `s3://coefficient/partials/...`.
 10. On success: ship TSV + parquet to R2; on fail: log to errors prefix.
 
@@ -904,7 +904,7 @@ lifetime cells/min.
 - Same `zen-metrics-0.6.8-linux-x86_64-gpu` binary works locally on the
   same source-image directory.
 - Diagnosis: environment-side; "most likely the
-  `ghcr.io/imazen/zen-metrics-sweep:0.6.3` docker image is missing
+  `ghcr.io/imazen/zenmetrics-sweep:0.6.3` docker image is missing
   something the binary dlopens (libwebp / libaom / libjxl runtime), or
   something in the worker's onstart pipeline got truncated."
 - Cost: $0.64 of $31.74 vast.ai credit. **All workers destroyed; no
@@ -915,7 +915,7 @@ lifetime cells/min.
   2. If runtime lib gap: rebuild docker image with missing libs.
   3. Run a 1-chunk smoke before scaling.
 
-### Parquet sidecar schema (zen-metrics-cli + sweep)
+### Parquet sidecar schema (zenmetrics-cli + sweep)
 305 columns:
 ```
 image_path: utf8 not null
@@ -1103,7 +1103,7 @@ rustfmt drift cleanup` (zensim).
    plus `_manifest.json`. R2 endpoint
    `https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com`.
    Public dev URL `pub-c8010c5b1ac84b968fa3d3b5cd3c2dae.r2.dev`. Owner:
-   codec sweep harness via `zen-metrics-cli` upload step.
+   codec sweep harness via `zenmetrics-cli` upload step.
 
 4. **Mirror download**: locally
    `s3cmd cp s3://zentrain/<run>/...` → `/mnt/v/zen/zensim-training/<run>/`.
@@ -1116,10 +1116,10 @@ rustfmt drift cleanup` (zensim).
    `source` pass-through. Owner: zenanalyze.
 
 6. **Schema adapter**: `zentrain/tools/zenmetrics_sweep_adapter.py`
-   translates `zen-metrics 0.3.0+` sweep TSV to zentrain pareto schema.
+   translates `zenmetrics 0.3.0+` sweep TSV to zentrain pareto schema.
    Owner: zentrain.
 
-7. **(Optional) Backfill 300-feature parquet**: `zen-metrics
+7. **(Optional) Backfill 300-feature parquet**: `zenmetrics
    features-backfill --input-tsv chunk.tsv --output-parquet chunk.parquet`.
    **NOT YET LANDED** (`feat/features-backfill` branch only — 752 LOC +
    286 LOC tests at commit `bd86239`). Owner: zenmetrics.
@@ -1170,7 +1170,7 @@ rustfmt drift cleanup` (zensim).
 
 ### IMMEDIATE — production blockers
 1. **Land the `feat/features-backfill` zenmetrics branch** (commit
-   `bd86239`, 752 LOC + 286 LOC tests at `crates/zen-metrics-cli/src/backfill.rs`).
+   `bd86239`, 752 LOC + 286 LOC tests at `crates/zenmetrics-cli/src/backfill.rs`).
    The recovery register lists this as "kept" but it never merged; the
    files don't exist on master. Recovery action says "mirror v15 TSVs
    to R2 + backfill CPU dssim before training pickers/zensim". Without
@@ -1380,9 +1380,9 @@ CUDA at runtime so `--features sweep,gpu,gpu-cuda` builds without nvcc.
 - Per-instance `SWEEP_GPU_RUNTIME=cuda`, `SWEEP_RUN_ID=sweep-v15-2026-05-06`
 
 **Build flavours** (per `zenmetrics/CLAUDE.md`):
-- Default dev: `cargo build --release -p zen-metrics-cli` (CPU + sweep codecs)
+- Default dev: `cargo build --release -p zenmetrics-cli` (CPU + sweep codecs)
 - Forced GPU-only worker:
-  `cargo build --release -p zen-metrics-cli --no-default-features --features sweep,png,gpu,gpu-cuda`
+  `cargo build --release -p zenmetrics-cli --no-default-features --features sweep,png,gpu,gpu-cuda`
   → drops cpu-metrics so workers can't silently fall back to slow CPU scoring.
 - WGPU variant (broader GPU compatibility, no CUDA SDK required):
   `--no-default-features --features sweep,png,gpu,gpu-wgpu`

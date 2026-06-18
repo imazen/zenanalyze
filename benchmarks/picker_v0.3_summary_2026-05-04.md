@@ -6,7 +6,7 @@ zenavif, and zenjxl. Per-codec details in
 
 ## Decision: train against existing v0.1-schema sweeps
 
-The 2026-05-04 zen-metrics sweep TSVs (documented in
+The 2026-05-04 zenmetrics sweep TSVs (documented in
 `picker_v0.3_blockers_2026-05-04.md`) had three structural blockers:
 TSV schema mismatch with the trainer, missing features for ~57% of
 the new sweep corpus, and a degenerate 2-cell binary-knob grid that
@@ -105,7 +105,7 @@ s3://zentrain/zenjxl/pickers/
 ## What's still pending
 
 1. Re-sweep with richer grids on the full mlp-tune-fast corpus (587
-   imgs across 7 sub-corpora) using the `zen-metrics sweep`
+   imgs across 7 sub-corpora) using the `zenmetrics sweep`
    subcommand at `~/work/turbo-metrics/target/release/zen-metrics`.
    Expected wall: ~9 hr at 8 parallel jobs across 3 codecs.
 2. Held-out re-encode A/B vs cid22-val for all 3 codecs (per-codec

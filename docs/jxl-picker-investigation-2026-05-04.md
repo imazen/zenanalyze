@@ -21,7 +21,7 @@ identified, ranked by cost.
    the speed-safe regime** that the user explicitly named. For
    "parity while encoding faster" the v05c data alone is sufficient.
 
-3. **zen-metrics CLI now exposes the expert knobs** (PR #2 on
+3. **zenmetrics CLI now exposes the expert knobs** (PR #2 on
    imazen/turbo-metrics) for future v06 sweeps targeting the
    speed-unconstrained quality regime, but no v06 sweep is required to
    ship a picker improvement.
@@ -80,7 +80,7 @@ vs v0.5 picker (HOLD verdict): +3.11% bytes / +1.62pp zensim. The
 prototype is **+5pp better on bytes** by changing only the teacher
 labeling.
 
-### zen-metrics CLI knob expansion (turbo-metrics PR #2)
+### zenmetrics CLI knob expansion (turbo-metrics PR #2)
 
 The JXL sweep CLI now exposes the LossyConfig knobs the zenjxl wrapper
 hides:

@@ -194,7 +194,7 @@ runtime branch).
 
 - v05c sweep on R2 `s3://zentrain/sweep-v05c-2026-05-04/` (no butteraugli)
 - v06 sweep on R2 `s3://zentrain/sweep-v06-2026-05-04/` (in flight; CPU
-  metrics, expanded JXL knobs via zen-metrics 0.6.0; chunks land at
+  metrics, expanded JXL knobs via zenmetrics 0.6.0; chunks land at
   `zenjxl/<chunk_id>.tsv` with butteraugli columns)
 - 500 representative images clustered from v05c via k-means on
   zenanalyze features (script lives at `/tmp/cluster_v06_subset.py`

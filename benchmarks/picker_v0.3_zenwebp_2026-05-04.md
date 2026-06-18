@@ -4,7 +4,7 @@
 
 Trained a fresh hybrid-heads MLP picker for zenwebp against the existing
 v0.1 schema-compatible Pareto sweep + features TSVs (the new 2026-05-04
-zen-metrics sweep had a TSV-schema + grid-shape mismatch with the
+zenmetrics sweep had a TSV-schema + grid-shape mismatch with the
 v0.1 trainer/runtime — see `picker_v0.3_blockers_2026-05-04.md`).
 Used `zenwebp_picker_config_v01_schema` (newly added — see
 `zentrain/examples/zenwebp_picker_config_v01_schema.py`) which mirrors

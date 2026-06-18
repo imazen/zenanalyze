@@ -31,11 +31,11 @@ each on top of waiting for sweeps to finish.
 2. **Verified infrastructure**: vast.ai $10.04 credit available,
    R2 buckets accessible, mlp-tune-fast corpus already at
    `s3://zentrain/sweep-2026-05-03/sources/` (587 PNGs).
-3. **Discovered key constraint**: `zen-metrics sweep` `--jobs` flag
+3. **Discovered key constraint**: `zenmetrics sweep` `--jobs` flag
    is "Reserved for future fan-out. Currently serial." Spec's
    estimate of $0.05-0.20/codec at 8-way parallelism is therefore
    wrong; real cost is ~$0.50-2.00/codec at single-instance speed.
-4. **Smoke-tested zen-metrics sweep locally** on 2 images — works.
+4. **Smoke-tested zenmetrics sweep locally** on 2 images — works.
 5. **Launched two vast.ai instances** with `onstart-cmd` + ssh
    bootstrap fallback (the ssh proxy auth that prior agents bounced
    off worked fine in this session):
@@ -64,7 +64,7 @@ each on top of waiting for sweeps to finish.
        cells from v0.3 are dropped.
 7. **Authored sweep adapter**:
    `zentrain/tools/zenmetrics_sweep_adapter.py`
-   - Translates zen-metrics 0.3.0 sweep TSV format
+   - Translates zenmetrics 0.3.0 sweep TSV format
      (`image_path / codec / q / knob_tuple_json / score_zensim / ...`)
      into zentrain Pareto schema
      (`image_path / size_class / config_id / config_name / q / axes / bytes / zensim / ...`).
@@ -261,7 +261,7 @@ jj bookmark set main -r @ && jj git push
    trains on.
 
 2. **zenjxl sweep encodes (q × distance) cross-product** but these are
-   normally alternative quality dials. Verify zen-metrics' zenjxl
+   normally alternative quality dials. Verify zenmetrics' zenjxl
    driver actually composes them (might be that q wins and distance
    is ignored, in which case ¾ of rows are duplicates). Inspect the
    output TSV for byte-identical rows across distance values at fixed
