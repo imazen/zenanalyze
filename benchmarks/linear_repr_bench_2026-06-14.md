@@ -124,16 +124,52 @@ auto-vectorizes to 3–4G. **Honest caveat:** this means f32 needs an *explicit*
 floor, not f32's ceiling, so the literal 5.6× is not the hand-tuned-vs-hand-tuned
 ratio.
 
-**It does not change the decision, though:** i16/i12 wins regardless because
-(1) **signedness is decisive** — laplacian/edge are signed, u16 can't and f32's
-only path to parity is explicit SIMD; (2) i16 reaches 3.5G from *plain*
-maintainable code while f32 demands careful explicit SIMD to not be reduction-
-bound; (3) headroom + i12 round-trip + precision-irrelevance all hold. f32 has no
-advantage that overrides signedness. **Verdict locked: i16/i12.** Build the
-production kernel there; the explicit-`f32x8` ceiling is moot for the choice.
+The autovec caveat above turned out to be the whole story — see the real-SIMD
+addendum, which **supersedes** the "i16/i12 locked on throughput" framing.
+
+## Addendum 2 — REAL hand-tuned SIMD (`bench_repr_simd`, magetypes)
+
+The previous addendum's caveat ("f32 needs an explicit `f32x8` kernel to
+compete") was exactly right. With **both** kernels real magetypes SIMD (4
+independent accumulators; f32 lanes→f64, i32 lanes with i64 `to_array` flush):
+
+| group | f32x8 | i32x8 |
+|---|--:|--:|
+| variance_simd 1MP | 22.7G | 23.7G (tie — CI crosses 0) |
+| variance_simd 4MP | 15.0G | 17.1G (~14%) |
+
+**f32x8 and i32x8 are tied** (i32 ~4–14% faster). The autovec "7–17× integer
+win" was *entirely* the FP-reduction-won't-autovectorize artifact: real f32x8 is
+15–22G — **~40× the autovec f32's 0.45G**. So the throughput basis for "i16/i12
+locked" evaporates; with real SIMD the representations are neck-and-neck.
+
+**Why i32x8, not i16x16, for variance:** the *square* needs i32 lanes regardless
+(luma² overflows i16), and magetypes exposes i16→i32 widening only on
+per-platform concrete types, not the portable generic API. With per-row
+streaming the luma buffer is tiny (L1-resident), so i16's denser *storage* is
+moot too. i16x16 buys nothing here.
+
+### Corrected, per-feature verdict
+
+The representation isn't one choice — it's **per operation**:
+
+- **Squared reductions (variance, laplacian): `i32x8`.** Tied with f32x8 on
+  throughput, but chosen because it's **exact** — f32 accumulation of millions of
+  ~16M squares loses mantissa precision; i32→i64 flush is bit-exact — and ~14%
+  faster at 4MP. (Luma values are still i12 from the LUT; the reduction widens to
+  i32.)
+- **In-width ops (uniformity min/max, edge threshold): `i16x16`.** Here the
+  bake-off's integer win is *real* and survives — no widening needed, full 16-lane
+  density, the 7× minmax gap. This is where i16x16 earns its place.
+
+So **both `i16x16` and `f32x8`/`i32x8` ship** — each on the op that fits. The
+production `Variance` kernel uses `i32x8`; `uniformity` (next feature) will use
+`i16x16`. Gates unchanged: downstream picker A/B before any default flip.
 
 ## Reproduce
 
 ```bash
-cargo run --release --example bench_linear_repr
+cargo run --release --example bench_linear_repr     # representation matrix
+cargo run --release --example bench_repr_handtuned  # autovec multi-accumulator
+cargo run --release --example bench_repr_simd        # real magetypes SIMD
 ```

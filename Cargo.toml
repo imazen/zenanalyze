@@ -98,6 +98,9 @@ name = "bench_linear_repr"
 name = "bench_repr_handtuned"
 
 [[example]]
+name = "bench_repr_simd"
+
+[[example]]
 name = "corpus_eval"
 required-features = ["experimental"]
 
