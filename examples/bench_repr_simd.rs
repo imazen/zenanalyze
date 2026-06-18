@@ -60,8 +60,8 @@ fn var_i32_simd(token: Token, p: &[i32]) -> i64 {
     for c in &mut it {
         for k in 0..4 {
             let v = i32x8::from_slice(token, &c[k * 8..k * 8 + 8]);
-            s[k] = s[k] + v;
-            sq[k] = sq[k] + v * v;
+            s[k] += v;
+            sq[k] += v * v;
         }
         cnt += 1;
         if cnt == FLUSH {
@@ -107,7 +107,7 @@ fn main() {
             let mut s: u32 = 0xC0FFEE ^ n as u32;
             let mut next = || {
                 s = s.wrapping_mul(1103515245).wrapping_add(12345);
-                (s >> 12 & 0xFFF) as u32 // i12 range 0..4095
+                s >> 12 & 0xFFF // i12 range 0..4095
             };
             let lf = leak((0..n).map(|_| next() as f32).collect::<Vec<_>>());
             let li = leak(lf.iter().map(|&x| x as i32).collect::<Vec<_>>());
