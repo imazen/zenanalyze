@@ -1,0 +1,96 @@
+# Dispatch-plan perf measurement — imazen/zenanalyze#50 / PR #54
+
+date_utc:        2026-06-04
+git_commit:      3c6c2a0b747b9990a3414c58a9e354e070aaa96e
+                 (HEAD of feat/dispatch-plan at measurement time; the
+                 perf example + content-aware-gate calibration are
+                 committed in the following commit on this branch)
+hostname:        lilith
+cpu:             AMD Ryzen 9 7950X (no thermal throttling)
+toolchain:       cargo (release profile, NO target-cpu=native — runtime
+                 SIMD dispatch is what ships)
+features:        experimental,hdr
+corpus:          /home/lilith/work/codec-corpus/imazen-26  (READ-ONLY; only decoded)
+codec backends:  image 0.25 png+jpeg only (HEIC/DNG/TIFF skipped)
+
+command:
+  cargo run --release --features "experimental,hdr" \
+    --example dispatch_perf -- \
+    --corpus /home/lilith/work/codec-corpus/imazen-26 \
+    --output benchmarks/dispatch_perf_2026-06-04.tsv \
+    --screen-n 50 --photo-n 100 --seed 1 --reps 9 \
+    --content-unif-edge-max 0.0005
+
+## Method
+
+For each image, time BOTH entry points with FeatureSet::SUPPORTED:
+  full  = analyze_features            (no gating; const-bool monomorphized
+                                       analyze_specialized_raw)
+  gated = analyze_with_dispatch_plan  (Stage 0/1.5/2)
+
+Interleaved A/B to cancel turbo/thermal drift: per image, REPS=9 reps;
+inside each rep, time full then gated back-to-back, ALTERNATING which
+side goes first per rep (full-first on even reps, gated-first on odd).
+Reported per-side time is the MEDIAN over reps. 3 untimed warmup pairs
+precede timing. Verified stable at reps=25 on a 20-image subset
+(seed=7): overall -28.85% (vs -29.50% at reps=9) — the regression is
+not measurement noise.
+
+Each image is classified by the gate signals (read from the full
+analysis): grayscale (is_grayscale=true), content_unif (uniformity>0.95
+AND edge_density<tau — the DISABLED content-aware uniformity gate's
+would-fire condition, timed to inform the worth-it call), or neither.
+
+## Result (negative numbers = gated SLOWER than full)
+
+OVERALL (n=147, median 9.0 MP):
+  full  = 23.461 ms (2.251 ms/MP)
+  gated = 31.688 ms (2.980 ms/MP)
+  per-image savings: mean -29.50%, median -33.38% (median delta -8.227 ms)
+
+The gated path is ~30% SLOWER overall. Decomposed by image size — the
+Stage 2 extended-pass threshold is LARGE_THRESHOLD = 8 MP:
+
+  <8 MP  (n=33) : mean savings -0.66%  (full 14.17 ms, gated 14.28 ms) — PARITY
+  >=8 MP (n=114): mean savings -37.85% (full 42.68 ms, gated 58.11 ms) — REGRESSION
+
+Pure-overhead control (neither gate fired AND <8 MP, n=33): -0.66%. The
+un-monomorphized multi-call dispatch structure itself is essentially
+free (within noise). The ENTIRE regression is Stage 2's extended Tier-3
+DCT pass: on every >=8 MP image, run_extended_pass re-walks the DCT pass
+at 2x hf_max_blocks to refine 3 features (patch_fraction_fast, aq_map_p99,
+noise_floor_y_p90). That is a deliberate accuracy-vs-speed tradeoff
+("strictly finer block sample is the whole point of the retry" —
+dispatch.rs docstring), NOT a bug, but it costs ~38% wall-time on the
+common large-image case.
+
+PER-GATE-FIRED SUBSETS:
+  grayscale-gate FIRED (n=8): full 24.956 ms, gated 33.176 ms,
+    median savings -31.17%. ALL 8 grayscale images in this corpus are
+    >=8 MP, so they all pay the Stage 2 cost too — the small chroma-tier
+    drop the gate buys is swamped by Stage 2. No <8 MP grayscale image in
+    the sample to isolate the gate's win.
+  content_unif WOULD-fire (n=1, the einstein page, 100 MP): -24.81%.
+  neither (n=138): -29.47% (dominated by the >=8 MP Stage 2 cost).
+
+## Verdict
+
+- Content-aware uniformity gate: NO safe tier1 threshold exists on this
+  corpus (see dispatch_gate_validation_2026-06-04.meta). Even the single
+  edge_density=0 image carries patch_fraction_fast=0.994 (the AUC-0.880
+  screen discriminator). Honest-stop: keep DISABLED.
+- Grayscale gate: stays ENABLED (validated bit-safe), but its perf win is
+  not isolable here and is dominated by Stage 2 on large images.
+- The measured headline: the dispatch plan as structured is a net perf
+  REGRESSION on >=8 MP images, entirely due to Stage 2's second DCT walk.
+  The gating is ~free; Stage 2 is the cost. Whether the 3-feature
+  accuracy refinement is worth ~38% wall-time on large images is a
+  separate product call (issue #50) and should be decided on the
+  accuracy-gain data, not assumed.
+
+## TSV columns
+
+path, stratum, width, height, megapixels, is_grayscale, uniformity,
+edge_density, subset (grayscale|content_unif|neither), full_ms, gated_ms,
+full_ms_per_mp, gated_ms_per_mp, savings_pct (full->gated; negative =
+gated slower).

@@ -1,0 +1,29 @@
+# Small-image dispatch-plan perf sweep — PR imazen/zenanalyze#54
+# Issue: imazen/zenanalyze#50 (quantify the grayscale gate's wall-time saving)
+git_commit: 75dd4ccce19148a3ee95916f615c89a07c53f7bd
+branch: feat/dispatch-plan
+hostname: lilith
+date: 2026-06-05
+build: cargo build --release --example dispatch_perf_small  (NO target-cpu=native; runtime SIMD dispatch)
+command: ./target/release/examples/dispatch_perf_small \
+  --corpus /home/lilith/work/codec-corpus/imazen-26 \
+  --output benchmarks/dispatch_perf_small_2026-06-05.tsv \
+  --screen-n 6 --photo-n 6 --seed 1 --reps 25
+corpus: /home/lilith/work/codec-corpus/imazen-26 (READ-ONLY)
+sizes_longest_side_px: 48 64 96 128 192 256 384 512 768 1024 (Lanczos3 downscale-only, never upscale)
+sources: 8 grayscale originals (explicit, is_grayscale==1 from the large-corpus run)
+         + 6 screen (stride-sampled, seed 1) + 6 photo (stride-sampled, seed 1)
+reps_per_cell: 25 (interleaved A/B, alternating which side runs first per rep; 3-rep warmup; median over reps)
+entry_points:
+  full  = analyze_features(SUPPORTED)
+  gated = analyze_with_dispatch_plan(SUPPORTED, None)  # default hints, Stage 2 OFF, grayscale gate only
+cells_timed: 198 (decode-failed: 0)
+notes: |
+  The grayscale gate's saving is PER-PIXEL, not fixed: on the grayscale
+  subset gated beta drops from 9.51 to 8.44 ms/MP (~11% of per-pixel cost),
+  while the fixed-overhead alpha delta is ~0.006 ms (negligible). The
+  saving therefore holds at a steady ~6-11% across ALL sizes on grayscale
+  content (and grows in absolute ms with size), rather than fading at large
+  sizes. On COLOR content (118 cells) the gate never fires and full==gated
+  within noise (delta-alpha ~ -0.003 ms, delta-beta ~ +0.013 ms/MP),
+  confirming the gating is free on the dominant case.
