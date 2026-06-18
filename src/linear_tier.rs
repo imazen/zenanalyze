@@ -76,17 +76,19 @@ fn sum_sumsq(p: &[f32]) -> (f64, f64) {
 /// The diffuse-white anchor scale: the factor that maps the converter's linear
 /// output to **diffuse-white-relative** linear (anchor → 1.0). PQ's linear is
 /// absolute (1.0 = 10000 nits) so it scales by `10000 / diffuse_white`; SDR and
-/// HLG are already relative, scale 1.0.
-///
-/// TODO(zenpixels-bump): honor a *signaled* anchor from the slice
-/// `ColorContext::diffuse_white`. zenanalyze pins zenpixels 0.2.11, whose
-/// `ColorContext` is `{icc, cicp}` only — the `diffuse_white` field landed in
-/// 0.2.15. Until the dep bumps, every PQ source uses the BT.2408 default (203).
+/// HLG are already relative, scale 1.0. The anchor is read from the slice's
+/// [`ColorContext::diffuse_white`](zenpixels::ColorContext) when signaled,
+/// defaulting to BT.2408 (203 nits) for PQ otherwise.
 fn anchor_scale(slice: &PixelSlice<'_>) -> f32 {
     if slice.descriptor().transfer != TransferFunction::Pq {
         return 1.0;
     }
-    PQ_PEAK_NITS / DEFAULT_DIFFUSE_WHITE_NITS
+    let nits = slice
+        .color_context()
+        .and_then(|c| c.diffuse_white)
+        .map(|d| d.nits())
+        .unwrap_or(DEFAULT_DIFFUSE_WHITE_NITS);
+    PQ_PEAK_NITS / nits.max(1.0)
 }
 
 /// Diffuse-white-normalized linear-light luma variance over any [`PixelSlice`],
@@ -207,5 +209,49 @@ mod tests {
         let buf = vec![80u8; 32 * 32 * 4];
         let slice = PixelSlice::new(&buf, 32, 32, 32 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
         assert!(linear_variance(&slice, 500_000).is_some());
+    }
+
+    /// The anchor is read from a **signaled** `ColorContext.diffuse_white`, not
+    /// just the default. A PQ envelope authored at 100 nits matches SDR-normal
+    /// only when the slice signals 100; the BT.2408 default (203) mis-normalizes
+    /// it. Proves the streaming decode honors the signal analyzer-side.
+    #[test]
+    fn honors_signaled_diffuse_white() {
+        use linear_srgb::tf::{linear_to_pq, srgb_to_linear};
+        use std::sync::Arc;
+        use zenpixels::{ColorContext, DiffuseWhite, TransferFunction};
+
+        let (w, h) = (96u32, 64u32);
+        let sdr = gray_ramp_rgb8(w as usize, h as usize, 200);
+        const DW: f32 = 100.0; // non-default authoring white
+        let pq16: Vec<u16> = sdr
+            .iter()
+            .map(|&c| {
+                let pq = linear_to_pq(srgb_to_linear(c as f32 / 255.0) * DW / 10000.0);
+                (pq.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16
+            })
+            .collect();
+        let pq_bytes: Vec<u8> = pq16.iter().flat_map(|&v| v.to_ne_bytes()).collect();
+        let hdr_desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+
+        let sdr_slice =
+            PixelSlice::new(&sdr, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+        let ctx = Arc::new(ColorContext::default().with_diffuse_white(DiffuseWhite::new(DW)));
+        let hdr_signaled = PixelSlice::new(&pq_bytes, w, h, (w * 6) as usize, hdr_desc)
+            .unwrap()
+            .with_color_context(ctx);
+        let hdr_default = PixelSlice::new(&pq_bytes, w, h, (w * 6) as usize, hdr_desc).unwrap();
+
+        let v_sdr = linear_variance(&sdr_slice, 500_000).unwrap();
+        let v_signaled = linear_variance(&hdr_signaled, 500_000).unwrap();
+        let v_default = linear_variance(&hdr_default, 500_000).unwrap();
+        assert!(
+            (v_sdr - v_signaled).abs() <= 0.05 * v_sdr.max(1.0),
+            "signaled anchor must match SDR: signaled {v_signaled} vs sdr {v_sdr}"
+        );
+        assert!(
+            (v_sdr - v_default).abs() > 0.1 * v_sdr.max(1.0),
+            "default (203) must mis-normalize a 100-nit envelope: default {v_default} vs sdr {v_sdr}"
+        );
     }
 }

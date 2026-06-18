@@ -56,8 +56,8 @@ experimental = []
 hdr = []
 
 [dependencies]
-zenpixels = { version = "0.2.11", default-features = false, features = ["imgref"] }
-zenpixels-convert = { version = "0.2.11", default-features = false }
+zenpixels = { version = "0.2.14", default-features = false, features = ["imgref"] }
+zenpixels-convert = { version = "0.2.14", default-features = false }
 archmage = { version = "0.9.23", features = ["macros", "avx512", "testable_dispatch"] }
 magetypes = { version = "0.9.23", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,

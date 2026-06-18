@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Linear-light Variance is now HDR-correct (diffuse-white normalized).** The
+  opt-in linear path (below) was generalized from RGB8-only/sRGB to **any format
+  / bit depth / HDR transfer**, via `zenpixels-convert`'s `RowConverter →
+  RGBF32_LINEAR` (all colour math) plus a **diffuse-white anchor** — a linear
+  exposure scale (`10000/diffuse_white` for PQ), *not* a tone curve — read from
+  the source `ColorContext.diffuse_white` (default BT.2408 = 203). SDR content in
+  an HDR (PQ) envelope reads back the **same** Variance as the plain SDR image
+  (`sdr_in_hdr_envelope_matches_sdr_normal`, `honors_signaled_diffuse_white`);
+  highlights above diffuse white survive as `>1.0` signal. Bumps the `zenpixels`
+  / `zenpixels-convert` deps `0.2.11 → 0.2.14` (for `ColorContext.diffuse_white`).
 - **Opt-in linear-light analysis** — `AnalysisQuery::with_linear_light(bool)`
   + `linear_light()` accessor (additive; `cargo semver-checks`: no breaking
   changes). Off by default; when set, the analyzer recomputes the supported
