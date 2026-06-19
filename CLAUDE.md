@@ -205,21 +205,18 @@ runtime branch).
 
 ## Known Bugs
 
-- **`zenpredict-bake/src/bin/fit_yeo_johnson.rs:447` test
-  `golden_search_finds_optimum_on_synthetic_gaussian` fails**
-  (pre-existing since `0b11215`, 2026-05-25). The golden-section MLE
-  returns λ≈−0.84 on deterministic log-normal data where the test
-  asserts |λ|<0.5 (log-transform ⇒ λ≈0). The test is fully
-  deterministic (Box-Muller, no RNG seed), so it has failed since the
-  day it landed. Scope: the `fit_yeo_johnson` tool in `zenpredict-bake`
-  only — `zenpredict` (the published runtime) is unaffected, and CI
-  does not run `zenpredict-bake`'s tests. Either the fitter's
-  objective or the test's expectation is wrong; needs a numerical
-  investigation. Do NOT relax the assertion without confirming the
-  fitter is correct.
-- CI does not run `zenpredict-bake`'s tests/benches at all (only
-  `-p zenpredict`, `-p zenpicker`, and the workspace `cargo build`).
-  `zenpredict-bake/benches/predict.rs` is also bit-rotted against
-  rand 0.9 (`gen_range` → `random_range`) and the current `Predictor`
-  API (E0308). Adding a `zenpredict-bake` test job would surface both
-  the bench rot and the `fit_yeo_johnson` failure above.
+_None currently open._
+
+Resolved 2026-06-19 (P0 CI-integrity pass):
+- The `fit_yeo_johnson` golden-section test "failure" was a **wrong test
+  expectation**, not a fitter bug. λ≈−0.843 IS the correct Yeo-Johnson MLE for
+  log-normal data: YJ λ=0 is `log(x+1)`, NOT `log(x)`, so the Box-Cox fact
+  "log-normal ⇒ λ≈0" does not carry over. Verified over a fine grid — the YJ
+  profile log-likelihood is sharply peaked at −0.843 (`ll(−0.843)≈−36.3` vs
+  `ll(0)≈−144.7`). The fitter was right; the test now asserts ≈−0.843 (renamed
+  `golden_search_finds_yj_optimum_on_lognormal`).
+- `zenpredict-bake` is now in CI (`.github/workflows/ci.yml` job
+  `zenpredict-bake`): fmt + clippy `--all-features --all-targets -D warnings` +
+  test (default + `fit-yj`, which builds the MLE bin and runs its test). The
+  bench `rand 0.9` deprecations (`gen_range`→`random_range`) are fixed and the
+  accumulated clippy debt was cleared so `-D warnings` passes.

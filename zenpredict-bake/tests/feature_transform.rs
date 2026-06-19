@@ -1,6 +1,3 @@
-use zenpredict::*;
-use zenpredict_bake::*;
-
 mod feature_transform_tests {
     //! Tests for issue #52 — `zentrain.feature_transforms` metadata
     //! key + `Predictor::predict_*_transformed` runtime helpers.
@@ -439,7 +436,7 @@ mod feature_transform_tests {
 
     /// Bake a single-layer identity-passthrough model whose first
     /// layer takes `expanded_dim` inputs, with the supplied transform
-    /// + param metadata. Used to assert that
+    /// and param metadata. Used to assert that
     /// `Predictor::predict_transformed` runs the expanding pipeline
     /// and forwards the expanded vector through the network.
     fn make_expanded_passthrough(

@@ -463,12 +463,12 @@ mod tests {
         let mut current = input.to_vec();
         for layer in layers {
             let mut next = alloc::vec![0.0f32; layer.out_dim];
-            for o in 0..layer.out_dim {
+            for (o, slot) in next.iter_mut().enumerate() {
                 let mut acc = layer.biases[o];
                 for (i, &x) in current.iter().enumerate() {
                     acc += x * layer.weights[i * layer.out_dim + o];
                 }
-                next[o] = match layer.activation {
+                *slot = match layer.activation {
                     Activation::Identity => acc,
                     Activation::Relu => acc.max(0.0),
                     Activation::LeakyRelu => {

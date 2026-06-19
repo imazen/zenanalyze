@@ -200,10 +200,10 @@ fn load_column(
                             out.push(v);
                         }
                     }
-                    if let Some(cap) = max_rows {
-                        if out.len() >= cap {
-                            break;
-                        }
+                    if let Some(cap) = max_rows
+                        && out.len() >= cap
+                    {
+                        break;
                     }
                 }
             }
@@ -216,10 +216,10 @@ fn load_column(
                             out.push(v);
                         }
                     }
-                    if let Some(cap) = max_rows {
-                        if out.len() >= cap {
-                            break;
-                        }
+                    if let Some(cap) = max_rows
+                        && out.len() >= cap
+                    {
+                        break;
                     }
                 }
             }
@@ -229,10 +229,10 @@ fn load_column(
                 ));
             }
         }
-        if let Some(cap) = max_rows {
-            if out.len() >= cap {
-                break;
-            }
+        if let Some(cap) = max_rows
+            && out.len() >= cap
+        {
+            break;
         }
     }
     Ok(out)
@@ -363,7 +363,8 @@ fn main() -> std::process::ExitCode {
         eprintln!("error: missing column name or --feature-idx. Pass --help for usage.");
         return std::process::ExitCode::from(1);
     }
-    if !(grid_min < grid_max) {
+    // `!= Some(Less)` (not `>=`) so a NaN bound is rejected too.
+    if grid_min.partial_cmp(&grid_max) != Some(std::cmp::Ordering::Less) {
         eprintln!("error: --grid-min must be < --grid-max");
         return std::process::ExitCode::from(1);
     }
@@ -436,9 +437,16 @@ mod tests {
     }
 
     #[test]
-    fn golden_search_finds_optimum_on_synthetic_gaussian() {
-        // Synthetic data: draw from N(0, 1) and shift positive to
-        // force a non-trivial λ. λ ≈ 0..1 should win.
+    fn golden_search_finds_yj_optimum_on_lognormal() {
+        // Deterministic log-normal data: x = exp(Box-Muller N(0,1)).
+        //
+        // NB: Yeo-Johnson λ=0 is log(x+1), NOT log(x), so the Box-Cox fact
+        // "log-normal ⇒ λ≈0" does NOT carry over to YJ — the +1 shift moves the
+        // MLE. The YJ profile log-likelihood for this data is sharply peaked at
+        // λ≈-0.843 (independently verified over a fine grid: ll(-0.843)≈-36.3 vs
+        // ll(0)≈-144.7, a 108-nat gap). The search must converge there. (An
+        // earlier version asserted |λ|<0.5 on the mistaken Box-Cox premise and
+        // failed since it landed — the fitter was right, the expectation wrong.)
         use std::f64::consts::PI;
         let n = 1000;
         let xs: Vec<f64> = (0..n)
@@ -451,11 +459,9 @@ mod tests {
             .map(|z| z.exp()) // log-normal — log-scale
             .collect();
         let (lambda, _ll) = golden_search(&xs, -2.0, 2.0, 1e-5);
-        // λ near 0 indicates "use log transform" — correct for
-        // log-normal data.
         assert!(
-            lambda.abs() < 0.5,
-            "expected λ near 0 for log-normal data, got {lambda}"
+            (lambda - (-0.843)).abs() < 0.02,
+            "YJ MLE for log-normal data should be ≈-0.843, got {lambda}"
         );
     }
 }

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The crate is now CI-gated (`.github/workflows/ci.yml` job `zenpredict-bake`):
+  fmt + clippy `--all-features --all-targets -D warnings` + test (default +
+  `fit-yj`). Previously CI never built or tested it, so the items below had
+  rotted unnoticed.
+- `fit_yeo_johnson` golden-section test corrected. It asserted the Box-Cox fact
+  "log-normal ⇒ λ≈0", but Yeo-Johnson λ=0 is `log(x+1)`, not `log(x)`, so the
+  correct YJ MLE for log-normal data is ≈−0.843 (the profile log-likelihood is
+  sharply peaked there: `ll(−0.843)≈−36.3` vs `ll(0)≈−144.7`). The fitter was
+  always correct; the test now asserts ≈−0.843 and is renamed
+  `golden_search_finds_yj_optimum_on_lognormal`.
+- `predict` bench updated for `rand 0.9` (`gen_range` → `random_range`); a batch
+  of accumulated clippy debt cleared so `-D warnings` passes.
+
 ### Added
 
 - **`BakeRequestJson` is now `#[non_exhaustive]`** so future

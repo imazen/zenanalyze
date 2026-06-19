@@ -899,8 +899,10 @@ mod tests {
         let scaler_mean = alloc::vec![0.0f32; 8];
         let scaler_scale = alloc::vec![1.0f32; 8];
         let req = BakeRequest::new(0, 0, &scaler_mean, &scaler_scale, &layers);
-        let mut cfg = OptimizeConfig::default();
-        cfg.local_search_iters = 0;
+        let cfg = OptimizeConfig {
+            local_search_iters: 0,
+            ..Default::default()
+        };
         let _ = bake_optimized_with(&req, &cfg).unwrap();
     }
 }

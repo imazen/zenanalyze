@@ -74,8 +74,9 @@ fn main() {
 
     // Materialize each layer's weights as f32 + biases as f32, preserving
     // the original dtype choice.
-    let mut owned_layers: Vec<(usize, usize, Activation, WeightDtype, Vec<f32>, Vec<f32>)> =
-        Vec::with_capacity(n_layers);
+    // (in_dim, out_dim, activation, dtype, weights, biases)
+    type OwnedLayer = (usize, usize, Activation, WeightDtype, Vec<f32>, Vec<f32>);
+    let mut owned_layers: Vec<OwnedLayer> = Vec::with_capacity(n_layers);
     for layer in model.layers() {
         let in_dim = layer.in_dim;
         let out_dim = layer.out_dim;

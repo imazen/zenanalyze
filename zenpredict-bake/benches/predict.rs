@@ -26,14 +26,14 @@ fn bake_shape(
     seed: u64,
 ) -> Vec<u8> {
     let mut rng = SmallRng::seed_from_u64(seed);
-    let scaler_mean: Vec<f32> = (0..n_in).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let scaler_scale: Vec<f32> = (0..n_in).map(|_| rng.gen_range(0.5..1.5)).collect();
+    let scaler_mean: Vec<f32> = (0..n_in).map(|_| rng.random_range(-1.0..1.0)).collect();
+    let scaler_scale: Vec<f32> = (0..n_in).map(|_| rng.random_range(0.5..1.5)).collect();
     let w0: Vec<f32> = (0..n_in * n_hidden)
-        .map(|_| rng.gen_range(-0.3f32..0.3))
+        .map(|_| rng.random_range(-0.3f32..0.3))
         .collect();
     let b0: Vec<f32> = vec![0.0; n_hidden];
     let w1: Vec<f32> = (0..n_hidden * n_out)
-        .map(|_| rng.gen_range(-0.3f32..0.3))
+        .map(|_| rng.random_range(-0.3f32..0.3))
         .collect();
     let b1: Vec<f32> = vec![0.0; n_out];
     let layers = [
@@ -61,7 +61,7 @@ fn bake_shape(
 fn random_inputs(n_in: usize, n_samples: usize, seed: u64) -> Vec<Vec<f32>> {
     let mut rng = SmallRng::seed_from_u64(seed);
     (0..n_samples)
-        .map(|_| (0..n_in).map(|_| rng.gen_range(-3.0f32..3.0)).collect())
+        .map(|_| (0..n_in).map(|_| rng.random_range(-3.0f32..3.0)).collect())
         .collect()
 }
 

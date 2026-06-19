@@ -89,6 +89,31 @@ jobs:
         if: matrix.features == 'std,advanced' && matrix.os == 'ubuntu-latest'
         run: cargo test -p zenpredict --no-default-features --features "${{ matrix.features }}" --doc
 
+  zenpredict-bake:
+    # The bake/composer tool. Not a runtime crate (runs at train/bake time on the
+    # CI/dev box), so a single ubuntu job suffices — but it MUST be gated so the
+    # `fit-yj` MLE bin + its golden-section test, the integration suites, and the
+    # zenbench `predict` bench don't silently bit-rot (clippy --all-targets
+    # compiles benches + examples too).
+    name: zenpredict-bake (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt -p zenpredict-bake --check
+      - name: Clippy (all features, all targets)
+        run: cargo clippy -p zenpredict-bake --all-features --all-targets -- -D warnings
+      - name: Build
+        run: cargo build -p zenpredict-bake
+      - name: Test (default)
+        run: cargo test -p zenpredict-bake
+      - name: Test (fit-yj — MLE bin + golden-section test)
+        run: cargo test -p zenpredict-bake --features fit-yj
+
   cross:
     name: Cross (${{ matrix.target }})
     runs-on: ubuntu-latest

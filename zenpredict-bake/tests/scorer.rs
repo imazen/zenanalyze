@@ -1,5 +1,4 @@
 use zenpredict::*;
-use zenpredict_bake::*;
 
 #[cfg(test)]
 mod scorer_tests {
