@@ -44,25 +44,25 @@ runs on the PQ→RGB8 narrowing, which crushes the SDR-in-PQ envelope toward
 black. The depth tier (HDR capture, ids 32-39,46,47) IS consistent and is
 correctly excluded (it measures the envelope on purpose).
 
-### The fork (needs a call)
+### Fix: normalize ONCE at the shared RowStream layer (not per-tier)
 
-Closing axis 3 means choosing the analysis space for the normalized path:
+The content tiers don't have per-feature kernels — they share combined passes
+(tier1's `accumulate_row_simd` + `stripe_block_stats_simd` emit variance, edges,
+chroma, uniformity, covariance in ONE f32x8 sweep; tier3 fuses DCT/entropy/AQ/
+noise/line-art/gradient/quant-survival). And every content tier reads the SAME
+`RowStream` RGB8 (`src/row_stream.rs`, `Inner::Convert` is the single narrowing
+point for u16/f32/HDR sources). So the fix is **one change at RowStream**, not a
+per-tier port: when linear-light is on, the Convert path emits diffuse-white-
+normalized RGB8 (decode → linear → ×anchor → re-encode), and every content
+feature becomes SDR/HDR-consistent inside its existing combined pass at once.
 
-1. **Linear-space (extend the current design).** Port each luma/chroma content
-   tier to compute on the normalized-linear plane. Honors the user's earlier
-   "diffuse-white-normalized **linear light**" choice; features are linear-space
-   (differ from the gamma default — `linear_light_flag_changes_variance` relies
-   on this). Large, per-tier, each threshold (edge 400, uniform var<25) needs a
-   linear re-derivation. SDR-in-PQ ≡ SDR *in linear space*.
+This also **deletes `linear_tier`** — that separate luma-plane pass exists only
+to re-derive Variance, which is exactly the anti-combine duplication; folding
+the anchor into the shared RowStream input makes tier1 emit a consistent
+Variance (and everything else) for free.
 
-2. **Normalize-then-standard (envelope undo).** One pass: decode → ×diffuse-white
-   anchor (linear) → re-encode sRGB → RGB8, then run the existing calibrated
-   gamma tiers unchanged. All 100 content features consistent at once, low risk,
-   reuses every kernel. But it makes linear-light a NO-OP for plain SDR (breaks
-   `linear_light_flag_changes_variance`) and the features are gamma-space, not
-   linear — a redefinition of what the flag means.
-
-Both use a linear diffuse-white anchor (no tone curve, per "tone mapping isn't
-the solution"). Option 2 is far cheaper and gives full consistency; option 1
-honors the literal "linear light" semantics. This is a feature-semantics
-decision, deferred to the user — not silently chosen.
+Semantic consequence to confirm: linear-light becomes "undo the HDR envelope,
+then analyze in the standard display-RGB space" — a NO-OP for plain SDR (so
+`linear_light_flag_changes_variance` is re-expressed as an envelope test), and
+features are display-space, not linear-space. The anchor itself is still applied
+in linear light (no tone curve, per "tone mapping isn't the solution").

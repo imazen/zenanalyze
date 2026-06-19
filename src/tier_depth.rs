@@ -363,6 +363,23 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     // Tolerance absorbs small numerical noise from the matrix walk.
     let m_to_srgb = primaries_to_srgb_matrix(desc.primaries);
     let m_to_p3 = primaries_to_displayp3_matrix(desc.primaries);
+    // u8 sources have only 256 distinct sample values, so precompute the EOTF
+    // once into a LUT instead of a per-pixel transcendental. lut[i] ==
+    // eotf(tf, i/255), so the walk stays BIT-IDENTICAL to the general path —
+    // this is the optimize-pass payback for dropping the u8 SDR shortcut:
+    // content-referred luminance, but no per-pixel pow().
+    let u8_lut: Option<[f32; 256]> = if matches!(ch, ChannelType::U8) {
+        let mut t = [0.0f32; 256];
+        for (i, e) in t.iter_mut().enumerate() {
+            *e = eotf(tf_kind, i as f32 / 255.0);
+        }
+        Some(t)
+    } else {
+        None
+    };
+    // Bt709 ⊆ both sRGB(=Bt709) and P3, so every Bt709-source pixel is trivially
+    // in both gamuts — skip the per-pixel matrix projections (exact: 1.0).
+    let trivial_gamut_bt709 = matches!(desc.primaries, ColorPrimaries::Bt709);
     let mut srgb_in: u32 = 0;
     let mut p3_in: u32 = 0;
     const GAMUT_LO: f32 = -0.005;
@@ -413,8 +430,11 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             let mut linear_max: f32 = 0.0;
             let mut linears = [0.0_f32; 4]; // up to 4 colour channels
             for c in 0..color_channels.min(4) {
-                let s = read_sample(ch, &row[off + c * ch_bytes..]);
-                let l = eotf(tf_kind, s);
+                // u8: ch_bytes == 1, so the channel byte is at off + c.
+                let l = match &u8_lut {
+                    Some(lut) => lut[row[off + c] as usize],
+                    None => eotf(tf_kind, read_sample(ch, &row[off + c * ch_bytes..])),
+                };
                 linears[c] = l;
                 if l > linear_max {
                     linear_max = l;
@@ -457,16 +477,22 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             // colour channels — grayscale by construction has the
             // pixel sitting on the achromatic axis, in every gamut).
             if color_channels >= 3 {
-                let (sr_r, sr_g, sr_b) = match m_to_srgb {
-                    Some(m) => mat3_mul(m, linears[0], linears[1], linears[2]),
-                    None => (linears[0], linears[1], linears[2]),
-                };
-                if in_gamut(sr_r, sr_g, sr_b) {
+                if trivial_gamut_bt709 {
+                    // Bt709 ⊆ sRGB and ⊆ P3 — in both by construction.
                     srgb_in += 1;
-                }
-                let (p3_r, p3_g, p3_b) = mat3_mul(m_to_p3, linears[0], linears[1], linears[2]);
-                if in_gamut(p3_r, p3_g, p3_b) {
                     p3_in += 1;
+                } else {
+                    let (sr_r, sr_g, sr_b) = match m_to_srgb {
+                        Some(m) => mat3_mul(m, linears[0], linears[1], linears[2]),
+                        None => (linears[0], linears[1], linears[2]),
+                    };
+                    if in_gamut(sr_r, sr_g, sr_b) {
+                        srgb_in += 1;
+                    }
+                    let (p3_r, p3_g, p3_b) = mat3_mul(m_to_p3, linears[0], linears[1], linears[2]);
+                    if in_gamut(p3_r, p3_g, p3_b) {
+                        p3_in += 1;
+                    }
                 }
             } else {
                 // Achromatic pixel — by definition it sits in every
