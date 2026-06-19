@@ -109,23 +109,30 @@ pub(crate) fn linear_variance(slice: &PixelSlice<'_>, pixel_budget: usize) -> Op
     let row_stride = ((w * h) / pixel_budget.max(1)).max(1);
     let dst_bytes = w * 3 * 4; // RGBF32_LINEAR = 3 × f32
     let mut dst = vec![0u8; dst_bytes];
-    let mut luma: Vec<f32> = Vec::with_capacity((h / row_stride + 1) * w);
+    // Reused per-row luma buffer — accumulate sum/sumsq in f64 per row instead
+    // of materializing the whole sampled plane (was multi-MB at high res). The
+    // f64 partials sum associatively, so the variance is identical.
+    let mut row_luma: Vec<f32> = vec![0.0; w];
+    let (mut sum, mut sumsq) = (0.0f64, 0.0f64);
+    let mut n = 0usize;
     let mut y = 0usize;
     while y < h {
         converter.convert_row(slice.row(y as u32), &mut dst, w as u32);
-        for px in dst.chunks_exact(12) {
+        for (px, l) in dst.chunks_exact(12).zip(row_luma.iter_mut()) {
             let r = f32::from_ne_bytes(px[0..4].try_into().unwrap());
             let g = f32::from_ne_bytes(px[4..8].try_into().unwrap());
             let b = f32::from_ne_bytes(px[8..12].try_into().unwrap());
-            luma.push((KR * r + KG * g + KB * b) * scale);
+            *l = (KR * r + KG * g + KB * b) * scale;
         }
+        let (s, sq) = sum_sumsq(&row_luma);
+        sum += s;
+        sumsq += sq;
+        n += w;
         y += row_stride;
     }
-    let n = luma.len();
     if n == 0 {
         return None;
     }
-    let (sum, sumsq) = sum_sumsq(&luma);
     let mean = sum / n as f64;
     Some((sumsq / n as f64 - mean * mean).max(0.0) as f32)
 }
