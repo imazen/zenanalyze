@@ -1,112 +1,164 @@
-# PR: a robust, type-free feature contract for the picker crate tree
+# PR: a co-versioning, type-free feature contract for the picker crate tree
 
-**Status:** drafted 2026-06-19. Code landed additively (patch-bump, `cargo
-semver-checks`: no breaking change). Codec migrations are follow-ups in their
-own repos.
+**Status:** drafted 2026-06-19. zenanalyze-side code landed additively
+(patch-bump; `cargo semver-checks`: no breaking change). Codec + `zenpredict`
+migrations are follow-ups in their own repos.
 
-## Problem
+## The hard requirement that drives the design
 
-zenanalyze produces feature vectors that feed compiled-in trained models across
-a growing set of codec crates. Reading the three production integrations
-(`zenwebp`, `zenjpeg`, `zenavif`) shows the contract between "the model's
-feature columns" and "the analyzer's feature ids, in order" is bound **three
-different ways, none blessed**:
+**A single build must link multiple zenanalyze majors at once — 0.1, 0.2, 0.3,
+1.0, 2.0 — simultaneously.** Different codec crates pin different versions
+because their baked models were trained against different feature *definitions*,
+and a product (e.g. imageflow) pulls in several codecs. zenanalyze is pure
+functions + `const` data — no `#[no_mangle]`, no `links`, no `static mut` /
+`thread_local`, no `extern "C"` — so Cargo links every major/0.x-minor as a
+separate crate, side by side, with no symbol or state clash. Verified.
 
-| codec | bind | failure mode |
-|---|---|---|
-| zenwebp | hardcoded `ANALYSIS_FEATURES` enum array ↔ `FEAT_COLS` names, **position-aligned**, compile-time length check + schema-hash at load | brittle: add/reorder a feature ⇒ hand-resync two arrays; compile-time-bound |
-| zenjpeg | embedded `feature_order.txt` of names, resolved at runtime via a hand-built `name→variant` map over `SUPPORTED.iter()` | re-implements the lookup; OK otherwise |
-| zenavif | reads feature-column names **from the model metadata**, hand-built name→variant map | re-implements the lookup |
+This makes feature-definition **drift impossible by construction**: each model
+is fed features by the *exact* version it was trained on, because that's the only
+version that codec links. It replaces the fragile "pin a patch and re-validate"
+contract with a build-time guarantee.
 
-Three concrete flaws fall out:
+## The cardinal rule it forces
 
-1. **No `from_name`.** The reverse of `feature_name` doesn't exist, so every
-   name-resolving codec hand-rolls a `HashMap` over `SUPPORTED.iter()`.
-2. **Type re-export.** Codecs that bind by enum (zenwebp) or expose analysis
-   results (`zenjpeg` does `pub use zenanalyze::feature::{AnalysisFeature,
-   AnalysisQuery, FeatureSet}`) leak zenanalyze's typed surface into their own
-   public API and their downstreams.
-3. **Silent numeric-definition drift.** The schema hash a model carries (in
-   `zenpredict`, over feature *names*) protects names + order, but a feature can
-   keep its id/name while its numeric definition drifts — allowed within a 0.x
-   minor — and every model silently eats the drift. No tripwire.
+**No zenanalyze type may cross a crate boundary.** Every zenanalyze type is
+version-specific: in a five-version build, `zenanalyze0_2::AnalysisFeature` and
+`zenanalyze1_0::AnalysisFeature` are *different, incompatible* types — five
+copies of everything. So the data-sharing contract is **core types only**
+(`u16`, `u32`, `&str`, `Vec<u16>`, `&[f32]`) plus the shared `PixelSlice` pixel
+currency. This is why there is no `FeatureSchema` adapter (an earlier draft had
+one — a version-specific struct can't be a cross-version contract, and it's a
+footgun precisely because it *looks* like one). The bind logic is free functions
+that return core types.
 
-The previous "expose tier/cost/value-kind/schema-hash accessors" idea was wrong:
-the runtime extracts a *fixed* set (cost/tier is a *training*-time ablation
-concern), the vector is all f32 (value-kind is moot), and a (id,name) hash
-duplicates the one `zenpredict` already bakes. None of those serve a real
-consumer.
+## The data structures
 
-## Design
+### 1. What the MODEL carries — the source of truth (baked, in ZNPR metadata)
 
-One **flat data plane** (core types only — no `AnalysisFeature` named by the
-consumer) plus one **adapter**.
+The model is self-describing. zenanalyze does **not** hold the schema — the model
+does, and `zenpredict` (the version-agnostic runtime) owns the format.
 
-### Flat surface (added)
-- `feature_id_by_name(name: &str) -> Option<u16>` and
-  `AnalysisFeature::from_name(&str) -> Option<Self>` — the missing reverse.
-  Accepts the `feat_` training-column prefix; `None` for unknown / retired /
-  cfg-disabled (caller falls back rather than feed a silent zero).
-- `feature_defs_version() -> u32` — monotonic version of the feature *numeric
-  definitions*, independent of crate version and the id/name set.
-
-### Adapter (added) — `FeatureSchema`
-The blessed bridge. Resolve once from the model's column-name list, extract per
-image:
-
-```rust
-let schema = zenanalyze::FeatureSchema::resolve(model.feature_columns())
-    .ok_or(MyErr::FeatureDrift)?;          // a retired feature => fall back
-if schema.defs_version() != model.baked_defs_version() {
-    warn!("analyzer feature math moved since training; re-validate");
-}
-// per image:
-let mut feats = vec![0.0f32; schema.len()];
-schema.extract(slice, &mut feats);          // PixelSlice in, &[f32] out
-let params = predictor.predict(&feats)?;    // core &[f32] -> codec params
+```text
+model.feature_columns      : Vec<String>   // feature NAMES, in model-input order
+model.analyzer_version     : String        // "0.2" — the zenanalyze major.minor it was extracted with
+model.feature_defs_version : u32           // within-major numeric-definition version at extract time
+model.schema_hash          : u64           // BLAKE2b over feature_columns (names + order)
 ```
 
-`FeatureSchema` holds the resolved ids (in the model's order) + the defs
-version. In/out are core types plus the shared `PixelSlice` pixel currency.
+`feature_columns` + `schema_hash` already exist in ZNPR (`zentrain.feature_columns`,
+header bytes 24..32). `analyzer_version` + `feature_defs_version` are the
+additions (one new metadata TLV each). Names are the durable key — **not ids**,
+which are version-local.
 
-### Passing data without re-exporting types
-This is what closes flaw #2. A codec uses `FeatureSchema` **internally**; its own
-public API exposes only `&[f32]` (or its own newtype). It never re-exports
-`AnalysisFeature` / `AnalysisQuery` / `AnalysisResults`. The data plane is the
-"separate surface", `FeatureSchema` is the "adapter" — either is enough to keep
-zenanalyze's typed surface out of a consumer's API. The rich typed surface stays
-for callers who *want* it (it isn't removed — additive PR).
+### 2. What CROSSES crate boundaries — core types only
 
-### Drift tripwire
-`feature_defs_version()` is bumped in lockstep with the threshold-contract
-CHANGELOG entries (any change to a feature's computed value). A model bakes the
-version it trained against; the codec compares at load. Coarse but honest, and
-it matches the existing "pin a patch, re-validate on bump" contract — it freezes
-at 1.0. (A per-feature-set fingerprint is a future refinement; the global
-counter is the minimal correct tripwire.)
+```text
+codec ── PixelSlice + &[u16] ids ──▶ zenanalyze@X      (extract)
+codec ◀──────── &[f32] values ─────── zenanalyze@X      (in model order)
+codec ──────── &[f32] values ──────▶ zenpredict         (predict)
+codec ◀──────── &[f32] outputs ────── zenpredict         (codec params)
+```
 
-## Codec migration (follow-ups, each in its own repo)
-- **zenavif** is already close — switch its hand-built name→variant map to
-  `FeatureSchema::resolve(model.feature_columns())`.
-- **zenjpeg** — replace `resolve_features()` + the `pub use` with `FeatureSchema`;
-  drop the re-export so its public API is core-typed.
-- **zenwebp** — retire the position-aligned `ANALYSIS_FEATURES`/`FEAT_COLS`
-  arrays for `FeatureSchema::resolve(FEAT_COLS)`; bake `feature_defs_version`
-  next to the existing schema-hash check.
+Never a `Vec<AnalysisFeature>`, an `AnalysisResults`, or any `@X` struct. The
+shared predictor sees only `&[f32]`, so it works with features from *any*
+zenanalyze version.
 
-All three then bind the *same* way, forward-compatibly (additions ignored,
-retirements caught by `resolve` returning `None`), with a definition-drift
-tripwire and no type re-export.
+### 3. What the CODEC holds at runtime — core types it owns
 
-## Explicitly out of scope (and why)
-- **Range / units / monotonicity metadata.** Worth adding — but *after* 1.0, as
-  a documented contract over a frozen set. Adding it now bakes a slot into the
-  `features_table!` grammar for ~102 rows over a set that's still churning.
-- **Redundancy-cluster membership.** Codec-specific + training-derived + the
-  data files are partly stale. Belongs in `zenpicker`/`zentrain`; zenanalyze
-  "doesn't bake content-class assumptions".
-- **A definition-aware schema *hash*.** A hash can't cheaply capture algorithm
-  drift; the monotonic `defs_version` counter is the pragmatic tripwire.
+```text
+ids  : Vec<u16>   // resolved id order (from resolve_feature_ids, version-local)
+defs : u32        // the model's baked feature_defs_version, for the load check
+```
 
-The deeper fix for drift is the contract's own endgame: converge the feature set
-and freeze at 1.0 (see the dense-percentiles dedup doc — that's the gate).
+The codec may wrap these in *its own* struct; it holds no zenanalyze type, so its
+public API — and its downstreams — stay free of zenanalyze across the version
+boundary.
+
+## The flow (example)
+
+```rust
+// ── at model load, once ────────────────────────────────────────────────────
+// the model is self-describing: names + the version it was baked with.
+let names: &[String] = model.feature_columns();              // ["variance", "edge_density", …]
+
+// resolve against THIS crate's pinned zenanalyze -> a core Vec<u16> we own:
+let ids: Vec<u16> = zenanalyze::resolve_feature_ids(names)
+    .ok_or(MyErr::FeatureDrift)?;                            // a retired name => fall back, never a silent 0
+
+// within-major drift backstop (cross-major is already guaranteed by the Cargo pin):
+if zenanalyze::feature_defs_version() != model.feature_defs_version() {
+    log::warn!("zenanalyze feature math moved within the major; re-validate this model");
+}
+
+// ── per image ──────────────────────────────────────────────────────────────
+let mut feats = vec![0.0f32; ids.len()];
+zenanalyze::feature_vector(slice, &ids, &mut feats);         // PixelSlice in, &[f32] out
+let params = predictor.predict(&feats)?;                     // core &[f32] both directions
+```
+
+## How names + versions are shared — the lifecycle
+
+```text
+TRAIN  (zentrain, Python)
+  extract features named feat_<name>  ──▶  train  ──▶  bake:
+     feature_columns      = [variance, edge_density, …]     (names + order)
+     analyzer_version     = "0.2"                            (the zenanalyze used to extract)
+     feature_defs_version = zenanalyze::feature_defs_version()   (e.g. 1)
+     schema_hash          = blake2b(feature_columns)
+
+BUILD  (each codec's Cargo.toml pins the model's major.minor)
+     zenjpeg → zenanalyze = "=0.2.7"
+     zenwebp → zenanalyze = "=1.0.3"
+     ⇒ Cargo links BOTH as separate crates — no conflict (pure-fn, no global state)
+
+RUN
+     each codec:  names ─resolve_feature_ids(its pinned @X)→ Vec<u16> ─feature_vector→ &[f32]
+     shared predictor:   &[f32] ─predict→ &[f32]            (names no zenanalyze type)
+```
+
+## The version guarantees, layered
+1. **Cross-major** (0.2 vs 1.0): the **Cargo pin**. A 0.2-model's codec links only
+   0.2; it *cannot* be fed 1.0 features because 1.0 isn't in that codec's graph.
+2. **Within-major numeric drift** (0.2.3 vs 0.2.7): `feature_defs_version` — baked
+   vs runtime, mismatch warns.
+3. **Name/order drift**: the existing `schema_hash` (zenpredict checks at load).
+
+## Coexistence (the Cargo picture)
+```toml
+# imageflow/Cargo.toml — pulls in codecs that pin different analyzer majors
+zenjpeg = "…"   # → zenanalyze =0.2.x
+zenwebp = "…"   # → zenanalyze =1.0.x
+```
+```text
+$ cargo tree -i zenanalyze
+zenanalyze v0.2.7  ← zenjpeg
+zenanalyze v1.0.3  ← zenwebp     # both present, both correct
+```
+
+## The zenanalyze surface (final — all free functions, all core types)
+- `feature_count() / feature_ids(&mut [u16]) / feature_name(u16)`
+- `feature_id_by_name(&str) -> Option<u16>` · `AnalysisFeature::from_name`
+- `resolve_feature_ids(&[S]) -> Option<Vec<u16>>`  ← the bind step, returns a core `Vec<u16>`
+- `feature_vector(slice, &[u16], &mut [f32]) -> bool`
+- `feature_defs_version() -> u32`
+
+No `FeatureSchema`, no exported struct on the contract path. The rich typed
+surface (`AnalysisFeature`/`AnalysisResults`/`FeatureSet`) stays for in-process
+callers that pin one version — it is simply never used *across* a boundary.
+
+## Follow-ups (other repos)
+- **zenpredict-bake** — bake `analyzer_version` + `feature_defs_version` into the
+  model metadata.
+- **zenpredict** — `Model::feature_columns()` / `.feature_defs_version()` /
+  `.analyzer_version()` accessors (read-only, core types).
+- **codecs** — bind via `resolve_feature_ids` + drop the `pub use
+  zenanalyze::feature::*`; pin the model's analyzer major.minor.
+
+## Why this dissolves the old worries
+- **Drift** — gone, by co-versioning.
+- **"Freeze at 1.0"** — no longer urgent: ship `0.3` with the pruned dense set
+  *while* old codecs stay on `0.2`, coexisting. The set evolves across majors;
+  each consumer migrates on its own schedule (see the dense-percentiles dedup
+  doc). Promoting the dedup winners = cut a new major, force no one.
+- **Type re-export** — structurally impossible to rely on: the types can't cross,
+  only `&[f32]` does.

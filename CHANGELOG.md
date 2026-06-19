@@ -9,18 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Self-describing feature surface for the picker crate tree** (additive):
+- **Co-versioning, type-free feature contract for the picker crate tree**
+  (additive — free functions, core types only, so multiple zenanalyze majors can
+  link in one build):
   - `AnalysisFeature::from_name` / `feature_id_by_name` — the reverse of
     `name`/`feature_name`, resolving a (optionally `feat_`-prefixed) column name
     to a feature. Every wired codec picker currently re-implements this by hand.
-  - `FeatureSchema` — an adapter that resolves a baked model's feature-column
-    name list to ids (in the model's order) and extracts the vector, so a codec
-    binds model↔analyzer **without naming `AnalysisFeature` in its own public
-    API**. Core types + `PixelSlice` in/out only.
-  - `feature_defs_version()` — a monotonic version of the feature *numeric
-    definitions*, to be baked next to a model and checked at load. The existing
-    schema hash protects names/order but not numeric-definition drift; this
-    closes that tripwire. Freezes at 1.0.
+  - `resolve_feature_ids(&[S]) -> Option<Vec<u16>>` — the blessed bind step:
+    resolves a baked model's feature-column NAME list to ids (in order),
+    returning a **core `Vec<u16>`** the caller owns. With `feature_vector`
+    (`&[u16]` in, `&[f32]` out) a codec binds model↔analyzer holding no
+    zenanalyze type, so the data path stays valid even when several zenanalyze
+    versions are linked at once.
+  - `feature_defs_version()` — monotonic version of the feature *numeric
+    definitions*. Cross-major drift is guaranteed by the Cargo pin; this is the
+    within-major backstop (bake next to the model, check at load). Freezes at 1.0.
+  - Contract + data structures + examples: `docs/feature-contract-pr-2026-06-19.md`.
 
 - **Linear-light Variance is now HDR-correct (diffuse-white normalized).** The
   opt-in linear path (below) was generalized from RGB8-only/sRGB to **any format
