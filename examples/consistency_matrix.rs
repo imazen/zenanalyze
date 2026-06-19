@@ -60,7 +60,10 @@ fn make_u8() -> Vec<u8> {
 fn vec_all(slice: PixelSlice<'_>) -> Vec<f32> {
     let n = feature_count();
     let mut out = vec![0.0f32; n];
-    assert!(feature_vector_all(slice, &mut out), "feature_vector_all failed");
+    assert!(
+        feature_vector_all(slice, &mut out),
+        "feature_vector_all failed"
+    );
     out
 }
 
@@ -70,11 +73,25 @@ fn main() {
     feature_ids(&mut ids);
 
     let u8buf = make_u8();
-    let a = vec_all(PixelSlice::new(&u8buf, W, H, (W * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap());
+    let a = vec_all(
+        PixelSlice::new(&u8buf, W, H, (W * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap(),
+    );
 
-    let b_u16: Vec<u16> = u8buf.iter().map(|&c| ((c as u16) << 8) | c as u16).collect();
+    let b_u16: Vec<u16> = u8buf
+        .iter()
+        .map(|&c| ((c as u16) << 8) | c as u16)
+        .collect();
     let b_bytes: Vec<u8> = b_u16.iter().flat_map(|&v| v.to_ne_bytes()).collect();
-    let b = vec_all(PixelSlice::new(&b_bytes, W, H, (W * 6) as usize, PixelDescriptor::RGB16_SRGB).unwrap());
+    let b = vec_all(
+        PixelSlice::new(
+            &b_bytes,
+            W,
+            H,
+            (W * 6) as usize,
+            PixelDescriptor::RGB16_SRGB,
+        )
+        .unwrap(),
+    );
 
     let e_f32: Vec<f32> = u8buf.iter().map(|&c| c as f32 / 255.0).collect();
     let e_bytes: Vec<u8> = e_f32.iter().flat_map(|&v| v.to_ne_bytes()).collect();
@@ -84,7 +101,11 @@ fn main() {
     // rel divergence vs A, per feature
     let rel = |va: f32, vx: f32| {
         let d = (va - vx).abs();
-        if d == 0.0 { 0.0 } else { d / va.abs().max(1e-6) }
+        if d == 0.0 {
+            0.0
+        } else {
+            d / va.abs().max(1e-6)
+        }
     };
     let tol = 1e-5;
 
@@ -105,14 +126,24 @@ fn main() {
         let name = feature_name(ids[i]).unwrap_or("?");
         let line = format!(
             "{:<28} {:>12.6} {:>12.6} {:>12.6}  {}{}",
-            format!("{}({})", name, ids[i]), va, vb, ve,
-            if beq { "" } else { "B≠" }, if eeq { "" } else { "E≠" },
+            format!("{}({})", name, ids[i]),
+            va,
+            vb,
+            ve,
+            if beq { "" } else { "B≠" },
+            if eeq { "" } else { "E≠" },
         );
         if format_descriptive(name) {
-            if !beq || !eeq { expected.push(line); }
+            if !beq || !eeq {
+                expected.push(line);
+            }
         } else {
             content_n += 1;
-            if beq && eeq { content_ok += 1; } else { content_bugs.push(line); }
+            if beq && eeq {
+                content_ok += 1;
+            } else {
+                content_bugs.push(line);
+            }
         }
     }
 
@@ -120,13 +151,26 @@ fn main() {
     if content_bugs.is_empty() {
         println!("  all {content_ok}/{content_n} content features identical across u8/u16/f32 ✓");
     } else {
-        println!("{:<28} {:>12} {:>12} {:>12}", "feature(id)", "A:u8", "B:u16loss", "E:f32srgb");
-        for d in &content_bugs { println!("{d}"); }
-        println!("  ✗ {}/{} content features DIVERGE — channel-type-dependent bug",
-            content_bugs.len(), content_n);
+        println!(
+            "{:<28} {:>12} {:>12} {:>12}",
+            "feature(id)", "A:u8", "B:u16loss", "E:f32srgb"
+        );
+        for d in &content_bugs {
+            println!("{d}");
+        }
+        println!(
+            "  ✗ {}/{} content features DIVERGE — channel-type-dependent bug",
+            content_bugs.len(),
+            content_n
+        );
     }
     println!("\n--- format/precision-descriptive (expected to differ by design) ---");
-    for d in &expected { println!("{d}"); }
+    for d in &expected {
+        println!("{d}");
+    }
 
-    assert!(content_bugs.is_empty(), "content-feature channel-type divergence");
+    assert!(
+        content_bugs.is_empty(),
+        "content-feature channel-type divergence"
+    );
 }

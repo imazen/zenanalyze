@@ -121,6 +121,11 @@ name = "per_feature_cost"
 required-features = ["experimental"]
 
 [[example]]
+name = "per_tier_cost"
+# uses PeakLuminanceNits (hdr-gated) as the depth-tier representative
+required-features = ["hdr"]
+
+[[example]]
 name = "grayscale_perf"
 
 [[example]]

@@ -24,7 +24,8 @@ fn var_rgb8_f32(rgb: &[u8]) -> f64 {
     let mut it = rgb.chunks_exact(K * 3);
     for c in &mut it {
         for j in 0..K {
-            let l = 0.299 * c[j * 3] as f32 + 0.587 * c[j * 3 + 1] as f32 + 0.114 * c[j * 3 + 2] as f32;
+            let l =
+                0.299 * c[j * 3] as f32 + 0.587 * c[j * 3 + 1] as f32 + 0.114 * c[j * 3 + 2] as f32;
             s[j] += l;
             sq[j] += l * l;
         }
@@ -43,7 +44,8 @@ fn var_rgb8_i32(rgb: &[u8]) -> i64 {
     let mut it = rgb.chunks_exact(K * 3);
     for c in &mut it {
         for j in 0..K {
-            let l = (77 * c[j * 3] as i32 + 150 * c[j * 3 + 1] as i32 + 29 * c[j * 3 + 2] as i32) >> 8;
+            let l =
+                (77 * c[j * 3] as i32 + 150 * c[j * 3 + 1] as i32 + 29 * c[j * 3 + 2] as i32) >> 8;
             let li = l as i64;
             s[j] += li;
             sq[j] += li * li;
@@ -121,7 +123,9 @@ fn main() {
                 g.config().max_rounds(60);
                 g.throughput(Throughput::Elements(n as u64));
                 g.bench("f32", |b| b.iter(|| black_box(var_rgb8_f32(rgb))));
-                g.bench("i32_fixedpoint", |b| b.iter(|| black_box(var_rgb8_i32(rgb))));
+                g.bench("i32_fixedpoint", |b| {
+                    b.iter(|| black_box(var_rgb8_i32(rgb)))
+                });
                 g.bench("i16_luma", |b| b.iter(|| black_box(var_rgb8_i16(rgb))));
             });
 

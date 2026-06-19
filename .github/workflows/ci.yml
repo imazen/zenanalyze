@@ -9,6 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Harden crate downloads against transient crates.io flakes. The
+  # windows-11-arm runner intermittently hits `curl [16] Error in the HTTP2
+  # framing layer` mid-download (e.g. arrow-row), failing the whole job.
+  # Force HTTP/1.1 and retry hard.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
 
 # Superseded runs only waste runner queue — particularly the macOS
 # jobs, which wait on GitHub's scarcest pool. Only the newest

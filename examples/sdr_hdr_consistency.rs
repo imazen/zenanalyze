@@ -85,7 +85,13 @@ fn main() {
             if r <= tol {
                 inv += 1;
             } else {
-                diverging.push(format!("{:<28} sdr={:>11.5} hdr={:>11.5}  rel={:.2}", format!("{f:?}"), vs, vh, r));
+                diverging.push(format!(
+                    "{:<28} sdr={:>11.5} hdr={:>11.5}  rel={:.2}",
+                    format!("{f:?}"),
+                    vs,
+                    vh,
+                    r
+                ));
             }
         }
     }

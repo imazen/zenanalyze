@@ -1000,7 +1000,12 @@ fn stripe_block_stats_dispatch(
     blocks_x: usize,
     rows: usize, // stripe height (STRIPE_H for full stripes, < 8 for the tail)
 ) -> StripeBlockStats {
-    incant!(stripe_block_stats_simd(stripe_rows, row_bytes, blocks_x, rows))
+    incant!(stripe_block_stats_simd(
+        stripe_rows,
+        row_bytes,
+        blocks_x,
+        rows
+    ))
 }
 
 /// Iterate the `blocks_x` 8×8 blocks in a complete (8-row) stripe and

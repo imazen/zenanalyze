@@ -307,7 +307,11 @@ impl<'a> RowStream<'a> {
             } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
-                normalize_linear_row(&self.lin_scratch[..len * 4], *scale, &mut self.scratch[..len]);
+                normalize_linear_row(
+                    &self.lin_scratch[..len * 4],
+                    *scale,
+                    &mut self.scratch[..len],
+                );
                 &self.scratch[..len]
             }
         }

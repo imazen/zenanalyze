@@ -724,8 +724,7 @@ mod tests {
             .iter()
             .flat_map(|&c| (((c as u16) << 8) | c as u16).to_ne_bytes())
             .collect();
-        let s16 =
-            PixelSlice::new(&buf16, 32, 32, 32 * 6, PixelDescriptor::RGB16_SRGB).unwrap();
+        let s16 = PixelSlice::new(&buf16, 32, 32, 32 * 6, PixelDescriptor::RGB16_SRGB).unwrap();
         let d16 = scan_depth(&s16, 100_000);
         assert_eq!(d16.peak_nits, PEAK_SRGB_NITS);
         assert_eq!(d16.p99_nits, PEAK_SRGB_NITS);

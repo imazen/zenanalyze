@@ -28,8 +28,7 @@ fn gray_ramp_rgb8(w: usize, h: usize, max_v: u8) -> Vec<u8> {
 
 /// Variance under the diffuse-white-normalized linear-light path.
 fn linear_variance(slice: PixelSlice<'_>) -> f32 {
-    let q =
-        AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance)).with_linear_light(true);
+    let q = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance)).with_linear_light(true);
     analyze_features(slice, &q)
         .unwrap()
         .get_f32(AnalysisFeature::Variance)
@@ -55,7 +54,10 @@ fn linear_light_collapses_shadow_variance() {
         || PixelSlice::new(&buf, w as u32, h as u32, w * 3, PixelDescriptor::RGB8_SRGB).unwrap();
     let lin = linear_variance(mk());
     let gamma = gamma_variance(mk());
-    assert!(lin.is_finite() && lin > 0.0, "linear var positive, got {lin}");
+    assert!(
+        lin.is_finite() && lin > 0.0,
+        "linear var positive, got {lin}"
+    );
     assert!(
         lin < 0.5 * gamma,
         "linear-light should collapse shadow variance: linear {lin} vs gamma {gamma}"
@@ -127,9 +129,8 @@ fn honors_signaled_diffuse_white() {
             .unwrap()
             .with_color_context(ctx),
     );
-    let v_default = linear_variance(
-        PixelSlice::new(&pq_bytes, w, h, (w * 6) as usize, hdr_desc).unwrap(),
-    );
+    let v_default =
+        linear_variance(PixelSlice::new(&pq_bytes, w, h, (w * 6) as usize, hdr_desc).unwrap());
     assert!(
         (v_sdr - v_signaled).abs() <= 0.10 * v_sdr.max(1.0),
         "signaled anchor must match SDR: signaled {v_signaled} vs sdr {v_sdr}"
