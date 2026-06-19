@@ -331,52 +331,17 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     let peak_nits_unit = peak_nits_for(tf_kind);
     let hdr_capable = is_hdr_capable_tf(tf_kind);
 
-    // SDR-fast-path: u8 source with an SDR-only transfer function
-    // can never produce HDR / wide-gamut signal, and the bit depth is
-    // trivially 8. Walking through the EOTF for every sample just to
-    // confirm that is wasteful — return the canonical SDR profile
-    // directly.
-    if matches!(ch, ChannelType::U8) && !hdr_capable {
-        // Conservative SDR-display peak — encode-orchestrators see a
-        // sensible non-zero peak for "what's the brightness" queries
-        // without having to walk pixels.
-        //
-        // Gamut-coverage fast path: u8 + sRGB-class transfer cannot
-        // carry values that exceed the source primaries (linear ∈
-        // [0, 1] always). Whether the image fits in a NARROWER
-        // gamut still depends on its actual pixel content — but the
-        // detection requires the matrix walk we're avoiding here.
-        // For sRGB-declared sources gamut_coverage_srgb is trivially
-        // 1.0; for wider declared primaries the SDR fast path skips
-        // the detection. Codecs needing the downcast signal must
-        // request a query that disables the fast path
-        // (e.g., include any HDR-tier feature that forces the walk).
-        let trivial_srgb_cover = if matches!(desc.primaries, ColorPrimaries::Bt709) {
-            1.0
-        } else {
-            0.0
-        };
-        let trivial_p3_cover = if matches!(
-            desc.primaries,
-            ColorPrimaries::Bt709 | ColorPrimaries::DisplayP3
-        ) {
-            1.0
-        } else {
-            0.0
-        };
-        return DepthStats {
-            peak_nits: PEAK_SRGB_NITS,
-            p99_nits: PEAK_SRGB_NITS,
-            headroom_stops: 0.0,
-            hdr_pixel_fraction: 0.0,
-            wide_gamut_peak: 1.0,
-            wide_gamut_fraction: 0.0,
-            effective_bit_depth: 8,
-            hdr_present: false,
-            gamut_coverage_srgb: trivial_srgb_cover,
-            gamut_coverage_p3: trivial_p3_cover,
-        };
-    }
+    // No U8/SDR luminance shortcut. peak_nits / p99_nits are CONTENT-referred
+    // ("luminance over sampled pixels", per the field docs), so a solid
+    // mid-gray must report its actual ~17 nits — NOT the 80-nit display
+    // reference — and must equal a lossless u16/f32 promotion of the same
+    // bytes. HDR content is content-referred too, so content-referred for
+    // every channel type is the only globally consistent choice. The main walk
+    // below computes that identically for u8 / u16 / f32; a u8 source still
+    // resolves effective_bit_depth = 8 via the match in the reduction, and the
+    // sRGB→sRGB gamut projection is the cheap identity (`None`) path. The u8
+    // sRGB EOTF has only 256 distinct inputs — a LUT keeps this fast (deferred
+    // to the optimize pass; correctness/consistency first).
 
     // Stride-sample rows, same shape as alpha pass. Within a row we
     // also stride-sample pixels for very wide images so the budget
@@ -423,6 +388,12 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     // sharper estimate up to ~10/12-bit.
     let mut low_byte_seen = [false; 256];
     let mut low_byte_distinct: u32 = 0;
+    // Byte-replication flag: a losslessly u8→u16-promoted source has
+    // (c<<8)|c for every sample, so the low byte equals the high byte
+    // everywhere. The distinct-low-byte heuristic alone can't see this (a
+    // promoted ramp has many distinct low bytes and looks like ≥14-bit) — this
+    // is the content-independent signature the field docs note is needed.
+    let mut byte_replicated = true;
     let probe_bits = matches!(ch, ChannelType::U16);
 
     let mut y = 0usize;
@@ -459,6 +430,10 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             // Probe low-byte for u16 sources.
             if probe_bits && color_channels >= 1 {
                 let low = row[off]; // little-endian: byte 0 is the low byte
+                let high = row[off + 1];
+                if low != high {
+                    byte_replicated = false; // genuine ≥9-bit content
+                }
                 if !low_byte_seen[low as usize] {
                     low_byte_seen[low as usize] = true;
                     low_byte_distinct += 1;
@@ -547,6 +522,7 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
                 16
             }
         }
+        ChannelType::U16 if byte_replicated => 8, // losslessly promoted u8
         ChannelType::U16 => effective_depth_from_low_byte(low_byte_distinct, total),
         // Defensive: ChannelType is non_exhaustive.
         _ => 0,
@@ -611,17 +587,51 @@ mod tests {
     use zenpixels::PixelDescriptor;
 
     #[test]
-    fn solid_srgb_u8_takes_fast_path_canonical_sdr_profile() {
-        // SDR fast-path: u8 + sRGB-class transfer cannot carry HDR, so
-        // we skip the per-pixel EOTF walk and return the canonical SDR
-        // profile (peak = display reference 80 nits, no HDR/wide-gamut
-        // signal, depth 8). Callers that want the actual brightness
-        // distribution read Variance / LumaHistogramEntropy from Tier
-        // 1 / Tier 3.
+    fn solid_srgb_u8_reports_content_referred_luminance_consistently() {
+        // peak_nits / p99_nits are CONTENT-referred: a solid mid-gray (128/255
+        // ≈ 0.50 sRGB → ~0.216 linear → ~17 nits) reports its ACTUAL luminance,
+        // not the 80-nit display reference. And a lossless u16 promotion of the
+        // same bytes must report the identical luminance (channel-type
+        // consistency — the whole point). Trivial SDR flags still hold.
         let buf = vec![128u8; 32 * 32 * 3];
         let s = PixelSlice::new(&buf, 32, 32, 32 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
         let d = scan_depth(&s, 100_000);
-        assert_eq!(d.peak_nits, PEAK_SRGB_NITS);
+
+        // lossless u8→u16: (c<<8)|c == c*257, 257/65535 == 1/255 → same signal
+        let buf16: Vec<u8> = buf
+            .iter()
+            .flat_map(|&c| (((c as u16) << 8) | c as u16).to_ne_bytes())
+            .collect();
+        let s16 =
+            PixelSlice::new(&buf16, 32, 32, 32 * 6, PixelDescriptor::RGB16_SRGB).unwrap();
+        let d16 = scan_depth(&s16, 100_000);
+
+        // content-referred: well below the 80-nit display reference
+        assert!(
+            d.peak_nits > 10.0 && d.peak_nits < 40.0,
+            "peak should be content luminance ~17 nits, got {}",
+            d.peak_nits
+        );
+        assert!(
+            (d.peak_nits - d.p99_nits).abs() < 1.0,
+            "solid image: peak≈p99 ({} vs {})",
+            d.peak_nits,
+            d.p99_nits
+        );
+        // channel-type consistency: u8 == u16-lossless on luminance
+        assert!(
+            (d.peak_nits - d16.peak_nits).abs() <= 0.5,
+            "peak u8 {} != u16 {}",
+            d.peak_nits,
+            d16.peak_nits
+        );
+        assert!(
+            (d.p99_nits - d16.p99_nits).abs() <= 0.5,
+            "p99 u8 {} != u16 {}",
+            d.p99_nits,
+            d16.p99_nits
+        );
+        // trivial SDR flags unchanged
         assert_eq!(d.headroom_stops, 0.0);
         assert!(!d.hdr_present);
         assert_eq!(d.effective_bit_depth, 8);
@@ -630,13 +640,18 @@ mod tests {
 
     #[test]
     fn solid_white_srgb_u8_at_sdr_reference() {
-        // Same fast-path; sRGB code 255 still returns the canonical
-        // 80-nit SDR profile. (The pixel-walking version would have
-        // returned exactly 80 nits too, since linear 1.0 = 80 nits.)
+        // sRGB code 255 → linear 1.0 → the 80-nit SDR display reference. Now
+        // content-referred (real EOTF walk), so it lands within an f32 ULP of
+        // 80 (the polynomial sRGB EOTF returns 0.9999999 for input 1.0), not
+        // the exact constant the old fast path hard-returned.
         let buf = vec![255u8; 32 * 32 * 3];
         let s = PixelSlice::new(&buf, 32, 32, 32 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
         let d = scan_depth(&s, 100_000);
-        assert_eq!(d.peak_nits, PEAK_SRGB_NITS);
+        assert!(
+            (d.peak_nits - PEAK_SRGB_NITS).abs() < 1e-3,
+            "white should be ~80 nits, got {}",
+            d.peak_nits
+        );
         assert_eq!(d.hdr_pixel_fraction, 0.0);
         assert!(!d.hdr_present);
     }

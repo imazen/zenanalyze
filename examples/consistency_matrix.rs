@@ -88,35 +88,45 @@ fn main() {
     };
     let tol = 1e-5;
 
-    println!("{:<28} {:>12} {:>12} {:>12}  flags", "feature(id)", "A:u8", "B:u16loss", "E:f32srgb");
-    let (mut nb, mut ne, mut worst_b, mut worst_e) = (0u32, 0u32, 0.0f32, 0.0f32);
-    let (mut worst_b_name, mut worst_e_name) = ("", "");
-    let mut diverging: Vec<String> = Vec::new();
+    // Format/precision-descriptive features legitimately differ by channel
+    // type — they REPORT the container, not the content. bitmap_bytes is the
+    // byte count (1/2/4 bpc); effective_bit_depth reports storage depth for
+    // floats (8 for u8, 8 for losslessly-promoted u16, 32 for f32) by design.
+    // Everything else is a content feature and MUST be channel-type-invariant.
+    let format_descriptive = |name: &str| matches!(name, "bitmap_bytes" | "effective_bit_depth");
+
+    let (mut content_n, mut content_ok) = (0u32, 0u32);
+    let mut content_bugs: Vec<String> = Vec::new();
+    let mut expected: Vec<String> = Vec::new();
     for i in 0..n {
         let (va, vb, ve) = (a[i], b[i], e[i]);
-        let (rb, re) = (rel(va, vb), rel(va, ve));
-        let beq = rb <= tol;
-        let eeq = re <= tol;
-        nb += beq as u32;
-        ne += eeq as u32;
+        let beq = rel(va, vb) <= tol;
+        let eeq = rel(va, ve) <= tol;
         let name = feature_name(ids[i]).unwrap_or("?");
-        if rb > worst_b { worst_b = rb; worst_b_name = Box::leak(name.to_string().into_boxed_str()); }
-        if re > worst_e { worst_e = re; worst_e_name = Box::leak(name.to_string().into_boxed_str()); }
-        if !beq || !eeq {
-            diverging.push(format!(
-                "{:<28} {:>12.6} {:>12.6} {:>12.6}  {}{}",
-                format!("{}({})", name, ids[i]), va, vb, ve,
-                if beq { "" } else { "B≠" }, if eeq { "" } else { "E≠" },
-            ));
+        let line = format!(
+            "{:<28} {:>12.6} {:>12.6} {:>12.6}  {}{}",
+            format!("{}({})", name, ids[i]), va, vb, ve,
+            if beq { "" } else { "B≠" }, if eeq { "" } else { "E≠" },
+        );
+        if format_descriptive(name) {
+            if !beq || !eeq { expected.push(line); }
+        } else {
+            content_n += 1;
+            if beq && eeq { content_ok += 1; } else { content_bugs.push(line); }
         }
     }
-    println!("\n--- diverging features (rel > {tol:.0e}) ---");
-    if diverging.is_empty() {
-        println!("  none — all {n} features identical across u8/u16/f32 ✓");
+
+    println!("--- CONTENT features: must be channel-type-invariant ---");
+    if content_bugs.is_empty() {
+        println!("  all {content_ok}/{content_n} content features identical across u8/u16/f32 ✓");
     } else {
-        for d in &diverging { println!("{d}"); }
+        println!("{:<28} {:>12} {:>12} {:>12}", "feature(id)", "A:u8", "B:u16loss", "E:f32srgb");
+        for d in &content_bugs { println!("{d}"); }
+        println!("  ✗ {}/{} content features DIVERGE — channel-type-dependent bug",
+            content_bugs.len(), content_n);
     }
-    println!("\nA==B (u16 lossless): {nb}/{n} identical  (worst: {worst_b_name} rel={worst_b:.2e})");
-    println!("A==E (f32 sRGB):     {ne}/{n} identical  (worst: {worst_e_name} rel={worst_e:.2e})");
-    println!("\nWant {n}/{n} on both. Divergence ⇒ channel-type-dependent narrowing bug.");
+    println!("\n--- format/precision-descriptive (expected to differ by design) ---");
+    for d in &expected { println!("{d}"); }
+
+    assert!(content_bugs.is_empty(), "content-feature channel-type divergence");
 }
