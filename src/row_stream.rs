@@ -20,8 +20,47 @@
 
 use core::ops::Range;
 
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{PixelDescriptor, PixelSlice, TransferFunction};
 use zenpixels_convert::RowConverter;
+
+const PQ_PEAK_NITS: f32 = 10000.0;
+const DEFAULT_DIFFUSE_WHITE_NITS: f32 = 203.0;
+
+/// Diffuse-white exposure anchor for the normalized-linear path. PQ linear is
+/// absolute (1.0 = 10000 nits) so it scales by `10000 / diffuse_white` to put
+/// the signaled diffuse white at 1.0 (matching SDR); SDR and HLG already sit at
+/// relative [0, 1], so the anchor is 1.0. Reads
+/// [`ColorContext::diffuse_white`](zenpixels::ColorContext) when signaled,
+/// defaulting to BT.2408 (203 nits) for PQ otherwise. A linear ×scale, NOT a
+/// tone curve.
+fn anchor_scale(slice: &PixelSlice<'_>) -> f32 {
+    if slice.descriptor().transfer != TransferFunction::Pq {
+        return 1.0;
+    }
+    let nits = slice
+        .color_context()
+        .and_then(|c| c.diffuse_white)
+        .map(|d| d.nits())
+        .unwrap_or(DEFAULT_DIFFUSE_WHITE_NITS);
+    PQ_PEAK_NITS / nits.max(1.0)
+}
+
+/// Quantize one RGBF32_LINEAR row (as native-endian f32 bytes, 12 B/px) to
+/// display-range RGB8 by `value * scale`, clamped to [0, 255]. `scale` folds
+/// the diffuse-white anchor and the 255 range factor. Super-white HDR (after
+/// the anchor) hard-clips to 255 — the content tiers see the display-range
+/// structure; the depth tier captures the real HDR envelope separately.
+#[inline]
+fn normalize_linear_row(lin_bytes: &[u8], scale: f32, dst: &mut [u8]) {
+    for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
+        let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
+        let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
+        let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
+        out[0] = (r * scale).clamp(0.0, 255.0) as u8;
+        out[1] = (g * scale).clamp(0.0, 255.0) as u8;
+        out[2] = (b * scale).clamp(0.0, 255.0) as u8;
+    }
+}
 
 /// Pull RGB8 rows from any [`PixelSlice`].
 ///
@@ -40,6 +79,9 @@ pub struct RowStream<'a> {
     primaries: zenpixels::ColorPrimaries,
     /// Row-of-RGB8 scratch reused across `fetch_into` and `borrow_row`.
     scratch: Vec<u8>,
+    /// Intermediate `width * 3` f32 (as bytes) row for the
+    /// `LinearNormalized` path only; empty otherwise.
+    lin_scratch: Vec<u8>,
 }
 
 enum Inner<'a> {
@@ -61,6 +103,20 @@ enum Inner<'a> {
     Convert {
         slice: PixelSlice<'a>,
         converter: RowConverter,
+    },
+    /// Diffuse-white-normalized linear-light path (opt-in, linear-light
+    /// analysis only). Decodes the source row to RGBF32_LINEAR, applies the
+    /// diffuse-white exposure anchor (a linear ×scale, NOT a tone curve), and
+    /// quantizes back to display-range RGB8. Every content tier then reads the
+    /// same normalized-linear bytes, so SDR-in-HDR-envelope content yields the
+    /// same features as plain SDR — by construction, in one shared pass.
+    LinearNormalized {
+        slice: PixelSlice<'a>,
+        /// Source descriptor → RGBF32_LINEAR.
+        converter: RowConverter,
+        /// `anchor_scale(slice) * 255`: linear[0,1] → [0,255] display range,
+        /// with PQ/HLG exposure normalized to the signaled diffuse white.
+        scale: f32,
     },
 }
 
@@ -121,6 +177,41 @@ impl<'a> RowStream<'a> {
             height,
             primaries: desc.primaries,
             scratch: vec![0u8; scratch_len],
+            lin_scratch: Vec::new(),
+        })
+    }
+
+    /// Build a row stream that emits **diffuse-white-normalized linear-light**
+    /// RGB8 (opt-in; for `AnalysisQuery::with_linear_light`). Every row is
+    /// decoded to linear, scaled by the diffuse-white exposure anchor, and
+    /// quantized to display-range RGB8 — so an HDR envelope (PQ/HLG) carrying
+    /// SDR content normalizes back to the same bytes as plain SDR, and every
+    /// content tier reading this stream produces envelope-invariant features in
+    /// its existing combined pass. The default `new` (and its zero-copy fast
+    /// paths) is untouched; this is a separate opt-in constructor.
+    ///
+    /// # Errors
+    /// Returns the `RowConverter` construction error if the source isn't
+    /// convertible to RGBF32_LINEAR.
+    pub fn new_normalized_linear(slice: PixelSlice<'a>) -> Result<Self, String> {
+        let width = slice.width();
+        let height = slice.rows();
+        let desc = slice.descriptor();
+        let scale = anchor_scale(&slice) * 255.0;
+        let converter = RowConverter::new(desc, PixelDescriptor::RGBF32_LINEAR)
+            .map_err(|e| format!("RowConverter::new (linear) failed: {:?}", e))?;
+        let w = width as usize;
+        Ok(Self {
+            inner: Inner::LinearNormalized {
+                slice,
+                converter,
+                scale,
+            },
+            width,
+            height,
+            primaries: desc.primaries,
+            scratch: vec![0u8; w * 3],
+            lin_scratch: vec![0u8; w * 3 * 4], // w * 3 × f32
         })
     }
 
@@ -171,6 +262,15 @@ impl<'a> RowStream<'a> {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut dst[..len], self.width);
             }
+            Inner::LinearNormalized {
+                slice,
+                converter,
+                scale,
+            } => {
+                let src = slice.row(y);
+                converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
+                normalize_linear_row(&self.lin_scratch[..len * 4], *scale, &mut dst[..len]);
+            }
         }
     }
 
@@ -198,6 +298,16 @@ impl<'a> RowStream<'a> {
             Inner::Convert { slice, converter } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.scratch[..len], self.width);
+                &self.scratch[..len]
+            }
+            Inner::LinearNormalized {
+                slice,
+                converter,
+                scale,
+            } => {
+                let src = slice.row(y);
+                converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
+                normalize_linear_row(&self.lin_scratch[..len * 4], *scale, &mut self.scratch[..len]);
                 &self.scratch[..len]
             }
         }

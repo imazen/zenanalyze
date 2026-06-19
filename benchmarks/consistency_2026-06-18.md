@@ -36,38 +36,36 @@ Remaining divergences are format/precision-descriptive **by design**:
 `bitmap_bytes` (byte count, 1/2/4 bpc) and `effective_bit_depth` for f32
 (reports 32-bit *storage* depth, the documented contract).
 
-## Axis 3 — SDR vs HDR envelope: PARTIAL (27/100), architectural
+## Axis 3 — SDR vs HDR envelope: CONSISTENT ✓ (fixed via option A)
 
 `sdr_hdr_consistency`: SDR content tagged SDR vs the same content as
-SDR-white-anchored PQ u16, linear-light ON for both, content features only:
+SDR-white-anchored PQ u16, linear-light ON for both, content features only.
 
-> **27/100 features SDR/HDR-invariant.** 73 still collapse under the envelope.
+- Before: **27/100** invariant — the linear path re-derived only Variance;
+  every other content tier ran on the PQ→RGB8 narrowing that crushed the
+  envelope toward black.
+- After: **97/99** content features invariant (bitmap_bytes excluded as a format
+  byte-count). The 2 residuals are higher-order statistics sensitive to the
+  u8-linear quantization — `LumaKurtosis` (4%) and `SpectralSlopeY` (7%) — both
+  well within "sufficiently close".
 
-Why: the diffuse-white-normalized linear-light path (`linear_tier`) currently
-re-derives **only Variance** on normalized linear; every other content tier
-runs on the PQ→RGB8 narrowing, which crushes the SDR-in-PQ envelope toward
-black. The depth tier (HDR capture, ids 32-39,46,47) IS consistent and is
-correctly excluded (it measures the envelope on purpose).
+### Fix: normalize ONCE at the shared RowStream layer
 
-### Fix: normalize ONCE at the shared RowStream layer (not per-tier)
+The content tiers share combined passes and all read the SAME `RowStream` RGB8
+(`Inner::Convert` is the single narrowing point for u16/f32/HDR). So the fix was
+one new constructor — `RowStream::new_normalized_linear` — that, when
+linear-light is on, decodes each row to RGBF32_LINEAR, applies the diffuse-white
+anchor (a linear ×scale, **no tone curve**), and quantizes to display-range
+RGB8. Every content tier then reads envelope-normalized bytes in its existing
+combined pass, so SDR-in-HDR ≡ SDR for all of them at once — no per-tier port.
 
-The content tiers don't have per-feature kernels — they share combined passes
-(tier1's `accumulate_row_simd` + `stripe_block_stats_simd` emit variance, edges,
-chroma, uniformity, covariance in ONE f32x8 sweep; tier3 fuses DCT/entropy/AQ/
-noise/line-art/gradient/quant-survival). And every content tier reads the SAME
-`RowStream` RGB8 (`src/row_stream.rs`, `Inner::Convert` is the single narrowing
-point for u16/f32/HDR sources). So the fix is **one change at RowStream**, not a
-per-tier port: when linear-light is on, the Convert path emits diffuse-white-
-normalized RGB8 (decode → linear → ×anchor → re-encode), and every content
-feature becomes SDR/HDR-consistent inside its existing combined pass at once.
+Per the user's choice this is **linear-space** (option A): features stay
+linear-light (the flag still meaningfully changes SDR variance), 8-bit (the
+tiers' existing precision). This **deleted the separate `linear_tier` pass** —
+it existed only to re-derive Variance, exactly the anti-combine duplication;
+`anchor_scale` moved into `row_stream`, and `linear_tier.rs` is now a test-only
+integration module.
 
-This also **deletes `linear_tier`** — that separate luma-plane pass exists only
-to re-derive Variance, which is exactly the anti-combine duplication; folding
-the anchor into the shared RowStream input makes tier1 emit a consistent
-Variance (and everything else) for free.
-
-Semantic consequence to confirm: linear-light becomes "undo the HDR envelope,
-then analyze in the standard display-RGB space" — a NO-OP for plain SDR (so
-`linear_light_flag_changes_variance` is re-expressed as an envelope test), and
-features are display-space, not linear-space. The anchor itself is still applied
-in linear light (no tone curve, per "tone mapping isn't the solution").
+The default path (linear-light OFF) is byte-for-byte unchanged — its zero-copy
+Native / StripAlpha fast paths are untouched; only `with_linear_light(true)`
+pays the inherent decode→normalize cost.

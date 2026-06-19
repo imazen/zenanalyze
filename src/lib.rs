@@ -172,7 +172,8 @@ mod alpha;
 mod dimensions;
 pub mod feature;
 mod grayscale;
-pub(crate) mod linear_tier;
+#[cfg(test)]
+mod linear_tier;
 pub(crate) mod luma;
 mod palette;
 pub(crate) mod row_stream;
@@ -445,12 +446,13 @@ pub fn analyze_features(
     // tier reads source bytes directly, no shared inner loop with
     // T1/T2/T3 to specialize, so a runtime branch costs nothing.
     let run_depth = features.intersects(feature::DEPTH_FEATURES);
-    // Linear-light opt-in (prototype). Runtime axis like `run_depth` — recomputes
-    // the supported tier-1 features in linear light. Off unless the caller asked
-    // AND a linear-affected feature is requested (only Variance today), so the
-    // default path and other callers pay nothing.
-    let run_linear_light =
-        query.linear_light() && features.contains(feature::AnalysisFeature::Variance);
+    // Linear-light opt-in. When on, the RowStream emits diffuse-white-normalized
+    // linear RGB8 (decode → ×anchor → display range), so EVERY content tier
+    // reads envelope-normalized bytes in its existing combined pass and an HDR
+    // envelope carrying SDR content yields the same features as plain SDR. Off
+    // by default — the default path keeps its zero-copy fast paths and pays
+    // nothing.
+    let run_linear_light = query.linear_light();
     // Source descriptor — captured up front so we can hand it back to
     // codecs verbatim via `AnalysisResults::source_descriptor()` even
     // after the analyzer's RowConverter / RowStream consumes the slice.
@@ -560,17 +562,15 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     // Suppress unused-var warning when hdr is off.
     let _ = run_depth;
 
-    // Diffuse-white-normalized linear-light Variance override (opt-in). Computed
-    // BEFORE `slice` is moved into the RowStream (so it sees the original samples
-    // + ColorContext anchor), via zenpixels-convert → RGBF32_LINEAR + the
-    // diffuse-white scale. Handles any format / bit depth / HDR transfer.
-    let linear_variance = if run_linear_light {
-        linear_tier::linear_variance(&slice, pixel_budget)
+    // Build the row stream. Linear-light routes every content tier through one
+    // diffuse-white-normalized linear RGB8 stream (so SDR-in-HDR ≡ SDR for all
+    // features, in the shared passes); the default keeps the zero-copy fast
+    // paths.
+    let mut stream = if run_linear_light {
+        RowStream::new_normalized_linear(slice).map_err(AnalyzeError::Convert)?
     } else {
-        None
+        RowStream::new(slice).map_err(AnalyzeError::Convert)?
     };
-
-    let mut stream = RowStream::new(slice).map_err(AnalyzeError::Convert)?;
 
     // Palette routing: if any "full-precision" palette feature was
     // requested (DistinctColorBins / Chao1 / PaletteDensity), run
@@ -613,11 +613,6 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             wants_skin: tier1_wants_skin,
         };
         tier1::extract_tier1_into_dispatch(&mut raw, &mut stream, pixel_budget, t1_dispatch);
-        // Linear-light override: replace the gamma Variance with the linear-light
-        // value computed source-direct above. Only Some when opt-in + RGB8 layout.
-        if let Some(lv) = linear_variance {
-            raw.variance = lv;
-        }
         if T2 && width >= 3 && height >= 3 {
             tier2_chroma::populate_tier2(&mut raw, &mut stream, pixel_budget);
         }

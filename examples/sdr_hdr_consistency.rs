@@ -65,10 +65,10 @@ fn main() {
         let d = (a - b).abs();
         if d == 0.0 { 0.0 } else { d / a.abs().max(1e-6) }
     };
-    // HDR/depth features (ids 32-39,46,47) MEASURE the envelope, so they SHOULD
-    // differ between SDR-tagged and PQ-tagged — exclude them from the
-    // "content must be invariant" check.
-    let is_depth = |id: u16| matches!(id, 32..=39 | 46 | 47);
+    // Exclude features that differ by construction, not by envelope:
+    //  - HDR/depth (ids 32-39,46,47) MEASURE the envelope on purpose.
+    //  - bitmap_bytes (60) is the format byte count (RGB8 vs RGB16 = 2×).
+    let is_depth = |id: u16| matches!(id, 32..=39 | 46 | 47 | 60);
 
     let tol = 0.03;
     let (mut inv, mut tot) = (0u32, 0u32);
