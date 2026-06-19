@@ -19,13 +19,18 @@ normalization bug (divided by 64 regardless of row count). Guarded by 2 new
 ## Axis 2 — channel type (u8 / u16 / f32): CONSISTENT ✓ (fixed)
 
 `consistency_matrix`: **108/108 content features bit-identical** across u8,
-losslessly-promoted u16, and f32-sRGB. Two fixes (`2705ce1`):
-- **p99/peak luminance** were semantically split — u8+SDR hard-returned the
-  80-nit *display reference*, u16/f32 computed the real *content* luminance.
-  Field docs say content-referred; removed the shortcut. Solid gray-128 now
-  reports ~17 nits on every channel type.
-- **effective_bit_depth** over-reported promoted u16 as 14. Added the
-  content-independent byte-replication signature (`low==high` ⇒ 8).
+losslessly-promoted u16, and f32-sRGB. Two fixes:
+- **p99/peak luminance** were split — u8+SDR hard-returned the 80-nit *display
+  reference* via the depth fast path; u16/f32 walked pixels for *content*
+  luminance. The first attempt (`2705ce1`) made it content-referred by REMOVING
+  the fast path — but that cost ~5.7ms/4MP and broke the flat-per-tier perf, so
+  it was reverted (`0595292`). Final resolution: EXTEND the fast path to every
+  non-HDR transfer (u8/u16/f32) — all SDR sources short-circuit to the same
+  display-referred profile (peak/p99 = 80), consistent AND fast. Only true HDR
+  (PQ/HLG) walks. Display-referred for SDR is by design (the depth tier answers
+  "what dynamic range does this need", not "how bright is this pixel").
+- **effective_bit_depth** kept the byte-replication signature (`low==high` ⇒ 8
+  for promoted u16) via a cheap byte-only probe inside the fast path.
 
 Remaining divergences are format/precision-descriptive **by design**:
 `bitmap_bytes` (byte count, 1/2/4 bpc) and `effective_bit_depth` for f32

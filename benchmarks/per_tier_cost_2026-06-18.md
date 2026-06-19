@@ -44,10 +44,27 @@ Two exact, value-preserving optimizations in `scan_depth`:
 Verified: all 9 `tier_depth` tests pass unchanged, `consistency_matrix` still
 108/108. Depth is now 41% of ALL (down from 54%).
 
-## Remaining lever (NOT bit-identical, deferred)
+## FINAL resolution — restore the SDR fast path (supersedes the LUT)
 
-`nits_to_bin` does a `log2` per pixel for the log-spaced percentile histogram —
-the last per-pixel transcendental. A fast-log2 approximation or a linear-bin
-restructure would shave it but shifts p99 by up to a bin (~3%), so it's a
-value-changing tradeoff, left for a deliberate call rather than folded into this
-bit-identical pass.
+The LUT/gamut-skip above optimized the depth *walk*, but the walk should never
+run for SDR in the first place. The depth tier had a U8-SDR fast path that
+short-circuited to the canonical SDR profile (no walk); an earlier consistency
+change had removed it (which is why depth was walking + showing up as the 13.6ms
+hotspot). The right fix was to **restore the fast path and extend it to all
+non-HDR transfers** (u8/u16/f32) — every SDR source short-circuits, only true
+HDR (PQ/HLG) walks (`0595292`).
+
+| 4MP depth tier | cost |
+|---|--:|
+| fast path removed (content walk) | 8.0ms |
+| **fast path restored + extended** | **2.3ms** (in line with the other tiers) |
+
+| 4MP ALL | cost |
+|---|--:|
+| fast path removed | 19.4ms |
+| **fast path restored** | **13.1ms** (−32%) |
+
+So the depth tier is no longer a hotspot — it's back to ~free for SDR. The
+LUT + Bt709 gamut-skip now apply only to the HDR-only walk. The per-pixel
+`log2` in `nits_to_bin` is likewise an HDR-walk-only concern now (deferred,
+value-changing).
