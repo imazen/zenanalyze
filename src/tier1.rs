@@ -479,90 +479,30 @@ pub(crate) fn extract_tier1_into_dispatch(
         }
 
         // --- 8×8 block stats: luma uniformity + per-channel flat color ---
-        // Skip if the stripe is short (no full 8-row block worth).
-        let stripe_full_rows = (h - y_start).min(STRIPE_H);
-        if stripe_full_rows == STRIPE_H {
+        // One kernel for every stripe. Full stripes pass rows = STRIPE_H (the
+        // calibrated 8×8 path); the last short stripe of a non-multiple-of-8
+        // image passes rows < 8 and the block is 8×rows. There is no separate
+        // floored scalar tail anymore — every stripe uses the same luma
+        // definition (so the SIMD and scalar arms agree), and partial stripes
+        // normalise by their true pixel count instead of always dividing by 64.
+        let stripe_rows = (h - y_start).min(STRIPE_H);
+        if stripe_rows > 0 && blocks_x > 0 {
             let s = stripe_block_stats_dispatch(
-                &stripe_buf[..STRIPE_H * row_bytes],
+                &stripe_buf[..stripe_rows * row_bytes],
                 row_bytes,
                 blocks_x,
+                stripe_rows,
             );
             uniform_blocks += s.uniform_blocks;
             flat_color_blocks += s.flat_color_blocks;
             total_blocks += blocks_x as u32;
-            if blocks_x > 0 {
-                if s.min_variance < block_var_min {
-                    block_var_min = s.min_variance;
-                }
-                if s.max_variance > block_var_max {
-                    block_var_max = s.max_variance;
-                }
-                block_var_sum += s.variance_sum;
+            if s.min_variance < block_var_min {
+                block_var_min = s.min_variance;
             }
-        } else {
-            // Tail stripe: keep the scalar fallback for partial heights
-            // (rare; only the last sampled stripe of a non-multiple-of-8
-            // image height).
-            for bx in 0..blocks_x {
-                let mut sum: u32 = 0;
-                let mut sq_sum: u32 = 0;
-                let mut r_min: u8 = 255;
-                let mut r_max: u8 = 0;
-                let mut g_min: u8 = 255;
-                let mut g_max: u8 = 0;
-                let mut b_min: u8 = 255;
-                let mut b_max: u8 = 0;
-                for dy in 0..stripe_full_rows {
-                    let base = dy * row_bytes + bx * STRIPE_H * 3;
-                    for dx in 0..STRIPE_H {
-                        let off = base + dx * 3;
-                        let r = stripe_buf[off];
-                        let g = stripe_buf[off + 1];
-                        let b = stripe_buf[off + 2];
-                        let l = (77u32 * r as u32 + 150 * g as u32 + 29 * b as u32) >> 8;
-                        sum += l;
-                        sq_sum += l * l;
-                        if r < r_min {
-                            r_min = r;
-                        }
-                        if r > r_max {
-                            r_max = r;
-                        }
-                        if g < g_min {
-                            g_min = g;
-                        }
-                        if g > g_max {
-                            g_max = g;
-                        }
-                        if b < b_min {
-                            b_min = b;
-                        }
-                        if b > b_max {
-                            b_max = b;
-                        }
-                    }
-                }
-                let n = (STRIPE_H * STRIPE_H) as f32;
-                let mean = sum as f32 / n;
-                let var = (sq_sum as f32 / n - mean * mean).max(0.0);
-                if var < 25.0 {
-                    uniform_blocks += 1;
-                }
-                let r_range = r_max as i32 - r_min as i32;
-                let g_range = g_max as i32 - g_min as i32;
-                let b_range = b_max as i32 - b_min as i32;
-                if r_range <= 4 && g_range <= 4 && b_range <= 4 {
-                    flat_color_blocks += 1;
-                }
-                if var < block_var_min {
-                    block_var_min = var;
-                }
-                if var > block_var_max {
-                    block_var_max = var;
-                }
-                block_var_sum += var as f64;
-                total_blocks += 1;
+            if s.max_variance > block_var_max {
+                block_var_max = s.max_variance;
             }
+            block_var_sum += s.variance_sum;
         }
 
         stripe_idx += stripe_step;
@@ -1055,11 +995,12 @@ pub(crate) struct StripeBlockStats {
 /// counts + variance min/max so the outer pipeline can compute the
 /// `variance_spread` heterogeneity feature for free (no extra pass).
 fn stripe_block_stats_dispatch(
-    stripe_rows: &[u8], // exactly STRIPE_H * row_bytes bytes
+    stripe_rows: &[u8], // exactly rows * row_bytes bytes
     row_bytes: usize,
     blocks_x: usize,
+    rows: usize, // stripe height (STRIPE_H for full stripes, < 8 for the tail)
 ) -> StripeBlockStats {
-    incant!(stripe_block_stats_simd(stripe_rows, row_bytes, blocks_x))
+    incant!(stripe_block_stats_simd(stripe_rows, row_bytes, blocks_x, rows))
 }
 
 /// Iterate the `blocks_x` 8×8 blocks in a complete (8-row) stripe and
@@ -1075,6 +1016,7 @@ fn stripe_block_stats_simd(
     stripe_rows: &[u8],
     row_bytes: usize,
     blocks_x: usize,
+    rows: usize,
 ) -> StripeBlockStats {
     let mut uniform_blocks: u32 = 0;
     let mut flat_color_blocks: u32 = 0;
@@ -1082,7 +1024,11 @@ fn stripe_block_stats_simd(
     let mut max_variance: f32 = 0.0;
     let mut variance_sum: f64 = 0.0;
 
-    let block_n = (STRIPE_H * STRIPE_H) as f32;
+    // Normalise by the actual pixel count: full stripes pass rows = STRIPE_H
+    // (block_n = 64, the calibrated path); a short tail stripe passes rows < 8
+    // and the block is 8×rows. Same luma definition for every stripe — there is
+    // no separate floored scalar tail anymore.
+    let block_n = (STRIPE_H * rows) as f32;
     let inv_256_v = f32x8::splat(token, 1.0 / 256.0);
     let coef_r_v = f32x8::splat(token, 77.0);
     let coef_g_v = f32x8::splat(token, 150.0);
@@ -1098,7 +1044,7 @@ fn stripe_block_stats_simd(
         let mut b_min_v = f32x8::splat(token, 255.0);
         let mut b_max_v = f32x8::zero(token);
 
-        for dy in 0..STRIPE_H {
+        for dy in 0..rows {
             let base = dy * row_bytes + bx * STRIPE_H * 3;
             // Deinterleave 8 RGB pixels (24 bytes) → 3 × [f32; 8] via
             // garb's tier-specialized chunk primitive. Inlines into the
@@ -2084,4 +2030,62 @@ fn accumulate_edge_slope_horizontal(
     *acc.sum += s;
     *acc.sq_sum += sq;
     *acc.count += n;
+}
+
+#[cfg(test)]
+mod block_stats_tests {
+    use super::*;
+
+    // Build one 8-wide block, `rows` tall, every row an identical horizontal
+    // ramp (vertically uniform). row_bytes = STRIPE_H*3 (single block wide).
+    fn vert_uniform_block(rows: usize) -> Vec<u8> {
+        let row_bytes = STRIPE_H * 3;
+        let mut buf = vec![0u8; rows * row_bytes];
+        for dy in 0..rows {
+            for dx in 0..STRIPE_H {
+                let v = (dx * 32) as u8; // 0,32,..,224 across the 8 px
+                let off = dy * row_bytes + dx * 3;
+                buf[off] = v;
+                buf[off + 1] = v;
+                buf[off + 2] = v;
+            }
+        }
+        buf
+    }
+
+    #[test]
+    fn partial_stripe_normalizes_by_true_pixel_count() {
+        // A vertically-uniform block has the same per-block luma variance no
+        // matter how many rows are present. The retired floored scalar tail
+        // divided by STRIPE_H² (64) even for short stripes, so rows<8 reported
+        // an under-normalized variance. The unified kernel divides by
+        // STRIPE_H*rows, so rows=4 and rows=8 must agree.
+        let row_bytes = STRIPE_H * 3;
+        let full = vert_uniform_block(STRIPE_H);
+        let part = vert_uniform_block(4);
+        let sf = stripe_block_stats_dispatch(&full, row_bytes, 1, STRIPE_H);
+        let sp = stripe_block_stats_dispatch(&part, row_bytes, 1, 4);
+        let (vf, vp) = (sf.variance_sum as f32, sp.variance_sum as f32);
+        assert!(vf > 0.0, "ramp block should have nonzero variance");
+        assert!(
+            (vf - vp).abs() <= 1e-3 * vf.max(1.0),
+            "partial-stripe variance {vp} != full-stripe variance {vf} (normalization regressed)"
+        );
+    }
+
+    #[test]
+    fn flat_block_is_uniform_at_any_height() {
+        // A constant block is uniform + flat-color whether full or partial —
+        // the tail must not misclassify it.
+        let row_bytes = STRIPE_H * 3;
+        let buf_full = vec![128u8; STRIPE_H * row_bytes];
+        let buf_part = vec![128u8; 3 * row_bytes];
+        let sf = stripe_block_stats_dispatch(&buf_full, row_bytes, 1, STRIPE_H);
+        let sp = stripe_block_stats_dispatch(&buf_part, row_bytes, 1, 3);
+        assert_eq!(sf.uniform_blocks, 1);
+        assert_eq!(sp.uniform_blocks, 1);
+        assert_eq!(sf.flat_color_blocks, 1);
+        assert_eq!(sp.flat_color_blocks, 1);
+        assert!(sf.variance_sum < 1e-3 && sp.variance_sum < 1e-3);
+    }
 }
