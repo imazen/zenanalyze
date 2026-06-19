@@ -914,6 +914,36 @@ pub fn feature_id_supported(id: u16) -> bool {
     }
 }
 
+/// Resolve a snake_case feature name (optionally `feat_`-prefixed, as training
+/// columns are written) to its stable id, or `None` if unknown in this build.
+///
+/// The reverse of [`feature_name`]. This is the primitive a codec needs to map
+/// a baked model's feature-column NAMES onto ids — every wired picker currently
+/// re-implements it by hand-building a name→variant map. Prefer [`FeatureSchema`]
+/// when resolving a whole list.
+pub fn feature_id_by_name(name: &str) -> Option<u16> {
+    feature::AnalysisFeature::from_name(name).map(|f| f.id())
+}
+
+/// Bump on ANY feature numeric-definition change (see [`feature_defs_version`]).
+const FEATURE_DEFS_VERSION: u32 = 1;
+
+/// Monotonic version of the feature **definitions** — the numeric algorithms,
+/// thresholds, and normalization scales that decide a feature's computed VALUE.
+/// Independent of the crate version and of the id/name set.
+///
+/// The schema hash a baked model carries (in `zenpredict`) protects the feature
+/// *names + order*, but NOT their numeric meaning: a feature can keep its
+/// id/name while its definition drifts (which the 0.x threshold contract
+/// explicitly permits), silently feeding a stale model wrong values. Bake this
+/// version next to the model and compare it at load — a mismatch means "the
+/// analyzer's feature math moved since training; re-validate / retrain". It is
+/// bumped in lockstep with the threshold-contract CHANGELOG entries; it freezes
+/// at 1.0.
+pub const fn feature_defs_version() -> u32 {
+    FEATURE_DEFS_VERSION
+}
+
 /// Extract a **model-aligned** feature vector from any [`PixelSlice`] into `out`.
 /// `out[i]` receives the feature whose stable id is `ids[i]` (`f32::NAN` for an
 /// id unknown in this build or undefined for the image). Only the analyzer
@@ -1044,6 +1074,88 @@ pub fn feature_vector_packed8_all(
     }
 }
 
+/// A resolved feature schema — the adapter that lets a codec extract exactly the
+/// features a baked model expects, in the model's order, **without naming
+/// [`feature::AnalysisFeature`] in its own code or public API**.
+///
+/// The fragile part of every picker integration today is bridging "the model's
+/// feature columns" to "the analyzer's feature ids in the right order". Codecs
+/// do it three different ways — a position-aligned hardcoded enum array
+/// (brittle), or a hand-rolled name→variant map (re-implemented per codec).
+/// `FeatureSchema` is the one blessed bridge: resolve once from the model's
+/// `feat_<name>` column list, then extract per image. Inputs/outputs are core
+/// types plus the shared `PixelSlice` pixel currency — nothing from this crate's
+/// typed surface leaks into the consumer, so the codec's own public API stays
+/// free of `zenanalyze` types.
+///
+/// ```ignore
+/// // once, at model load — names come from the baked model metadata:
+/// let schema = zenanalyze::FeatureSchema::resolve(model.feature_columns())
+///     .ok_or(MyErr::FeatureDrift)?;            // a retired feature => fall back
+/// if schema.defs_version() != model.baked_defs_version() {
+///     log::warn!("analyzer feature math moved since training; re-validate");
+/// }
+/// // per image:
+/// let mut feats = vec![0.0f32; schema.len()];
+/// schema.extract(slice, &mut feats);
+/// let params = predictor.predict(&feats)?;     // core &[f32] -> codec params
+/// ```
+#[derive(Clone, Debug)]
+pub struct FeatureSchema {
+    ids: Box<[u16]>,
+    defs_version: u32,
+}
+
+impl FeatureSchema {
+    /// Resolve a model's feature-name list (each optionally `feat_`-prefixed) to
+    /// this build's stable ids, **preserving the given order**. Returns `None`
+    /// if ANY name is unknown to this build (retired or cfg-disabled) — the
+    /// caller then falls back to its heuristic rather than feed the model a
+    /// zero where it expected signal.
+    pub fn resolve<S: AsRef<str>>(names: &[S]) -> Option<Self> {
+        let mut ids = Vec::with_capacity(names.len());
+        for n in names {
+            ids.push(feature::AnalysisFeature::from_name(n.as_ref())?.id());
+        }
+        Some(Self {
+            ids: ids.into_boxed_slice(),
+            defs_version: FEATURE_DEFS_VERSION,
+        })
+    }
+
+    /// Number of features in the schema (== the resolved name count).
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// Whether the schema resolved zero features.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// The resolved stable ids, in the model's order.
+    #[must_use]
+    pub fn ids(&self) -> &[u16] {
+        &self.ids
+    }
+
+    /// The [`feature_defs_version`] this schema was resolved against. Bake it
+    /// into the model at train time; compare at load to detect numeric drift.
+    #[must_use]
+    pub fn defs_version(&self) -> u32 {
+        self.defs_version
+    }
+
+    /// Extract the schema's features from `slice` into `out` (len ≥ [`len`](Self::len)),
+    /// in the schema's order. Returns false on analysis failure or short `out`.
+    /// Only the analyzer passes the schema's features need are run.
+    pub fn extract(&self, slice: PixelSlice<'_>, out: &mut [f32]) -> bool {
+        feature_vector(slice, &self.ids, out)
+    }
+}
+
 #[cfg(test)]
 #[allow(deprecated)] // tests cover composites variants slated for removal next major
 mod tests;
@@ -1052,6 +1164,45 @@ mod tests;
 mod feature_vector_tests {
     use super::*;
     use feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
+
+    #[test]
+    fn from_name_round_trips_and_strips_prefix() {
+        // every supported feature's name resolves back to its id
+        let mut ids = [0u16; 256];
+        let n = feature_ids(&mut ids);
+        for &id in &ids[..n] {
+            let name = feature_name(id).unwrap();
+            assert_eq!(feature_id_by_name(name), Some(id), "name {name}");
+            // the feat_ prefix (training-column form) is accepted too
+            let prefixed = std::format!("feat_{name}");
+            assert_eq!(feature_id_by_name(&prefixed), Some(id));
+        }
+        assert_eq!(feature_id_by_name("not_a_real_feature"), None);
+        assert_eq!(AnalysisFeature::from_name("variance"), Some(AnalysisFeature::Variance));
+    }
+
+    #[test]
+    fn feature_schema_resolves_and_extracts_in_order() {
+        // a model's column list (out of id-order, feat_-prefixed) resolves and
+        // extracts in THAT order — no AnalysisFeature named by the caller.
+        let cols = ["feat_edge_density", "feat_variance", "feat_uniformity"];
+        let schema = FeatureSchema::resolve(&cols).expect("known features");
+        assert_eq!(schema.len(), 3);
+        assert_eq!(schema.defs_version(), feature_defs_version());
+
+        let buf = rgb8_image(96, 64);
+        let mk = || PixelSlice::new(&buf, 96, 64, 96 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+        let mut got = [0.0f32; 3];
+        assert!(schema.extract(mk(), &mut got));
+
+        // identical to requesting those ids directly via feature_vector
+        let mut want = [0.0f32; 3];
+        assert!(feature_vector(mk(), schema.ids(), &mut want));
+        assert_eq!(got, want);
+
+        // an unknown column => None (caller falls back), never a silent zero
+        assert!(FeatureSchema::resolve(&["feat_variance", "feat_does_not_exist"]).is_none());
+    }
 
     fn rgb8_image(w: u32, h: u32) -> Vec<u8> {
         let mut v = vec![0u8; (w * h * 3) as usize];

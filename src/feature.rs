@@ -159,6 +159,29 @@ macro_rules! features_table {
                     )*
                 }
             }
+
+            /// Inverse of [`name`](Self::name): resolve a snake_case feature
+            /// name to its variant. This is the bridge a codec uses to map a
+            /// baked model's feature-column names onto this build's features
+            /// without hardcoding ids or re-implementing the lookup (which
+            /// every codec currently does). An optional `feat_` prefix is
+            /// accepted (training columns are written `feat_<name>`). Returns
+            /// `None` for an unknown, retired, or not-compiled-in (cfg-gated
+            /// off) name — the caller falls back to its heuristic.
+            #[allow(unused_doc_comments, deprecated)]
+            pub fn from_name(name: &str) -> Option<Self> {
+                let name = match name.strip_prefix("feat_") {
+                    Some(rest) => rest,
+                    None => name,
+                };
+                $(
+                    $(#[$variant_attr])*
+                    if name == stringify!($field) {
+                        return Some(Self::$variant);
+                    }
+                )*
+                None
+            }
         }
 
         impl FeatureSet {
