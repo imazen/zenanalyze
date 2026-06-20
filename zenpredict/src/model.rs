@@ -845,6 +845,37 @@ impl Model {
         Metadata::parse(raw).expect("metadata blob parse validated at parse time")
     }
 
+    /// The model's feature-column NAMES in input order, parsed from the
+    /// [`FEATURE_COLUMNS`](crate::keys::FEATURE_COLUMNS) metadata (newline- or
+    /// comma-separated, `feat_` prefix kept as authored). Empty on older bakes
+    /// that didn't record them. These are the names a codec resolves against its
+    /// own `zenanalyze@X` and the `names` of a `zenanalyze_api::Request`.
+    pub fn feature_columns(&self) -> impl Iterator<Item = &str> {
+        self.metadata()
+            .get_utf8(crate::keys::FEATURE_COLUMNS)
+            .unwrap_or("")
+            .split(['\n', ','])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
+    /// The `zenanalyze` version the model's features were extracted with (the
+    /// [`ANALYZER_VERSION`](crate::keys::ANALYZER_VERSION) metadata, e.g.
+    /// `"0.2.7"`), or `None` on bakes predating the key. Its `major.minor` plus
+    /// [`feature_defs_version`](Self::feature_defs_version) is the reuse key a
+    /// codec checks against an offered feature result.
+    pub fn analyzer_version(&self) -> Option<&str> {
+        self.metadata().get_utf8(crate::keys::ANALYZER_VERSION).ok()
+    }
+
+    /// The feature numeric-definition version the model was trained against (the
+    /// [`FEATURE_DEFS_VERSION`](crate::keys::FEATURE_DEFS_VERSION) metadata), or
+    /// `None` on bakes predating the key.
+    pub fn feature_defs_version(&self) -> Option<u32> {
+        self.metadata()
+            .get_pod::<u32>(crate::keys::FEATURE_DEFS_VERSION)
+    }
+
     /// Per-output [`OutputSpec`] table.
     pub fn output_specs(&self) -> &[OutputSpec] {
         if self.header.output_specs.is_empty() {

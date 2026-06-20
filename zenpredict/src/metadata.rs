@@ -387,4 +387,17 @@ pub mod keys {
     pub const REACH_RATES: &str = "zentrain.reach_rates";
     /// bytes (numeric) — `u8[n_zq]`. Paired with [`REACH_RATES`].
     pub const REACH_ZQ_TARGETS: &str = "zentrain.reach_zq_targets";
+
+    /// utf8 — the `zenanalyze` crate version the model's features were extracted
+    /// with, e.g. `"0.2.7"` (`zenanalyze::analyzer_version()` at bake time). With
+    /// [`FEATURE_DEFS_VERSION`], its `major.minor` is the reuse key a codec uses
+    /// to decide whether an offered feature result was produced by compatible
+    /// definitions (see the `zenanalyze-api` `Offer::matches` contract). Absent
+    /// on models baked before this key existed.
+    pub const ANALYZER_VERSION: &str = "zentrain.analyzer_version";
+    /// numeric (u32) — `zenanalyze::feature_defs_version()` at bake time: the
+    /// feature numeric-definition version the model was trained against. Catches
+    /// within-major drift the name-based schema hash can't (a feature keeping its
+    /// name while its math moves). Absent on models baked before this key.
+    pub const FEATURE_DEFS_VERSION: &str = "zentrain.feature_defs_version";
 }

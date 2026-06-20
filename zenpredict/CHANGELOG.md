@@ -13,6 +13,15 @@
 
 ### Added
 
+- **Model self-describes its feature provenance** for the `zenanalyze-api`
+  offer/reuse contract: two metadata keys `keys::ANALYZER_VERSION` (utf8) +
+  `keys::FEATURE_DEFS_VERSION` (u32), and `Model::feature_columns()` /
+  `analyzer_version()` / `feature_defs_version()` accessors. A codec builds a
+  `zenanalyze_api::Request` (names + version stamp) from these, so it can check
+  whether an offered feature result was produced by compatible definitions
+  before reusing it. Both keys are `Option`/empty on bakes predating them
+  (additive, non-breaking). Bakers (zentrain) populate the two keys.
+
 ### Fixed
 
 - **README: the flagship codec-picker example is now compilable and the
