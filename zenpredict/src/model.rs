@@ -870,10 +870,18 @@ impl Model {
 
     /// The feature numeric-definition version the model was trained against (the
     /// [`FEATURE_DEFS_VERSION`](crate::keys::FEATURE_DEFS_VERSION) metadata), or
-    /// `None` on bakes predating the key.
+    /// `None` on bakes predating the key (or a wrong-width entry).
+    ///
+    /// Decoded as a 4-byte little-endian `u32` per the metadata module's scalar
+    /// shape contract — endian-explicit so it round-trips identically on i686 /
+    /// big-endian, unlike a native-endian `get_pod`.
     pub fn feature_defs_version(&self) -> Option<u32> {
-        self.metadata()
-            .get_pod::<u32>(crate::keys::FEATURE_DEFS_VERSION)
+        let bytes = self
+            .metadata()
+            .get_numeric(crate::keys::FEATURE_DEFS_VERSION)
+            .ok()?;
+        let arr: [u8; 4] = bytes.try_into().ok()?;
+        Some(u32::from_le_bytes(arr))
     }
 
     /// Per-output [`OutputSpec`] table.

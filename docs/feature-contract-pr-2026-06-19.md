@@ -1,8 +1,10 @@
 # The feature contract: request → union → one pass → offer → reuse-or-own
 
-**Status:** 2026-06-19. `zenanalyze-api` (the contract crate) and the
-`zenanalyze`/`zenpredict` producer surface have landed additively. The bake
-pipeline (zentrain) and codec migrations are follow-ups in their repos.
+**Status:** 2026-06-19. `zenanalyze-api` (the contract crate) and the full
+**Rust** producer surface — `zenanalyze`, `zenpredict` (model accessors), and
+`zenpredict-bake` (writes the stamps) — have landed additively. The only
+producer remainder is zentrain *passing* the two values into the bake request;
+codec migrations are follow-ups in their repos.
 
 ## The requirement
 
@@ -86,10 +88,17 @@ and run an own-pass: `feature_name`, `feature_id_by_name`, `resolve_feature_ids`
 - ✅ `zenanalyze`: the version-local primitives (`from_name`, `resolve_feature_ids`,
   `feature_vector`, `analyzer_version`, `feature_defs_version`).
 - ✅ `zenpredict`: `keys::ANALYZER_VERSION` + `keys::FEATURE_DEFS_VERSION` +
-  `Model::feature_columns()/analyzer_version()/feature_defs_version()`.
-- ⏳ **bake pipeline** (zentrain `bake_picker.py`): populate the two new model
-  metadata keys at bake time (`zenanalyze::analyzer_version()` +
-  `feature_defs_version()`).
+  `Model::feature_columns()/analyzer_version()/feature_defs_version()` (the u32
+  decoded LE-explicit so it round-trips on i686/any-endian).
+- ✅ `zenpredict-bake`: first-class `analyzer_version` + `feature_defs_version`
+  fields on `BakeRequestJson` that write the two reuse-key metadata entries —
+  **the Rust baker owns the byte encoding** (UTF-8 / LE-`u32`), so Python never
+  hand-rolls LE hex. An explicit `metadata` entry for the same key still wins
+  (dup-guarded). The baker (not Python) is and stays the byte-writer.
+- ⏳ **zentrain** (`bake_picker.py`): *pass the two values through* to the bake
+  request — `analyzer_version` + `feature_defs_version` captured at extraction
+  time. Python supplies the values; the Rust baker writes the bytes (this is the
+  existing inversion, not a Python baker).
 - ⏳ **codec migrations** (their repos): build a `Request`, negotiate `Offer` (or
   own-pass), drop the `pub use zenanalyze::feature::*`.
 - ⏳ **caller** (orchestrator/product): the union + best-version-pick + single

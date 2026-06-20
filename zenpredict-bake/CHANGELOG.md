@@ -19,6 +19,16 @@
 
 ### Added
 
+- **`BakeRequestJson.analyzer_version` + `feature_defs_version`** — optional
+  first-class version stamps for the `zenanalyze-api` offer/reuse key. When set,
+  the baker writes them to `keys::ANALYZER_VERSION` (UTF-8) and
+  `keys::FEATURE_DEFS_VERSION` (4-byte LE `u32`) metadata, read back via
+  `Model::analyzer_version()` / `feature_defs_version()`. Preferred over a
+  hand-rolled `metadata` entry — a `u32` can't ride the `f32` repr, so manual
+  encoding would mean emitting LE hex by hand; an explicit `metadata` entry for
+  the same key still takes precedence (no duplicate key written). Both default to
+  `None`. Bakers (zentrain) pass the values through from extraction.
+
 - **`BakeRequestJson` is now `#[non_exhaustive]`** so future
   `#[serde(default)]` field additions are non-breaking on the Rust
   side. Direct struct-literal construction outside the crate is no

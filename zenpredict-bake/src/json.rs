@@ -273,6 +273,26 @@ pub struct BakeRequestJson {
     /// the uncompressed variant happens to be smaller.
     #[serde(default)]
     pub optimize: bool,
+    /// The `zenanalyze` crate version the features were extracted with
+    /// (e.g. `"0.2.7"`). When set, the baker writes it verbatim to the
+    /// [`ANALYZER_VERSION`](zenpredict::keys::ANALYZER_VERSION) UTF-8
+    /// metadata key — the analyzer half of the `zenanalyze-api`
+    /// offer/reuse key. Prefer this typed field over a hand-rolled
+    /// `metadata` entry. Default `None` (key omitted). The value can
+    /// only be known by whoever ran the extraction, so the baker can't
+    /// synthesize it — pass it through from the training pipeline.
+    #[serde(default)]
+    pub analyzer_version: Option<String>,
+    /// The `zenanalyze::feature_defs_version()` the features were
+    /// extracted with. When set, the baker writes it as a 4-byte
+    /// little-endian `u32` to the
+    /// [`FEATURE_DEFS_VERSION`](zenpredict::keys::FEATURE_DEFS_VERSION)
+    /// numeric metadata key — the within-major drift half of the reuse
+    /// key. Prefer this typed field over a hand-rolled `metadata` entry:
+    /// a `u32` can't ride the `f32` repr (different bytes), so hand
+    /// encoding would mean emitting LE hex by hand. Default `None`.
+    #[serde(default)]
+    pub feature_defs_version: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -529,6 +549,11 @@ fn hex_nibble(b: u8) -> Option<u8> {
 /// search permutation + compression candidates). All three default
 /// to off / 0.0 / false, so existing JSON callers see no behavior
 /// change.
+///
+/// Also honors the optional `analyzer_version` / `feature_defs_version`
+/// stamps, writing them to the `zenanalyze-api` reuse-key metadata
+/// (UTF-8 / LE-u32). Both default to `None` (key omitted); an explicit
+/// `metadata` entry for the same key takes precedence.
 pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
     // Decode metadata values up front so the byte buffers outlive
     // the borrow into BakeMetadataEntry.
@@ -537,6 +562,11 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         .iter()
         .map(decode_metadata_value)
         .collect::<Result<_, _>>()?;
+
+    // First-class version stamps → owned bytes that outlive the
+    // metadata borrow. defs_version is a u32, written LE so it decodes
+    // identically on any endianness (cf. Model::feature_defs_version).
+    let defs_version_bytes: Option<[u8; 4]> = req.feature_defs_version.map(u32::to_le_bytes);
 
     // Apply per-layer zero-bias when requested. We own the weight
     // vectors only when zerobias is active; otherwise borrow from
@@ -582,7 +612,7 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         .map(FeatureBound::from)
         .collect();
 
-    let metadata: Vec<BakeMetadataEntry<'_>> = req
+    let mut metadata: Vec<BakeMetadataEntry<'_>> = req
         .metadata
         .iter()
         .zip(decoded_values.iter())
@@ -592,6 +622,29 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
             value: bytes,
         })
         .collect();
+
+    // Append the first-class version stamps, unless the caller already
+    // hand-rolled a `metadata` entry for the same key (that explicit
+    // entry wins — we never emit a duplicate key into the blob).
+    let has_key = |k: &str| req.metadata.iter().any(|e| e.key == k);
+    if let Some(v) = &req.analyzer_version
+        && !has_key(zenpredict::keys::ANALYZER_VERSION)
+    {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::ANALYZER_VERSION,
+            kind: MetadataType::Utf8,
+            value: v.as_bytes(),
+        });
+    }
+    if let Some(bytes) = &defs_version_bytes
+        && !has_key(zenpredict::keys::FEATURE_DEFS_VERSION)
+    {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_DEFS_VERSION,
+            kind: MetadataType::Numeric,
+            value: &bytes[..],
+        });
+    }
 
     // Build the v3 OutputSpec table + flat discrete-sets pool from
     // the JSON. The pool is grown as each spec's discrete set is

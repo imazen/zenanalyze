@@ -609,3 +609,74 @@ fn cargo_bin(name: &str) -> std::path::PathBuf {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| panic!("CARGO_BIN_EXE_{name} not set; run via `cargo test`"))
 }
+
+// --- zenanalyze-api reuse-key stamps (analyzer_version / feature_defs_version) ---
+
+#[test]
+fn json_round_trip_version_stamps() {
+    // First-class analyzer_version + feature_defs_version stamps + the
+    // feature_columns metadata round-trip through the Model accessors a codec
+    // uses to build a `zenanalyze_api::Request`.
+    let json = r#"{
+        "schema_hash": 7,
+        "scaler_mean": [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [{"in_dim":2,"out_dim":2,"activation":"identity","dtype":"f32",
+                    "weights":[1.0,0.0,0.0,1.0],"biases":[0.0,0.0]}],
+        "analyzer_version": "0.2.7",
+        "feature_defs_version": 1,
+        "metadata": [
+            {"key": "zentrain.feature_columns", "type": "utf8",
+             "text": "variance\nedge_density\nuniformity"}
+        ]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+
+    assert_eq!(model.analyzer_version(), Some("0.2.7"));
+    assert_eq!(model.feature_defs_version(), Some(1));
+    let cols: Vec<&str> = model.feature_columns().collect();
+    assert_eq!(cols, ["variance", "edge_density", "uniformity"]);
+    // feature_columns entry + the two appended stamps = 3 (no dup).
+    assert_eq!(model.metadata().len(), 3);
+}
+
+#[test]
+fn json_version_stamps_absent_are_none() {
+    let json = r#"{
+        "schema_hash": 7,
+        "scaler_mean": [0.0],
+        "scaler_scale": [1.0],
+        "layers": [{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32",
+                    "weights":[1.0],"biases":[0.0]}]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    assert_eq!(model.analyzer_version(), None);
+    assert_eq!(model.feature_defs_version(), None);
+    assert_eq!(model.feature_columns().count(), 0);
+}
+
+#[test]
+fn json_explicit_metadata_entry_wins_over_first_class_stamp() {
+    // A hand-rolled metadata entry for a stamp key takes precedence, and the
+    // first-class field is NOT also appended (no duplicate key in the blob).
+    let json = r#"{
+        "schema_hash": 7,
+        "scaler_mean": [0.0],
+        "scaler_scale": [1.0],
+        "layers": [{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32",
+                    "weights":[1.0],"biases":[0.0]}],
+        "analyzer_version": "0.2.7",
+        "metadata": [
+            {"key": "zentrain.analyzer_version", "type": "utf8", "text": "9.9.9"}
+        ]
+    }"#;
+    let bytes = bake_from_json_str(json).unwrap();
+    let aligned = Aligned(bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+    assert_eq!(model.analyzer_version(), Some("9.9.9")); // explicit wins
+    assert_eq!(model.metadata().len(), 1); // first-class stamp not appended
+}
