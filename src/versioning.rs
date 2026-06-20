@@ -422,40 +422,36 @@ mod tests {
             .collect()
     }
 
-    /// Fixed-precision canonical text for one value vector; `NaN` is a sentinel
-    /// (a real value — e.g. peak luminance on an SDR image).
+    /// **Type-canonical** text for one value — discrete types as exact integers
+    /// (so a large count round-trips losslessly and an off-by-one is detectable),
+    /// `f32` at fixed precision, `NaN` as a sentinel (a real value — e.g. peak
+    /// luminance on an SDR image).
+    fn format_one(v: FeatureValue) -> String {
+        match v {
+            FeatureValue::U32(n) => n.to_string(),
+            FeatureValue::U64(n) => n.to_string(),
+            FeatureValue::Bool(b) => u8::from(b).to_string(),
+            FeatureValue::F32(x) if x.is_nan() => "nan".to_string(),
+            FeatureValue::F32(x) => format!("{x:.7e}"),
+        }
+    }
+
     fn format_values(values: &[FeatureValue]) -> String {
         values
             .iter()
-            .map(|v| {
-                let f = v.to_f32();
-                if f.is_nan() {
-                    "nan".to_string()
-                } else {
-                    format!("{f:.7e}")
-                }
-            })
+            .map(|&v| format_one(v))
             .collect::<Vec<_>>()
             .join("\t")
     }
 
-    fn golden_rows() -> Vec<(String, Vec<f32>)> {
+    fn golden_text_rows() -> Vec<(String, Vec<String>)> {
         GOLDEN
             .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
                 let mut it = l.split('\t');
                 let name = it.next().unwrap_or("").to_string();
-                let vals = it
-                    .map(|s| {
-                        if s == "nan" {
-                            f32::NAN
-                        } else {
-                            s.parse().unwrap_or(f32::NAN)
-                        }
-                    })
-                    .collect();
-                (name, vals)
+                (name, it.map(str::to_string).collect())
             })
             .collect()
     }
@@ -465,6 +461,29 @@ mod tests {
             return a.is_nan() && b.is_nan();
         }
         (a - b).abs() <= REL_TOLERANCE * a.abs().max(b.abs()).max(1.0)
+    }
+
+    /// Tolerance keyed on the value's TYPE. Discrete features (counts, bit depths,
+    /// bools) are computed as integers with no float noise, so they must match
+    /// **exactly** — a single relative tolerance would miss an off-by-one in a
+    /// large count (e.g. 32768→32769 is 3e-5 relative, under `REL_TOLERANCE`).
+    /// Only `f32` features get the relative tolerance. (A future refinement: a
+    /// per-feature `f32` override table for the few features whose big reductions
+    /// / transcendentals drift more across platforms than the global budget.)
+    fn value_matches(recomputed: FeatureValue, golden_text: &str) -> bool {
+        match recomputed {
+            FeatureValue::F32(x) => {
+                if golden_text == "nan" {
+                    x.is_nan()
+                } else {
+                    golden_text
+                        .parse::<f32>()
+                        .map(|e| rel_close(x, e))
+                        .unwrap_or(false)
+                }
+            }
+            other => format_one(other) == golden_text,
+        }
     }
 
     /// THE KEYSTONE. Every feature must take ≥2 distinct values across the corpus
@@ -508,8 +527,8 @@ mod tests {
             return;
         }
 
-        let golden: std::collections::HashMap<String, Vec<f32>> =
-            golden_rows().into_iter().collect();
+        let golden: std::collections::HashMap<String, Vec<String>> =
+            golden_text_rows().into_iter().collect();
         assert!(
             !golden.is_empty(),
             "golden is empty — bless it first: ZENANALYZE_BLESS_GOLDEN=1 cargo test --all-features golden_is_stable"
@@ -529,8 +548,8 @@ mod tests {
                 continue;
             }
             for (i, (v, e)) in values.iter().zip(expected).enumerate() {
-                if !rel_close(v.to_f32(), *e) {
-                    drift.push(format!("{name}[{i}]: {} vs golden {}", v.to_f32(), e));
+                if !value_matches(*v, e) {
+                    drift.push(format!("{name}[{i}]: {} vs golden {}", format_one(*v), e));
                     break;
                 }
             }
