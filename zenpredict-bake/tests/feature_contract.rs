@@ -140,3 +140,62 @@ fn model_without_stamps_defaults_to_zero_key() {
 fn req_reuse(offer: &Offer<'_>, req: &Request<'_>) -> Option<Vec<f32>> {
     offer.reuse_for(req)
 }
+
+fn tmp_path(name: &str) -> std::path::PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push(format!("zpbake-fc-{}-{}", std::process::id(), name));
+    p
+}
+
+#[test]
+fn repack_stamps_an_unstamped_bin() {
+    use zenpredict_bake::cli::run_repack_cli;
+
+    // An UNSTAMPED bake (a pre-contract codec picker), with feature columns.
+    let json = r#"{
+        "schema_hash": 555,
+        "scaler_mean":  [0.0, 0.0],
+        "scaler_scale": [1.0, 1.0],
+        "layers": [{"in_dim": 2, "out_dim": 2, "activation": "identity", "dtype": "f32",
+                    "weights": [1.0,0.0, 0.0,1.0], "biases": [0.0, 0.0]}],
+        "metadata": [
+            {"key": "zentrain.feature_columns", "type": "utf8", "text": "variance\nedge_density"}
+        ]
+    }"#;
+    let unstamped = bake_from_json_str(json).unwrap();
+    let in_path = tmp_path("repack-in.bin");
+    let out_path = tmp_path("repack-out.bin");
+    std::fs::write(&in_path, &unstamped).unwrap();
+
+    // The codec re-bake path: stamp the existing bin (no re-training).
+    let argv: Vec<String> = [
+        in_path.to_string_lossy().as_ref(),
+        out_path.to_string_lossy().as_ref(),
+        "--analyzer-version",
+        "0.2.7",
+        "--feature-defs-version",
+        "1",
+        "--config-hash",
+        "0",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let _ = run_repack_cli(&argv); // ExitCode isn't PartialEq; verify via the output bin.
+
+    let out_bytes = std::fs::read(&out_path).expect("repack must write the output bin");
+    let aligned = Aligned(out_bytes);
+    let model = Model::from_bytes(&aligned.0).unwrap();
+
+    // Stamps written...
+    assert_eq!(model.analyzer_version(), Some("0.2.7"));
+    assert_eq!(model.feature_defs_version(), Some(1));
+    assert_eq!(model.feature_config_hash(), Some(0));
+    // ...and the original content survived the round-trip.
+    let cols: Vec<&str> = model.feature_columns().collect();
+    assert_eq!(cols, ["variance", "edge_density"]);
+    assert_eq!(model.schema_hash(), 555);
+
+    let _ = std::fs::remove_file(&in_path);
+    let _ = std::fs::remove_file(&out_path);
+}

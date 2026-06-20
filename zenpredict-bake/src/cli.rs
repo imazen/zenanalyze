@@ -232,7 +232,14 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
 ///
 /// Usage:
 ///   zenpredict repack <input.bin> <output.bin> [--dtype f32|f16|i8] \
-///                     [--zerobias <tau>] [--compress] [--optimize]
+///                     [--zerobias <tau>] [--compress] [--optimize] \
+///                     [--analyzer-version <ver>] [--feature-defs-version <u32>] \
+///                     [--config-hash <u64>]
+///
+/// The three `--*-version` / `--config-hash` flags write the zenanalyze-api
+/// reuse-key stamps into the model metadata (override semantics) — the codec
+/// re-bake path: stamp an existing `.bin` so its picker can reuse a shared
+/// `Offer` without re-training.
 ///
 /// Exit codes:
 ///   0  success
@@ -240,7 +247,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
 pub fn run_repack_cli(argv: &[String]) -> ExitCode {
     if argv.len() < 2 {
         eprintln!(
-            "usage: zenpredict repack <input.bin> <output.bin> [--dtype f32|f16|i8] [--zerobias <tau>] [--compress] [--optimize]"
+            "usage: zenpredict repack <input.bin> <output.bin> [--dtype f32|f16|i8] [--zerobias <tau>] [--compress] [--optimize] [--analyzer-version <ver>] [--feature-defs-version <u32>] [--config-hash <u64>]"
         );
         return ExitCode::from(1);
     }
@@ -267,6 +274,35 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             "i8" => Some(WeightDtype::I8),
             other => {
                 eprintln!("zenpredict repack: unknown --dtype: {other}");
+                return ExitCode::from(1);
+            }
+        },
+        None => None,
+    };
+
+    // zenanalyze-api reuse-key stamps to write into the model's metadata — the
+    // codec re-bake path: stamp an existing .bin (no re-training) so its picker
+    // can reuse a shared Offer. Each overrides any existing entry for its key.
+    let analyzer_version: Option<String> = argv
+        .windows(2)
+        .find(|w| w[0] == "--analyzer-version")
+        .map(|w| w[1].clone());
+    let feature_defs_version: Option<u32> =
+        match argv.windows(2).find(|w| w[0] == "--feature-defs-version") {
+            Some(w) => match w[1].parse() {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("zenpredict repack: --feature-defs-version requires a u32: {e}");
+                    return ExitCode::from(1);
+                }
+            },
+            None => None,
+        };
+    let config_hash: Option<u64> = match argv.windows(2).find(|w| w[0] == "--config-hash") {
+        Some(w) => match w[1].parse() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("zenpredict repack: --config-hash requires a u64: {e}");
                 return ExitCode::from(1);
             }
         },
@@ -368,10 +404,37 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
 
     // Materialize metadata entries (raw byte values).
     let md = model.metadata();
-    let metadata_owned: Vec<(String, MetadataType, Vec<u8>)> = md
+    let mut metadata_owned: Vec<(String, MetadataType, Vec<u8>)> = md
         .iter()
         .map(|e| (e.key.to_string(), e.kind, e.value.to_vec()))
         .collect();
+    // Inject / override the zenanalyze-api reuse-key stamps when requested.
+    // Override semantics: drop any existing entry for the key, then add — so a
+    // re-stamp is idempotent and never leaves a duplicate key in the blob.
+    if let Some(v) = &analyzer_version {
+        metadata_owned.retain(|(k, _, _)| k != zenpredict::keys::ANALYZER_VERSION);
+        metadata_owned.push((
+            zenpredict::keys::ANALYZER_VERSION.to_string(),
+            MetadataType::Utf8,
+            v.as_bytes().to_vec(),
+        ));
+    }
+    if let Some(v) = feature_defs_version {
+        metadata_owned.retain(|(k, _, _)| k != zenpredict::keys::FEATURE_DEFS_VERSION);
+        metadata_owned.push((
+            zenpredict::keys::FEATURE_DEFS_VERSION.to_string(),
+            MetadataType::Numeric,
+            v.to_le_bytes().to_vec(),
+        ));
+    }
+    if let Some(v) = config_hash {
+        metadata_owned.retain(|(k, _, _)| k != zenpredict::keys::FEATURE_CONFIG_HASH);
+        metadata_owned.push((
+            zenpredict::keys::FEATURE_CONFIG_HASH.to_string(),
+            MetadataType::Numeric,
+            v.to_le_bytes().to_vec(),
+        ));
+    }
     let metadata_borrowed: Vec<BakeMetadataEntry<'_>> = metadata_owned
         .iter()
         .map(|(k, kind, v)| BakeMetadataEntry {

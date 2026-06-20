@@ -19,6 +19,12 @@
 
 ### Added
 
+- **`zenpredict repack` writes the reuse-key stamps** — new
+  `--analyzer-version <ver>` / `--feature-defs-version <u32>` / `--config-hash <u64>`
+  flags inject (override semantics) the three `zenanalyze-api` metadata keys into
+  an existing `.bin`, preserving all other content. This is the **codec re-bake
+  path**: stamp a pre-contract picker model so it can reuse a shared `Offer`,
+  without re-training.
 - **`BakeRequestJson.analyzer_version` + `feature_defs_version` +
   `feature_config_hash`** — optional first-class stamps for the `zenanalyze-api`
   three-part offer/reuse key. When set, the baker writes them to
