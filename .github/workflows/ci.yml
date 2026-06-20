@@ -182,7 +182,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test deps
-        run: python -m pip install --upgrade pytest numpy pyarrow
+        # numpy: _predict/_metapicker libs; pyarrow: provenance Parquet metadata;
+        # scikit-learn + joblib: _picker_lib's GBDT path (test_picker_lib_strict).
+        run: python -m pip install --upgrade pytest numpy pyarrow scikit-learn joblib
       - name: Run zentrain tool tests
         working-directory: zentrain/tools
         run: python -m pytest -q test_provenance.py test_predict_lib.py test_picker_lib_strict.py test_metapicker_lib.py
