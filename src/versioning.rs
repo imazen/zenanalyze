@@ -104,8 +104,21 @@ fn hash_row(version: &str, row_values_text: &str) -> u64 {
 /// feature has no golden row (a build whose feature set predates it).
 #[must_use]
 pub fn feature_version_hash(feature: AnalysisFeature) -> Option<u64> {
+    version_hash_for_name(feature.name())
+}
+
+/// Like [`feature_version_hash`] but keyed by the feature's canonical **name** —
+/// the form serialized in an [`crate::OwnedOffer`] / on disk — so a serialized
+/// name list can be re-stamped without re-resolving each [`AnalysisFeature`].
+#[must_use]
+pub fn feature_version_hash_by_name(name: &str) -> Option<u64> {
+    version_hash_for_name(name)
+}
+
+/// The parsed golden as `(feat_<name>, values_text)` rows, parsed once.
+fn golden_rows() -> &'static Vec<(String, String)> {
     static ROWS: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    let rows = ROWS.get_or_init(|| {
+    ROWS.get_or_init(|| {
         GOLDEN
             .lines()
             .filter(|l| !l.trim().is_empty())
@@ -114,10 +127,67 @@ pub fn feature_version_hash(feature: AnalysisFeature) -> Option<u64> {
                     .map(|(k, v)| (k.to_string(), v.to_string()))
             })
             .collect()
-    });
-    let key = format!("feat_{}", feature.name());
-    let row = rows.iter().find(|(k, _)| *k == key)?;
+    })
+}
+
+fn version_hash_for_name(name: &str) -> Option<u64> {
+    let key = format!("feat_{name}");
+    let row = golden_rows().iter().find(|(k, _)| *k == key)?;
     Some(hash_row(crate::analyzer_version(), &row.1))
+}
+
+/// A stable digest of the **value-affecting input framing** of `slice`: the
+/// descriptor's transfer function, primaries, and alpha mode, plus any signaled
+/// diffuse-white. The *same pixels* under different primaries (per-primaries luma
+/// weights), transfer (HDR EOTF), alpha mode (premultiplied vs straight), or
+/// diffuse-white (the PQ anchor) produce different features — so this is the
+/// third leg of a serialized feature set's reuse key, alongside the per-feature
+/// [`feature_version_hash`] (code) and `AnalysisQuery::config_hash` (config).
+///
+/// Bit depth / channel type is deliberately **not** hashed: u8 / u16 / f32 SDR
+/// converge to identical features by the consistency contract, so mixing depth in
+/// would split a reuse key that should match. Only framing that changes values is
+/// folded in. A mismatch costs an own-pass, never a wrong reuse, so the digest
+/// errs toward distinguishing (e.g. unsignaled vs signaled-default diffuse-white
+/// hash apart even where the PQ anchor would coincide).
+#[must_use]
+pub fn descriptor_hash(slice: &zenpixels::PixelSlice<'_>) -> u64 {
+    let dw_nits = slice
+        .color_context()
+        .and_then(|c| c.diffuse_white)
+        .map(|d| d.nits());
+    descriptor_hash_of(&slice.descriptor(), dw_nits)
+}
+
+/// The framing digest for an explicit descriptor + optional signaled diffuse-white
+/// (in nits) — the same hash [`descriptor_hash`] derives from a [`zenpixels::PixelSlice`],
+/// for callers that have the descriptor directly (e.g. the RGB8 fast path, which is
+/// `descriptor_hash_of(&PixelDescriptor::RGB8_SRGB, None)`).
+#[must_use]
+pub fn descriptor_hash_of(
+    descriptor: &zenpixels::PixelDescriptor,
+    diffuse_white_nits: Option<f32>,
+) -> u64 {
+    // Discriminants are stable (`#[repr(u8)]` in zenpixels); alpha `None` → 0,
+    // distinct from every real `AlphaMode` (which start at 1). Unsignaled
+    // diffuse-white → 0 bits, distinct from any signaled value.
+    let dw = diffuse_white_nits
+        .map_or(0u64, |n| u64::from(n.to_bits()))
+        .to_le_bytes();
+    let bytes = [
+        descriptor.transfer as u8,
+        descriptor.primaries as u8,
+        descriptor.alpha.map_or(0u8, |a| a as u8),
+        dw[0],
+        dw[1],
+        dw[2],
+        dw[3],
+        dw[4],
+        dw[5],
+        dw[6],
+        dw[7],
+    ];
+    fnv1a(&bytes)
 }
 
 #[cfg(test)]

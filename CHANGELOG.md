@@ -22,7 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `every_feature_varies` lint requires every feature to take ≥2 distinct values
   across the corpus (a constant feature is unversioned), mechanically forcing
   corpus diversity — tiny/photo/screen/line-art/palette/alpha plus HDR PQ, Bt2020
-  wide-gamut, and super-white RGBF32 cases that exercise the depth tier.
+  wide-gamut, and super-white RGBF32 cases that exercise the depth tier. Closed
+  two coverage gaps: descriptor *path* coverage (Native u16 SDR, DisplayP3 PQ,
+  HLG Bt2020, premultiplied-alpha cases — same logical content under framings the
+  code branches on) and a per-feature `f32` tolerance hook
+  (`F32_TOLERANCE_OVERRIDES` / `f32_tolerance`) for features whose reductions drift
+  more than the global budget.
+- **Dep-free feature serialization contract** — `zenanalyze_api::provenance`
+  (zero-dep, additive on the frozen 1.x). A `zenanalyze-provenance/1` text block
+  records the three legs of a serialized feature set's reuse key — `analyzer_version`,
+  `config_hash`, `descriptor_hash` — plus each feature's `version_hash`, so a
+  training run years later can validate reuse **feature-by-feature**
+  (`OwnedProvenance::parse` + `feature_is_reusable`). `write_provenance` serializes;
+  the format is forward-compatible (unknown headers ignored). zenanalyze adds
+  `versioning::descriptor_hash` / `descriptor_hash_of` (a stable digest of the
+  value-affecting input framing: transfer / primaries / alpha / diffuse-white — bit
+  depth deliberately excluded, since SDR u8/u16/f32 converge) and
+  `OwnedOffer::provenance(descriptor_hash)` (gated on `api`), to stamp straight into
+  Parquet key-value metadata. An end-to-end test runs extract → stamp → parse →
+  validate-against-live-analyzer, and confirms a descriptor mismatch falls out.
 - **Training-side reuse-key provenance (zentrain)** — the "outside-in" half so
   baked picker models can carry the stamps and actually reuse a shared feature
   `Offer`. New `zentrain/tools/_provenance.py` (`stamps_from_provenance` +

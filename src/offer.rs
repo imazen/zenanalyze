@@ -88,6 +88,36 @@ impl OwnedOffer {
     pub fn config_hash(&self) -> u64 {
         self.config_hash
     }
+
+    /// Serialize this offer's **provenance** for storing alongside its values on
+    /// disk (e.g. in Parquet key-value metadata), so a training run years later
+    /// can validate reuse feature-by-feature. Records `(analyzer_version,
+    /// config_hash, descriptor_hash)` plus each carried feature's
+    /// [`feature_version_hash`](crate::versioning::feature_version_hash) — the
+    /// three legs of the reuse key (code / config / input framing).
+    ///
+    /// `descriptor_hash` is the value-affecting input framing
+    /// ([`crate::versioning::descriptor_hash`] from the analyzed slice, or
+    /// [`descriptor_hash_of`](crate::versioning::descriptor_hash_of) for an
+    /// explicit descriptor — `descriptor_hash_of(&PixelDescriptor::RGB8_SRGB,
+    /// None)` for the RGB8 fast path). Features with no golden version row are
+    /// omitted (unversioned → a consumer treats them as not-reusable, the safe
+    /// direction), which by the `every_present_feature_has_a_version_hash` golden
+    /// test means every carried feature is stamped.
+    #[must_use]
+    pub fn provenance(&self, descriptor_hash: u64) -> String {
+        let feats: Vec<(&str, u64)> = self
+            .names
+            .iter()
+            .filter_map(|&n| crate::versioning::feature_version_hash_by_name(n).map(|h| (n, h)))
+            .collect();
+        zenanalyze_api::provenance::write_provenance(
+            analyzer_version(),
+            self.config_hash,
+            descriptor_hash,
+            &feats,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -140,5 +170,47 @@ mod tests {
             0,
         );
         assert!(offer.reuse_for(&req_missing).is_none());
+    }
+
+    /// The serialization contract end to end: extract → stamp provenance → parse
+    /// it back → confirm it validates each feature against the live analyzer, and
+    /// rejects a different input framing (descriptor).
+    #[test]
+    fn provenance_round_trips_and_gates_on_descriptor() {
+        use zenanalyze_api::provenance::OwnedProvenance;
+        use zenpixels::PixelDescriptor;
+
+        let (w, h) = (32u32, 32u32);
+        let rgb: Vec<u8> = (0..w * h * 3).map(|i| (i % 251) as u8).collect();
+        let query = AnalysisQuery::new(
+            FeatureSet::just(AnalysisFeature::Variance).with(AnalysisFeature::EdgeDensity),
+        );
+        let owned = OwnedOffer::extract(&rgb, w, h, &query);
+
+        // RGB8 fast path ⇒ the sRGB descriptor framing.
+        let dh = crate::versioning::descriptor_hash_of(&PixelDescriptor::RGB8_SRGB, None);
+        let text = owned.provenance(dh);
+
+        let prov = OwnedProvenance::parse(&text).expect("our own provenance must parse");
+        assert_eq!(prov.config_hash(), owned.config_hash());
+        assert_eq!(prov.descriptor_hash(), dh);
+        assert_eq!(prov.analyzer_version(), analyzer_version());
+
+        // Every carried feature validates against the live analyzer under the
+        // same (code, config, framing) — the whole point of the stamp.
+        for &name in owned.names() {
+            let live = crate::versioning::feature_version_hash_by_name(name)
+                .expect("a carried feature is versioned (golden invariant)");
+            assert!(
+                prov.feature_is_reusable(name, live, owned.config_hash(), dh),
+                "{name} should be reusable under the matching key"
+            );
+            // A different input framing (e.g. a Display-P3 PQ descriptor) must
+            // fall out — same pixels, different values.
+            assert!(
+                !prov.feature_is_reusable(name, live, owned.config_hash(), dh ^ 0x1),
+                "{name} must NOT reuse across a descriptor mismatch"
+            );
+        }
     }
 }

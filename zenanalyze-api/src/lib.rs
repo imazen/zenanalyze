@@ -75,6 +75,8 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+pub mod provenance;
+
 /// What a consumer wants: the feature column **names** its model needs, and the
 /// reuse key it needs them computed under.
 ///
