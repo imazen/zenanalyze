@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`OwnedOffer` + the opt-in `api` feature** — the producer side of the
+  `zenanalyze-api` contract. `OwnedOffer::extract(rgb, w, h, &query)` runs one
+  analysis pass and owns the dense `(names, values)` + reuse key;
+  `as_offer() -> zenanalyze_api::Offer<'_>` lends the borrowed contract type (the
+  `PathBuf`→`&Path` pattern), so a dozen codecs on different zenanalyze versions
+  can share one extraction. Gated behind `api` (off by default; pulls the
+  zero-dep `zenanalyze-api` 1.0). The owned holder lives in this impl crate, not
+  the frozen contract, so `Offer` stays a minimal borrowed type. An end-to-end
+  test runs extract → offer → `reuse_for` (reuse on match, own-pass on
+  config/version/coverage miss) — the real-use validation of the frozen shape.
 - **`AnalysisQuery::config_hash() -> u64`** — opaque digest of the value-affecting
   analysis config for the `zenanalyze-api` reuse key. `0` = canonical default
   (gamma); `with_linear_light(true)` deviates to a stable nonzero. Lets a codec

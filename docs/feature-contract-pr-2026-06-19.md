@@ -138,8 +138,12 @@ schema_hash          → Model::schema_hash()           -> u64            (names
 - ✅ `zenanalyze-api` **1.0** — frozen shape: `config_hash` reuse key,
   `#[non_exhaustive]` + constructors, soundness docs, tests (config gating +
   `major_minor` pre-release/degenerate edges).
-- ✅ `zenanalyze` — `AnalysisQuery::config_hash()` (`0` = default, linear-light
-  deviates) + the version-local primitives.
+- ✅ `zenanalyze` — **actually produces an `Offer`**: the opt-in `api` feature +
+  `OwnedOffer::extract(rgb, w, h, &query)` → `as_offer()`, plus
+  `AnalysisQuery::config_hash()` and the version-local primitives. An end-to-end
+  test (extract → offer → `reuse_for`) validates the frozen borrowed-`Offer` shape
+  under real use, and confirms the producer's owned holder belongs in the impl
+  crate — *not* the frozen contract.
 - ✅ `zenpredict` — `keys::{ANALYZER_VERSION, FEATURE_DEFS_VERSION, FEATURE_CONFIG_HASH}`
   + the four `Model` accessors (numerics LE-explicit for i686/any-endian).
 - ✅ `zenpredict-bake` — first-class `analyzer_version` / `feature_defs_version` /
@@ -160,9 +164,12 @@ These came up in the survey; each is omitted on purpose (YAGNI for a frozen
 surface) and is **provably additive-safe** under `1.0 + #[non_exhaustive]`, so
 *not* adding them now is correct minimalism, not a deferred risk:
 
-- **Owned/cacheable `Offer`** (0 current consumers; 1 hypothetical caching
-  server). Add a new `OwnedOffer` struct + `Offer::to_owned()` — a new pub type
-  is additive in any `1.x`.
+- **Owned/cacheable `Offer` *in the frozen crate*** (0 current consumers; 1
+  hypothetical caching server). The producer's owned holder already exists as
+  `zenanalyze::OwnedOffer` (impl-crate, lends a borrowed `Offer`) — which
+  *validated* that the frozen contract needs no owned variant. A version-agnostic
+  cacheable `Offer::to_owned()` in `zenanalyze-api` is still additive-later if a
+  consumer ever needs to store an offer across versions.
 - **`gather_into(&mut [f32])`** (no-alloc consumers). New method — additive.
 - **Non-`f32` values.** Every current feature is exactly representable in `f32`'s
   24-bit mantissa (counts ≤ ~32k, bit-depths ∈ {8..32}, bools → 0/1). If that

@@ -188,6 +188,12 @@ pub(crate) mod tier_depth;
 #[cfg(feature = "experimental")]
 pub(crate) mod xyb_color_loss;
 
+/// Producer side of the `zenanalyze-api` feature contract ([`OwnedOffer`]).
+#[cfg(feature = "api")]
+mod offer;
+#[cfg(feature = "api")]
+pub use offer::OwnedOffer;
+
 use core::fmt;
 
 use zenpixels::{PixelDescriptor, PixelSlice};

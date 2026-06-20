@@ -36,6 +36,13 @@ name = "zenanalyze"
 
 [features]
 default = []
+# Opt into the `zenanalyze-api` producer surface: `OwnedOffer::extract` runs one
+# analysis pass and lends a `zenanalyze_api::Offer` (the frozen, version-unifying
+# feature contract) so a dozen codecs on different zenanalyze versions can share
+# one extraction. Off by default — only picker / orchestrator consumers need it.
+# Making it default later is additive; the reverse would be breaking, so it
+# starts opt-in.
+api = ["dep:zenanalyze-api"]
 # Opt-in to features whose *structural definition* (not just numeric
 # scale) is not yet settled. As of 2026-06-13 this gate is narrow:
 # only `palette_density` (id 12, `#[deprecated]`, being retired) and
@@ -56,6 +63,11 @@ experimental = []
 hdr = []
 
 [dependencies]
+# The frozen, version-unifying feature contract (Request/Offer). Optional (gated
+# by the `api` feature), 1.0 and zero-dep so every zenanalyze version depends on
+# the SAME zenanalyze-api and their Offers unify across a multi-version build.
+# Publish zenanalyze-api before zenanalyze when releasing with `api` enabled.
+zenanalyze-api = { version = "1.0.0", path = "zenanalyze-api", optional = true }
 zenpixels = { version = "0.2.14", default-features = false, features = ["imgref"] }
 zenpixels-convert = { version = "0.2.14", default-features = false }
 archmage = { version = "0.9.23", features = ["macros", "avx512", "testable_dispatch"] }
