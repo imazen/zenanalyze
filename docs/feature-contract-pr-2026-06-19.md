@@ -150,9 +150,19 @@ schema_hash          → Model::schema_hash()           -> u64            (names
   `feature_config_hash` fields; **Rust owns the byte encoding** (UTF-8 / LE-u32 /
   LE-u64); explicit metadata entry wins, dup-guarded.
 - ✅ `bake_picker.py` — forwards all three values when the trainer recorded them.
-- ⏳ **zentrain** — record the three stamps at extraction (needs the feature
-  dataset to carry the analyzer version + config in provenance). Python supplies
-  values; the Rust baker writes bytes — *not* a Python baker.
+- ✅ `zenpicker` — **consumes** the contract: opt-in `api` feature +
+  `MetaPicker::feature_request()` builds a `Request` from the model (names
+  collected once at construction; stamps from the accessors) for a caller to
+  negotiate a shared `Offer` before `pick`. Test validates reuse + drift-rejection.
+- ✅ `zentrain` — **outside-in provenance**: `tools/_provenance.py` +
+  `train_hybrid.py` / `train_multi_codec.py` emit the three stamps into the model
+  JSON from a codec config's optional `ANALYSIS_PROVENANCE` (bake_picker forwards).
+  Source-of-truth is *declared*, not auto-guessed (the extractor's exact zenanalyze
+  version isn't verifiable from here, and a wrong stamp is a soundness risk);
+  undeclared → unstamped → safe own-pass. Template in the reference config.
+- ⏳ **per-codec configs** — *declare* `ANALYSIS_PROVENANCE` with the verified
+  extractor version so their pickers actually reuse (the mechanism is wired and
+  safe-by-default until they do).
 - ⏳ **codec migrations** (their repos) — build a `Request`, negotiate the `Offer`,
   drop the `pub use zenanalyze::feature::*`.
 - ⏳ **caller/orchestrator** (the product) — group by key, union per group,
