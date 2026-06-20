@@ -39,7 +39,13 @@ Optional model JSON fields (recommended for shipping bakes):
   schema_version_tag, extra_axes, config_names,
   hybrid_heads_manifest, safety_report, safety_profile,
   training_objective, reach_safety, calibration_metrics,
-  bake_name
+  bake_name,
+  analyzer_version (str, the zenanalyze crate version the features
+    were extracted with, e.g. "0.2.7"),
+  feature_defs_version (int, zenanalyze::feature_defs_version() at
+    extraction) — the zenanalyze-api offer/reuse key. Record both
+    from the feature dataset's extraction provenance; when present
+    they're baked to keys::ANALYZER_VERSION / FEATURE_DEFS_VERSION.
 
 Format ZNPR v2 layout: `zenpredict::Model::from_bytes`. See
 `zenpredict/src/model.rs` and `zenpredict/src/bake/json.rs` for the
@@ -704,6 +710,23 @@ def build_bake_request_json(
         out["compressed"] = True
     if optimize:
         out["optimize"] = True
+    # zenanalyze-api offer/reuse-key stamps (zenpredict-bake 0.2+).
+    # The trainer records which zenanalyze produced the features;
+    # thread the crate version + feature_defs_version through as typed
+    # fields so the Rust baker writes them (utf8 / LE-u32) to
+    # keys::ANALYZER_VERSION / FEATURE_DEFS_VERSION. A codec then checks
+    # an offered feature result's (major.minor, defs) against its model's
+    # before reusing. We supply the VALUES here; the baker owns the
+    # bytes — Python never hand-rolls a u32 (it can't ride the f32 repr).
+    # Only emit when the trainer recorded them: an absent key leaves
+    # Model::analyzer_version() / feature_defs_version() returning None,
+    # the documented older-bake behavior.
+    analyzer_version = model.get("analyzer_version")
+    if analyzer_version is not None:
+        out["analyzer_version"] = str(analyzer_version)
+    feature_defs_version = model.get("feature_defs_version")
+    if feature_defs_version is not None:
+        out["feature_defs_version"] = int(feature_defs_version)
     return out
 
 
