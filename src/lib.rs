@@ -194,6 +194,9 @@ mod offer;
 #[cfg(feature = "api")]
 pub use offer::OwnedOffer;
 
+/// Content-hash feature versioning + the golden test set ([`versioning`]).
+pub mod versioning;
+
 use core::fmt;
 
 use zenpixels::{PixelDescriptor, PixelSlice};

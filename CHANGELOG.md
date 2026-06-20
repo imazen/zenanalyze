@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Content-hash feature versioning + golden test set** (`versioning` module).
+  `feature_version_hash(feature) -> Option<u64>` fingerprints each feature's
+  computation from a committed golden (its values over a fixed synthetic corpus)
+  mixed with the crate's caret-compatibility root (`0.MINOR` / `MAJOR`) — so
+  features serialized to disk can be checked, feature-by-feature, for
+  reuse-compatibility years later, and only *changed* features change their hash.
+  The golden test (`src/versioning_golden.tsv`, blessed via
+  `ZENANALYZE_BLESS_GOLDEN=1`) is a tripwire: it fails when current code stops
+  reproducing the golden within `REL_TOLERANCE`, forcing a deliberate re-bless
+  (which bumps the hash) on any behaviour change. The keystone
+  `every_feature_varies` lint requires every feature to take ≥2 distinct values
+  across the corpus (a constant feature is unversioned), mechanically forcing
+  corpus diversity — tiny/photo/screen/line-art/palette/alpha plus HDR PQ, Bt2020
+  wide-gamut, and super-white RGBF32 cases that exercise the depth tier.
 - **Training-side reuse-key provenance (zentrain)** — the "outside-in" half so
   baked picker models can carry the stamps and actually reuse a shared feature
   `Offer`. New `zentrain/tools/_provenance.py` (`stamps_from_provenance` +
