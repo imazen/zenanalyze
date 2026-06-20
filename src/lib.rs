@@ -970,7 +970,10 @@ pub const fn analyzer_version() -> &'static str {
 /// run against the *same* zenanalyze version the model was baked with — pin it
 /// in `Cargo.toml`. See `docs/feature-contract-pr-2026-06-19.md`.
 pub fn resolve_feature_ids<S: AsRef<str>>(names: &[S]) -> Option<Vec<u16>> {
-    names.iter().map(|n| feature_id_by_name(n.as_ref())).collect()
+    names
+        .iter()
+        .map(|n| feature_id_by_name(n.as_ref()))
+        .collect()
 }
 
 /// Extract a **model-aligned** feature vector from any [`PixelSlice`] into `out`.
@@ -1125,7 +1128,10 @@ mod feature_vector_tests {
             assert_eq!(feature_id_by_name(&prefixed), Some(id));
         }
         assert_eq!(feature_id_by_name("not_a_real_feature"), None);
-        assert_eq!(AnalysisFeature::from_name("variance"), Some(AnalysisFeature::Variance));
+        assert_eq!(
+            AnalysisFeature::from_name("variance"),
+            Some(AnalysisFeature::Variance)
+        );
     }
 
     #[test]
@@ -1140,8 +1146,7 @@ mod feature_vector_tests {
         assert_eq!(feature_name(ids[1]), Some("variance"));
 
         let buf = rgb8_image(96, 64);
-        let slice =
-            PixelSlice::new(&buf, 96, 64, 96 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+        let slice = PixelSlice::new(&buf, 96, 64, 96 * 3, PixelDescriptor::RGB8_SRGB).unwrap();
         let mut feats = [0.0f32; 3];
         assert!(feature_vector(slice, &ids, &mut feats)); // PixelSlice in, &[f32] out
 

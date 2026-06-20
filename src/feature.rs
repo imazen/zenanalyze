@@ -2498,10 +2498,18 @@ mod tests {
         let gamma_a = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance));
         let gamma_b = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::EdgeDensity));
         assert_eq!(gamma_a.config_hash(), 0);
-        assert_eq!(gamma_b.config_hash(), 0, "config_hash ignores the feature set");
+        assert_eq!(
+            gamma_b.config_hash(),
+            0,
+            "config_hash ignores the feature set"
+        );
 
         let linear = gamma_a.with_linear_light(true);
-        assert_ne!(linear.config_hash(), 0, "linear-light must deviate from default");
+        assert_ne!(
+            linear.config_hash(),
+            0,
+            "linear-light must deviate from default"
+        );
         // stable: same config → same hash
         let linear2 =
             AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance)).with_linear_light(true);
