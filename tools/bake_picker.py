@@ -43,9 +43,12 @@ Optional model JSON fields (recommended for shipping bakes):
   analyzer_version (str, the zenanalyze crate version the features
     were extracted with, e.g. "0.2.7"),
   feature_defs_version (int, zenanalyze::feature_defs_version() at
-    extraction) — the zenanalyze-api offer/reuse key. Record both
-    from the feature dataset's extraction provenance; when present
-    they're baked to keys::ANALYZER_VERSION / FEATURE_DEFS_VERSION.
+    extraction),
+  feature_config_hash (int u64, zenanalyze::AnalysisQuery.config_hash()
+    at extraction; 0 = gamma default) — the three together are the
+    zenanalyze-api offer/reuse key. Record them from the feature
+    dataset's extraction provenance; when present they're baked to
+    keys::ANALYZER_VERSION / FEATURE_DEFS_VERSION / FEATURE_CONFIG_HASH.
 
 Format ZNPR v2 layout: `zenpredict::Model::from_bytes`. See
 `zenpredict/src/model.rs` and `zenpredict/src/bake/json.rs` for the
@@ -727,6 +730,13 @@ def build_bake_request_json(
     feature_defs_version = model.get("feature_defs_version")
     if feature_defs_version is not None:
         out["feature_defs_version"] = int(feature_defs_version)
+    feature_config_hash = model.get("feature_config_hash")
+    if feature_config_hash is not None:
+        # u64 digest of the value-affecting AnalysisQuery config the features
+        # were extracted under (zenanalyze::AnalysisQuery::config_hash(); 0 =
+        # gamma default). The baker writes it LE-u64; keeps a linear-light model
+        # from reusing gamma features (and vice-versa).
+        out["feature_config_hash"] = int(feature_config_hash)
     return out
 
 

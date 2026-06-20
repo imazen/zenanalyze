@@ -293,6 +293,16 @@ pub struct BakeRequestJson {
     /// encoding would mean emitting LE hex by hand. Default `None`.
     #[serde(default)]
     pub feature_defs_version: Option<u32>,
+    /// The `zenanalyze::AnalysisQuery::config_hash()` the features were
+    /// extracted under (`0` = canonical default / gamma). When set, the
+    /// baker writes it as an 8-byte little-endian `u64` to the
+    /// [`FEATURE_CONFIG_HASH`](zenpredict::keys::FEATURE_CONFIG_HASH)
+    /// numeric metadata key — the analysis-config third of the
+    /// `zenanalyze-api` reuse key, so a codec won't reuse e.g.
+    /// linear-light features against a gamma-trained model. Prefer this
+    /// typed field over a hand-rolled `metadata` entry. Default `None`.
+    #[serde(default)]
+    pub feature_config_hash: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -551,9 +561,10 @@ fn hex_nibble(b: u8) -> Option<u8> {
 /// change.
 ///
 /// Also honors the optional `analyzer_version` / `feature_defs_version`
-/// stamps, writing them to the `zenanalyze-api` reuse-key metadata
-/// (UTF-8 / LE-u32). Both default to `None` (key omitted); an explicit
-/// `metadata` entry for the same key takes precedence.
+/// / `feature_config_hash` stamps, writing them to the `zenanalyze-api`
+/// reuse-key metadata (UTF-8 / LE-u32 / LE-u64). All default to `None`
+/// (key omitted); an explicit `metadata` entry for the same key takes
+/// precedence.
 pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
     // Decode metadata values up front so the byte buffers outlive
     // the borrow into BakeMetadataEntry.
@@ -564,9 +575,11 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         .collect::<Result<_, _>>()?;
 
     // First-class version stamps → owned bytes that outlive the
-    // metadata borrow. defs_version is a u32, written LE so it decodes
-    // identically on any endianness (cf. Model::feature_defs_version).
+    // metadata borrow. defs_version is a u32, config_hash a u64, both
+    // written LE so they decode identically on any endianness (cf.
+    // Model::feature_defs_version / feature_config_hash).
     let defs_version_bytes: Option<[u8; 4]> = req.feature_defs_version.map(u32::to_le_bytes);
+    let config_hash_bytes: Option<[u8; 8]> = req.feature_config_hash.map(u64::to_le_bytes);
 
     // Apply per-layer zero-bias when requested. We own the weight
     // vectors only when zerobias is active; otherwise borrow from
@@ -641,6 +654,15 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
     {
         metadata.push(BakeMetadataEntry {
             key: zenpredict::keys::FEATURE_DEFS_VERSION,
+            kind: MetadataType::Numeric,
+            value: &bytes[..],
+        });
+    }
+    if let Some(bytes) = &config_hash_bytes
+        && !has_key(zenpredict::keys::FEATURE_CONFIG_HASH)
+    {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_CONFIG_HASH,
             kind: MetadataType::Numeric,
             value: &bytes[..],
         });

@@ -625,6 +625,7 @@ fn json_round_trip_version_stamps() {
                     "weights":[1.0,0.0,0.0,1.0],"biases":[0.0,0.0]}],
         "analyzer_version": "0.2.7",
         "feature_defs_version": 1,
+        "feature_config_hash": 14695981039346656037,
         "metadata": [
             {"key": "zentrain.feature_columns", "type": "utf8",
              "text": "variance\nedge_density\nuniformity"}
@@ -636,10 +637,13 @@ fn json_round_trip_version_stamps() {
 
     assert_eq!(model.analyzer_version(), Some("0.2.7"));
     assert_eq!(model.feature_defs_version(), Some(1));
+    // u64 config hash round-trips LE-exactly (here a representative nonzero,
+    // near u64::MAX, to catch any width/endian truncation).
+    assert_eq!(model.feature_config_hash(), Some(14695981039346656037));
     let cols: Vec<&str> = model.feature_columns().collect();
     assert_eq!(cols, ["variance", "edge_density", "uniformity"]);
-    // feature_columns entry + the two appended stamps = 3 (no dup).
-    assert_eq!(model.metadata().len(), 3);
+    // feature_columns entry + the three appended stamps = 4 (no dup).
+    assert_eq!(model.metadata().len(), 4);
 }
 
 #[test]
@@ -656,6 +660,7 @@ fn json_version_stamps_absent_are_none() {
     let model = Model::from_bytes(&aligned.0).unwrap();
     assert_eq!(model.analyzer_version(), None);
     assert_eq!(model.feature_defs_version(), None);
+    assert_eq!(model.feature_config_hash(), None);
     assert_eq!(model.feature_columns().count(), 0);
 }
 

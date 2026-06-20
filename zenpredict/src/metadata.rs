@@ -400,4 +400,13 @@ pub mod keys {
     /// within-major drift the name-based schema hash can't (a feature keeping its
     /// name while its math moves). Absent on models baked before this key.
     pub const FEATURE_DEFS_VERSION: &str = "zentrain.feature_defs_version";
+    /// numeric (u64) — `zenanalyze::AnalysisQuery::config_hash()` at bake time:
+    /// the value-affecting analysis-config digest the model was trained under
+    /// (`0` = canonical default / gamma). The third part of the `zenanalyze-api`
+    /// reuse key, alongside [`ANALYZER_VERSION`] + [`FEATURE_DEFS_VERSION`]. Stops
+    /// a codec reusing e.g. linear-light features against a gamma-trained model:
+    /// the same feature name carries a different value under the flag while the
+    /// version + defs stay fixed. Absent (treated as `0`) on models baked before
+    /// this key.
+    pub const FEATURE_CONFIG_HASH: &str = "zentrain.feature_config_hash";
 }

@@ -19,14 +19,18 @@
 
 ### Added
 
-- **`BakeRequestJson.analyzer_version` + `feature_defs_version`** — optional
-  first-class version stamps for the `zenanalyze-api` offer/reuse key. When set,
-  the baker writes them to `keys::ANALYZER_VERSION` (UTF-8) and
-  `keys::FEATURE_DEFS_VERSION` (4-byte LE `u32`) metadata, read back via
-  `Model::analyzer_version()` / `feature_defs_version()`. Preferred over a
-  hand-rolled `metadata` entry — a `u32` can't ride the `f32` repr, so manual
+- **`BakeRequestJson.analyzer_version` + `feature_defs_version` +
+  `feature_config_hash`** — optional first-class stamps for the `zenanalyze-api`
+  three-part offer/reuse key. When set, the baker writes them to
+  `keys::ANALYZER_VERSION` (UTF-8), `keys::FEATURE_DEFS_VERSION` (4-byte LE
+  `u32`), and `keys::FEATURE_CONFIG_HASH` (8-byte LE `u64`) metadata, read back
+  via `Model::analyzer_version()` / `feature_defs_version()` /
+  `feature_config_hash()`. `config_hash` is the value-affecting analysis-config
+  digest (`AnalysisQuery::config_hash()`, `0` = gamma default) that keeps a
+  linear-light model from reusing gamma features. Preferred over hand-rolled
+  `metadata` entries — a `u32`/`u64` can't ride the `f32` repr, so manual
   encoding would mean emitting LE hex by hand; an explicit `metadata` entry for
-  the same key still takes precedence (no duplicate key written). Both default to
+  the same key still takes precedence (no duplicate key written). All default to
   `None`. Bakers (zentrain) pass the values through from extraction.
 
 - **`BakeRequestJson` is now `#[non_exhaustive]`** so future

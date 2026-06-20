@@ -884,6 +884,23 @@ impl Model {
         Some(u32::from_le_bytes(arr))
     }
 
+    /// The value-affecting analysis-config digest the model was trained under
+    /// (the [`FEATURE_CONFIG_HASH`](crate::keys::FEATURE_CONFIG_HASH) metadata,
+    /// `zenanalyze::AnalysisQuery::config_hash()` at bake time), or `None` on
+    /// bakes predating the key (treat as `0` = canonical default). The third part
+    /// of the `zenanalyze-api` reuse key.
+    ///
+    /// Decoded as an 8-byte little-endian `u64`, endian-explicit so it round-trips
+    /// identically on i686 / big-endian.
+    pub fn feature_config_hash(&self) -> Option<u64> {
+        let bytes = self
+            .metadata()
+            .get_numeric(crate::keys::FEATURE_CONFIG_HASH)
+            .ok()?;
+        let arr: [u8; 8] = bytes.try_into().ok()?;
+        Some(u64::from_le_bytes(arr))
+    }
+
     /// Per-output [`OutputSpec`] table.
     pub fn output_specs(&self) -> &[OutputSpec] {
         if self.header.output_specs.is_empty() {
