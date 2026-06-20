@@ -47,7 +47,16 @@ jobs:
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
-        run: cargo test --no-default-features --features "${{ matrix.features }}" --lib
+        # `golden_is_stable` is a *reference-platform* value tripwire: it
+        # re-extracts the corpus and bit-compares to a golden blessed on x86_64.
+        # SIMD-reduced statistical features sum lane-wise, so a different SIMD
+        # width diverges per tier — and a few cross a decision threshold (edge
+        # count, degeneracy guard) producing 0.0-vs-nonzero that no tolerance can
+        # bridge. So it runs in the dedicated `golden-reference` job (x86_64) and
+        # is skipped here. The *hash* is computed from committed text and IS
+        # platform-independent; the other versioning tests (variance lint, hash
+        # sensitivity, every-feature-has-hash) run on every platform below.
+        run: cargo test --no-default-features --features "${{ matrix.features }}" --lib -- --skip golden_is_stable
       # The `api` feature (the zenanalyze-api producer surface: OwnedOffer +
       # feature_set_provenance + the serialization-provenance sidecar) is not in
       # the matrix above, so cover it once on ubuntu — otherwise the api-gated
@@ -156,7 +165,9 @@ jobs:
           # `CROSS_RUNTIME` automatically (passthrough is the default for
           # uppercase env vars set in the calling shell).
           CROSS_RUNTIME: "1"
-        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib
+        # Skip the reference-platform value tripwire on cross targets (i686 x87 /
+        # aarch64 NEON diverge per SIMD tier) — see the Test job + golden-reference.
+        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip golden_is_stable
       # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
       # because Model::from_bytes does u32 / usize arithmetic that wraps
       # on 32-bit; checked_mul guards exist but live-fire tests confirm.
@@ -188,3 +199,22 @@ jobs:
       - name: Run zentrain tool tests
         working-directory: zentrain/tools
         run: python -m pytest -q test_provenance.py test_predict_lib.py test_picker_lib_strict.py test_metapicker_lib.py
+
+  golden-reference:
+    # The feature-versioning value tripwire's REFERENCE platform. `golden_is_stable`
+    # re-extracts the synthetic corpus and bit-compares to the committed golden
+    # (`src/versioning_golden.tsv`), within REL_TOLERANCE + the per-feature
+    # overrides. Those budgets are sized from the x86_64 bless, so this is the one
+    # job that asserts it — the portable Test/Cross jobs `--skip golden_is_stable`
+    # because SIMD-reduced features diverge per tier (and a few cross a decision
+    # threshold to 0.0-vs-nonzero, which no tolerance bridges). The version *hash*
+    # is text-derived and platform-independent; only this live re-extraction check
+    # is arch-pinned. Bless with ZENANALYZE_BLESS_GOLDEN=1 on x86_64.
+    name: golden-reference (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Golden value-stability tripwire
+        run: cargo test --features "experimental,hdr" versioning::tests::golden_is_stable -- --exact --nocapture
