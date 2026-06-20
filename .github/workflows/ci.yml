@@ -48,6 +48,17 @@ jobs:
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
         run: cargo test --no-default-features --features "${{ matrix.features }}" --lib
+      # The `api` feature (the zenanalyze-api producer surface: OwnedOffer +
+      # feature_set_provenance + the serialization-provenance sidecar) is not in
+      # the matrix above, so cover it once on ubuntu — otherwise the api-gated
+      # code (and the extract_features_for_picker example's stamping path) would
+      # bit-rot un-CI'd. Includes zenanalyze-api itself.
+      - name: Clippy + test (api feature)
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
+        run: |
+          cargo clippy --features "api,hdr" --all-targets -- -D warnings
+          cargo test --features "api,hdr" --lib
+          cargo test -p zenanalyze-api
       - name: Build zenpicker
         run: cargo build -p zenpicker
       - name: Test zenpicker
