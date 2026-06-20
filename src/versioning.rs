@@ -300,6 +300,56 @@ mod tests {
         }
     }
 
+    /// Generic RGB `u16` case with explicit transfer + primaries — covers the
+    /// descriptor code-paths (Native-vs-Convert, per-primaries luma, transfer
+    /// decode) that change a feature's value for the *same* logical content.
+    fn u16_rgb(
+        w: u32,
+        h: u32,
+        transfer: zenpixels::TransferFunction,
+        primaries: zenpixels::ColorPrimaries,
+        diffuse_white: Option<f32>,
+        f: impl Fn(u32, u32) -> [u16; 3],
+    ) -> Case {
+        let mut u16s: Vec<u16> = Vec::with_capacity((w * h * 3) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                u16s.extend_from_slice(&f(x, y));
+            }
+        }
+        let bytes: Vec<u8> = u16s.iter().flat_map(|&v| v.to_le_bytes()).collect();
+        Case {
+            w,
+            h,
+            bytes,
+            descriptor: PixelDescriptor::RGB16
+                .with_transfer(transfer)
+                .with_primaries(primaries),
+            rgb8_fast: false,
+            diffuse_white,
+        }
+    }
+
+    /// RGBA8 with **premultiplied** alpha — exercises the premult alpha path
+    /// (distinct from the straight-alpha `rgba8` cases above).
+    fn rgba8_premult(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Case {
+        let mut bytes = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                bytes.extend_from_slice(&f(x, y));
+            }
+        }
+        Case {
+            w,
+            h,
+            bytes,
+            descriptor: PixelDescriptor::RGBA8_SRGB
+                .with_alpha(Some(zenpixels::AlphaMode::Premultiplied)),
+            rgb8_fast: false,
+            diffuse_white: None,
+        }
+    }
+
     /// The ordered corpus. Order is part of the contract — only **append**;
     /// reordering rewrites every hash.
     fn corpus() -> Vec<Case> {
@@ -387,6 +437,50 @@ mod tests {
             hdr_pq(64, 48, 100.0, 4.0),           // HDR PQ dim
             hdr_wide_gamut(64, 48),               // Bt2020 saturated — gamut-coverage features
             hdr_linear_float(48, 48),             // RGBF32 super-white — wide_gamut_fraction/peak
+            // --- descriptor path coverage: same logical content, framings the
+            //     code branches on (so a per-path change is versioned). ---
+            u16_rgb(
+                64,
+                48,
+                zenpixels::TransferFunction::Srgb,
+                zenpixels::ColorPrimaries::Bt709,
+                None,
+                |x, _| {
+                    let v = (x * 65535 / 63) as u16;
+                    [v, v / 2, 65535 - v]
+                },
+            ), // Native u16 SDR — versions the u8==u16==f32 consistency
+            u16_rgb(
+                64,
+                48,
+                zenpixels::TransferFunction::Pq,
+                zenpixels::ColorPrimaries::DisplayP3,
+                Some(203.0),
+                |x, y| {
+                    let lum = (3000 + x * 600) as u16;
+                    match (x + y) % 3 {
+                        0 => [lum, 200, 200],
+                        1 => [200, lum, 200],
+                        _ => [200, 200, lum],
+                    }
+                },
+            ), // DisplayP3 PQ saturated — P3 luma + gamut_coverage_p3 path
+            u16_rgb(
+                64,
+                48,
+                zenpixels::TransferFunction::Hlg,
+                zenpixels::ColorPrimaries::Bt2020,
+                Some(203.0),
+                |x, y| {
+                    let v = ((x ^ y) * 700 % 60000) as u16;
+                    [v, 30000u16.saturating_sub(v / 2), v / 3]
+                },
+            ), // HLG Bt2020 — the HLG decode path
+            rgba8_premult(32, 32, |x, y| {
+                let a = ((x + y) * 6).min(255) as u8;
+                let s = |c: u32| (a as u32 * c / 255) as u8;
+                [s(200), s(80), a / 2, a] // premultiplied colour (already × alpha)
+            }), // premultiplied alpha path
         ]
     }
 
@@ -456,21 +550,35 @@ mod tests {
             .collect()
     }
 
-    fn rel_close(a: f32, b: f32) -> bool {
+    /// Per-feature `f32` relative-tolerance overrides for the few features whose
+    /// large reductions / transcendentals (entropy `log`, gamut matrices, big
+    /// pixel sums) drift more across platforms than the global [`REL_TOLERANCE`].
+    /// Empty until measured on real ARM/i686/wasm runs — the honest way to set
+    /// these is from observed spread, not a guess (and bit-exact determinism via
+    /// pinned `libm` would retire them entirely). Keyed by `feat_<name>`.
+    const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
+
+    fn f32_tolerance(feat_key: &str) -> f32 {
+        F32_TOLERANCE_OVERRIDES
+            .iter()
+            .find(|(k, _)| *k == feat_key)
+            .map_or(REL_TOLERANCE, |(_, t)| *t)
+    }
+
+    fn rel_close(a: f32, b: f32, tol: f32) -> bool {
         if a.is_nan() || b.is_nan() {
             return a.is_nan() && b.is_nan();
         }
-        (a - b).abs() <= REL_TOLERANCE * a.abs().max(b.abs()).max(1.0)
+        (a - b).abs() <= tol * a.abs().max(b.abs()).max(1.0)
     }
 
-    /// Tolerance keyed on the value's TYPE. Discrete features (counts, bit depths,
-    /// bools) are computed as integers with no float noise, so they must match
-    /// **exactly** — a single relative tolerance would miss an off-by-one in a
-    /// large count (e.g. 32768→32769 is 3e-5 relative, under `REL_TOLERANCE`).
-    /// Only `f32` features get the relative tolerance. (A future refinement: a
-    /// per-feature `f32` override table for the few features whose big reductions
-    /// / transcendentals drift more across platforms than the global budget.)
-    fn value_matches(recomputed: FeatureValue, golden_text: &str) -> bool {
+    /// Tolerance keyed on the value's TYPE (and, for `f32`, the feature). Discrete
+    /// features (counts, bit depths, bools) are computed as integers with no float
+    /// noise, so they must match **exactly** — a single relative tolerance would
+    /// miss an off-by-one in a large count (e.g. 32768→32769 is 3e-5 relative,
+    /// under `REL_TOLERANCE`). Only `f32` features get a relative tolerance, with
+    /// an optional per-feature override ([`F32_TOLERANCE_OVERRIDES`]).
+    fn value_matches(recomputed: FeatureValue, golden_text: &str, f32_tol: f32) -> bool {
         match recomputed {
             FeatureValue::F32(x) => {
                 if golden_text == "nan" {
@@ -478,7 +586,7 @@ mod tests {
                 } else {
                     golden_text
                         .parse::<f32>()
-                        .map(|e| rel_close(x, e))
+                        .map(|e| rel_close(x, e, f32_tol))
                         .unwrap_or(false)
                 }
             }
@@ -548,7 +656,7 @@ mod tests {
                 continue;
             }
             for (i, (v, e)) in values.iter().zip(expected).enumerate() {
-                if !value_matches(*v, e) {
+                if !value_matches(*v, e, f32_tolerance(name)) {
                     drift.push(format!("{name}[{i}]: {} vs golden {}", format_one(*v), e));
                     break;
                 }
