@@ -163,7 +163,12 @@ def run_codec(recipe: CodecRecipe, dry_run: bool = False) -> bool:
         return False
     sys.stderr.write(f"  [OK] extracted in {elapsed:.0f}s\n")
 
-    # Convert TSV -> Parquet.
+    # Convert TSV -> Parquet. The converter auto-carries a `<stem>.provenance`
+    # sidecar (the `zenanalyze-provenance/1` block) into the Parquet key-value
+    # metadata when one is present — so an extractor built with `--features api`
+    # (its zenanalyze must expose the provenance API) gets its serialization
+    # provenance preserved through conversion at no cost here. Absent sidecar ->
+    # unstamped Parquet (legacy-safe).
     converter = ZA_ROOT / "benchmarks/tsv_to_parquet.py"
     sys.stderr.write(f"  converting to Parquet...\n")
     cv = subprocess.run(

@@ -155,3 +155,23 @@ jobs:
         env:
           CROSS_RUNTIME: "1"
         run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,advanced" --lib
+
+  zentrain-pytests:
+    # The zentrain Python tooling tests — pure-logic unit tests for the picker /
+    # predict / metapicker libs and the feature serialization-provenance plumbing
+    # (`_provenance.py`: the `zenanalyze-provenance/1` block carried through Parquet
+    # metadata). Light deps (pytest + numpy + pyarrow), so a single ubuntu job keeps
+    # them from bit-rotting. Run from `zentrain/tools` so the sibling modules import
+    # by name.
+    name: zentrain pytests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: python -m pip install --upgrade pytest numpy pyarrow
+      - name: Run zentrain tool tests
+        working-directory: zentrain/tools
+        run: python -m pytest -q test_provenance.py test_predict_lib.py test_picker_lib_strict.py test_metapicker_lib.py

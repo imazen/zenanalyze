@@ -190,6 +190,16 @@ pub fn descriptor_hash_of(
     fnv1a(&bytes)
 }
 
+/// The framing digest of the **RGB8 sRGB fast path** —
+/// `descriptor_hash_of(&PixelDescriptor::RGB8_SRGB, None)`. This is the framing of
+/// every [`crate::analyze_features_rgb8`] extraction (and the
+/// `extract_features_for_picker` example), so the in-workspace extractor can stamp
+/// provenance without naming a descriptor.
+#[must_use]
+pub fn rgb8_srgb_descriptor_hash() -> u64 {
+    descriptor_hash_of(&zenpixels::PixelDescriptor::RGB8_SRGB, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

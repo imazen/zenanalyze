@@ -192,7 +192,7 @@ pub(crate) mod xyb_color_loss;
 #[cfg(feature = "api")]
 mod offer;
 #[cfg(feature = "api")]
-pub use offer::OwnedOffer;
+pub use offer::{OwnedOffer, feature_set_provenance};
 
 /// Content-hash feature versioning + the golden test set ([`versioning`]).
 pub mod versioning;

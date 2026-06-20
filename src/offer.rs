@@ -15,6 +15,35 @@ use crate::feature::AnalysisQuery;
 use crate::{analyze_features_rgb8, analyzer_version, feature_defs_version, feature_name};
 use zenanalyze_api::Offer;
 
+/// Serialize the **extraction-level** provenance for a `query` + input framing —
+/// the stamp to store alongside a feature table (e.g. one
+/// `extract_features_for_picker` output, where every row shares this `query`,
+/// config, and descriptor). Covers every feature in `query.features()` that has a
+/// golden version row; the rest are omitted (unversioned → a consumer treats them
+/// as not-reusable, the safe direction).
+///
+/// `descriptor_hash` is the value-affecting input framing
+/// ([`crate::versioning::descriptor_hash`] / `descriptor_hash_of`, or
+/// [`crate::versioning::rgb8_srgb_descriptor_hash`] for the RGB8 fast path). See
+/// [`OwnedOffer::provenance`] for the per-offer variant that stamps exactly the
+/// features one offer carries.
+#[must_use]
+pub fn feature_set_provenance(query: &AnalysisQuery, descriptor_hash: u64) -> String {
+    let feats: Vec<(&str, u64)> = query
+        .features()
+        .iter()
+        .filter_map(|feat| {
+            feature_name(feat.id()).zip(crate::versioning::feature_version_hash(feat))
+        })
+        .collect();
+    zenanalyze_api::provenance::write_provenance(
+        analyzer_version(),
+        query.config_hash(),
+        descriptor_hash,
+        &feats,
+    )
+}
+
 /// An owned bundle of feature names + values + reuse key, backing a borrowed
 /// [`Offer`]. Produce one with [`OwnedOffer::extract`], then lend it as an
 /// [`Offer`] with [`as_offer`](Self::as_offer).

@@ -258,6 +258,31 @@ fn main() -> ExitCode {
     writeln!(w).unwrap();
 
     let query = AnalysisQuery::new(FeatureSet::SUPPORTED);
+
+    // Stamp the extraction's serialization provenance next to the table, so a
+    // training run years later can validate reuse feature-by-feature (the
+    // `zenanalyze-provenance/1` block: analyzer version + config + RGB8-sRGB
+    // framing + per-feature version hashes). Needs the `api` feature for the
+    // single-source serializer; without it the table is simply unstamped (safe —
+    // a consumer with no provenance runs its own pass).
+    #[cfg(feature = "api")]
+    {
+        let prov_path = args.output.with_extension("provenance");
+        let prov = zenanalyze::feature_set_provenance(
+            &query,
+            zenanalyze::versioning::rgb8_srgb_descriptor_hash(),
+        );
+        match std::fs::write(&prov_path, &prov) {
+            Ok(()) => eprintln!("wrote provenance sidecar: {}", prov_path.display()),
+            Err(e) => eprintln!("warning: provenance sidecar not written: {e}"),
+        }
+    }
+    #[cfg(not(feature = "api"))]
+    eprintln!(
+        "note: built without --features api; no provenance sidecar written \
+         (the feature serialization contract needs the api feature)"
+    );
+
     let mut total_done = 0usize;
     let mut total_failed = 0usize;
 

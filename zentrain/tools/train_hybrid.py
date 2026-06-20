@@ -281,6 +281,46 @@ CONFIG_NAMES: dict = {}
 # model safely runs its own feature pass (no reuse). See tools/_provenance.py.
 ANALYSIS_PROVENANCE: dict = {}
 
+
+def _feature_provenance_block(features_path) -> str | None:
+    """The fine-grained ``zenanalyze-provenance/1`` block for the FEATURES table —
+    from its Parquet key-value metadata, else a ``<stem>.provenance`` sidecar (the
+    TSV case). ``None`` if the table is unstamped (legacy / no `api` extractor)."""
+    from _provenance import provenance_from_parquet, read_provenance_sidecar
+
+    p = Path(features_path)
+    if p.suffix.lower() in (".parquet", ".pq"):
+        block = provenance_from_parquet(p)
+        if block:
+            return block
+    return read_provenance_sidecar(p)
+
+
+def _check_provenance_agreement(block: str, declared: dict) -> None:
+    """Warn (don't fail) if the codec config's declared coarse stamps disagree with
+    the FEATURES table's actual serialization provenance — a declared
+    `analyzer_version` / `feature_config_hash` that mismatches the bytes on disk
+    means the reuse-key stamps would misdescribe the training features."""
+    from _provenance import parse_provenance_block
+
+    try:
+        parsed = parse_provenance_block(block)
+    except ValueError as e:
+        sys.stderr.write(f"  [provenance] WARNING: unparseable FEATURES block: {e}\n")
+        return
+    dav = declared.get("analyzer_version")
+    if dav and dav.split(".")[:2] != parsed["analyzer_version"].split(".")[:2]:
+        sys.stderr.write(
+            f"  [provenance] WARNING: declared analyzer_version {dav!r} disagrees "
+            f"with FEATURES provenance {parsed['analyzer_version']!r} (major.minor)\n"
+        )
+    if "feature_config_hash" in declared and declared["feature_config_hash"] != parsed["config_hash"]:
+        sys.stderr.write(
+            f"  [provenance] WARNING: declared feature_config_hash "
+            f"{declared['feature_config_hash']} disagrees with FEATURES provenance "
+            f"config_hash {parsed['config_hash']}\n"
+        )
+
 # These are bound from the loaded codec config in main(). Module-
 # level placeholders so the helper functions below can name them.
 PARETO: Path
@@ -3254,6 +3294,15 @@ def main():
     from _provenance import stamps_from_provenance
 
     out.update(stamps_from_provenance(ANALYSIS_PROVENANCE))
+    # Fine-grained serialization provenance of the training features themselves
+    # (per-feature version hashes + descriptor framing), recorded verbatim so a
+    # future run can validate reuse feature-by-feature. Carried from the FEATURES
+    # Parquet metadata / sidecar; absent -> simply not recorded (legacy-safe).
+    feat_block = _feature_provenance_block(FEATURES)
+    if feat_block:
+        out["feature_provenance"] = feat_block
+        _check_provenance_agreement(feat_block, ANALYSIS_PROVENANCE)
+        sys.stderr.write("  [provenance] recorded FEATURES serialization provenance\n")
     OUT_JSON.write_text(json.dumps(out, indent=2))
     sys.stderr.write(
         f"\nWrote {OUT_JSON} ({n_params} weights, {n_params*2/1024:.1f} KB f16)\n"

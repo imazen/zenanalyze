@@ -34,6 +34,20 @@ from pathlib import Path
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 
+# Provenance helpers live in zentrain/tools (sibling of benchmarks/). Optional:
+# if unavailable, conversion proceeds without stamping (legacy-safe).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "zentrain" / "tools"))
+try:
+    from _provenance import embed_provenance_in_table as _embed_provenance
+    from _provenance import read_provenance_sidecar as _read_provenance_sidecar
+except ImportError:  # pragma: no cover - keeps the converter standalone
+
+    def _read_provenance_sidecar(_path):
+        return None
+
+    def _embed_provenance(table, _block):
+        return table
+
 
 def convert(tsv_path: Path, keep_tsv: bool = False) -> Path:
     if not tsv_path.is_file():
@@ -58,6 +72,15 @@ def convert(tsv_path: Path, keep_tsv: bool = False) -> Path:
         f"  parsed {table.num_rows} rows × {table.num_columns} cols "
         f"in {read_elapsed:.1f} s\n"
     )
+
+    # Carry the feature serialization provenance (the `<stem>.provenance` sidecar
+    # an `extract_features_for_picker --features api` run emits) into the Parquet
+    # key-value metadata, so it survives the TSV→Parquet conversion and the trainer
+    # can validate reuse on read. Absent sidecar → unstamped (legacy-safe).
+    prov = _read_provenance_sidecar(tsv_path)
+    if prov is not None:
+        table = _embed_provenance(table, prov)
+        sys.stderr.write("  embedded feature provenance into Parquet metadata\n")
 
     sys.stderr.write(f"  writing {out} (zstd compression)...\n")
     t0 = time.time()

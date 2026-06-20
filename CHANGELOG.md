@@ -41,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OwnedOffer::provenance(descriptor_hash)` (gated on `api`), to stamp straight into
   Parquet key-value metadata. An end-to-end test runs extract → stamp → parse →
   validate-against-live-analyzer, and confirms a descriptor mismatch falls out.
+- **zentrain + Parquet provenance plumbing** — the serialization contract wired
+  through the training pipeline. `extract_features_for_picker --features api` now
+  emits a `<table>.provenance` sidecar (one block per extraction: RGB8-sRGB
+  framing, gamma config, per-feature version hashes via
+  `feature_set_provenance`). `benchmarks/tsv_to_parquet.py` carries any sidecar
+  into the Parquet key-value metadata on conversion; `zentrain/tools/_provenance.py`
+  gains a pure-Python mirror of the format (`parse_provenance_block`,
+  `write_provenance_block`, `feature_is_reusable`, `embed_provenance_in_table`,
+  `provenance_from_parquet`, `assert_consistent_provenance` — no new deps);
+  `train_hybrid.py` records the FEATURES table's block into the model JSON
+  (`feature_provenance`) and warns if it disagrees with the declared coarse
+  reuse-key stamps. New `zentrain-pytests` CI job runs the (previously un-CI'd)
+  zentrain tool tests, including 11 new serialization-provenance tests.
 - **Training-side reuse-key provenance (zentrain)** — the "outside-in" half so
   baked picker models can carry the stamps and actually reuse a shared feature
   `Offer`. New `zentrain/tools/_provenance.py` (`stamps_from_provenance` +
