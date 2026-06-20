@@ -1,0 +1,22 @@
+[package]
+name = "zenanalyze-api"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/imazen/zenanalyze"
+description = "Frozen, version-unifying feature contract for the zenanalyze picker tree: Request (what a codec wants) + Offer (a self-describing feature result) so a dozen codecs on different zenanalyze/zenpredict versions can share one extraction pass. Pure transport — no feature definitions."
+keywords = ["image", "features", "codec", "picker", "contract"]
+categories = ["multimedia::images", "no-std"]
+
+# IMPORTANT: this crate is the UNIFYING contract. Many zenanalyze versions
+# coexist in one build; THIS crate is the single type every layer agrees on, so
+# it MUST stay API-stable — a breaking change splits the ecosystem. It carries
+# only transport types (names, values, version stamps), never feature
+# definitions, which is what lets it freeze. No dependencies (core + alloc only)
+# so nothing it pulls in can force a version split either.
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

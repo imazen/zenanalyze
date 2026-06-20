@@ -944,6 +944,19 @@ pub const fn feature_defs_version() -> u32 {
     FEATURE_DEFS_VERSION
 }
 
+/// This crate's version string (`CARGO_PKG_VERSION`, e.g. `"0.2.0"`).
+///
+/// The producer side of the **offered-results** contract stamps this together
+/// with [`feature_defs_version`] onto a self-describing feature offer, so a
+/// downstream codec picker can decide whether the offer was produced by the
+/// same feature *definitions* its model was trained on — `(major.minor,
+/// defs_version)` is the reuse key (a `0.2` offer can't satisfy a `1.0`-trained
+/// model; `0.2.3` vs `0.2.7` is caught by `defs_version`). The negotiation logic
+/// itself is version-agnostic and lives downstream, not here.
+pub const fn analyzer_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 /// Resolve a model's feature-column NAME list (each optionally `feat_`-prefixed)
 /// to this build's stable ids, **preserving order**. Returns a plain `Vec<u16>`
 /// — a core type the caller owns; nothing from this crate's typed surface is

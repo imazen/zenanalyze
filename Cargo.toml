@@ -178,7 +178,7 @@ opt-level = 2
 debug = true
 
 [workspace]
-members = ["zenpicker", "zenpredict", "zenpredict-bake", "zenpredict-viz"]
+members = ["zenanalyze-api", "zenpicker", "zenpredict", "zenpredict-bake", "zenpredict-viz"]
 # zenpicker-train is a local training binary that pulls a cross-repo
 # path dependency (`zenstats` from the sibling `zenmetrics` checkout)
 # plus parquet/arrow. It is not publishable and the sibling repo is
