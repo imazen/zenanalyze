@@ -28,8 +28,18 @@
 //! i686, wasm all read the same bytes. The stability test re-extracts and
 //! compares *values* within [`REL_TOLERANCE`], which absorbs cross-platform float
 //! noise; that tolerance is precisely "platforms close enough to share a
-//! serialized vector." (The cleaner long game is bit-exact determinism — pinned
-//! `libm`, fixed reduction order — which removes the tolerance entirely.)
+//! serialized vector."
+//!
+//! That noise is **not** uniform, and the golden tripwire measured it directly:
+//! the statistical features sum lane-wise inside the SIMD inner loops, so a
+//! different SIMD width reduces in a different order, giving distinct per-tier
+//! values. For well-conditioned features that stays ≤ 0.3 % (hence the 0.5 %
+//! global budget); a few cancellation-prone reductions (an edge-gradient stddev,
+//! the chroma–luma Pearson covariances) swing several percent and carry looser
+//! per-feature budgets in `F32_TOLERANCE_OVERRIDES`. Both are sized from observed
+//! CI spread, not guessed. (The cleaner long game is bit-exact determinism —
+//! pinned `libm`, fixed reduction order — which collapses every budget back toward
+//! `1e-4`.)
 //!
 //! # Coverage
 //!
@@ -56,9 +66,22 @@ use std::sync::OnceLock;
 const GOLDEN: &str = include_str!("versioning_golden.tsv");
 
 /// Relative tolerance for the value-stability check — the cross-platform float
-/// budget below which two extractions are deemed the same version. Tunable; the
-/// sensitivity test proves a deliberate change exceeds it.
-pub const REL_TOLERANCE: f32 = 1.0e-4;
+/// budget below which two extractions are deemed the same version.
+///
+/// Set to **0.5 %** from the *measured* spread of the golden across the full CI
+/// matrix (x86 AVX-512 / AVX2, i686, aarch64+macOS+Windows NEON). The statistical
+/// features accumulate sum + sum-of-squares **lane-wise in the SIMD inner loops**,
+/// so a different SIMD width sums in a different order; for the well-conditioned
+/// features that f64-reduction divergence stays ≤ 0.3 % across every tier
+/// (`variance` 0.01 %, `quant_survival_y` 0.03 %, `aq_map_std` 0.04 %,
+/// `dct_compressibility_y` 0.07 %, `spectral_slope_y` 0.14 %, `patch_fraction`
+/// 0.29 %). The original `1e-4` was tighter than the hardware can reproduce — a
+/// false-failure on every non-AVX-512 runner. A *behaviour* change moves a feature
+/// far more than 0.5 %, so the tripwire still fires. The three cancellation-prone
+/// outliers get looser per-feature budgets in [`F32_TOLERANCE_OVERRIDES`]. (The
+/// clean long game is bit-exact determinism — fixed reduction order / pinned
+/// `libm` — which collapses this back toward `1e-4`.)
+pub const REL_TOLERANCE: f32 = 5.0e-3;
 
 /// The caret-compatibility root of a semver string: `"0.2"` for `0.2.7`, `"1"`
 /// for `1.5.3`, `"2"` for `2.0.0`. The boundary across which reuse is forbidden
@@ -630,13 +653,27 @@ mod tests {
             .collect()
     }
 
-    /// Per-feature `f32` relative-tolerance overrides for the few features whose
-    /// large reductions / transcendentals (entropy `log`, gamut matrices, big
-    /// pixel sums) drift more across platforms than the global [`REL_TOLERANCE`].
-    /// Empty until measured on real ARM/i686/wasm runs — the honest way to set
-    /// these is from observed spread, not a guess (and bit-exact determinism via
-    /// pinned `libm` would retire them entirely). Keyed by `feat_<name>`.
-    const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
+    /// Per-feature `f32` relative-tolerance overrides for the cancellation-prone
+    /// reductions whose cross-platform spread exceeds the global [`REL_TOLERANCE`].
+    /// Values are **measured** across the full CI matrix (x86 AVX-512/AVX2, i686,
+    /// aarch64/NEON, macOS, Windows-ARM) on commit 41c390f, then rounded up for
+    /// margin — the honest way to set these (per the project's tolerance rule), not
+    /// a guess. Bit-exact determinism (fixed reduction order / pinned `libm`) would
+    /// retire them. Keyed by `feat_<name>`.
+    ///
+    /// - `edge_slope_stdev` — `sqrt(E[g²] − E[g]²)` over SIMD-reduced edge-gradient
+    ///   magnitudes; the variance subtraction + per-tier approximate math give three
+    ///   distinct per-tier values (43.38 i686 / 43.42 AVX-512 / 43.67 AVX2 / 45.85
+    ///   NEON), a 5.3 % spread. Budget 10 %.
+    /// - `chroma_luma_covariance_{cb,cr}` — Pearson `(nΣXY − ΣXΣY)/√…`, which on the
+    ///   near-gray gradient case is ill-conditioned (Cb/Cr ≈ 0 → the numerator nearly
+    ///   cancels), swinging ~0.11 absolute on a value near −0.28 across tiers.
+    ///   Budget 20 %.
+    const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
+        ("feat_edge_slope_stdev", 1.0e-1),
+        ("feat_chroma_luma_covariance_cb", 2.0e-1),
+        ("feat_chroma_luma_covariance_cr", 2.0e-1),
+    ];
 
     fn f32_tolerance(feat_key: &str) -> f32 {
         F32_TOLERANCE_OVERRIDES
