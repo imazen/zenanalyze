@@ -27,7 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HLG Bt2020, premultiplied-alpha cases — same logical content under framings the
   code branches on) and a per-feature `f32` tolerance hook
   (`F32_TOLERANCE_OVERRIDES` / `f32_tolerance`) for features whose reductions drift
-  more than the global budget.
+  more than the global budget. Tolerances were then **sized from the measured CI
+  spread** across the matrix (x86 AVX-512/AVX2, i686, ARM/NEON): `REL_TOLERANCE`
+  0.5 % covers the 6 well-conditioned drifters; 3 cancellation-prone outliers
+  (`edge_slope_stdev`, the two `chroma_luma_covariance_*`) get 10–20 % overrides.
+  `golden_is_stable` (the live re-extraction tripwire) is scoped to an **x86-64
+  reference** CI job and `--skip`ped on the portable matrix — SIMD-reduced features
+  diverge per tier, and a few cross a decision threshold to 0.0-vs-nonzero that no
+  tolerance bridges; the version *hash* (text-derived) stays platform-independent.
+  Diagnosis: `docs/feature-cross-platform-divergence-2026-06-20.md`.
 - **Dep-free feature serialization contract** — `zenanalyze_api::provenance`
   (zero-dep, additive on the frozen 1.x). A `zenanalyze-provenance/1` text block
   records the three legs of a serialized feature set's reuse key — `analyzer_version`,

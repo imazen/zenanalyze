@@ -205,7 +205,29 @@ runtime branch).
 
 ## Known Bugs
 
-_None currently open._
+- **`edge_slope_stdev` cross-platform divergence (~6 %, deferred fix).** The SIMD
+  edge kernel (`src/tier1.rs` ≈line 1506) computes the gradient magnitude with
+  `rsqrt_approx()` — a ~12-bit reciprocal-sqrt that lowers to a *different-precision
+  instruction per backend* (x86 `rsqrtps` ~12-bit, AVX-512 `vrsqrt14` ~14-bit, NEON
+  `vrsqrte` ~8-bit), while the scalar tail (≈line 1560) uses exact `sqrt()`. Through
+  the cancellation-prone `√(E[g²]−E[g]²)` this diverges up to ~6 % across arches
+  (and 0.0-vs-nonzero on near-uniform content). Decision-irrelevant (always at the
+  degenerate floor, far from thresholds) but caps the feature's cross-machine
+  reuse precision. Recommended fix: SIMD exact `sqrt()` (bit-identical across
+  backends) — deferred because it removes a deliberate perf opt + needs re-bless +
+  model re-validation. Full diagnosis + 9-feature measured table:
+  `docs/feature-cross-platform-divergence-2026-06-20.md`.
+
+## Investigation Notes
+
+- **Feature versioning is platform-aware by construction (2026-06-20).** The
+  `versioning` golden tripwire surfaced that 9 SIMD-reduced statistical features
+  have per-SIMD-tier value divergence (6 at <0.3 % from f64 reduction order; 3
+  cancellation-prone outliers up to ~11 %). The version *hash* is text-derived
+  (platform-independent); `golden_is_stable` (live re-extraction) is therefore a
+  **reference-platform (x86-64) tripwire** — asserted by the `golden-reference` CI
+  job, `--skip`ped in the portable matrix. `REL_TOLERANCE`=0.5 % + 3 per-feature
+  overrides are sized from the measured CI spread, not guessed.
 
 Resolved 2026-06-19 (P0 CI-integrity pass):
 - The `fit_yeo_johnson` golden-section test "failure" was a **wrong test

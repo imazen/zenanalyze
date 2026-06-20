@@ -1,0 +1,132 @@
+# Cross-platform feature divergence — diagnosis (2026-06-20)
+
+When the content-hash feature-versioning golden (`src/versioning.rs` +
+`versioning_golden.tsv`) first ran across the full CI matrix, the
+`golden_is_stable` value-stability tripwire fired on **9 of ~97 features**. This
+is the model working as designed — it measured the analyzer's own cross-platform
+reproducibility floor. This doc records what it found and why.
+
+## What diverges, measured
+
+Golden blessed on x86-64 AVX-512 (Ryzen 7950X). Max relative deviation of each
+drifting feature across the CI matrix (ubuntu x86-64 AVX2, i686, aarch64 +
+macOS-ARM + Windows-ARM NEON), from the run on commit `41c390f`:
+
+| feature | max rel. dev | nature |
+|---|--:|---|
+| `chroma_luma_covariance_cb` / `_cr` | ~11 % (0.11 absolute) | Pearson, ill-conditioned near-gray |
+| `edge_slope_stdev` | 5.3 % (and structural 0.0-vs-1.30) | rsqrt-approx + cancellation |
+| `patch_fraction` | 0.29 % | threshold count |
+| `spectral_slope_y` | 0.14 % | f64 reduction order |
+| `dct_compressibility_y` | 0.067 % | f64 reduction order |
+| `aq_map_std` | 0.041 % | f64 reduction order |
+| `quant_survival_y` | 0.025 % | f64 reduction order |
+| `variance` | 0.012 % | f64 reduction order |
+
+Values are **bit-identical within a SIMD tier** (every AVX2 box gives 43.669, every
+NEON box gives 45.846) and differ **across** tiers — i.e. deterministic per-tier,
+not random noise. Two regimes:
+
+- **Six features at 0.01–0.29 %** — plain f64 lane-wise reduction-order divergence
+  (the SIMD inner loops sum sum/sum-of-squares lane-wise; a different lane count
+  reduces in a different order). Harmless; covered by the 0.5 % global
+  `REL_TOLERANCE`.
+- **Three cancellation-prone outliers** — `edge_slope_stdev` and the two
+  `chroma_luma_covariance_*`. These need looser per-feature budgets and have a
+  deeper root cause (below).
+
+The `i686` / NEON runs also produced **structural** `0.0`-vs-nonzero flips
+(`edge_slope_stdev[7] = 0.0` vs `1.30`; `chroma_luma_covariance_cb[19] = 0.0` vs
+`-0.266`): a per-tier-divergent value crossing a *decision threshold* (the edge
+`grad_sq > EDGE_THRESH_SQ` count, or the covariance degeneracy guard) the other way.
+No float tolerance can bridge `0.0` vs `1.30`.
+
+## Root cause of the `edge_slope_stdev` outlier
+
+`src/tier1.rs`, the FULL edge accumulation. Two distinct numerical paths for the
+**same** quantity (the per-pixel luma-gradient magnitude `√(gx² + gy²)`):
+
+- **SIMD chunk** (≈line 1506): `safe_grad_sq.rsqrt_approx()` then
+  `grad_sq * inv_sqrt` — a **~12-bit approximate** reciprocal-sqrt. The comment
+  assumes "~12-bit precision (well above the edge-slope stddev's noise floor)" —
+  but `rsqrt_approx` lowers to a **different instruction with different precision
+  per backend**: x86 `rsqrtps` (~12-bit), AVX-512 `vrsqrt14ps` (~14-bit), NEON
+  `vrsqrte`+step (~8-bit). So the magnitude itself differs per architecture, most
+  on NEON (coarsest estimate → the +5.6 % outlier).
+- **Scalar tail** (≈line 1560): exact `grad_sq.sqrt()`. So the rightmost 1–7
+  edge pixels per row (non-multiple-of-8 widths) use a *different, exact* sqrt than
+  the SIMD body — an internal SIMD-vs-tail seam even on one machine.
+
+Both feed `edge_slope_stdev = √(E[g²] − E[g]²)`, the cancellation-prone variance
+formula. On near-uniform-edge content (regular lines) the true variance ≈ 0, so the
+per-backend magnitude error and the catastrophic cancellation dominate → the
+`0.0`-vs-`1.30` flip. On varied content (checkerboard, value ≈ 43) the rsqrt
+per-backend error still shows as the 5.3 % spread.
+
+`chroma_luma_covariance_*` uses exact `.sqrt()` (line 758) — its divergence is pure
+Pearson cancellation `(nΣXY − ΣXΣY)/√…` on the near-gray gradient case, where
+Cb/Cr ≈ 0 makes the numerator nearly cancel and the degeneracy guard flip per tier.
+
+## Is it a correctness problem?
+
+For **codec decisions**: no. The divergence occurs at each feature's *degenerate
+floor* (near-uniform edges → `edge_slope_stdev` ≈ 0; near-gray → covariance
+degenerate), far from any decision threshold (`edge_slope_stdev > 35 ⇒ screen`,
+etc.), so it never flips a classification. The 5.3 % on the checkerboard sits at
+43–46, both well above 35 → same verdict.
+
+For **serialized-feature reuse across machines** (the point of the versioning
+work): yes, partially. `edge_slope_stdev` is only reproducible to ~6 % across
+architectures, so a model trained on x86 features and inferring on NEON-extracted
+features sees up to a 6 % shift in this one feature. The per-feature version
+tolerance now encodes exactly that (10 % budget) — an honest statement of the
+feature's cross-platform reusability.
+
+It is, strictly, a "two code paths produce different output for the same
+operation" case (SIMD `rsqrt_approx` vs scalar exact `sqrt`, and per-backend
+rsqrt).
+
+## Recommended fix (not yet applied — shipped-feature + perf change)
+
+Replace the SIMD `rsqrt_approx()` magnitude with an **exact SIMD `sqrt()`** to
+match the scalar tail:
+
+```rust
+// was: rsqrt_approx + the max(1.0) NaN-guard (0 * rsqrt(0) = NaN)
+let g_mag_v = grad_sq_v.sqrt() * mask_v;   // sqrt(0)=0, mask zeros non-edges
+```
+
+IEEE-754 mandates correctly-rounded f32 `sqrt`, so this is **bit-identical across
+SSE/AVX2/AVX-512/NEON and the scalar tail**, collapsing the dominant ~6 % divergence
+to the residual f32 `reduce_add` lane-order floor (~0.4 %; eliminable too by
+widening the horizontal sum to f64).
+
+Tradeoffs, why it is **deferred to a decision** rather than applied here:
+
+1. **Perf** — `rsqrt_approx` was a deliberate "~3× faster than batch sqrt" choice.
+   The absolute cost is one extra-latency sqrt per 8-px chunk on *stripe-sampled*
+   Tier-1 rows (not the full image), so the expected impact on total analyze time
+   is small — but it removes a deliberate optimization and must be **measured**
+   (zenbench `tier1_bench`), not assumed.
+2. **Re-bless** — it changes `edge_slope_stdev`'s value (≈0.1–0.5 % on x86, larger
+   on NEON toward the exact value), so the golden must be re-blessed and its
+   version hash bumps. Allowed under the 0.2.x feature-drift contract, but it
+   churns the hash + any provenance blocks generated against it.
+3. **Downstream models** — picker models trained on the current `edge_slope_stdev`
+   re-validate on the new definition. Decision impact is expected negligible (the
+   change is sub-threshold), but it is a behavior change.
+
+The covariance outliers are pure cancellation, not rsqrt; a stable formulation
+(or excluding near-degenerate cases from the corpus) is a separate, smaller item.
+
+## How the versioning model handles it today
+
+- **Hash** is computed from the committed golden *text* → platform-independent;
+  used everywhere.
+- **`REL_TOLERANCE` = 0.5 %** covers the six well-conditioned drifters.
+- **`F32_TOLERANCE_OVERRIDES`** carries the three measured outliers
+  (`edge_slope_stdev` 10 %, covariances 20 %).
+- **`golden_is_stable`** (the live re-extraction tripwire) is **scoped to an
+  x86-64 reference** (`golden-reference` CI job); the portable Test/Cross jobs
+  `--skip` it (caller-controlled in `ci.yml`, no source `#[ignore]`). It still runs
+  on the developer's x86-64 locally, so behavior regressions are caught at dev time.
