@@ -218,3 +218,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Golden value-stability tripwire
         run: cargo test --features "experimental,hdr" versioning::tests::golden_is_stable -- --exact --nocapture
+
+  rsqrt-probe:
+    # Measures the cross-platform divergence of the four √ methods (exact /
+    # hardware rsqrt_approx / magetypes Newton-refined rsqrt / our deterministic
+    # rsqrt_stable). `--nocapture` surfaces the `RSQRTPROBE` hash lines so we can
+    # read each method's per-arch hash from the logs: the hardware methods differ
+    # per SIMD tier (x86 rsqrtps/vrsqrt14 vs ARM vrsqrte), while `stable` + `exact`
+    # MUST be byte-identical everywhere (also asserted in-test against the blessed
+    # hash). x86 + both ARM flavours cover the interesting spread.
+    name: rsqrt-probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: rsqrt method probe
+        run: cargo test --features hdr simd_math::tests::magnitude_method_determinism_and_accuracy -- --exact --nocapture

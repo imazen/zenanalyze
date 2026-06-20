@@ -197,6 +197,8 @@ pub use offer::{OwnedOffer, feature_set_provenance};
 /// Content-hash feature versioning + the golden test set ([`versioning`]).
 pub mod versioning;
 
+mod simd_math;
+
 use core::fmt;
 
 use zenpixels::{PixelDescriptor, PixelSlice};
