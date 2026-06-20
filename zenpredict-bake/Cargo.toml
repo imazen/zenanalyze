@@ -74,6 +74,10 @@ zenbench = "0.1.8"
 # only; runtime consumers of zenpredict-bake (the JSON-bake CLI)
 # don't need advanced API.
 zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced"] }
+# Full producer->consumer loop test: build a zenanalyze_api::Request from a baked
+# Model's accessors and negotiate an Offer. Dev-only — the baker doesn't depend
+# on the contract.
+zenanalyze-api = { version = "1.0.0", path = "../zenanalyze-api" }
 
 [[bench]]
 name = "predict"
