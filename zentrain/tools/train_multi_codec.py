@@ -1034,6 +1034,12 @@ def write_codec_json(
         },
         "train_metrics": train_metrics,
     }
+    # zenanalyze-api reuse-key stamps from this codec config's ANALYSIS_PROVENANCE
+    # (outside-in provenance). bake_picker.py forwards them; absent -> unstamped
+    # -> the baked model safely runs its own feature pass. See tools/_provenance.py.
+    from _provenance import stamps_from_provenance
+
+    out.update(stamps_from_provenance(getattr(bundle.module, "ANALYSIS_PROVENANCE", None)))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2))
     sys.stderr.write(f"  wrote {out_path} ({len(json.dumps(out)) / 1024:.1f} KB)\n")

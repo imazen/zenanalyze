@@ -276,6 +276,11 @@ SEED = 0xCAFE
 
 CONFIG_NAMES: dict = {}
 
+# zenanalyze-api reuse-key provenance, optionally declared by the codec config
+# (`ANALYSIS_PROVENANCE`). Bound in the loader; empty -> no stamps -> the baked
+# model safely runs its own feature pass (no reuse). See tools/_provenance.py.
+ANALYSIS_PROVENANCE: dict = {}
+
 # These are bound from the loaded codec config in main(). Module-
 # level placeholders so the helper functions below can name them.
 PARETO: Path
@@ -387,6 +392,7 @@ def load_codec_config(name: str):
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
     global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN
     global FEATURE_TRANSFORMS, FEATURE_TRANSFORM_PARAMS, OUTPUT_SPECS, SPARSE_OVERRIDES
+    global ANALYSIS_PROVENANCE
     mod = importlib.import_module(name)
     PARETO = Path(mod.PARETO)
     FEATURES = Path(mod.FEATURES)
@@ -427,6 +433,12 @@ def load_codec_config(name: str):
         METRIC_DIRECTION = d
     if hasattr(mod, "TIME_COLUMN"):
         TIME_COLUMN = str(mod.TIME_COLUMN)
+    # Optional — zenanalyze-api reuse-key provenance: which zenanalyze version +
+    # AnalysisQuery config extracted this codec's features. Recorded into the
+    # baked model so it can reuse a shared feature Offer. Undeclared -> no stamps
+    # (safe own-pass). See tools/_provenance.py for the declaration shape.
+    if hasattr(mod, "ANALYSIS_PROVENANCE"):
+        ANALYSIS_PROVENANCE = dict(mod.ANALYSIS_PROVENANCE)
     # Optional — FEATURE_GROUPS validator. Codec configs declare
     # mutual-exclusion groups based on the cross-codec dendrogram +
     # LOO data; the validator enforces `count(KEEP ∩ group) ≤
@@ -3236,6 +3248,12 @@ def main():
         "student_metrics": {"argmin": student_argmin, "scalars": student_scalars},
         "safety_report": safety_report,
     }
+    # zenanalyze-api reuse-key stamps from the codec config's ANALYSIS_PROVENANCE
+    # (outside-in: which zenanalyze + config extracted the features). bake_picker.py
+    # forwards these to the ZNPR metadata; absent -> unstamped -> safe own-pass.
+    from _provenance import stamps_from_provenance
+
+    out.update(stamps_from_provenance(ANALYSIS_PROVENANCE))
     OUT_JSON.write_text(json.dumps(out, indent=2))
     sys.stderr.write(
         f"\nWrote {OUT_JSON} ({n_params} weights, {n_params*2/1024:.1f} KB f16)\n"

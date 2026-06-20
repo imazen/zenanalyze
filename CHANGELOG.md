@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Training-side reuse-key provenance (zentrain)** — the "outside-in" half so
+  baked picker models can carry the stamps and actually reuse a shared feature
+  `Offer`. New `zentrain/tools/_provenance.py` (`stamps_from_provenance` +
+  `workspace_provenance`); `train_hybrid.py` and `train_multi_codec.py` read an
+  optional `ANALYSIS_PROVENANCE` from the codec config and emit the three stamps
+  into the model JSON (which `bake_picker.py` already forwards). Undeclared → no
+  stamps → the baked model safely runs its own pass. Documented template in
+  `zentrain/examples/zenjpeg_picker_config.py`. The source-of-truth is *declared*
+  (the extractor's exact zenanalyze version isn't auto-guessed — a wrong version
+  stamp would be a soundness risk).
 - **`OwnedOffer` + the opt-in `api` feature** — the producer side of the
   `zenanalyze-api` contract. `OwnedOffer::extract(rgb, w, h, &query)` runs one
   analysis pass and owns the dense `(names, values)` + reuse key;

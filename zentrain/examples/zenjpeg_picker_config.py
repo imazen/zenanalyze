@@ -43,6 +43,31 @@ PARETO = Path("benchmarks/zq_pareto_2026-04-29.parquet")
 # the final v2.2 bake, point at `_v2_2.tsv` (full corpus).
 FEATURES = Path("benchmarks/zq_pareto_features_2026-05-01_parallel.tsv")
 
+# ---------- zenanalyze-api reuse-key provenance (optional) ----------
+#
+# Declares which zenanalyze + AnalysisQuery config extracted FEATURES, so the
+# baked model can REUSE a shared feature Offer at inference instead of
+# re-extracting (tools/_provenance.py + docs/feature-contract-pr-2026-06-19.md).
+# train_hybrid.py reads this and stamps three reuse-key fields into the model
+# JSON; bake_picker.py forwards them to the ZNPR metadata. Leave it undeclared
+# and the baked model safely runs its own pass — no reuse, never a wrong reuse.
+#
+# These features were re-extracted with the post-#42 zenanalyze under the gamma
+# default (config_hash 0). Fill in the EXACT crate version that extractor linked
+# — it lives in the zenjpeg repo, which pins its own zenanalyze, NOT necessarily
+# this workspace's — then uncomment. A guessed version is worse than none (a
+# wrong stamp can cause a wrong reuse), so confirm it before enabling:
+#
+# ANALYSIS_PROVENANCE = {
+#     "analyzer_version": "0.2.0",   # the zenanalyze version the extractor used
+#     "feature_defs_version": 1,     # zenanalyze::feature_defs_version() then
+#     "feature_config_hash": 0,      # 0 = gamma default (AnalysisQuery::new)
+# }
+#
+# If FEATURES were extracted by an in-workspace zenanalyze instead, derive it:
+#   from _provenance import workspace_provenance
+#   ANALYSIS_PROVENANCE = workspace_provenance()
+
 # Where to write the trained model + summary:
 OUT_JSON = Path("benchmarks/zenjpeg_hybrid_v0.3_2026-05-04.json")
 OUT_LOG = Path("benchmarks/zenjpeg_hybrid_v0.3_2026-05-04.log")
