@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AnalysisQuery::config_hash() -> u64`** — opaque digest of the value-affecting
+  analysis config for the `zenanalyze-api` reuse key. `0` = canonical default
+  (gamma); `with_linear_light(true)` deviates to a stable nonzero. Lets a codec
+  refuse to reuse linear-light features against a gamma-trained model (the same
+  feature name produces different values under the flag, while `feature_defs_version`
+  stays fixed). Ignores the feature set and crate-internal budgets; new
+  value-affecting flags fold in without changing the frozen `zenanalyze-api`.
 - **Co-versioning, type-free feature contract for the picker crate tree**
   (additive — free functions, core types only, so multiple zenanalyze majors can
   link in one build):

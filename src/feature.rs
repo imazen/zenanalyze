@@ -1942,6 +1942,39 @@ impl AnalysisQuery {
     pub const fn linear_light(&self) -> bool {
         self.linear_light
     }
+
+    /// Opaque digest of the **value-affecting** analysis config, for the
+    /// `zenanalyze-api` reuse key (`zenanalyze_api::Request::config_hash` /
+    /// `Offer::config_hash`).
+    ///
+    /// Two passes that share this hash compute every feature identically (given
+    /// the same image + same crate `major.minor` + same `feature_defs_version`);
+    /// two that differ may not. `0` is the **canonical default** (gamma, no mode
+    /// flags) — so default-config models and the default pass interoperate
+    /// without anyone stamping anything. Only equality is meaningful.
+    ///
+    /// What's hashed: the caller-settable flags that change a feature's *value*
+    /// for a fixed name — currently just [`linear_light`](Self::linear_light)
+    /// (gamma vs linear-light `variance`). What's **not**: the
+    /// [`features`](Self::features) set (that's "which features," handled by the
+    /// offer's names, not "what value") and the crate-internal sampling budgets
+    /// (those are invariants folded into `feature_defs_version`). A flag mixes in
+    /// only when it *deviates from its default*, so the canonical default stays
+    /// `0` as new flags land. The byte layout may grow across releases, but it is
+    /// stable within a `major.minor` — which is all reuse soundness needs, since
+    /// cross-minor reuse is already gated by the analyzer version.
+    #[must_use]
+    pub const fn config_hash(&self) -> u64 {
+        // FNV-1a over the non-default value-affecting flags.
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325; // offset basis
+        let mut any = false;
+        if self.linear_light {
+            h = (h ^ 0x01).wrapping_mul(0x0000_0100_0000_01b3);
+            any = true;
+        }
+        // future value-affecting flags mix in here (on deviation from default).
+        if any { h } else { 0 }
+    }
 }
 
 /// Crate-internal: the canonical sampling budgets.
@@ -2454,6 +2487,25 @@ mod tests {
         let q = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance));
         assert!(q.features().contains(AnalysisFeature::Variance));
         assert!(!q.features().contains(AnalysisFeature::EdgeDensity));
+    }
+
+    #[test]
+    fn config_hash_zero_for_default_nonzero_for_linear_light() {
+        // The zenanalyze-api reuse-key digest: default config == 0 so default
+        // models/offers interoperate without stamping; linear-light deviates to
+        // a stable nonzero so its features never silently reuse against a
+        // gamma-trained model. Independent of which features are requested.
+        let gamma_a = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance));
+        let gamma_b = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::EdgeDensity));
+        assert_eq!(gamma_a.config_hash(), 0);
+        assert_eq!(gamma_b.config_hash(), 0, "config_hash ignores the feature set");
+
+        let linear = gamma_a.with_linear_light(true);
+        assert_ne!(linear.config_hash(), 0, "linear-light must deviate from default");
+        // stable: same config → same hash
+        let linear2 =
+            AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance)).with_linear_light(true);
+        assert_eq!(linear.config_hash(), linear2.config_hash());
     }
 
     #[test]
