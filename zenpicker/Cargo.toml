@@ -19,9 +19,21 @@ default = ["std"]
 # Mirrors zenpredict's `std` gate. `no_std + alloc` builds drop the
 # `std::error::Error` impls; everything else works.
 std = ["zenpredict/std"]
+# Opt into the `zenanalyze-api` feature contract: `MetaPicker::feature_request`
+# builds a `zenanalyze_api::Request` from the picker's model so a caller can
+# reuse a shared feature `Offer` (or fall back to its own pass) before `pick`.
+# Off by default; `no_std + alloc` compatible (zenanalyze-api is zero-dep).
+api = ["dep:zenanalyze-api"]
 
 [dependencies]
 zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false }
+# The frozen, version-unifying feature contract. Optional (gated by `api`), 1.0
+# and zero-dep so it unifies across a multi-version build.
+zenanalyze-api = { version = "1.0.0", path = "../zenanalyze-api", optional = true }
+
+[dev-dependencies]
+# Bake tiny ZNPR models for the `feature_request` integration test (api feature).
+zenpredict-bake = { path = "../zenpredict-bake" }
 
 [lints.rust]
 unsafe_code = "forbid"

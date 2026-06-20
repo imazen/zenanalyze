@@ -209,6 +209,11 @@ pub const ALL_LABELS_CSV: &str = "jpeg,webp,jxl,avif,png,gif";
 /// across many encode requests.
 pub struct MetaPicker<'b> {
     predictor: Predictor<'b>,
+    /// Model feature-column names, collected once at construction so
+    /// [`feature_request`](Self::feature_request) can lend them inside a
+    /// `zenanalyze_api::Request` without re-walking the metadata per call.
+    #[cfg(feature = "api")]
+    feature_names: alloc::vec::Vec<&'b str>,
 }
 
 impl<'b> MetaPicker<'b> {
@@ -228,8 +233,35 @@ impl<'b> MetaPicker<'b> {
     /// reference-data rather than carry a lifetime parameter.
     pub fn new(model: &'b Model) -> Self {
         Self {
+            #[cfg(feature = "api")]
+            feature_names: model.feature_columns().collect(),
             predictor: Predictor::new(model),
         }
+    }
+
+    /// Build a [`zenanalyze_api::Request`] for this picker's model — its feature
+    /// column names plus the three-part reuse key (`analyzer_version`,
+    /// `feature_defs_version`, `config_hash`) read off the baked metadata.
+    ///
+    /// A caller negotiates a shared feature [`Offer`](zenanalyze_api::Offer) with
+    /// `offer.reuse_for(&picker.feature_request())`: `Some(vec)` feeds straight
+    /// into [`pick`](Self::pick), `None` means run an own `zenanalyze` pass. The
+    /// returned `Request` borrows `self`; drop it before calling the `&mut self`
+    /// [`pick`].
+    ///
+    /// Stamps absent on older bakes default to `("", 0, 0)`, which matches no
+    /// real offer — so a pre-stamp model safely always runs its own pass rather
+    /// than risk a wrong reuse. Requires the `api` feature.
+    #[cfg(feature = "api")]
+    #[must_use]
+    pub fn feature_request(&self) -> zenanalyze_api::Request<'_> {
+        let model = self.predictor.model();
+        zenanalyze_api::Request::new(
+            &self.feature_names,
+            model.analyzer_version().unwrap_or(""),
+            model.feature_defs_version().unwrap_or(0),
+            model.feature_config_hash().unwrap_or(0),
+        )
     }
 
     /// Borrow the underlying predictor — useful when the caller
