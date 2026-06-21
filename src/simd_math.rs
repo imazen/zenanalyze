@@ -321,7 +321,8 @@ mod tests {
             .map(|b| {
                 let mut blk = [0.0f32; 64];
                 for (i, v) in blk.iter_mut().enumerate() {
-                    *v = (((b * 64 + i) * 2_654_435 + 1) % 401) as f32 - 200.0;
+                    // u64 math so the LCG doesn't overflow 32-bit usize on i686.
+                    *v = (((b * 64 + i) as u64 * 2_654_435 + 1) % 401) as f32 - 200.0;
                 }
                 blk
             })
