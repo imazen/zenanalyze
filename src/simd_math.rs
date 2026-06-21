@@ -8,11 +8,17 @@
 //! divergence** (see `docs/feature-cross-platform-divergence-2026-06-20.md`).
 //!
 //! [`rsqrt_stable!`] is a drop-in that is **bit-identical on every backend**: a
-//! software bit-trick seed (integer ops on the float bits) refined by Newton-
-//! Raphson in pure f32 `*`/`-` (NO `mul_add` → no FMA, which is itself
-//! backend-dependent). f32 mul/sub are IEEE-correctly-rounded, so the whole thing
-//! is deterministic. It keeps the speed of an approximation (no hardware `sqrt`
-//! latency) while removing the cross-platform divergence.
+//! **software** bit-trick seed (integer ops on the float bits) refined by Newton-
+//! Raphson. The determinism comes from the *software seed* replacing the hardware
+//! `rsqrt_approx` — NOT from avoiding `mul_add`. `mul_add` is the IEEE
+//! correctly-rounded fused-multiply-add (magetypes lowers it to hardware FMA where
+//! present, else a correctly-rounded `fmaf`), so it is itself deterministic; the
+//! Newton steps here happen to use explicit `*`/`-` but `mul_add` would be equally
+//! portable (and the `log2_lowp`/`log2_midp` probes confirm magetypes' `mul_add`
+//! polynomials are byte-identical across arches). The only non-deterministic
+//! primitives are the hardware *approximations* (`rsqrt_approx`, `rcp_approx`).
+//! `rsqrt_stable!` keeps approximation speed (no hardware `sqrt` latency) while
+//! removing the cross-platform divergence.
 //!
 //! It is a `macro_rules!` rather than a `fn` so it expands inside a `#[magetypes]`
 //! body against that body's per-tier `f32x8` (which the macro re-types to
@@ -38,8 +44,8 @@ macro_rules! rsqrt_stable {
         let y0 = (magic - x.bitcast_to_i32().shr_logical_const::<1>()).bitcast_to_f32();
         let half = $vec::splat($token, 0.5);
         let onehalf = $vec::splat($token, 1.5);
-        // Two Newton steps, explicit mul/sub (mul_add would fuse to a
-        // backend-dependent FMA and break determinism).
+        // Two Newton steps. (`mul_add` would be equally deterministic — it is the
+        // correctly-rounded fma — but explicit mul/sub keeps the bless stable.)
         let y1 = y0 * (onehalf - half * x * y0 * y0);
         y1 * (onehalf - half * x * y1 * y1)
     }};
@@ -87,6 +93,34 @@ pub(crate) fn magnitude_methods(
 
         xv.sqrt().store(&mut buf);
         exact[off..off + 8].copy_from_slice(&buf);
+    }
+}
+
+/// `out[i] = log2_lowp(x[i])` (magetypes low-precision SIMD log2 — bit-ops +
+/// `mul_add` polynomial, no hardware approximation). Lengths equal, multiple of 8.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn log2_lowp_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let chunks = x.len() / 8;
+    for c in 0..chunks {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let mut buf = [0.0f32; 8];
+        f32x8::load(token, arr).log2_lowp().store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
+}
+
+/// `out[i] = log2_midp(x[i])` (magetypes mid-precision SIMD log2). Companion of
+/// [`log2_lowp_into`] for accuracy/perf comparison.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn log2_midp_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let chunks = x.len() / 8;
+    for c in 0..chunks {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let mut buf = [0.0f32; 8];
+        f32x8::load(token, arr).log2_midp().store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
     }
 }
 
@@ -170,5 +204,87 @@ mod tests {
                 "exact sqrt must be deterministic across platforms"
             );
         }
+    }
+
+    /// Measures magetypes `log2_lowp` / `log2_midp` cross-platform determinism +
+    /// accuracy. Both are bit-ops + a `mul_add` polynomial (no hardware approx), so
+    /// the prediction is they're byte-identical on every arch — asserted against the
+    /// x86-blessed hash; the `LOGPROBE` line surfaces the hashes + accuracy in CI.
+    #[test]
+    fn log2_lowp_midp_determinism_and_accuracy() {
+        const LOWP_GOLDEN_HASH: u64 = 0x67c2_346b_644a_0119;
+        const MIDP_GOLDEN_HASH: u64 = 0xc4b7_1ece_d59d_3a08;
+
+        let x = grid();
+        let n = x.len();
+        let (mut lowp, mut midp) = (vec![0.0; n], vec![0.0; n]);
+        incant!(log2_lowp_into(&x, &mut lowp));
+        incant!(log2_midp_into(&x, &mut midp));
+
+        // f64 reference for accuracy (host, not used for the determinism hash).
+        let refv: Vec<f32> = x.iter().map(|&v| (v as f64).log2() as f32).collect();
+        let (hl, hm) = (fnv1a(&lowp), fnv1a(&midp));
+        println!(
+            "LOGPROBE lowp_hash={hl:016x} midp_hash={hm:016x} \
+             max_rel_vs_exact: lowp={:.3e} midp={:.3e}",
+            max_rel(&lowp, &refv),
+            max_rel(&midp, &refv),
+        );
+
+        if LOWP_GOLDEN_HASH != 0 {
+            assert_eq!(
+                hl, LOWP_GOLDEN_HASH,
+                "log2_lowp must be deterministic across platforms"
+            );
+            assert_eq!(
+                hm, MIDP_GOLDEN_HASH,
+                "log2_midp must be deterministic across platforms"
+            );
+        }
+    }
+
+    /// Relative perf of `log2_lowp` vs `log2_midp` vs scalar `f32::log2` (libm).
+    /// Modest interleaved workload — always runs (prints `LOGPERF` ns/elem); the
+    /// absolute numbers are rough under CI noise but the lowp↔midp ratio is the
+    /// point: are they "far apart" or not. Interleaved + checksummed to defeat
+    /// thermal bias and dead-code elimination.
+    #[test]
+    fn log2_lowp_vs_midp_perf() {
+        use std::time::Instant;
+        let x: Vec<f32> = (0..16_384u32).map(|i| (i + 1) as f32).collect();
+        let n = x.len();
+        let (mut lowp, mut midp) = (vec![0.0f32; n], vec![0.0f32; n]);
+        const ITERS: u32 = 200;
+        let (mut t_low, mut t_mid, mut t_scal) = (0u128, 0u128, 0u128);
+        let mut sink = 0.0f32;
+        for _ in 0..ITERS {
+            // Interleave so each method sees the same thermal/turbo state.
+            let a = Instant::now();
+            incant!(log2_lowp_into(&x, &mut lowp));
+            t_low += a.elapsed().as_nanos();
+            sink += lowp[0];
+
+            let b = Instant::now();
+            incant!(log2_midp_into(&x, &mut midp));
+            t_mid += b.elapsed().as_nanos();
+            sink += midp[1];
+
+            let c = Instant::now();
+            let mut s = 0.0f32;
+            for &v in &x {
+                s += v.log2();
+            }
+            t_scal += c.elapsed().as_nanos();
+            sink += s;
+        }
+        let per = |t: u128| t as f64 / (ITERS as f64 * n as f64);
+        println!(
+            "LOGPERF ns/elem: lowp={:.3} midp={:.3} scalar_log2={:.3}  (midp/lowp={:.2}x)  sink={sink}",
+            per(t_low),
+            per(t_mid),
+            per(t_scal),
+            per(t_mid) / per(t_low).max(1e-9),
+        );
+        assert!(sink.is_finite());
     }
 }

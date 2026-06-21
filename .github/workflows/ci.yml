@@ -246,5 +246,5 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: rsqrt method probe
-        run: cargo test --features hdr simd_math::tests::magnitude_method_determinism_and_accuracy -- --exact --nocapture
+      - name: rsqrt + log2 method probe
+        run: cargo test --features hdr simd_math::tests:: -- --nocapture
