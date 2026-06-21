@@ -1503,6 +1503,8 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 // diverge ~6% across arches; this is bit-identical everywhere and
                 // matches the scalar tail's `rsqrt_stable_scalar`. Clamp to
                 // [1.0, ∞) so non-edge lanes (mask=0) stay finite.
+                // TODO: swap to `rsqrt_approx_12()` (≥12-bit, cheaper per backend)
+                // once it ships in a published magetypes — local archmage has it.
                 let grad_sq_v = f32x8::load(token, &grad_sq_arr);
                 let mask_v = f32x8::load(token, &mask_arr);
                 let one_v = f32x8::splat(token, 1.0);
