@@ -66,6 +66,30 @@ fn main() {
     let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
     let arg1 = std::env::args().nth(1).unwrap_or_default();
 
+    // Real-image mode: `profile_analyze <path.jpg> [iters]`. Random pixels bias
+    // the palette/DCT hotspots (random saturates the 32K colour table → maximal
+    // scatter cache-misses); a decoded photo gives the true content profile.
+    if std::path::Path::new(&arg1).is_file() {
+        let img = image::open(&arg1).expect("decode image").to_rgb8();
+        let (w, h) = img.dimensions();
+        let buf = img.into_raw();
+        let stride = (w * 3) as usize;
+        let iters: usize = std::env::args()
+            .nth(2)
+            .and_then(|a| a.parse().ok())
+            .unwrap_or(3);
+        for _ in 0..iters {
+            let slice =
+                PixelSlice::new(black_box(&buf), w, h, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+            let _ = black_box(analyze_features(black_box(slice), black_box(&q)));
+        }
+        eprintln!(
+            "profiled real image {arg1} ({w}×{h}, {} Mpx) ×{iters}",
+            (w as f64 * h as f64) / 1e6
+        );
+        return;
+    }
+
     if arg1 == "sweep" {
         // Sizes spanning tiny (fixed-overhead-dominated) → 4K (per-pixel-
         // dominated). Iters scaled down as size grows to keep total time sane.

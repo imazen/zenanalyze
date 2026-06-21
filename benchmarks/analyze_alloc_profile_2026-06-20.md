@@ -98,6 +98,34 @@ All remaining cost is now genuine compute — the allocation waste is gone.
 | `tier3::populate_tier3` | 3.4% | DCT orchestration | |
 | `tier2_chroma::process_row_group_simd_v3` | 3.2% | Cb/Cr 2nd-diff sharpness | |
 
+## ⚠️ Correction (2026-06-21) — the ranking above is random-1 MP-biased
+
+The hotspot table above was measured on **pseudo-random 1 MP** pixels, which
+violates the synthetic-content profiling rule. Re-measured on a real 2.85 Mpx
+photo (`art-cc0/aic`) and on random at the *same* size to separate the two
+effects:
+
+| | random 1 MP | random 2.86 Mpx | **real photo 2.85 Mpx** |
+|---|--:|--:|--:|
+| total instructions | — | 1.04 B | **0.82 B** (−22%) |
+| `palette::scan_and_count_gray` | 12% | **23%** | **14.7% (#1)** |
+| `tier1::accumulate_row` | 27% | 21% | 14.2% |
+| `tier3::dct_stats` | 10% | 7% | 4.3% |
+
+- **Size effect:** palette is the only **uncapped** (full-image) tier — tier1 caps
+  at ~500K px, tier3 at 1024 blocks — so palette's share **grows with image
+  size** while the capped tiers shrink. At 1 MP palette is #2; at ~3 Mpx it's #1.
+- **Content effect:** a real photo runs ~22% fewer total instructions, and the
+  palette scan specifically runs in ~half the instructions of random at the same
+  size (random maximizes the colour-table scatter / scan work). tier3 also drops.
+- **Net correction:** the original "tier1 is the dominant hotspot, palette is
+  near-optimal / not a target" conclusion holds only at small sizes. **For
+  realistic multi-Mpx photos, palette and tier1 are co-#1 (~14% each), and palette
+  is the cost that scales with image size** — so the full-image palette scan is a
+  more important optimization target than the random-1 MP profile implied (it was
+  already flagged as the #1 next opportunity below, now with stronger evidence).
+  Reprofile with `profile_analyze <photo.jpg>` before acting on any ranking.
+
 These remaining hotspots are all **already-SIMD genuine compute**: tier1
 `accumulate_row` is AVX2/512 per-pixel work (algorithmic-only from here), the
 palette 12% is an inherent per-pixel `flags[idx]=1` scatter into a 32 KB
