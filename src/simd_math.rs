@@ -50,7 +50,6 @@ macro_rules! rsqrt_stable {
         y1 * (onehalf - half * x * y1 * y1)
     }};
 }
-pub(crate) use rsqrt_stable;
 
 /// Scalar counterpart of [`rsqrt_stable!`], **bit-identical** to one SIMD lane
 /// (same f32 ops, same order) — so a kernel's SIMD body and its scalar tail agree
@@ -60,6 +59,47 @@ pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
     let y0 = f32::from_bits(0x5f37_59df - (x.to_bits() >> 1));
     let y1 = y0 * (1.5 - 0.5 * x * y0 * y0);
     y1 * (1.5 - 0.5 * x * y1 * y1)
+}
+
+/// `out[i] = rsqrt_stable(x[i])` — the deterministic bit-hack + 2-Newton path.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn rsqrt_stable_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let n = x.len() / 8;
+    for c in 0..n {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let xv = f32x8::load(token, arr);
+        let mut buf = [0.0f32; 8];
+        rsqrt_stable!(f32x8, token, xv).store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
+}
+
+/// `out[i] = rsqrt(x[i])` — magetypes' hardware estimate + 1 Newton (≥16-bit; the
+/// `rsqrt_approx_12` general/ARM path, the published stand-in for it).
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn rsqrt_nt_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let n = x.len() / 8;
+    for c in 0..n {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let mut buf = [0.0f32; 8];
+        f32x8::load(token, arr).rsqrt().store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
+}
+
+/// `out[i] = rsqrt_approx(x[i])` — the raw hardware estimate (≥8-bit; x86 ~12-bit).
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn rsqrt_hw_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let n = x.len() / 8;
+    for c in 0..n {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let mut buf = [0.0f32; 8];
+        f32x8::load(token, arr).rsqrt_approx().store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
 }
 
 /// Compute the gradient magnitude `√x` four ways per input, so a test can measure
@@ -410,6 +450,44 @@ mod tests {
             per(t_prod),
             per(t_old) / per(t_simd).max(1e-9),
             per(t_old) / per(t_prod).max(1e-9),
+        );
+        assert!(sink.is_finite());
+    }
+
+    /// Relative perf of the rsqrt primitives (`RSQRTPERF` ns/elem) — `rsqrt_stable`
+    /// (bit-hack + 2 Newton) vs `rsqrt` (hardware + 1 Newton, the rsqrt_approx_12
+    /// stand-in) vs raw `rsqrt_approx` (hardware estimate). Interleaved.
+    #[test]
+    fn rsqrt_methods_perf() {
+        use std::time::Instant;
+        let x: Vec<f32> = (0..16_384u32).map(|i| (i + 1) as f32).collect();
+        let n = x.len();
+        let mut out = vec![0.0f32; n];
+        const ITERS: u32 = 300;
+        let (mut t_st, mut t_nt, mut t_hw) = (0u128, 0u128, 0u128);
+        let mut sink = 0.0f32;
+        for _ in 0..ITERS {
+            let a = Instant::now();
+            incant!(rsqrt_stable_into(&x, &mut out));
+            t_st += a.elapsed().as_nanos();
+            sink += out[0];
+            let b = Instant::now();
+            incant!(rsqrt_nt_into(&x, &mut out));
+            t_nt += b.elapsed().as_nanos();
+            sink += out[1];
+            let c = Instant::now();
+            incant!(rsqrt_hw_into(&x, &mut out));
+            t_hw += c.elapsed().as_nanos();
+            sink += out[2];
+        }
+        let per = |t: u128| t as f64 / (ITERS as f64 * n as f64);
+        println!(
+            "RSQRTPERF ns/elem: rsqrt_stable={:.3} rsqrt(hw+1nt)={:.3} rsqrt_approx(hw)={:.3}  \
+             (stable/nt={:.2}x)  sink={sink}",
+            per(t_st),
+            per(t_nt),
+            per(t_hw),
+            per(t_st) / per(t_nt).max(1e-9),
         );
         assert!(sink.is_finite());
     }
