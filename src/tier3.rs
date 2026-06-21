@@ -1248,15 +1248,19 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                         if mag < COEF_FLOOR {
                             continue;
                         }
-                        let rr = (u_idx * u_idx + v_idx * v_idx) as f32;
-                        let r = rr.sqrt();
-                        let bin = if r < 2.0 {
+                        // Bin by radius `r = √(u²+v²)`, but compare the **squared**
+                        // radius `rr` to the squared thresholds — `rr` is an exact
+                        // integer and 2²/3²/4.5²/6² are exact, so `r < t ⇔ rr < t²`
+                        // bit-for-bit, with no per-coefficient sqrt (4.5² = 20.25,
+                        // and integer `rr < 20.25 ⇔ rr < 21`).
+                        let rr = u_idx * u_idx + v_idx * v_idx;
+                        let bin = if rr < 4 {
                             0
-                        } else if r < 3.0 {
+                        } else if rr < 9 {
                             1
-                        } else if r < 4.5 {
+                        } else if rr < 21 {
                             2
-                        } else if r < 6.0 {
+                        } else if rr < 36 {
                             3
                         } else {
                             4
