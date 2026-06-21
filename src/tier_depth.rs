@@ -55,6 +55,7 @@
 //! monomorphization explosion). One small dedicated tier is the
 //! clean answer.
 
+use archmage::{incant, magetypes};
 use linear_srgb::tf;
 use zenpixels::{ChannelType, ColorPrimaries, PixelSlice, TransferFunction};
 
@@ -184,6 +185,33 @@ fn eotf_slice(tf_kind: TransferFunction, values: &mut [f32]) {
         TransferFunction::Pq => d::pq_to_linear_slice(values),
         TransferFunction::Hlg => d::hlg_to_linear_slice(values),
         _ => {}
+    }
+}
+
+/// For each `nits`, compute the histogram bin *value*
+/// `log2(1 + max(nits,0)) · (HIST_BINS/14)` (the caller floors + clamps + scatters)
+/// — the SIMD `log2_midp` form of [`nits_to_bin`]'s scalar `log2`. ~11× faster than
+/// libm `log2`; `log2_midp`'s ~1e-7 vs libm almost never flips the integer bin
+/// (within the feature tolerance). The 0..8 tail uses scalar libm `log2` to match
+/// `nits_to_bin` exactly. `nits`/`out` equal length.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+fn nits_bin_value_slice(token: Token, nits: &[f32], out: &mut [f32]) {
+    const SCALE: f32 = HIST_BINS as f32 / 14.0;
+    let scale = f32x8::splat(token, SCALE);
+    let one = f32x8::splat(token, 1.0);
+    let zero = f32x8::splat(token, 0.0);
+    let n = nits.len();
+    let nchunks = n / 8;
+    for c in 0..nchunks {
+        let off = c * 8;
+        let arr: &[f32; 8] = nits[off..off + 8].try_into().unwrap();
+        let v = (f32x8::load(token, arr).max(zero) + one).log2_midp() * scale;
+        let mut buf = [0.0f32; 8];
+        v.store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
+    for i in nchunks * 8..n {
+        out[i] = (1.0 + nits[i].max(0.0)).log2() * SCALE;
     }
 }
 
@@ -436,6 +464,9 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     // linearized values for the per-pixel statistics. `nch` colour channels/pixel.
     let nch = color_channels.min(4);
     let mut lin_buf: Vec<f32> = Vec::with_capacity(width * nch);
+    // Per-row nits + bin-value scratch for the SIMD `log2` histogram binning.
+    let mut nits_buf: Vec<f32> = Vec::with_capacity(width);
+    let mut binv_buf: Vec<f32> = Vec::with_capacity(width);
     // Bt709 ⊆ both sRGB(=Bt709) and P3, so every Bt709-source pixel is trivially
     // in both gamuts — skip the per-pixel matrix projections (exact: 1.0).
     let trivial_gamut_bt709 = matches!(desc.primaries, ColorPrimaries::Bt709);
@@ -510,8 +541,11 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
         // Pass 2 — SIMD EOTF the whole row's gathered samples (signal → linear).
         eotf_slice(tf_kind, &mut lin_buf);
 
-        // Pass 3 — per-pixel statistics from the linearized buffer.
+        // Pass 3 — per-pixel statistics from the linearized buffer. The luminance
+        // histogram is deferred: gather `nits` here, then bin the row in one SIMD
+        // `log2_midp` pass (Pass 4) instead of a per-pixel scalar `log2`.
         let n_pixels = lin_buf.len() / nch;
+        nits_buf.clear();
         for pi in 0..n_pixels {
             let linears = &lin_buf[pi * nch..pi * nch + nch];
             let mut linear_max = 0.0f32;
@@ -568,8 +602,17 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
                 srgb_in += 1;
                 p3_in += 1;
             }
-            hist[nits_to_bin(nits)] += 1;
+            nits_buf.push(nits);
             total += 1;
+        }
+
+        // Pass 4 — SIMD `log2_midp` bin values for the whole row, then scatter into
+        // the histogram (the data-dependent index keeps the scatter scalar).
+        binv_buf.resize(nits_buf.len(), 0.0);
+        incant!(nits_bin_value_slice(&nits_buf, &mut binv_buf));
+        for &v in &binv_buf {
+            // `v ≥ 0` (nits ≥ 0), so `as usize` floors; clamp to the top bin.
+            hist[(v as usize).min(HIST_BINS - 1)] += 1;
         }
         y += row_step;
     }
