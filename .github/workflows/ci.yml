@@ -72,6 +72,16 @@ jobs:
         run: cargo build -p zenpicker
       - name: Test zenpicker
         run: cargo test -p zenpicker --lib
+      - name: Test zenpicker (api consumer contract)
+        # `tests/feature_request.rs` is `#![cfg(feature="api")]` and the `--lib`
+        # step above excludes integration tests, so without this the consumer
+        # half of the feature contract is never exercised in CI (the consumer is
+        # exactly the half that silently rots). Run the gated integration tests
+        # AND clippy the gated path under -D warnings.
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
+        run: |
+          cargo test -p zenpicker --features api --tests
+          cargo clippy -p zenpicker --features api --all-targets -- -D warnings
       - name: Clippy zenpicker
         if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: cargo clippy -p zenpicker --all-targets -- -D warnings
