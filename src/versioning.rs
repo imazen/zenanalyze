@@ -30,16 +30,18 @@
 //! noise; that tolerance is precisely "platforms close enough to share a
 //! serialized vector."
 //!
-//! That noise is **not** uniform, and the golden tripwire measured it directly:
-//! the statistical features sum lane-wise inside the SIMD inner loops, so a
-//! different SIMD width reduces in a different order, giving distinct per-tier
-//! values. For well-conditioned features that stays ≤ 0.3 % (hence the 0.5 %
-//! global budget); a few cancellation-prone reductions (an edge-gradient stddev,
-//! the chroma–luma Pearson covariances) swing several percent and carry looser
-//! per-feature budgets in `F32_TOLERANCE_OVERRIDES`. Both are sized from observed
-//! CI spread, not guessed. (The cleaner long game is bit-exact determinism —
-//! pinned `libm`, fixed reduction order — which collapses every budget back toward
-//! `1e-4`.)
+//! That noise is **not** uniform, and the golden tripwire measures it directly on
+//! every platform (each prints its per-feature spread vs the x86 golden). For
+//! well-conditioned features the lane-order f64-reduction divergence stays ≤ 0.07 %
+//! (hence the 0.5 % global budget). The exceptions: the chroma–luma Pearson
+//! covariances have a degeneracy guard that flips `0.0`-vs-nonzero per SIMD tier
+//! (`XPLAT_STRUCTURAL_EXEMPT` — enforced only on the reference), and
+//! `spectral_slope_y` / `patch_fraction` diverge several percent **on i686 only**
+//! from x87 excess precision in `std`/libm (a relaxed-but-finite i686 budget keeps
+//! them bounded there; tight everywhere else). All budgets are sized from observed
+//! CI spread, not guessed. (The cleaner long game is bit-exact determinism — fixed
+//! reduction order, done without speed loss via a fixed-lane-count f64 accumulator
+//! — which would retire the covariance exemption.)
 //!
 //! # Coverage
 //!
@@ -72,15 +74,15 @@ const GOLDEN: &str = include_str!("versioning_golden.tsv");
 /// matrix (x86 AVX-512 / AVX2, i686, aarch64+macOS+Windows NEON). The statistical
 /// features accumulate sum + sum-of-squares **lane-wise in the SIMD inner loops**,
 /// so a different SIMD width sums in a different order; for the well-conditioned
-/// features that f64-reduction divergence stays ≤ 0.3 % across every tier
+/// features that f64-reduction divergence stays ≤ 0.07 % across every tier
 /// (`variance` 0.01 %, `quant_survival_y` 0.03 %, `aq_map_std` 0.04 %,
-/// `dct_compressibility_y` 0.07 %, `spectral_slope_y` 0.14 %, `patch_fraction`
-/// 0.29 %). The original `1e-4` was tighter than the hardware can reproduce — a
-/// false-failure on every non-AVX-512 runner. A *behaviour* change moves a feature
-/// far more than 0.5 %, so the tripwire still fires. The three cancellation-prone
-/// outliers get looser per-feature budgets in [`F32_TOLERANCE_OVERRIDES`]. (The
-/// clean long game is bit-exact determinism — fixed reduction order / pinned
-/// `libm` — which collapses this back toward `1e-4`.)
+/// `dct_compressibility_y` 0.07 %). The original `1e-4` was tighter than the
+/// hardware can reproduce — a false-failure on every non-AVX-512 runner. A
+/// *behaviour* change moves a feature far more than 0.5 %, so the tripwire still
+/// fires. The covariances (structural guard flip) get a 15 % override + xplat
+/// exemption; `spectral_slope_y` / `patch_fraction` get a relaxed budget on i686
+/// only ([`I686_TOLERANCE_OVERRIDES`]). (The clean long game is bit-exact
+/// determinism — fixed reduction order — which collapses this back toward `1e-4`.)
 pub const REL_TOLERANCE: f32 = 5.0e-3;
 
 /// The caret-compatibility root of a semver string: `"0.2"` for `0.2.7`, `"1"`
@@ -697,16 +699,23 @@ mod tests {
     /// tolerance — from x87 80-bit excess precision in precompiled `std`/`libm`
     /// paths (the product-then-ln's `.ln()`; a DCT-energy threshold count). Forcing
     /// `+sse2` on this crate does NOT fix it (verified in CI: byte-identical spread)
-    /// because `std` stays x87 and isn't rebuilt without `-Z build-std`. They pass
-    /// on EVERY 64-bit platform incl. aarch64/NEON, so this is enforced there with
-    /// the tight global tolerance. i686 is carried as a 32-bit / pointer-width
-    /// stand-in for WASM, whose float model is SSE2-like (no x87) — so this x87
-    /// divergence is not representative of what i686 is testing for. `cfg`-gated to
-    /// 32-bit x86 so it's empty (enforced) on every other target.
+    /// because `std` stays x87 and isn't rebuilt without `-Z build-std`; no
+    /// reduction-order change touches `libm` either (aarch64/NEON passes these at
+    /// the tight global tolerance). Rather than EXEMPT them on i686, give them a
+    /// **relaxed but finite** i686 tolerance — so the divergence stays *bounded*
+    /// (a real behaviour change beyond the x87 spread still trips it) instead of
+    /// unchecked. Budgets are the measured i686 spread (`spectral_slope_y` 7.2 %,
+    /// `patch_fraction` 6.25 %) rounded up for margin. `cfg`-gated to 32-bit x86 so
+    /// every other target enforces the tight global tolerance. i686 is carried as a
+    /// 32-bit / pointer-width stand-in for WASM, whose float model is SSE2-like (no
+    /// x87), so this x87 spread is not representative of what i686 tests for.
     #[cfg(target_arch = "x86")]
-    const I686_X87_EXEMPT: &[&str] = &["feat_spectral_slope_y", "feat_patch_fraction"];
+    const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
+        ("feat_spectral_slope_y", 1.0e-1),
+        ("feat_patch_fraction", 1.0e-1),
+    ];
     #[cfg(not(target_arch = "x86"))]
-    const I686_X87_EXEMPT: &[&str] = &[];
+    const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
 
     /// The bless / reference platform sets this so the structural-exempt features
     /// are still enforced there (against the golden they bless). Set by the
@@ -727,8 +736,11 @@ mod tests {
     }
 
     fn f32_tolerance(feat_key: &str) -> f32 {
-        F32_TOLERANCE_OVERRIDES
+        // i686-relaxed budgets take precedence on 32-bit x86 (empty elsewhere),
+        // then the cross-platform per-feature overrides, then the global floor.
+        I686_TOLERANCE_OVERRIDES
             .iter()
+            .chain(F32_TOLERANCE_OVERRIDES)
             .find(|(k, _)| *k == feat_key)
             .map_or(REL_TOLERANCE, |(_, t)| *t)
     }
@@ -831,9 +843,10 @@ mod tests {
                 continue;
             }
             let tol = f32_tolerance(name);
-            let xplat_exempt = !reference && XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
-            let i686_exempt = I686_X87_EXEMPT.contains(&name.as_str()); // empty off 32-bit x86
-            let enforce = !xplat_exempt && !i686_exempt;
+            // Only the structural-flip features are exempt off the reference; the
+            // i686-divergent features are now ENFORCED with a relaxed i686 budget
+            // (see I686_TOLERANCE_OVERRIDES), so their divergence stays bounded.
+            let enforce = reference || !XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
             let mut max_dev = 0.0f32;
             let mut first_drift: Option<String> = None;
             for (i, (v, e)) in values.iter().zip(expected).enumerate() {
@@ -865,8 +878,8 @@ mod tests {
         for (n, d) in spread.iter().take(15) {
             let note = if XPLAT_STRUCTURAL_EXEMPT.contains(&n.as_str()) {
                 ", xplat-exempt"
-            } else if I686_X87_EXEMPT.contains(&n.as_str()) {
-                ", i686-exempt"
+            } else if I686_TOLERANCE_OVERRIDES.iter().any(|(k, _)| k == n) {
+                ", i686-relaxed"
             } else {
                 ""
             };
