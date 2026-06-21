@@ -693,6 +693,21 @@ mod tests {
         "feat_chroma_luma_covariance_cr",
     ];
 
+    /// Features that diverge **only on 32-bit x86 (i686)** — beyond the global
+    /// tolerance — from x87 80-bit excess precision in precompiled `std`/`libm`
+    /// paths (the product-then-ln's `.ln()`; a DCT-energy threshold count). Forcing
+    /// `+sse2` on this crate does NOT fix it (verified in CI: byte-identical spread)
+    /// because `std` stays x87 and isn't rebuilt without `-Z build-std`. They pass
+    /// on EVERY 64-bit platform incl. aarch64/NEON, so this is enforced there with
+    /// the tight global tolerance. i686 is carried as a 32-bit / pointer-width
+    /// stand-in for WASM, whose float model is SSE2-like (no x87) — so this x87
+    /// divergence is not representative of what i686 is testing for. `cfg`-gated to
+    /// 32-bit x86 so it's empty (enforced) on every other target.
+    #[cfg(target_arch = "x86")]
+    const I686_X87_EXEMPT: &[&str] = &["feat_spectral_slope_y", "feat_patch_fraction"];
+    #[cfg(not(target_arch = "x86"))]
+    const I686_X87_EXEMPT: &[&str] = &[];
+
     /// The bless / reference platform sets this so the structural-exempt features
     /// are still enforced there (against the golden they bless). Set by the
     /// `golden-reference` CI job; absent on the portable / cross matrices.
@@ -816,7 +831,9 @@ mod tests {
                 continue;
             }
             let tol = f32_tolerance(name);
-            let enforce = reference || !XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
+            let xplat_exempt = !reference && XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
+            let i686_exempt = I686_X87_EXEMPT.contains(&name.as_str()); // empty off 32-bit x86
+            let enforce = !xplat_exempt && !i686_exempt;
             let mut max_dev = 0.0f32;
             let mut first_drift: Option<String> = None;
             for (i, (v, e)) in values.iter().zip(expected).enumerate() {
@@ -846,12 +863,17 @@ mod tests {
             "== golden spread on this platform (max rel-dev vs x86 golden, ref={reference}) =="
         );
         for (n, d) in spread.iter().take(15) {
-            let exempt = XPLAT_STRUCTURAL_EXEMPT.contains(&n.as_str());
+            let note = if XPLAT_STRUCTURAL_EXEMPT.contains(&n.as_str()) {
+                ", xplat-exempt"
+            } else if I686_X87_EXEMPT.contains(&n.as_str()) {
+                ", i686-exempt"
+            } else {
+                ""
+            };
             eprintln!(
-                "  {n:>34}  {:>8.4}%  (tol {:.1}%{})",
+                "  {n:>34}  {:>8.4}%  (tol {:.1}%{note})",
                 d * 100.0,
                 f32_tolerance(n) * 100.0,
-                if exempt { ", xplat-exempt" } else { "" }
             );
         }
         assert!(
