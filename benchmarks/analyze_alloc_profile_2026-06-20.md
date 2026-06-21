@@ -74,3 +74,31 @@ All remaining cost is now genuine compute — the allocation waste is gone.
 Next opportunities, in order: (1) palette gray-scan (12%, full-image), (2) the
 laplacian's 3×-redundant per-row luma recompute (the kernel re-derives luma for
 prev/cur/next every row, where `cur` of row *i* is `prev` of row *i+1*).
+
+## Size sweep (wall-clock, `profile_analyze sweep`)
+
+The per-pixel cost is **not** globally linear — each tier subsamples above its
+own budget, so above those knees the work is capped and ns/px falls as 1/px.
+
+| side | Mpx | ns/call | ns/px | regime |
+|--:|--:|--:|--:|---|
+| 64 | 0.004 | 130 µs | 31.8 | full density (all tiers uncapped) |
+| 128 | 0.016 | 497 µs | 30.4 | full density |
+| 256 | 0.066 | 2.26 ms | 34.4 | tier3 at its 1024-block cap |
+| 512 | 0.262 | 4.41 ms | 16.8 | tier3 + tier2 capped |
+| 1024 | 1.049 | 7.98 ms | 7.6 | tier1 near its 500K-px cap |
+| 2048 | 4.194 | 12.4 ms | 3.0 | all tiers sampling-capped |
+
+Full-density fit (≤128², every tier uncapped):
+**ns/call ≈ 7.7 µs fixed + 29.9 ns/px · pixels**.
+
+* **Fixed per-call overhead is small** (~7.7 µs: result struct + RowStream setup
+  + tier dispatch) — not a focus target.
+* **Full-density per-pixel cost ≈ 30 ns/px** is paid in full for images up to
+  ~256² — i.e. **web thumbnails / small images**, the web-focused case. That's
+  exactly where tier1 `accumulate_row` (27%), palette gray-scan (12%) and tier3
+  `dct_stats` (10%) all run at full density, so kernel optimisations there help
+  the small-image path most.
+* **Large images are already sampling-bounded** (1 MP → 7.6 ns/px, 4 MP → 3.0)
+  — the analyzer does budget-capped work, so kernel speedups help proportionally
+  less there (most pixels are skipped).
