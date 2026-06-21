@@ -18,7 +18,7 @@ use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use archmage::{incant, magetypes};
 
-use crate::simd_math::rsqrt_stable_scalar;
+use crate::simd_math::{rsqrt_stable, rsqrt_stable_scalar};
 
 // ---------------------------------------------------------------------------
 // Tier-aware RGB24 chunk-8 deinterleave dispatch
@@ -1517,22 +1517,22 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 }
             }
             if FULL {
-                // Gradient magnitude `√x = x · rsqrt(x)` for all 8 lanes via
-                // magetypes `rsqrt()` (hardware estimate + 1 Newton) — the published
-                // stand-in for `rsqrt_approx_12`'s general/ARM path: ≥16-bit floor
-                // (kills the raw-`rsqrt_approx` 8-bit-ARM divergence that caused the
-                // ~6% `edge_slope_stdev` Known Bug) and ~1.6× cheaper than the old
-                // deterministic `rsqrt_stable!` (bit-hack + 2 Newton). Not bit-
-                // identical (~16–24-bit per-arch spread), but `edge_slope_stdev`'s
-                // golden is x86-reference-scoped + toleranced, so that's fine.
-                // (Swap to `rsqrt_approx_12()` for the x86 12-bit stop once it ships
-                // in a published magetypes — local archmage has it.) Clamp to
-                // [1.0, ∞) so non-edge lanes (mask=0) stay finite.
+                // Gradient magnitude `√x = x · rsqrt(x)` for all 8 lanes via the
+                // DETERMINISTIC `rsqrt_stable!` (software seed + Newton, pure
+                // mul/sub). The hardware `rsqrt_approx()` / Newton-refined `rsqrt()`
+                // lower to a different-precision instruction per backend (x86
+                // ~12-bit / AVX-512 ~14-bit / NEON ~8-bit seed) and made
+                // `edge_slope_stdev` diverge ~6% across arches; this is bit-identical
+                // everywhere and matches the scalar tail's `rsqrt_stable_scalar`, so
+                // there is no SIMD-vs-tail seam. (A `.rsqrt()` swap was tried for
+                // speed and reverted: its measured gain was ~0.02 ns/px — below the
+                // per-tier noise floor — not worth losing cross-arch determinism.)
+                // Clamp to [1.0, ∞) so non-edge lanes (mask=0) stay finite.
                 let grad_sq_v = f32x8::load(token, &grad_sq_arr);
                 let mask_v = f32x8::load(token, &mask_arr);
                 let one_v = f32x8::splat(token, 1.0);
                 let safe_grad_sq = grad_sq_v.max(one_v);
-                let inv_sqrt = safe_grad_sq.rsqrt();
+                let inv_sqrt = rsqrt_stable!(f32x8, token, safe_grad_sq);
                 let g_mag_v = grad_sq_v * inv_sqrt * mask_v;
                 let g_sq_masked_v = grad_sq_v * mask_v;
                 edge_grad_sum += g_mag_v.reduce_add() as f64;

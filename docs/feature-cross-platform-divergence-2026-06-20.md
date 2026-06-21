@@ -158,6 +158,18 @@ bits. Only a software seed (or exact sqrt) is deterministic. Accuracy vs exact o
 x86: `rsqrt_approx` 1.96e-4, magetypes `rsqrt` 1.4e-7, `rsqrt_stable` 4.6e-6 — all
 far below `edge_slope_stdev`'s decision granularity.
 
+**Detour, tried and reverted (2329a9a → reverted):** the SIMD body was briefly
+swapped from `rsqrt_stable!` to magetypes `.rsqrt()` for speed (intended as a
+stand-in for a `rsqrt_approx_12` design). It was reverted because (a) per the
+table above `.rsqrt()` is non-deterministic across arches — it reintroduced the
+very `edge_slope_stdev` divergence this section fixed; (b) it left the scalar
+tail on `rsqrt_stable_scalar`, creating a SIMD-vs-tail seam the body/tail were
+specifically built to avoid; and (c) the measured gain was ~0.02 ns/px — below
+the per-tier noise floor. The inverse-sqrt is a negligible slice of the edge
+kernel, so determinism wins. Do not re-swap to `.rsqrt()`/`rsqrt_approx` here
+without a *cross-arch-deterministic* approximation (and then update both the body
+and the tail, and make `rsqrt-probe` assert the kernel's actual method).
+
 The `edge_slope_stdev` golden was re-blessed (only that feature's row changed). Its
 `F32_TOLERANCE_OVERRIDES` budget could now be tightened toward the f64-reduction
 floor, but is left at 10 % for safety until a follow-up re-measures the post-fix

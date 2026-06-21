@@ -50,6 +50,7 @@ macro_rules! rsqrt_stable {
         y1 * (onehalf - half * x * y1 * y1)
     }};
 }
+pub(crate) use rsqrt_stable;
 
 /// Scalar counterpart of [`rsqrt_stable!`], **bit-identical** to one SIMD lane
 /// (same f32 ops, same order) — so a kernel's SIMD body and its scalar tail agree
