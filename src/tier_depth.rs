@@ -416,6 +416,26 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     } else {
         None
     };
+    // u16 sources (HDR is u16/f32) have 65536 distinct values — precompute the EOTF
+    // into a 256 KB LUT so the per-pixel walk is a lookup, not the (external,
+    // ~12 ns) PQ/HLG `pow`/`exp`. `lut[v] == eotf(tf, v/65535)` so it stays
+    // BIT-IDENTICAL to the general path. Built once (65536 EOTF calls) and amortized
+    // over the sampled work; only when the sampled samples exceed the build cost
+    // (measured ~3.8× at the 100k-pixel budget) — skip the build for tiny images.
+    let est_samples = (width.saturating_mul(height))
+        .min(pixel_budget)
+        .saturating_mul(color_channels.max(1));
+    let u16_lut: Option<Box<[f32; 65536]>> =
+        if matches!(ch, ChannelType::U16) && u8_lut.is_none() && est_samples > 65536 {
+            let mut t = vec![0.0f32; 65536].into_boxed_slice();
+            for (i, e) in t.iter_mut().enumerate() {
+                *e = eotf(tf_kind, i as f32 / 65535.0);
+            }
+            // The slice is exactly 65536 long, so the conversion never fails.
+            Some(t.try_into().expect("65536-len boxed slice → [f32; 65536]"))
+        } else {
+            None
+        };
     // Bt709 ⊆ both sRGB(=Bt709) and P3, so every Bt709-source pixel is trivially
     // in both gamuts — skip the per-pixel matrix projections (exact: 1.0).
     let trivial_gamut_bt709 = matches!(desc.primaries, ColorPrimaries::Bt709);
@@ -470,9 +490,11 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             let mut linears = [0.0_f32; 4]; // up to 4 colour channels
             for c in 0..color_channels.min(4) {
                 // u8: ch_bytes == 1, so the channel byte is at off + c.
-                let l = match &u8_lut {
-                    Some(lut) => lut[row[off + c] as usize],
-                    None => eotf(tf_kind, read_sample(ch, &row[off + c * ch_bytes..])),
+                let cbytes = &row[off + c * ch_bytes..];
+                let l = match (&u8_lut, &u16_lut) {
+                    (Some(lut), _) => lut[row[off + c] as usize],
+                    (_, Some(lut)) => lut[u16::from_le_bytes([cbytes[0], cbytes[1]]) as usize],
+                    _ => eotf(tf_kind, read_sample(ch, cbytes)),
                 };
                 linears[c] = l;
                 if l > linear_max {
@@ -700,6 +722,83 @@ fn sdr_u16_effective_depth(
 mod tests {
     use super::*;
     use zenpixels::PixelDescriptor;
+
+    /// Measures the u16 EOTF win for the HDR depth scan: per-pixel PQ EOTF vs a
+    /// 65536-entry LUT (build cost included). The depth scan samples ~100k pixels
+    /// × 3 channels = ~300k EOTF calls; the LUT amortizes the (external, expensive)
+    /// PQ EOTF over a build-once table. Prints `PQEOTFPERF`.
+    #[test]
+    fn pq_eotf_lut_vs_perpixel_perf() {
+        use std::time::Instant;
+        let tf = TransferFunction::Pq;
+        const NSAMPLES: usize = 300_000; // ~100k pixels × 3 channels
+        // u64 math so the LCG doesn't overflow 32-bit usize on i686.
+        let samples: Vec<u16> = (0..NSAMPLES)
+            .map(|i| ((i as u64 * 2_654_435 + 1) % 65536) as u16)
+            .collect();
+        const ITERS: u32 = 20;
+        let (mut t_pp, mut t_lut) = (0u128, 0u128);
+        let mut sink = 0.0f32;
+        for _ in 0..ITERS {
+            let a = Instant::now();
+            let mut s = 0.0f32;
+            for &v in &samples {
+                s += eotf(tf, v as f32 / 65535.0);
+            }
+            t_pp += a.elapsed().as_nanos();
+            sink += s;
+
+            let b = Instant::now();
+            let mut lut = vec![0.0f32; 65536];
+            for (i, e) in lut.iter_mut().enumerate() {
+                *e = eotf(tf, i as f32 / 65535.0);
+            }
+            let mut s2 = 0.0f32;
+            for &v in &samples {
+                s2 += lut[v as usize];
+            }
+            t_lut += b.elapsed().as_nanos();
+            sink += s2;
+        }
+        let per = |t: u128| t as f64 / (ITERS as f64 * NSAMPLES as f64);
+        println!(
+            "PQEOTFPERF ns/sample: per_pixel={:.2} lut_incl_build={:.2}  (speedup {:.2}x)  sink={sink}",
+            per(t_pp),
+            per(t_lut),
+            per(t_pp) / per(t_lut).max(1e-9),
+        );
+        assert!(sink.is_finite());
+    }
+
+    /// The u16 EOTF LUT path (large image, >65536 samples) must produce exactly
+    /// the same result as the per-pixel path (small image) — the LUT is
+    /// `eotf(tf, v/65535)`, bit-identical to the per-pixel EOTF by construction.
+    #[test]
+    fn u16_eotf_lut_matches_per_pixel() {
+        const V: u16 = 40_000;
+        let desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+        let mk = |w: usize, h: usize| -> Vec<u8> {
+            let vb = V.to_le_bytes();
+            let mut buf = vec![0u8; w * h * 6];
+            for px in buf.chunks_exact_mut(6) {
+                px[0..2].copy_from_slice(&vb);
+                px[2..4].copy_from_slice(&vb);
+                px[4..6].copy_from_slice(&vb);
+            }
+            buf
+        };
+        let big = mk(256, 256); // 196_608 samples > 65536 ⇒ LUT path
+        let small = mk(64, 48); // 9_216 samples < 65536 ⇒ per-pixel path
+        let s_big = PixelSlice::new(&big, 256, 256, 256 * 6, desc).unwrap();
+        let s_small = PixelSlice::new(&small, 64, 48, 64 * 6, desc).unwrap();
+        let d_big = scan_depth(&s_big, 100_000);
+        let d_small = scan_depth(&s_small, 100_000);
+        assert_eq!(
+            d_big.peak_nits, d_small.peak_nits,
+            "u16 EOTF LUT path must match the per-pixel path bit-for-bit"
+        );
+        assert_eq!(d_big.wide_gamut_peak, d_small.wide_gamut_peak);
+    }
 
     #[test]
     fn solid_srgb_canonical_sdr_profile_consistent_across_channel_types() {

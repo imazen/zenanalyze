@@ -75,8 +75,8 @@ Hot sites that currently use scalar `libm`:
 |---|---|---|---|
 | ~~`tier3.rs:1264` `mag.ln()`~~ **DONE** | spectral-slope log\|F\| | per AC coefficient | **product-then-ln** — accumulate the f64 product per bin, one `ln` per bin (5/block vs ~30). Measured 2.2× (vs 1.73× for SIMD `ln_midp`), more accurate (f64), **within tolerance so no re-bless**. Beat the SIMD approach — see the `spectral_ln_binning_perf` probe. |
 | `tier3.rs:643` `p*p.log2()` | entropy | per bin (~256, once/image) | low value (once/image); `log2_midp` over the bin array if convenient |
-| `tier_depth.rs:136` `(1+nits).log2()` | HDR histogram bin | per sampled pixel | batch the depth scan → `log2_midp` |
-| `tier_depth.rs:157` `signal.powf(2.2)` | Gamma-2.2 EOTF | per sampled pixel | `pow_midp` (or a 256-LUT if input is u8) |
+| ~~`tier_depth` EOTF (u16)~~ **DONE** | PQ/HLG EOTF per channel | per sampled pixel (HDR) | **65536-entry EOTF LUT** for u16 sources — `lut[v] = eotf(tf, v/65535)`, bit-identical, **no re-bless**. The EOTF lives in external `linear_srgb` (can't SIMD it), so the LUT amortizes the (~12 ns) per-pixel `pow`/`exp` over a build-once table: measured **3.77×** at the 100k-pixel budget (gated to skip tiny images). Extends the existing u8 EOTF LUT. |
+| `tier_depth.rs:136` `(1+nits).log2()` | HDR histogram bin | per sampled pixel | left — 1 log2/pixel (vs the 3 EOTF/pixel now LUT'd); continuous input (no LUT), would need a scan-loop SIMD restructure for a marginal gain |
 
 Already optimal: `tier3.rs:1832` AQ log uses magetypes `log10_lowp`; all
 cold/post-reduction `log10`/`ln` (tier1:703, dimensions, tier_depth:571) run once
