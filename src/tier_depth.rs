@@ -737,9 +737,10 @@ mod tests {
             .map(|i| ((i as u64 * 2_654_435 + 1) % 65536) as u16)
             .collect();
         const ITERS: u32 = 20;
-        let (mut t_pp, mut t_lut) = (0u128, 0u128);
+        let (mut t_pp, mut t_lut, mut t_simd) = (0u128, 0u128, 0u128);
         let mut sink = 0.0f32;
         for _ in 0..ITERS {
+            // Scalar per-pixel EOTF.
             let a = Instant::now();
             let mut s = 0.0f32;
             for &v in &samples {
@@ -748,6 +749,7 @@ mod tests {
             t_pp += a.elapsed().as_nanos();
             sink += s;
 
+            // 65536-entry LUT (build + lookup).
             let b = Instant::now();
             let mut lut = vec![0.0f32; 65536];
             for (i, e) in lut.iter_mut().enumerate() {
@@ -759,13 +761,23 @@ mod tests {
             }
             t_lut += b.elapsed().as_nanos();
             sink += s2;
+
+            // linear-srgb's public auto-dispatched SIMD EOTF slice (gather + SIMD).
+            let c = Instant::now();
+            let mut buf: Vec<f32> = samples.iter().map(|&v| v as f32 / 65535.0).collect();
+            linear_srgb::default::pq_to_linear_slice(&mut buf);
+            sink += buf.iter().copied().sum::<f32>();
+            t_simd += c.elapsed().as_nanos();
         }
         let per = |t: u128| t as f64 / (ITERS as f64 * NSAMPLES as f64);
         println!(
-            "PQEOTFPERF ns/sample: per_pixel={:.2} lut_incl_build={:.2}  (speedup {:.2}x)  sink={sink}",
+            "PQEOTFPERF ns/sample: scalar={:.2} lut_incl_build={:.2} simd_slice={:.2}  \
+             (lut {:.2}x, simd {:.2}x)  sink={sink}",
             per(t_pp),
             per(t_lut),
+            per(t_simd),
             per(t_pp) / per(t_lut).max(1e-9),
+            per(t_pp) / per(t_simd).max(1e-9),
         );
         assert!(sink.is_finite());
     }
