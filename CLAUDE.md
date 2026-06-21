@@ -205,18 +205,17 @@ runtime branch).
 
 ## Known Bugs
 
-- **`edge_slope_stdev` cross-platform divergence (~6 %, deferred fix).** The SIMD
-  edge kernel (`src/tier1.rs` ≈line 1506) computes the gradient magnitude with
-  `rsqrt_approx()` — a ~12-bit reciprocal-sqrt that lowers to a *different-precision
-  instruction per backend* (x86 `rsqrtps` ~12-bit, AVX-512 `vrsqrt14` ~14-bit, NEON
-  `vrsqrte` ~8-bit), while the scalar tail (≈line 1560) uses exact `sqrt()`. Through
-  the cancellation-prone `√(E[g²]−E[g]²)` this diverges up to ~6 % across arches
-  (and 0.0-vs-nonzero on near-uniform content). Decision-irrelevant (always at the
-  degenerate floor, far from thresholds) but caps the feature's cross-machine
-  reuse precision. Recommended fix: SIMD exact `sqrt()` (bit-identical across
-  backends) — deferred because it removes a deliberate perf opt + needs re-bless +
-  model re-validation. Full diagnosis + 9-feature measured table:
-  `docs/feature-cross-platform-divergence-2026-06-20.md`.
+_None currently open._
+
+Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
+- The SIMD edge kernel computed the gradient magnitude with the hardware
+  `rsqrt_approx()` (different-precision instruction per backend) while the scalar
+  tail used exact `sqrt()`, so `edge_slope_stdev` diverged ~6 % across arches.
+  **Fixed** by `simd_math::rsqrt_stable!` (software bit-trick seed + Newton in pure
+  f32 mul/sub — bit-identical on every backend) in both the SIMD body and the
+  scalar tail. CI probe (`rsqrt-probe` job) confirms `rsqrt_stable` is byte-identical
+  on x86/ARM while both magetypes `rsqrt_approx` AND the Newton-refined `rsqrt`
+  diverge. Diagnosis: `docs/feature-cross-platform-divergence-2026-06-20.md`.
 
 ## Investigation Notes
 

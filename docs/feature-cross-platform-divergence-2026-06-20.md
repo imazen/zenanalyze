@@ -130,3 +130,37 @@ The covariance outliers are pure cancellation, not rsqrt; a stable formulation
   x86-64 reference** (`golden-reference` CI job); the portable Test/Cross jobs
   `--skip` it (caller-controlled in `ci.yml`, no source `#[ignore]`). It still runs
   on the developer's x86-64 locally, so behavior regressions are caught at dev time.
+
+## Update 2026-06-20 — fixed via `rsqrt_stable`, with a deterministic seed (not exact sqrt)
+
+The dominant outlier (`edge_slope_stdev`) is **fixed**, and the fix is better than
+the originally-recommended exact `sqrt`: rather than pay exact-sqrt latency, the
+edge kernel now uses `simd_math::rsqrt_stable!` — a software Quake seed
+(`0x5f3759df - (bits(x)>>1)`, integer ops) + 2 Newton steps in **explicit f32
+mul/sub** (no `mul_add`, so no backend-dependent FMA). f32 mul/sub are
+IEEE-correctly-rounded, so the result is bit-identical on every backend while
+keeping approximation speed. The scalar tail uses the matching `rsqrt_stable_scalar`
+(same f32 ops, one lane) so there is no SIMD-vs-tail seam.
+
+A CI `rsqrt-probe` job measured all four √ methods over a fixed grid across
+x86-64, macOS-ARM, and Windows-ARM (FNV hash of the output vector):
+
+| method | x86-64 | ARM (NEON, both) | deterministic |
+|---|---|---|---|
+| `rsqrt_approx` (hardware) | `da07b12b4fb7391c` | `4fa90f0776894ab7` | no |
+| magetypes `rsqrt` (Newton from hw seed) | `16e013cdd1251458` | `931bb8fa1f55dd34` | **no** |
+| `rsqrt_stable` (ours) | `6b404d4c5e62e664` | `6b404d4c5e62e664` | **yes** |
+| exact `sqrt` | `3aaf412b356dac68` | `3aaf412b356dac68` | yes |
+
+The key result: magetypes' Newton-refined `rsqrt` is **not** cross-platform
+deterministic either — Newton from a per-arch hardware seed leaves per-arch low
+bits. Only a software seed (or exact sqrt) is deterministic. Accuracy vs exact on
+x86: `rsqrt_approx` 1.96e-4, magetypes `rsqrt` 1.4e-7, `rsqrt_stable` 4.6e-6 — all
+far below `edge_slope_stdev`'s decision granularity.
+
+The `edge_slope_stdev` golden was re-blessed (only that feature's row changed). Its
+`F32_TOLERANCE_OVERRIDES` budget could now be tightened toward the f64-reduction
+floor, but is left at 10 % for safety until a follow-up re-measures the post-fix
+cross-platform spread (the f32 `reduce_add` lane-order residual, ~0.4 %, remains).
+The two `chroma_luma_covariance_*` outliers are pure Pearson cancellation (exact
+sqrt already), a separate item.

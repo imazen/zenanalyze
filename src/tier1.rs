@@ -18,6 +18,8 @@ use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use archmage::{incant, magetypes};
 
+use crate::simd_math::{rsqrt_stable, rsqrt_stable_scalar};
+
 // ---------------------------------------------------------------------------
 // Tier-aware RGB24 chunk-8 deinterleave dispatch
 // ---------------------------------------------------------------------------
@@ -1493,17 +1495,19 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
                 }
             }
             if FULL {
-                // ONE batched sqrt for all 8 lanes via rsqrt_approx:
-                // `sqrt(x) = x * (1 / sqrt(x))`. ~3× faster than
-                // batch `sqrt()`, ~12-bit precision (well above the
-                // edge-slope stddev's noise floor). Clamp grad_sq to
-                // [1.0, ∞) so non-edge lanes (mask=0) don't produce
-                // `0 * Inf = NaN` from `0 * rsqrt_approx(0)`.
+                // Gradient magnitude `√x = x · rsqrt(x)` for all 8 lanes via the
+                // DETERMINISTIC `rsqrt_stable!` (software seed + Newton, pure
+                // mul/sub). The old hardware `rsqrt_approx()` lowered to a
+                // different-precision instruction per backend (x86 ~12-bit /
+                // AVX-512 ~14-bit / NEON ~8-bit) and made `edge_slope_stdev`
+                // diverge ~6% across arches; this is bit-identical everywhere and
+                // matches the scalar tail's `rsqrt_stable_scalar`. Clamp to
+                // [1.0, ∞) so non-edge lanes (mask=0) stay finite.
                 let grad_sq_v = f32x8::load(token, &grad_sq_arr);
                 let mask_v = f32x8::load(token, &mask_arr);
                 let one_v = f32x8::splat(token, 1.0);
                 let safe_grad_sq = grad_sq_v.max(one_v);
-                let inv_sqrt = safe_grad_sq.rsqrt_approx();
+                let inv_sqrt = rsqrt_stable!(f32x8, token, safe_grad_sq);
                 let g_mag_v = grad_sq_v * inv_sqrt * mask_v;
                 let g_sq_masked_v = grad_sq_v * mask_v;
                 edge_grad_sum += g_mag_v.reduce_add() as f64;
@@ -1557,7 +1561,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             if FULL {
                 let mask = crossed as u32 as f32;
                 edge_grad_count += crossed as u64;
-                let g_mag = grad_sq.sqrt();
+                // `rsqrt_stable_scalar` (not exact `sqrt`) so the tail's edge
+                // pixels match the SIMD body's magnitude bit-for-bit — no
+                // SIMD-vs-tail seam.
+                let g_mag = grad_sq * rsqrt_stable_scalar(grad_sq);
                 edge_grad_sum += (g_mag * mask) as f64;
                 edge_grad_sq_sum += (grad_sq * mask) as f64;
                 if has_next {

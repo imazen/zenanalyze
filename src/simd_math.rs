@@ -44,6 +44,17 @@ macro_rules! rsqrt_stable {
         y1 * (onehalf - half * x * y1 * y1)
     }};
 }
+pub(crate) use rsqrt_stable;
+
+/// Scalar counterpart of [`rsqrt_stable!`], **bit-identical** to one SIMD lane
+/// (same f32 ops, same order) — so a kernel's SIMD body and its scalar tail agree
+/// exactly. Same Quake seed + 2 Newton steps, explicit `*`/`-` (no `mul_add`).
+#[inline]
+pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
+    let y0 = f32::from_bits(0x5f37_59df - (x.to_bits() >> 1));
+    let y1 = y0 * (1.5 - 0.5 * x * y0 * y0);
+    y1 * (1.5 - 0.5 * x * y1 * y1)
+}
 
 /// Compute the gradient magnitude `√x` four ways per input, so a test can measure
 /// each method's cross-platform spread. `x` is `grad_sq` (the edge kernel's
