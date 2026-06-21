@@ -167,7 +167,12 @@ jobs:
           CROSS_RUNTIME: "1"
         # Skip the reference-platform value tripwire on cross targets (i686 x87 /
         # aarch64 NEON diverge per SIMD tier) — see the Test job + golden-reference.
-        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip golden_is_stable
+        # Also skip the log2 determinism assert: i686 has no hardware FMA, so
+        # magetypes' mul_add takes the software fmaf fallback, which doesn't match
+        # hardware-FMA platforms bit-for-bit (rsqrt_stable, being mul_add-free, stays
+        # identical and is NOT skipped). The FMA-platform determinism is asserted by
+        # the Test matrix + rsqrt-probe job. The perf test still runs.
+        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip golden_is_stable --skip log2_lowp_midp_determinism_and_accuracy
       # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
       # because Model::from_bytes does u32 / usize arithmetic that wraps
       # on 32-bit; checked_mul guards exist but live-fire tests confirm.

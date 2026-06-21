@@ -9,12 +9,18 @@ it feeds a serialized feature. Driven by the rsqrt determinism finding
 
 A SIMD math primitive is cross-platform deterministic **iff** it avoids hardware
 *approximation* instructions (`rsqrt_approx`, `rcp_approx`) and uses only
-integer ops + IEEE-correctly-rounded f32 operations. **`mul_add` is fine** — it is
-the IEEE correctly-rounded fused-multiply-add (magetypes lowers it to hardware FMA
-where present, else a correctly-rounded `fmaf` fallback), so it yields the unique
-correctly-rounded result on every arch. (My first pass wrongly flagged `mul_add`;
+integer ops + IEEE-correctly-rounded f32 operations. **`mul_add` is fine on
+FMA-capable arches** — it is the IEEE correctly-rounded fused-multiply-add, so
+hardware-FMA platforms (x86-64, AArch64/Apple/Windows-ARM) all yield the unique
+correctly-rounded result. (My first pass wrongly flagged `mul_add` as the cause;
 the magetypes `rsqrt` divergence is its hardware `rsqrt_approx` **seed**, not the
-Newton `mul_add`.) Consequences for the options:
+Newton `mul_add`.) **One exception, CI-measured: i686** — 32-bit x86 has no
+hardware FMA, so magetypes' `mul_add` takes the software `fmaf` fallback, which
+does *not* match the hardware-FMA result bit-for-bit (`log2_lowp` hashed
+`8af3fc30…` on i686 vs `67c2346b…` on every FMA platform). So `mul_add`-based
+primitives are deterministic across FMA arches but i686 is a reference-scope
+outlier (already so for `golden_is_stable`). `rsqrt_stable` (mul_add-**free**,
+explicit mul/sub) is identical even on i686 — the most portable. Consequences:
 
 | approach | speed | accurate | cross-platform deterministic? |
 |---|---|---|---|

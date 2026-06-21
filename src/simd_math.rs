@@ -208,8 +208,12 @@ mod tests {
 
     /// Measures magetypes `log2_lowp` / `log2_midp` cross-platform determinism +
     /// accuracy. Both are bit-ops + a `mul_add` polynomial (no hardware approx), so
-    /// the prediction is they're byte-identical on every arch — asserted against the
-    /// x86-blessed hash; the `LOGPROBE` line surfaces the hashes + accuracy in CI.
+    /// they're byte-identical on every **FMA-capable** arch — CI-confirmed on x86-64,
+    /// macOS-ARM, and Windows-ARM, asserted here against the x86-blessed hash. The
+    /// one exception is **i686** (no hardware FMA → magetypes' `mul_add` uses the
+    /// software `fmaf` fallback, which doesn't match hardware FMA bit-for-bit), so
+    /// the CI cross job `--skip`s this assert there; `rsqrt_stable` (mul_add-free)
+    /// stays identical even on i686. The `LOGPROBE` line surfaces the hashes in CI.
     #[test]
     fn log2_lowp_midp_determinism_and_accuracy() {
         const LOWP_GOLDEN_HASH: u64 = 0x67c2_346b_644a_0119;
