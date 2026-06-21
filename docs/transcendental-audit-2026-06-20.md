@@ -73,7 +73,7 @@ Hot sites that currently use scalar `libm`:
 
 | site | quantity | loop | plan |
 |---|---|---|---|
-| `tier3.rs:1264` `mag.ln()` | spectral-slope log\|F\| | per AC coefficient (~20–40/block) | SIMD `ln_midp` over a block's coeffs, then scalar bin-scatter |
+| ~~`tier3.rs:1264` `mag.ln()`~~ **DONE** | spectral-slope log\|F\| | per AC coefficient | **product-then-ln** — accumulate the f64 product per bin, one `ln` per bin (5/block vs ~30). Measured 2.2× (vs 1.73× for SIMD `ln_midp`), more accurate (f64), **within tolerance so no re-bless**. Beat the SIMD approach — see the `spectral_ln_binning_perf` probe. |
 | `tier3.rs:643` `p*p.log2()` | entropy | per bin (~256, once/image) | low value (once/image); `log2_midp` over the bin array if convenient |
 | `tier_depth.rs:136` `(1+nits).log2()` | HDR histogram bin | per sampled pixel | batch the depth scan → `log2_midp` |
 | `tier_depth.rs:157` `signal.powf(2.2)` | Gamma-2.2 EOTF | per sampled pixel | `pow_midp` (or a 256-LUT if input is u8) |

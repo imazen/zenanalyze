@@ -124,6 +124,21 @@ pub(crate) fn log2_midp_into(token: Token, x: &[f32], out: &mut [f32]) {
     }
 }
 
+/// `out[i] = ln_midp(x[i])` (magetypes mid-precision SIMD natural log). Deterministic
+/// on FMA arches (bit-ops + `mul_add` poly); ~11× faster than scalar `f32::ln`.
+/// Used for the spectral-slope `log|F|` accumulation. `x > 0`; lengths a multiple of 8.
+#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
+pub(crate) fn ln_midp_into(token: Token, x: &[f32], out: &mut [f32]) {
+    let chunks = x.len() / 8;
+    for c in 0..chunks {
+        let off = c * 8;
+        let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
+        let mut buf = [0.0f32; 8];
+        f32x8::load(token, arr).ln_midp().store(&mut buf);
+        out[off..off + 8].copy_from_slice(&buf);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +303,112 @@ mod tests {
             per(t_mid),
             per(t_scal),
             per(t_mid) / per(t_low).max(1e-9),
+        );
+        assert!(sink.is_finite());
+    }
+
+    /// The realistic spectral-slope-binning win: per 8×8 DCT block, accumulate
+    /// `log|F|` per radial bin the OLD way (scalar `f32::ln` per coefficient) vs the
+    /// NEW way (batch all 64 through SIMD `ln_midp`, then scalar bin-scatter).
+    /// Prints `SPECTRALPERF` ns/block + speedup. Interleaved + checksummed.
+    #[test]
+    fn spectral_ln_binning_perf() {
+        use std::time::Instant;
+        const NBLOCKS: usize = 512;
+        const FLOOR: f32 = 1.0;
+        // Synthetic DCT-like coefficient blocks, integer-derived (deterministic).
+        let blocks: Vec<[f32; 64]> = (0..NBLOCKS)
+            .map(|b| {
+                let mut blk = [0.0f32; 64];
+                for (i, v) in blk.iter_mut().enumerate() {
+                    *v = (((b * 64 + i) * 2_654_435 + 1) % 401) as f32 - 200.0;
+                }
+                blk
+            })
+            .collect();
+        // Radial bin per flattened index (idx = v*8 + u).
+        let mut binmap = [0usize; 64];
+        for (idx, b) in binmap.iter_mut().enumerate() {
+            let (u, v) = (idx % 8, idx / 8);
+            let rr = u * u + v * v;
+            *b = if rr < 4 {
+                0
+            } else if rr < 9 {
+                1
+            } else if rr < 21 {
+                2
+            } else if rr < 36 {
+                3
+            } else {
+                4
+            };
+        }
+
+        const ITERS: u32 = 200;
+        let (mut t_old, mut t_simd, mut t_prod) = (0u128, 0u128, 0u128);
+        let mut sink = 0.0f32;
+        for _ in 0..ITERS {
+            // OLD: scalar `f32::ln` per above-floor coefficient.
+            let a = Instant::now();
+            for blk in &blocks {
+                let mut binsum = [0.0f32; 5];
+                for (i, &c) in blk.iter().enumerate().skip(1) {
+                    let mag = c.abs();
+                    if mag >= FLOOR {
+                        binsum[binmap[i]] += mag.ln();
+                    }
+                }
+                sink += binsum[0] + binsum[4];
+            }
+            t_old += a.elapsed().as_nanos();
+
+            // SIMD: batch all 64 through ln_midp, then scatter.
+            let d = Instant::now();
+            for blk in &blocks {
+                let mut mags = [0.0f32; 64];
+                for (m, &c) in mags.iter_mut().zip(blk.iter()) {
+                    *m = c.abs().max(FLOOR);
+                }
+                let mut lns = [0.0f32; 64];
+                incant!(ln_midp_into(&mags, &mut lns));
+                let mut binsum = [0.0f32; 5];
+                for (i, &c) in blk.iter().enumerate().skip(1) {
+                    if c.abs() >= FLOOR {
+                        binsum[binmap[i]] += lns[i];
+                    }
+                }
+                sink += binsum[0] + binsum[4];
+            }
+            t_simd += d.elapsed().as_nanos();
+
+            // PRODUCT: accumulate the f64 product per bin (cheap multiplies), then
+            // ONE ln per bin — Σln(mag) = ln(Πmag). 5 lns/block instead of ~30.
+            let e = Instant::now();
+            for blk in &blocks {
+                let mut binprod = [1.0f64; 5];
+                for (i, &c) in blk.iter().enumerate().skip(1) {
+                    let mag = c.abs();
+                    if mag >= FLOOR {
+                        binprod[binmap[i]] *= mag as f64;
+                    }
+                }
+                let mut binsum = [0.0f32; 5];
+                for b in 0..5 {
+                    binsum[b] = binprod[b].ln() as f32;
+                }
+                sink += binsum[0] + binsum[4];
+            }
+            t_prod += e.elapsed().as_nanos();
+        }
+        let per = |t: u128| t as f64 / (ITERS as f64 * NBLOCKS as f64);
+        println!(
+            "SPECTRALPERF ns/block: scalar_ln={:.1} simd_ln_midp={:.1} product_then_ln={:.1}  \
+             (simd {:.2}x, product {:.2}x)  sink={sink}",
+            per(t_old),
+            per(t_simd),
+            per(t_prod),
+            per(t_old) / per(t_simd).max(1e-9),
+            per(t_old) / per(t_prod).max(1e-9),
         );
         assert!(sink.is_finite());
     }
