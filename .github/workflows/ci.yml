@@ -47,16 +47,21 @@ jobs:
       - name: Build
         run: cargo build --no-default-features --features "${{ matrix.features }}"
       - name: Test
-        # `golden_is_stable` is a *reference-platform* value tripwire: it
-        # re-extracts the corpus and bit-compares to a golden blessed on x86_64.
-        # SIMD-reduced statistical features sum lane-wise, so a different SIMD
-        # width diverges per tier — and a few cross a decision threshold (edge
-        # count, degeneracy guard) producing 0.0-vs-nonzero that no tolerance can
-        # bridge. So it runs in the dedicated `golden-reference` job (x86_64) and
-        # is skipped here. The *hash* is computed from committed text and IS
-        # platform-independent; the other versioning tests (variance lint, hash
-        # sensitivity, every-feature-has-hash) run on every platform below.
+        # `golden_is_stable` needs the full (experimental,hdr) feature set the
+        # golden was blessed with, so it's skipped in the generic per-feature-combo
+        # run here and exercised by the dedicated xplat step below.
         run: cargo test --no-default-features --features "${{ matrix.features }}" --lib -- --skip golden_is_stable
+      - name: Golden tolerance check (xplat — x86 blesses, every platform checks)
+        # ONE platform (x86_64, the golden-reference job) defines the golden values;
+        # EVERY platform re-extracts live and checks within the per-feature
+        # tolerance, so cross-platform divergence is bounded, not just measured on
+        # the reference. Structural-exempt features (covariances: a degeneracy guard
+        # that flips 0.0-vs-nonzero per SIMD tier — unbridgeable) are enforced only
+        # on the reference job and merely *reported* here. The printed per-platform
+        # spread is how the tolerances are sized empirically. Only meaningful under
+        # the full feature set the golden carries.
+        if: matrix.features == 'experimental,hdr'
+        run: cargo test --no-default-features --features "experimental,hdr" --lib versioning::tests::golden_is_stable -- --exact --nocapture
       # The `api` feature (the zenanalyze-api producer surface: OwnedOffer +
       # feature_set_provenance + the serialization-provenance sidecar) is not in
       # the matrix above, so cover it once on ubuntu — otherwise the api-gated
@@ -182,7 +187,9 @@ jobs:
         # hardware-FMA platforms bit-for-bit (rsqrt_stable, being mul_add-free, stays
         # identical and is NOT skipped). The FMA-platform determinism is asserted by
         # the Test matrix + rsqrt-probe job. The perf test still runs.
-        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip golden_is_stable --skip log2_lowp_midp_determinism_and_accuracy
+        # golden_is_stable now runs here too (xplat tolerance check vs the x86
+        # golden); only log2_…_determinism stays skipped on i686 (no hardware FMA).
+        run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip log2_lowp_midp_determinism_and_accuracy
       # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
       # because Model::from_bytes does u32 / usize arithmetic that wraps
       # on 32-bit; checked_mul guards exist but live-fire tests confirm.
@@ -240,7 +247,13 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Golden value-stability tripwire
+      - name: Golden value-stability tripwire (the reference — enforces structural-exempt features too)
+        # ZENANALYZE_GOLDEN_REFERENCE=1 marks this as the bless/reference platform,
+        # so the structural-exempt features (covariances) ARE enforced here against
+        # the golden they were blessed with — they're only exempted on the OTHER
+        # (portable/cross) platforms where their guard flips 0.0-vs-nonzero.
+        env:
+          ZENANALYZE_GOLDEN_REFERENCE: "1"
         run: cargo test --features "experimental,hdr" versioning::tests::golden_is_stable -- --exact --nocapture
 
   rsqrt-probe:
