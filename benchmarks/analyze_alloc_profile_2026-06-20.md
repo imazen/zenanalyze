@@ -58,6 +58,33 @@ content-hash tripwire (unchanged) + all 212 lib tests.
 | `__memset_avx2` | 45.3 M (10.7%) | 0.58 M (0.15%) | **−98.7%** |
 | heap allocs | 11,014 (3,671/call) | 115 (38/call) | **−99.0%** |
 
+### ⚠️ Wall-clock reality check — instruction count ≠ speedup
+
+The −11% is **instructions**, not wall-clock. A single-threaded A/B (this harness,
+`sweep` mode, pre-hoist commit `2329a9a7` vs post-hoist) found wall-clock
+**neutral** at every size that isn't tiny:
+
+| side | pre-hoist | post-hoist | verdict |
+|--:|--:|--:|---|
+| 64² | ~141 µs | ~135 µs | within run-to-run noise (135–145 µs) |
+| 1024² | 7.79–7.98 ms | 7.99–8.07 ms | **neutral** |
+| 2048² | 3.08–3.10 ns/px | 3.17–3.19 ns/px | **neutral** |
+
+The eliminated work — `vec![0.0; width]` (a glibc **tcache** malloc returning the
+same address every row) + a 4 KB `memset` — overlaps with the pass's memory
+stalls and isn't on the critical path at sizes where SIMD compute dominates. So
+this is an **instruction-count + allocation-count reduction, not a single-thread
+speedup**. It is still worth keeping: 3,671 → 38 allocs/call sharply cuts
+allocator pressure (relevant under *concurrent* per-image load, where global-
+allocator lock contention is a real cost a single-thread bench can't see), it's
+the correct shape (no per-row scratch), and it carries zero wall-clock
+regression. The concurrent benefit is **not measured here** — don't claim it as a
+number.
+
+**Lesson:** profile wall-clock before claiming a perf win. See the laplacian
+cautionary tale below for the inverse — a change that *looked* like a win in
+instructions and *regressed* wall-clock.
+
 ## New hotspot ranking (self %, post-hoist)
 
 All remaining cost is now genuine compute — the allocation waste is gone.
@@ -67,13 +94,35 @@ All remaining cost is now genuine compute — the allocation waste is gone.
 | `tier1::accumulate_row_simd_v3` | 27.1% | per-pixel variance/chroma/edge/skin stats | already AVX2/512; algorithmic only |
 | `palette::scan_and_count_gray_v3` | 11.7% | distinct-colour bin counting | candidate — full-image scan |
 | `tier3::dct_stats` | 9.9% | 8×8 DCT statistics | per-block FMA, near-optimal |
-| `tier1::accumulate_laplacian_simd_v3` | 6.8% | laplacian_variance | recomputes luma 3× per row (rolling-buffer opportunity) |
+| `tier1::accumulate_laplacian_simd_v3` | 6.8% | laplacian_variance | luma-precompute tried → regressed (below) |
 | `tier3::populate_tier3` | 3.4% | DCT orchestration | |
 | `tier2_chroma::process_row_group_simd_v3` | 3.2% | Cb/Cr 2nd-diff sharpness | |
 
-Next opportunities, in order: (1) palette gray-scan (12%, full-image), (2) the
-laplacian's 3×-redundant per-row luma recompute (the kernel re-derives luma for
-prev/cur/next every row, where `cur` of row *i* is `prev` of row *i+1*).
+These remaining hotspots are all **already-SIMD genuine compute**: tier1
+`accumulate_row` is AVX2/512 per-pixel work (algorithmic-only from here), the
+palette 12% is an inherent per-pixel `flags[idx]=1` scatter into a 32 KB
+presence table (no efficient SIMD scatter; the grayscale check is already folded
+into the same single pass), and tier3 `dct_stats` is per-block FMA. No cheap
+wall-clock lever remains; further gains need algorithm changes, not
+micro-optimization.
+
+## ⚠️ Cautionary tale — laplacian luma precompute (tried, reverted)
+
+The laplacian re-derives luma for prev/cur/next **every** call, and within a
+stripe `cur` of row *i* is `prev` of row *i+1* — so ~2/3 of the luma compute is
+redundant. Precomputing each stripe row's luma once and feeding the stencil
+precomputed slices **dropped the kernel's instruction count ~47%** (callgrind:
+6.8% → 3.6% self) and was bit-identical (golden unchanged, 212 tests pass).
+
+But wall-clock **regressed** (1 MP: 7.98 → 8.6–9.2 ms, +8–15%, consistent across
+sizes). The old per-call luma was **SIMD** (autovectorized inside the
+`#[magetypes]` `target_feature` region); the precompute moved it to a **scalar**
+strided (`stride 3`) loop in the non-`target_feature` driver, plus a 36 KB
+`stripe_luma` write per stripe. Fewer instructions, more cycles + memory
+traffic. **Reverted.** A genuine version would need the precompute itself
+SIMD-vectorized (deinterleave + dot-product magetypes kernel) to beat the
+in-kernel SIMD luma it replaces — deferred as not worth the complexity for a
+sub-2% target.
 
 ## Size sweep (wall-clock, `profile_analyze sweep`)
 
