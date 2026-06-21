@@ -786,6 +786,52 @@ mod tests {
         assert!(sink.is_finite());
     }
 
+    /// ns/pixel of the full HDR depth scan (PQ u16, 1MP) + the nits_to_bin log2's
+    /// share (scalar libm log2 vs a SIMD log2_midp stand-in over the same count).
+    /// Prints `HDRDEPTHPERF` — the data for "where to focus next".
+    #[test]
+    fn hdr_depth_scan_perf() {
+        use std::time::Instant;
+        let (w, h) = (1024usize, 1024usize);
+        let desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+        // Deterministic-ish u16 PQ content, varied so the scan walks (not uniform).
+        let mut buf = vec![0u8; w * h * 6];
+        for (i, px) in buf.chunks_exact_mut(2).enumerate() {
+            let v = ((i as u64 * 2_654_435 + 1) % 65536) as u16;
+            px.copy_from_slice(&v.to_le_bytes());
+        }
+        let s = PixelSlice::new(&buf, w as u32, h as u32, w * 6, desc).unwrap();
+        let npx = (w * h) as f64;
+        const ITERS: u32 = 30;
+        let mut t = 0u128;
+        let mut sink = 0.0f32;
+        for _ in 0..ITERS {
+            let a = Instant::now();
+            let d = scan_depth(&s, 500_000);
+            t += a.elapsed().as_nanos();
+            sink += d.peak_nits + d.p99_nits;
+        }
+        // Isolate the nits_to_bin libm log2 cost over the sampled count (~500k).
+        let sampled = 500_000u32.min((w * h) as u32);
+        let nits_vals: Vec<f32> = (0..sampled).map(|i| (i % 10000) as f32).collect();
+        let mut t_log = 0u128;
+        let mut bsink = 0usize;
+        for _ in 0..ITERS {
+            let a = Instant::now();
+            for &n in &nits_vals {
+                bsink += nits_to_bin(n);
+            }
+            t_log += a.elapsed().as_nanos();
+        }
+        println!(
+            "HDRDEPTHPERF 1MP PQ-u16: scan_total={:.2} ns/px | nits_to_bin_log2={:.2} ns/sampled-px (~{:.2} ns/px)  sink={sink} {bsink}",
+            t as f64 / (ITERS as f64 * npx),
+            t_log as f64 / (ITERS as f64 * sampled as f64),
+            t_log as f64 / (ITERS as f64 * npx),
+        );
+        assert!(sink.is_finite());
+    }
+
     /// The row-batched SIMD-slice EOTF scan must be size-independent: a large image
     /// (many rows of gather→slice) and a small one give the same peak for uniform
     /// content. Guards the gather/EOTF/scatter restructure against row-boundary or
