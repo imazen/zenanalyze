@@ -656,23 +656,25 @@ mod tests {
     /// Per-feature `f32` relative-tolerance overrides for the cancellation-prone
     /// reductions whose cross-platform spread exceeds the global [`REL_TOLERANCE`].
     /// Values are **measured** across the full CI matrix (x86 AVX-512/AVX2, i686,
-    /// aarch64/NEON, macOS, Windows-ARM) on commit 41c390f, then rounded up for
-    /// margin — the honest way to set these (per the project's tolerance rule), not
-    /// a guess. Bit-exact determinism (fixed reduction order / pinned `libm`) would
-    /// retire them. Keyed by `feat_<name>`.
+    /// aarch64/NEON, macOS, Windows-ARM) — printed by `golden_is_stable` on every
+    /// platform — then rounded up for margin, not guessed. Bit-exact determinism
+    /// (fixed reduction order) would retire them. Keyed by `feat_<name>`.
     ///
-    /// - `edge_slope_stdev` — `sqrt(E[g²] − E[g]²)` over SIMD-reduced edge-gradient
-    ///   magnitudes; the variance subtraction + per-tier approximate math give three
-    ///   distinct per-tier values (43.38 i686 / 43.42 AVX-512 / 43.67 AVX2 / 45.85
-    ///   NEON), a 5.3 % spread. Budget 10 %.
-    /// - `chroma_luma_covariance_{cb,cr}` — Pearson `(nΣXY − ΣXΣY)/√…`, which on the
-    ///   near-gray gradient case is ill-conditioned (Cb/Cr ≈ 0 → the numerator nearly
-    ///   cancels), swinging ~0.11 absolute on a value near −0.28 across tiers.
-    ///   Budget 20 %.
+    /// - `chroma_luma_covariance_{cb,cr}` — Pearson `(nΣXY − ΣXΣY)/√…`, ill-
+    ///   conditioned on the near-gray gradient case (Cb/Cr ≈ 0 → the numerator
+    ///   nearly cancels). ~11 % across x86 tiers (enforced on the x86 reference);
+    ///   on i686/NEON the degeneracy guard flips `0.0`-vs-nonzero, so these are
+    ///   also in [`XPLAT_STRUCTURAL_EXEMPT`] (enforced only on the reference).
+    ///   Budget 15 % (measured 11 % + margin).
+    ///
+    /// `edge_slope_stdev`'s former 10 % override is **retired**: it was sized for
+    /// the old hardware-`rsqrt_approx` edge magnitude (5.3 % per-arch). The kernel
+    /// is back on deterministic `rsqrt_stable` (commit be389a1) — the CI spread
+    /// report now shows it at ≈0 on every platform incl. i686, so it rides the
+    /// global tolerance.
     const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
-        ("feat_edge_slope_stdev", 1.0e-1),
-        ("feat_chroma_luma_covariance_cb", 2.0e-1),
-        ("feat_chroma_luma_covariance_cr", 2.0e-1),
+        ("feat_chroma_luma_covariance_cb", 1.5e-1),
+        ("feat_chroma_luma_covariance_cr", 1.5e-1),
     ];
 
     /// Features whose cross-tier divergence is **structural** — a per-tier value

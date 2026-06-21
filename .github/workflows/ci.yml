@@ -161,9 +161,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - i686-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - target: i686-unknown-linux-gnu
+            # Force SSE2 so f64 lives in 64-bit IEEE registers, not x87's 80-bit
+            # excess precision. x87 was the SOLE cause of the spectral_slope_y /
+            # patch_fraction cross-platform divergence (both are plain-f64 math —
+            # product-then-ln, a threshold count — with NO FMA, so this isn't an
+            # FMA issue). SSE2 is also the float model that matters for the i686
+            # target's reason-to-exist (WASM compat / pointer-width), where x87
+            # doesn't exist. `cross` passes RUSTFLAGS into the guest.
+            rustflags: "-C target-feature=+sse,+sse2"
+          - target: aarch64-unknown-linux-gnu
+            rustflags: ""
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
