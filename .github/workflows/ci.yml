@@ -247,4 +247,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: rsqrt + log2 method probe
-        run: cargo test --features hdr simd_math::tests:: -- --nocapture
+        run: cargo test --features hdr --lib simd_math -- --nocapture
