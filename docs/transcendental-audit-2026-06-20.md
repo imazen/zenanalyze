@@ -7,24 +7,42 @@ it feeds a serialized feature. Driven by the rsqrt determinism finding
 
 ## The determinism axis (the key constraint)
 
-A SIMD math primitive is cross-platform deterministic **iff** it uses only
-integer ops + IEEE-correctly-rounded f32 `*`/`-`/`sqrt` — i.e. **no hardware
-approximation instruction and no `mul_add` (FMA)**. FMA fuses to one rounding and
-is hardware-availability-dependent, so `a*b+c` and `fma(a,b,c)` differ and the
-backend picks differently per arch. Consequences for the options:
+A SIMD math primitive is cross-platform deterministic **iff** it avoids hardware
+*approximation* instructions (`rsqrt_approx`, `rcp_approx`) and uses only
+integer ops + IEEE-correctly-rounded f32 operations. **`mul_add` is fine** — it is
+the IEEE correctly-rounded fused-multiply-add (magetypes lowers it to hardware FMA
+where present, else a correctly-rounded `fmaf` fallback), so it yields the unique
+correctly-rounded result on every arch. (My first pass wrongly flagged `mul_add`;
+the magetypes `rsqrt` divergence is its hardware `rsqrt_approx` **seed**, not the
+Newton `mul_add`.) Consequences for the options:
 
-| approach | speed | cross-platform deterministic? |
-|---|---|---|
-| exact `sqrt()` (hardware, IEEE) | slow | ✅ (correctly-rounded is unique) |
-| hardware `rsqrt_approx` / `rsqrt` | fast | ❌ per-arch instruction/seed |
-| magetypes `*_lowp` (log2/exp2/pow) | fast | ❌ **uses `mul_add`** (FMA) |
-| **software poly, explicit `*`/`-`** | fast | ✅ |
-| scalar `libm` (`f32::ln`, `powf`, `cbrt`) | slow | ❌ libm differs per platform |
+| approach | speed | accurate | cross-platform deterministic? |
+|---|---|---|---|
+| exact `sqrt()` (hardware, IEEE) | slow | exact | ✅ |
+| hardware `rsqrt_approx` / `rsqrt` | fast | 8–14 bit | ❌ per-arch instruction/seed |
+| **magetypes `*_lowp`** (bit-ops + `mul_add` poly) | fast | ~2e-6 | ✅ (no hardware approx) |
+| **magetypes `*_midp`** | fast | ~1e-7 | ✅ |
+| software bit-trick + Newton (`rsqrt_stable`) | fast | ~5e-6 | ✅ |
+| scalar `libm` (`f32::ln`, `powf`, `cbrt`) | slow | exact-ish | ❌ libm differs per platform |
 
-So "use magetypes" gives speed but **not** determinism for the log/exp family
-(they're built on `mul_add`). A deterministic *and* fast log/exp needs a software
-polynomial evaluated with explicit mul/sub — which is what `../work/polyfit` is
-for (fit offline → bake `const` coefficients → SIMD Horner, no FMA).
+So `magetypes::*_lowp`/`*_midp` give speed **and** determinism for the log/exp
+family — they're bit-ops + a `mul_add` polynomial, no hardware approximation. No
+polyfit needed for log2/exp2/pow (magetypes covers them); polyfit remains the tool
+for functions magetypes lacks (e.g. `cbrt`, currently test-only).
+
+### Measured (x86-64 AVX-512, release, no `target-cpu=native`)
+
+| `log2` method | ns/elem | accuracy vs exact | deterministic |
+|---|--:|--:|---|
+| `log2_lowp` | 0.129 | 1.9e-6 | ✅ (CI-asserted) |
+| `log2_midp` | 0.203 | 1.1e-7 | ✅ (CI-asserted) |
+| scalar `f32::log2` (libm) | 2.293 | exact | ❌ |
+
+`midp` is only **1.58×** `lowp` but **~11×** faster than scalar libm, and near
+f32-exact (1.1e-7). **Recommendation: `midp`** for the log/exp conversions —
+near-exact + deterministic + 11× faster than libm; drop to `lowp` only on a
+profiled hot path that needs the extra 1.58×. Probes + asserts live in
+`src/simd_math.rs` (the `rsqrt-probe` CI job runs them across x86/ARM).
 
 ## sqrt / rsqrt — DONE
 
@@ -38,42 +56,26 @@ for (fit offline → bake `const` coefficients → SIMD Horner, no FMA).
 `rsqrt_stable!` lives in `src/simd_math.rs` with a CI `rsqrt-probe` job that
 measures the cross-platform spread and asserts determinism.
 
-## log / exp / pow — QUEUED (needs a determinism-vs-speed decision)
+## log / exp / pow — QUEUED (decided: magetypes `*_midp`)
 
-Hot sites that currently use scalar `libm` (slow + per-platform):
+Decision (user steer): convert the hot scalar-`libm` log/exp sites to magetypes
+SIMD `*_midp` — near-exact (1.1e-7), deterministic, and ~11× faster than libm
+(per the measurement above). Each changes the feature value (libm → midp) → a
+re-bless; allowed under the 0.2.x feature-drift contract.
 
-| site | quantity | loop | note |
+Hot sites that currently use scalar `libm`:
+
+| site | quantity | loop | plan |
 |---|---|---|---|
-| `tier3.rs:1264` `mag.ln()` | spectral-slope log\|F\| | per AC coefficient (~20–40/block) | hottest log; SIMD-vectorizable |
-| `tier3.rs:643` `p*p.log2()` | entropy | per histogram bin (~50–200) | LUT-able (256-entry) but quantizes → re-bless |
-| `tier_depth.rs:136` `(1+nits).log2()` | HDR histogram bin | per sampled pixel | LUT-able (~256–512) |
-| `tier_depth.rs:157` `signal.powf(2.2)` | Gamma-2.2 EOTF | per sampled pixel | 256-entry LUT if input is u8 |
+| `tier3.rs:1264` `mag.ln()` | spectral-slope log\|F\| | per AC coefficient (~20–40/block) | SIMD `ln_midp` over a block's coeffs, then scalar bin-scatter |
+| `tier3.rs:643` `p*p.log2()` | entropy | per bin (~256, once/image) | low value (once/image); `log2_midp` over the bin array if convenient |
+| `tier_depth.rs:136` `(1+nits).log2()` | HDR histogram bin | per sampled pixel | batch the depth scan → `log2_midp` |
+| `tier_depth.rs:157` `signal.powf(2.2)` | Gamma-2.2 EOTF | per sampled pixel | `pow_midp` (or a 256-LUT if input is u8) |
 
-Already optimal: `tier3.rs:1832` AQ log uses magetypes `log10_lowp` (deliberate
-fast SIMD path); all cold/post-reduction `log10`/`ln` (tier1:703, dimensions,
-tier_depth:571) run once per image.
+Already optimal: `tier3.rs:1832` AQ log uses magetypes `log10_lowp`; all
+cold/post-reduction `log10`/`ln` (tier1:703, dimensions, tier_depth:571) run once
+per image — leave as libm.
 
 `xyb_color_loss.rs` `cbrt`/`powf` are **test-only** reference math — the runtime
-path is LUT-based already, so no hot cbrt/powf to optimize there.
-
-### The decision
-
-These log/exp sites currently drift only 0.01–0.3 % across platforms (libm
-variance), within the 0.5 % global `REL_TOLERANCE`. Three ways forward, per the
-table above:
-
-1. **Leave as libm** — simplest; non-deterministic but within tolerance today.
-2. **magetypes `*_lowp`** — ~3–8× faster (SIMD), but `mul_add`-based → *adds*
-   cross-platform divergence (the thing we just removed from the edge kernel), and
-   ~1 % accuracy change → re-bless.
-3. **polyfit → deterministic SIMD Horner** — fit a minimax log2/exp2 over the
-   mantissa with `polyfit::CurveFit::new_weighted(|x| x.log2(), range, degree)`,
-   bake `const` coefficients, evaluate with explicit mul/sub. Fast **and**
-   deterministic. More work (per-function fit + range reduction + re-bless), and
-   the right call only if these features need cross-machine reuse precision tighter
-   than libm gives.
-
-Recommendation: option 3 for `tier3:1264` (the hottest, and a feature serialized
-for training reuse), option 1 for the cold ones, and option 3-or-LUT for the
-`tier_depth` HDR path. Pending a steer on how much cross-platform precision these
-specific features need.
+path is LUT-based already, so no hot cbrt/powf to optimize there. (If a hot `cbrt`
+ever appears, magetypes lacks it → fit one with `../work/polyfit`.)
