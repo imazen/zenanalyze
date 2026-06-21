@@ -370,6 +370,18 @@ pub(crate) fn extract_tier1_into_dispatch(
     let stripe_rows = STRIPE_H + 1;
     let mut stripe_buf = vec![0u8; stripe_rows * row_bytes];
 
+    // Laplacian luma scratch (prev / cur / next row), reused across every
+    // sampled interior row instead of re-allocated per row inside the SIMD
+    // kernel. DHAT attributed ~1,300 allocs / Mpx — a large share of the
+    // analyze-pass `memset` — to these three per-row `vec![0.0; w]`s. Only
+    // allocated when the laplacian pass actually runs (`SUPPORTED` requests
+    // it; lean orchestrator FeatureSets don't).
+    let (mut lap_prev, mut lap_cur, mut lap_next) = if dispatch.wants_laplacian {
+        (vec![0.0f32; w], vec![0.0f32; w], vec![0.0f32; w])
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
+
     let mut stats = PixelStats::default();
     let mut sampled_pixels: u64 = 0;
     let mut sampled_interior: u64 = 0;
@@ -463,7 +475,17 @@ pub(crate) fn extract_tier1_into_dispatch(
                 let prev_row = &stripe_buf[prev_off..prev_off + row_bytes];
                 let cur_row = &stripe_buf[cur_off..cur_off + row_bytes];
                 let nxt_row = &stripe_buf[nxt_off..nxt_off + row_bytes];
-                accumulate_laplacian_dispatch(prev_row, cur_row, nxt_row, w, &weights, &mut stats);
+                accumulate_laplacian_dispatch(
+                    prev_row,
+                    cur_row,
+                    nxt_row,
+                    w,
+                    &weights,
+                    &mut lap_prev,
+                    &mut lap_cur,
+                    &mut lap_next,
+                    &mut stats,
+                );
             }
 
             // SkinToneFraction + EdgeSlopeStdev were folded INTO
@@ -1624,7 +1646,7 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
 /// SIMD iter. The stencil reads from contiguous f32 arrays so the
 /// shifted-neighbour loads are aligned and pure mul/add — LLVM emits
 /// the FMA chain directly.
-#[allow(clippy::too_many_arguments)] // SIMD kernel — token + 3 row slices + dims + accumulators
+#[allow(clippy::too_many_arguments)] // SIMD kernel — token + 3 row slices + dims + scratch + accumulators
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn accumulate_laplacian_simd<const BT601: bool>(
     token: Token,
@@ -1635,6 +1657,13 @@ fn accumulate_laplacian_simd<const BT601: bool>(
     kr: f32,
     kg: f32,
     kb: f32,
+    // Caller-owned luma scratch (length ≥ `width`), reused across every
+    // sampled row so this hot kernel allocates nothing — see the hoist in
+    // `extract_tier1_into_dispatch`. All three are fully overwritten by the
+    // luma loop below before any read, so stale data never leaks between rows.
+    prev_l: &mut [f32],
+    cur_l: &mut [f32],
+    next_l: &mut [f32],
     histogram: &mut [u32; 256],
 ) -> (f64, f64, u64) {
     let (kr, kg, kb) = if BT601 {
@@ -1645,9 +1674,6 @@ fn accumulate_laplacian_simd<const BT601: bool>(
     if width < 3 {
         return (0.0, 0.0, 0);
     }
-    let mut prev_l = vec![0.0f32; width];
-    let mut cur_l = vec![0.0f32; width];
-    let mut next_l = vec![0.0f32; width];
     for x in 0..width {
         let off = x * 3;
         prev_l[x] = kr * prev_row[off] as f32
@@ -1726,12 +1752,16 @@ fn accumulate_laplacian_simd<const BT601: bool>(
     (lap_sum, lap_sq_sum, count)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn accumulate_laplacian_dispatch(
     prev_row: &[u8],
     cur_row: &[u8],
     next_row: &[u8],
     width: usize,
     weights: &crate::luma::LumaWeights,
+    prev_l: &mut [f32],
+    cur_l: &mut [f32],
+    next_l: &mut [f32],
     stats: &mut PixelStats,
 ) {
     let kr = weights.kr;
@@ -1746,6 +1776,9 @@ fn accumulate_laplacian_dispatch(
             kr,
             kg,
             kb,
+            prev_l,
+            cur_l,
+            next_l,
             &mut stats.laplacian_histogram
         ))
     } else {
@@ -1757,6 +1790,9 @@ fn accumulate_laplacian_dispatch(
             kr,
             kg,
             kb,
+            prev_l,
+            cur_l,
+            next_l,
             &mut stats.laplacian_histogram
         ))
     };

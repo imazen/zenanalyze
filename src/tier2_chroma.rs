@@ -136,6 +136,10 @@ fn image_sharpness_breakdown(
     let mut row1 = vec![0u8; row_bytes];
     let mut row2 = vec![0u8; row_bytes];
 
+    // Deinterleave scratch, allocated once and reused for every sampled
+    // row-group (see RowGroupScratch). Was nine `vec![0.0; len]`s per group.
+    let mut scratch = RowGroupScratch::with_width(width);
+
     stream.fetch_into(0, &mut row0);
     stream.fetch_into(1, &mut row1);
     stream.fetch_into(2, &mut row2);
@@ -160,7 +164,7 @@ fn image_sharpness_breakdown(
     // mean + p99 peak — both are scale-invariant.
     let mut y0: usize = 0;
     loop {
-        let group = process_row_group_dispatch(&row0, &row1, &row2, width);
+        let group = process_row_group_dispatch(&row0, &row1, &row2, width, &mut scratch);
         sumh.0 += group.sumh_cb;
         sumh.1 += group.sumh_cr;
         sumv.0 += group.sumv_cb;
@@ -282,14 +286,51 @@ struct RowGroupStats {
     max_diff_cr: u32,
 }
 
+/// Per-row YCbCr deinterleave scratch for [`process_row_group_simd`], owned by
+/// the driver loop and reused across every sampled row-group. Each field is
+/// fully overwritten by the deinterleave before any read, so reuse is identical
+/// to the old per-group `vec![0.0; len]`s — but it turns nine heap allocations
+/// *per row-group* into nine one-time allocations. DHAT attributed the largest
+/// share of the analyze-pass `memset` to these. Sized to the full row width;
+/// the kernel sub-slices to the exact `row0_len` / `row12_len` it needs.
+#[derive(Default)]
+struct RowGroupScratch {
+    y0: Vec<f32>,
+    cb0: Vec<f32>,
+    cr0: Vec<f32>,
+    y1: Vec<f32>,
+    cb1: Vec<f32>,
+    cr1: Vec<f32>,
+    y2: Vec<f32>,
+    cb2: Vec<f32>,
+    cr2: Vec<f32>,
+}
+
+impl RowGroupScratch {
+    fn with_width(width: usize) -> Self {
+        RowGroupScratch {
+            y0: vec![0.0f32; width],
+            cb0: vec![0.0f32; width],
+            cr0: vec![0.0f32; width],
+            y1: vec![0.0f32; width],
+            cb1: vec![0.0f32; width],
+            cr1: vec![0.0f32; width],
+            y2: vec![0.0f32; width],
+            cb2: vec![0.0f32; width],
+            cr2: vec![0.0f32; width],
+        }
+    }
+}
+
 /// Runtime-dispatched entry to the SIMD'd row-group kernel.
 fn process_row_group_dispatch(
     row0: &[u8],
     row1: &[u8],
     row2: &[u8],
     width: usize,
+    scratch: &mut RowGroupScratch,
 ) -> RowGroupStats {
-    incant!(process_row_group_simd(row0, row1, row2, width))
+    incant!(process_row_group_simd(row0, row1, row2, width, scratch))
 }
 
 /// Process one 3-row group: compute every horizontal triplet
@@ -308,6 +349,10 @@ fn process_row_group_simd(
     row1: &[u8],
     row2: &[u8],
     width: usize,
+    // Caller-owned deinterleave scratch (each field length ≥ `width`), reused
+    // across every row-group so this hot kernel allocates nothing. Sub-sliced
+    // to `row0_len` / `row12_len` below; fully overwritten before any read.
+    scratch: &mut RowGroupScratch,
 ) -> RowGroupStats {
     // Constants for the boost factor.
     let y_max_v = f32x8::splat(token, 9.0 * 255.0);
@@ -361,18 +406,19 @@ fn process_row_group_simd(
     // for a/b/c).
     //
     // Sized for the maximum chunk: chunks_x_8 + 2 trailing pixels for
-    // the c position. Reused across iters; no per-iter allocation.
+    // the c position. Reused across row-groups via the caller-owned
+    // `scratch`; no per-group allocation.
     let row0_len = chunks * 8 + 2;
     let row12_len = chunks * 8;
-    let mut y0 = vec![0.0f32; row0_len];
-    let mut cb0 = vec![0.0f32; row0_len];
-    let mut cr0 = vec![0.0f32; row0_len];
-    let mut y1 = vec![0.0f32; row12_len];
-    let mut cb1 = vec![0.0f32; row12_len];
-    let mut cr1 = vec![0.0f32; row12_len];
-    let mut y2 = vec![0.0f32; row12_len];
-    let mut cb2 = vec![0.0f32; row12_len];
-    let mut cr2 = vec![0.0f32; row12_len];
+    let y0 = &mut scratch.y0[..row0_len];
+    let cb0 = &mut scratch.cb0[..row0_len];
+    let cr0 = &mut scratch.cr0[..row0_len];
+    let y1 = &mut scratch.y1[..row12_len];
+    let cb1 = &mut scratch.cb1[..row12_len];
+    let cr1 = &mut scratch.cr1[..row12_len];
+    let y2 = &mut scratch.y2[..row12_len];
+    let cb2 = &mut scratch.cb2[..row12_len];
+    let cr2 = &mut scratch.cr2[..row12_len];
 
     // Bulk-deinterleave row0 (chunks*8 + 2 pixels). Simple per-pixel
     // scalar — LLVM autovectorizes well under the per-tier
