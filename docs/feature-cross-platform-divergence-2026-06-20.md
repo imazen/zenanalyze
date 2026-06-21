@@ -176,3 +176,42 @@ floor, but is left at 10 % for safety until a follow-up re-measures the post-fix
 cross-platform spread (the f32 `reduce_add` lane-order residual, ~0.4 %, remains).
 The two `chroma_luma_covariance_*` outliers are pure Pearson cancellation (exact
 sqrt already), a separate item.
+
+## Update 2026-06-21 — one platform blesses, EVERY platform checks (+ tolerances shrunk from CI)
+
+The x86-only scoping was replaced. `golden_is_stable` now runs on the portable
+(macOS / Windows-ARM) **and** cross (i686 / aarch64) matrices too; the x86-64
+`golden-reference` job (`ZENANALYZE_GOLDEN_REFERENCE=1`) blesses the values, and
+every other platform re-extracts live and checks within the per-feature tolerance —
+so cross-platform divergence is now *bounded*, not merely measured on the reference.
+The test prints each platform's spread (max rel-dev vs the x86 golden); those CI
+logs sized the tolerances below.
+
+**Measured spread on the actual CI matrix (2026-06-21), worst platform per feature:**
+
+| feature | worst | platform | handling |
+|---|--:|---|---|
+| `chroma_luma_covariance_{cb,cr}` | 26.6 % | i686 | `XPLAT_STRUCTURAL_EXEMPT` (guard flips per tier); enforced on x86 ref at 15 % |
+| `spectral_slope_y` | 7.23 % | **i686 only** | `I686_X87_EXEMPT`; tight (0.5 %) on every 64-bit platform |
+| `patch_fraction` | 6.25 % | **i686 only** | `I686_X87_EXEMPT`; tight on every 64-bit platform |
+| `dct_compressibility_y` | 0.067 % | i686 | global 0.5 % |
+| `aq_map_std` / `quant_survival_y` / `variance` / … | ≤ 0.041 % | i686 | global 0.5 % |
+| `edge_slope_stdev` | **≈ 0 %** | — | **override retired** (deterministic after the `rsqrt_stable` revert) |
+
+**Tolerances now:** global `REL_TOLERANCE` 0.5 %; one override
+(`chroma_luma_covariance_*` 15 %, was 20 %); `edge_slope_stdev`'s 10 % override
+**retired**.
+
+**Two things no float tolerance can bound** (exempt, not fixed):
+- **covariances** — the Pearson degeneracy guard returns `0.0`-vs-nonzero across
+  SIMD tiers on i686/NEON. Exempt on non-reference platforms.
+- **`spectral_slope_y` / `patch_fraction` on i686 only** — x87 80-bit excess
+  precision in *precompiled `std`/libm* (`.ln()`, a DCT-energy threshold count).
+  `+sse2` was tried and reverted: byte-identical spread, because `cross` doesn't
+  rebuild `std` (would need `-Z build-std`). These pass on every 64-bit platform
+  incl. aarch64/NEON, so they're tight there; i686 stands in for WASM, whose float
+  model is SSE2-like (no x87) — the x87 divergence is unrepresentative.
+
+**Remaining follow-up** to make *all* tolerances xplat-enforced: fixed-order f64
+reduction (so the covariance guard stops flipping per tier) and either `build-std`
++sse2 for i686 or accepting the x87 stand-in gap.
