@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-06-22 (features)** by [`imazen26_train_corpus_2026-06-22.pointer.md`](imazen26_train_corpus_2026-06-22.pointer.md) — features re-extracted on current `main` (6cb86df9); renders byte-identical (kept). Kept for history.
+
 # imazen-26 SDR training corpus — rendered renditions + features (2026-06-14)
 
 The budget-selected variants (`imazen26_budget_select_2026-06-14.md`, 1.5 GP
