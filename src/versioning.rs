@@ -655,45 +655,32 @@ mod tests {
             .collect()
     }
 
-    /// Per-feature `f32` relative-tolerance overrides for the cancellation-prone
-    /// reductions whose cross-platform spread exceeds the global [`REL_TOLERANCE`].
-    /// Values are **measured** across the full CI matrix (x86 AVX-512/AVX2, i686,
-    /// aarch64/NEON, macOS, Windows-ARM) — printed by `golden_is_stable` on every
-    /// platform — then rounded up for margin, not guessed. Bit-exact determinism
-    /// (fixed reduction order) would retire them. Keyed by `feat_<name>`.
+    /// Per-feature `f32` relative-tolerance overrides that apply on **every**
+    /// platform (the i686-only relaxations live in [`I686_TOLERANCE_OVERRIDES`]).
     ///
-    /// - `chroma_luma_covariance_{cb,cr}` — Pearson `(nΣXY − ΣXΣY)/√…`, ill-
-    ///   conditioned on the near-gray gradient case (Cb/Cr ≈ 0 → the numerator
-    ///   nearly cancels). ~11 % across x86 tiers (enforced on the x86 reference);
-    ///   on i686/NEON the degeneracy guard flips `0.0`-vs-nonzero, so these are
-    ///   also in [`XPLAT_STRUCTURAL_EXEMPT`] (enforced only on the reference).
-    ///   Budget 15 % (measured 11 % + margin).
-    ///
-    /// `edge_slope_stdev`'s former 10 % override is **retired**: it was sized for
-    /// the old hardware-`rsqrt_approx` edge magnitude (5.3 % per-arch). The kernel
-    /// is back on deterministic `rsqrt_stable` (commit be389a1) — the CI spread
-    /// report now shows it at ≈0 on every platform incl. i686, so it rides the
-    /// global tolerance.
-    const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
-        ("feat_chroma_luma_covariance_cb", 1.5e-1),
-        ("feat_chroma_luma_covariance_cr", 1.5e-1),
-    ];
+    /// **Currently empty** — and that's the win. Both former occupants are retired:
+    /// `edge_slope_stdev` (was 10 %, for the old hardware-`rsqrt_approx` 5.3 %
+    /// per-arch spread) is deterministic again on `rsqrt_stable`; and the
+    /// `chroma_luma_covariance_{cb,cr}` (was 15 %) are now deterministic on every
+    /// 64-bit platform via the fixed-order f64 reduction (`fixed_reduce8`), so they
+    /// ride the tight global tolerance on 64-bit and only carry a relaxed *i686*
+    /// budget for x87. Nothing needs an all-platform override anymore.
+    const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
 
-    /// Features whose cross-tier divergence is **structural** — a per-tier value
-    /// crosses a decision threshold (e.g. the Pearson degeneracy guard, or an edge
-    /// count) so the two paths produce `0.0`-vs-nonzero, which **no float tolerance
-    /// can bridge**. The golden values are blessed on the x86-64 reference; these
-    /// features' tolerance is asserted only there (where the build is the same tier
-    /// that blessed). On every other platform their per-feature deviation is
-    /// *reported but not enforced* — so the spread stays visible in CI logs without
-    /// a false failure. Every OTHER feature's tolerance IS enforced on every
-    /// platform. Fixing the determinism (fixed-order f64 reduction so the guards
-    /// stop flipping) would let these rejoin the cross-platform set and is the
-    /// right long-term fix — tracked in the divergence doc.
-    const XPLAT_STRUCTURAL_EXEMPT: &[&str] = &[
-        "feat_chroma_luma_covariance_cb",
-        "feat_chroma_luma_covariance_cr",
-    ];
+    /// Features asserted ONLY on the x86-64 reference (reported-not-enforced
+    /// elsewhere) because a per-tier value crosses a decision threshold producing
+    /// `0.0`-vs-nonzero that no float tolerance can bridge.
+    ///
+    /// **Currently empty.** The chroma–luma covariances used to live here (their
+    /// Pearson degeneracy guard flipped per SIMD tier), but the fixed-order f64
+    /// reduction (`simd_math::fixed_reduce8`) made their inputs bit-identical across
+    /// SIMD tiers, so the guard no longer flips and they're enforced on every
+    /// 64-bit platform — only i686's x87 *scalar* finalization still diverges, and
+    /// that's handled by a relaxed [`I686_TOLERANCE_OVERRIDES`] budget, not an
+    /// exemption. The mechanism (and the `golden-reference` job's
+    /// `ZENANALYZE_GOLDEN_REFERENCE`) stays in place for any future structural
+    /// feature.
+    const XPLAT_STRUCTURAL_EXEMPT: &[&str] = &[];
 
     /// Features that diverge **only on 32-bit x86 (i686)** — beyond the global
     /// tolerance — from x87 80-bit excess precision in precompiled `std`/`libm`
@@ -713,6 +700,13 @@ mod tests {
     const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
         ("feat_spectral_slope_y", 1.0e-1),
         ("feat_patch_fraction", 1.0e-1),
+        // The covariances are now deterministic on every 64-bit platform
+        // (fixed_reduce8 made their SIMD-reduced inputs bit-identical across tiers),
+        // but i686's x87 80-bit *scalar* finalization (`n·ΣXY − ΣX·ΣY`, the sqrt,
+        // the divide at tier1.rs:~770) still swings the ill-conditioned near-gray
+        // Pearson value ~26 %. Relaxed-but-finite here; tight (global) elsewhere.
+        ("feat_chroma_luma_covariance_cb", 3.0e-1),
+        ("feat_chroma_luma_covariance_cr", 3.0e-1),
     ];
     #[cfg(not(target_arch = "x86"))]
     const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];

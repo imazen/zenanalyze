@@ -18,7 +18,7 @@ use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use archmage::{incant, magetypes};
 
-use crate::simd_math::{rsqrt_stable, rsqrt_stable_scalar};
+use crate::simd_math::{fixed_reduce8, rsqrt_stable, rsqrt_stable_scalar};
 
 // ---------------------------------------------------------------------------
 // Tier-aware RGB24 chunk-8 deinterleave dispatch
@@ -1329,23 +1329,23 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
 
         iters_since_flush += 1;
         if iters_since_flush >= FLUSH {
-            cb_sum += cb_sum_v.reduce_add() as f64;
-            cb_sq_sum += cb_sq_v.reduce_add() as f64;
-            cr_sum += cr_sum_v.reduce_add() as f64;
-            cr_sq_sum += cr_sq_v.reduce_add() as f64;
+            cb_sum += fixed_reduce8(cb_sum_v.to_array());
+            cb_sq_sum += fixed_reduce8(cb_sq_v.to_array());
+            cr_sum += fixed_reduce8(cr_sum_v.to_array());
+            cr_sq_sum += fixed_reduce8(cr_sq_v.to_array());
             cb_sum_v = f32x8::zero(token);
             cb_sq_v = f32x8::zero(token);
             cr_sum_v = f32x8::zero(token);
             cr_sq_v = f32x8::zero(token);
             if FULL {
-                luma_sum += luma_sum_v.reduce_add() as f64;
-                luma_sq_sum += luma_sq_v.reduce_add() as f64;
-                rg_sum += rg_sum_v.reduce_add() as f64;
-                rg_sq_sum += rg_sq_v.reduce_add() as f64;
-                yb_sum += yb_sum_v.reduce_add() as f64;
-                yb_sq_sum += yb_sq_v.reduce_add() as f64;
-                y_cb_sum += y_cb_sum_v.reduce_add() as f64;
-                y_cr_sum += y_cr_sum_v.reduce_add() as f64;
+                luma_sum += fixed_reduce8(luma_sum_v.to_array());
+                luma_sq_sum += fixed_reduce8(luma_sq_v.to_array());
+                rg_sum += fixed_reduce8(rg_sum_v.to_array());
+                rg_sq_sum += fixed_reduce8(rg_sq_v.to_array());
+                yb_sum += fixed_reduce8(yb_sum_v.to_array());
+                yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
+                y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
+                y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
                 luma_sum_v = f32x8::zero(token);
                 luma_sq_v = f32x8::zero(token);
                 rg_sum_v = f32x8::zero(token);
@@ -1362,20 +1362,22 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             iters_since_flush = 0;
         }
     }
-    // Final flush of SIMD partials.
-    cb_sum += cb_sum_v.reduce_add() as f64;
-    cb_sq_sum += cb_sq_v.reduce_add() as f64;
-    cr_sum += cr_sum_v.reduce_add() as f64;
-    cr_sq_sum += cr_sq_v.reduce_add() as f64;
+    // Final flush of SIMD partials. Fixed-order f64 reduction (see fixed_reduce8)
+    // so the cancellation-prone variance / Pearson-covariance finals are
+    // bit-identical across SIMD tiers, not just within one.
+    cb_sum += fixed_reduce8(cb_sum_v.to_array());
+    cb_sq_sum += fixed_reduce8(cb_sq_v.to_array());
+    cr_sum += fixed_reduce8(cr_sum_v.to_array());
+    cr_sq_sum += fixed_reduce8(cr_sq_v.to_array());
     if FULL {
-        luma_sum += luma_sum_v.reduce_add() as f64;
-        luma_sq_sum += luma_sq_v.reduce_add() as f64;
-        rg_sum += rg_sum_v.reduce_add() as f64;
-        rg_sq_sum += rg_sq_v.reduce_add() as f64;
-        yb_sum += yb_sum_v.reduce_add() as f64;
-        yb_sq_sum += yb_sq_v.reduce_add() as f64;
-        y_cb_sum += y_cb_sum_v.reduce_add() as f64;
-        y_cr_sum += y_cr_sum_v.reduce_add() as f64;
+        luma_sum += fixed_reduce8(luma_sum_v.to_array());
+        luma_sq_sum += fixed_reduce8(luma_sq_v.to_array());
+        rg_sum += fixed_reduce8(rg_sum_v.to_array());
+        rg_sq_sum += fixed_reduce8(rg_sq_v.to_array());
+        yb_sum += fixed_reduce8(yb_sum_v.to_array());
+        yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
+        y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
+        y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
     }
     if SKIN {
         skin_count += skin_count_v.reduce_add() as u64;

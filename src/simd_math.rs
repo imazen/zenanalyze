@@ -62,6 +62,28 @@ pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
     y1 * (1.5 - 0.5 * x * y1 * y1)
 }
 
+/// Deterministic horizontal sum of 8 SIMD lanes into f64 — widen each lane to f64
+/// (exact) and sum in fixed lane order `0..8`. Unlike a hardware `reduce_add()`,
+/// whose add-tree shape is arch-specific (hadd pairs / `vaddvq` / scalar), this is
+/// the **same f64 add order on every backend**, so flushing a lane accumulator
+/// through it makes cancellation-prone reductions (variance, the Pearson
+/// chroma–luma covariances) bit-identical across SIMD tiers. It runs once per
+/// flush (every `FLUSH` iters), not per element, so it adds no per-pixel cost.
+///
+/// (i686 still diverges here: its `f64` is x87 80-bit, a precision axis orthogonal
+/// to lane order, which only `-Z build-std`-with-sse2 or accepting it can address —
+/// see the i686-relaxed budgets in `versioning`.)
+#[inline]
+pub(crate) fn fixed_reduce8(lanes: [f32; 8]) -> f64 {
+    let mut s = 0.0f64;
+    let mut i = 0;
+    while i < 8 {
+        s += lanes[i] as f64;
+        i += 1;
+    }
+    s
+}
+
 /// `out[i] = rsqrt_stable(x[i])` — the deterministic bit-hack + 2-Newton path.
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 pub(crate) fn rsqrt_stable_into(token: Token, x: &[f32], out: &mut [f32]) {

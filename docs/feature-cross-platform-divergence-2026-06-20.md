@@ -215,3 +215,30 @@ logs sized the tolerances below.
 **Remaining follow-up** to make *all* tolerances xplat-enforced: fixed-order f64
 reduction (so the covariance guard stops flipping per tier) and either `build-std`
 +sse2 for i686 or accepting the x87 stand-in gap.
+
+## Update 2026-06-21 (later) — fixed-order f64 reduction retires the covariance exemption
+
+Done. The tier1 stats accumulators (`luma_sum` / `cb_sum` / `y_cb_sum` / … in the
+flush + final flush) now reduce via `simd_math::fixed_reduce8` — `to_array()` +
+sequential f64 lane sum — instead of the hardware `reduce_add()`, whose add-tree
+shape is arch-specific. The lane *count* was already fixed at 8 (`f32x8`), so this
+fixed lane *order* is the last piece: the covariances' Pearson inputs are now
+bit-identical across SIMD tiers, the degeneracy guard no longer flips, and the
+**covariances are deterministic on every 64-bit platform** → `XPLAT_STRUCTURAL_EXEMPT`
+is now **empty** (the mechanism stays for any future structural feature). Re-bless
+moved 4 features (`variance`, `chroma_complexity`, `chroma_luma_covariance_{cb,cr}`);
+well-conditioned sums round identically and didn't move.
+
+**Speed: no measurable cost** — `fixed_reduce8` runs once per 32-iter flush
+(amortized), not per pixel. A/B at 1 MP (3 runs each, this harness):
+fixed_reduce8 **8.04–8.36 ms** vs hardware `reduce_add` **8.10–8.26 ms** — within
+run-to-run noise.
+
+**Tolerance state now:** global 0.5 %; `F32_TOLERANCE_OVERRIDES` **empty** (both
+former entries retired — `edge_slope_stdev` via `rsqrt_stable`, the covariances via
+`fixed_reduce8`); `I686_TOLERANCE_OVERRIDES` carries the only relaxations
+(`spectral_slope_y` / `patch_fraction` 10 %, `chroma_luma_covariance_*` 30 %) — all
+i686-only x87, enforced tight on every 64-bit platform. The one remaining gap is
+i686's x87 *scalar* finalization (the covariance `n·ΣXY−ΣXΣY` / sqrt / divide and
+the spectral `.ln()`), which needs `build-std`+sse2 or pinned `libm` to close —
+everything else is now tight + xplat-enforced.
