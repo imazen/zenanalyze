@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-06-22** by [`imazen26_features_2026-06-22.pointer.md`](imazen26_features_2026-06-22.pointer.md) — re-extracted on the current `main` (build_commit 6cb86df9). Kept for history.
+
 # imazen-26 full-feature extraction (2026-06-13) — data pointer
 
 All 110 `main`-branch features (`experimental` + `hdr`) extracted over the

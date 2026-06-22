@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-06-22** by [`imazen26_hdr_2026-06-22.pointer.md`](imazen26_hdr_2026-06-22.pointer.md) — re-extracted on the current `main` (build_commit 6cb86df9). Kept for history.
+
 # imazen-26 HDR size grid — renditions + features (2026-06-14)
 
 The size-grid follow-on to `imazen26_hdr_2026-06-14` (native HDR). Bit-depth-
