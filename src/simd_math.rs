@@ -30,24 +30,22 @@
 use archmage::magetypes;
 
 /// Deterministic reciprocal square root `≈ 1/√x` (bit-identical across x86 /
-/// AVX-512 / NEON / i686 / wasm). `$vec` is the in-scope SIMD float type, `$token`
-/// the archmage token, `$x` a positive `$vec`. Quake seed
+/// AVX-512 / NEON / i686 / wasm). `$x` is a positive SIMD float vector; `$vec` /
+/// `$token` are kept for call-site compatibility but are now vestigial. Quake seed
 /// `0x5f3759df - (bits(x) >> 1)` + 2 Newton steps `y·(1.5 − 0.5·x·y²)`, explicit
-/// `*`/`-` only (no FMA). ~5e-4 relative — better than the ~8–14-bit hardware
-/// `rsqrt_approx`, and the *same* value on every architecture.
+/// `*`/`-` only (no FMA) — better than the ~8–14-bit hardware `rsqrt_approx`, and
+/// the *same* value on every architecture.
+///
+/// This now delegates to magetypes 0.9.27's portable reciprocal-sqrt:
+/// `rsqrt_approx_portable` is the same Quake seed + 1 Newton step, and the
+/// trailing `rsqrt_newton_portable` is the 2nd step — so it is **bit-for-bit
+/// identical** to the body this macro used to inline by hand (same seed, same
+/// `y·(1.5 − 0.5·x·y²)` non-FMA Newton, same order). The committed
+/// `STABLE_GOLDEN_HASH` in the tests below is the determinism guard that proves it.
 macro_rules! rsqrt_stable {
     ($vec:ident, $token:expr, $x:expr) => {{
         let x = $x;
-        // Magic-constant int vector = matching-width companion of `x`, obtained
-        // without naming i32xN: splat the float whose bits are the magic, reinterpret.
-        let magic = $vec::splat($token, f32::from_bits(0x5f37_59df)).bitcast_to_i32();
-        let y0 = (magic - x.bitcast_to_i32().shr_logical_const::<1>()).bitcast_to_f32();
-        let half = $vec::splat($token, 0.5);
-        let onehalf = $vec::splat($token, 1.5);
-        // Two Newton steps. (`mul_add` would be equally deterministic — it is the
-        // correctly-rounded fma — but explicit mul/sub keeps the bless stable.)
-        let y1 = y0 * (onehalf - half * x * y0 * y0);
-        y1 * (onehalf - half * x * y1 * y1)
+        x.rsqrt_approx_portable().rsqrt_newton_portable(x)
     }};
 }
 pub(crate) use rsqrt_stable;

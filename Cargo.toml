@@ -70,8 +70,8 @@ hdr = []
 zenanalyze-api = { version = "0.1.0", path = "zenanalyze-api", optional = true }
 zenpixels = { version = "0.2.14", default-features = false, features = ["imgref"] }
 zenpixels-convert = { version = "0.2.14", default-features = false }
-archmage = { version = "0.9.23", features = ["macros", "avx512", "testable_dispatch"] }
-magetypes = { version = "0.9.23", features = ["avx512"] }
+archmage = { version = "0.9.27", features = ["macros", "avx512", "testable_dispatch"] }
+magetypes = { version = "0.9.27", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,
 # `bgra_to_rgb`, etc.) via `archmage::incant!` — used by the
 # `RowStream::StripAlpha8` fast path. Measured ~7× speedup over the
