@@ -623,7 +623,24 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             wants_full_kernel: tier1_full_kernel,
             wants_skin: tier1_wants_skin,
         };
-        tier1::extract_tier1_into_dispatch(&mut raw, &mut stream, pixel_budget, t1_dispatch);
+        // Linear-light HDR-correct path reads the row stream as unclamped f32
+        // (super-white survives), so the tier-1 kernels see the full envelope;
+        // the default SDR path stays u8 (gamma display bytes, the fast path).
+        if run_linear_light {
+            tier1::extract_tier1_into_dispatch::<f32>(
+                &mut raw,
+                &mut stream,
+                pixel_budget,
+                t1_dispatch,
+            );
+        } else {
+            tier1::extract_tier1_into_dispatch::<u8>(
+                &mut raw,
+                &mut stream,
+                pixel_budget,
+                t1_dispatch,
+            );
+        }
         if T2 && width >= 3 && height >= 3 {
             tier2_chroma::populate_tier2(&mut raw, &mut stream, pixel_budget);
         }

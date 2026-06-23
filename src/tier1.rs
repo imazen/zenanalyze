@@ -122,7 +122,7 @@ use deinterleave_dispatch::DeinterleaveRgb24Chunk8;
 /// tuned `vpshufb` deinterleave (no SDR regression); `f32` is a plain gather of an
 /// already-linear row. `base` is an element index into `rows` either way (the row
 /// stride is `width * 3` elements for both).
-pub(crate) trait ChunkInput: Copy {
+pub(crate) trait ChunkInput: Copy + Default {
     /// Deinterleave one 8-pixel RGB chunk (`&[Self; 24]`) into 3 × `[f32; 8]` planes.
     fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
         chunk: &[Self; 24],
@@ -131,6 +131,9 @@ pub(crate) trait ChunkInput: Copy {
     /// Widen one channel value to f32 (u8 → `value as f32`; f32 → identity) for the
     /// scalar edge / chroma-gradient stencil.
     fn to_f32(self) -> f32;
+    /// Fetch one display-domain row from the stream into `dst` (u8 → `fetch_into`, the
+    /// SDR/gamma path; f32 → `fetch_f32_into`, the HDR-correct unclamped path).
+    fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [Self]);
 }
 
 impl ChunkInput for u8 {
@@ -144,6 +147,10 @@ impl ChunkInput for u8 {
     #[inline(always)]
     fn to_f32(self) -> f32 {
         self as f32
+    }
+    #[inline(always)]
+    fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [u8]) {
+        stream.fetch_into(y, dst);
     }
 }
 
@@ -166,6 +173,10 @@ impl ChunkInput for f32 {
     #[inline(always)]
     fn to_f32(self) -> f32 {
         self
+    }
+    #[inline(always)]
+    fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [f32]) {
+        stream.fetch_f32_into(y, dst);
     }
 }
 
@@ -367,8 +378,12 @@ impl Tier1Dispatch {
     }
 }
 
-pub fn extract_tier1_into(out: &mut RawAnalysis, stream: &mut RowStream<'_>, pixel_budget: usize) {
-    extract_tier1_into_dispatch(out, stream, pixel_budget, Tier1Dispatch::full());
+pub fn extract_tier1_into<R: ChunkInput>(
+    out: &mut RawAnalysis,
+    stream: &mut RowStream<'_>,
+    pixel_budget: usize,
+) {
+    extract_tier1_into_dispatch::<R>(out, stream, pixel_budget, Tier1Dispatch::full());
 }
 
 // `unused_assignments` / `unused_variables`: the smooth-soft-sum
@@ -377,7 +392,7 @@ pub fn extract_tier1_into(out: &mut RawAnalysis, stream: &mut RowStream<'_>, pix
 // computed unconditionally inside the SIMD/scalar inner loops to
 // keep the kernel signature stable across feature combinations.
 #[allow(unused_assignments, unused_variables)]
-pub(crate) fn extract_tier1_into_dispatch(
+pub(crate) fn extract_tier1_into_dispatch<R: ChunkInput>(
     out: &mut RawAnalysis,
     stream: &mut RowStream<'_>,
     pixel_budget: usize,
@@ -423,7 +438,7 @@ pub(crate) fn extract_tier1_into_dispatch(
     // stripe). Allocated once, reused across every active stripe.
     // 9 × max_width × 3 = ~108 kb at 4K width.
     let stripe_rows = STRIPE_H + 1;
-    let mut stripe_buf = vec![0u8; stripe_rows * row_bytes];
+    let mut stripe_buf = vec![R::default(); stripe_rows * row_bytes];
 
     // Laplacian luma scratch (prev / cur / next row), reused across every
     // sampled interior row instead of re-allocated per row inside the SIMD
@@ -478,7 +493,8 @@ pub(crate) fn extract_tier1_into_dispatch(
         // Pre-fetch 8 stripe rows + 1 lookahead row.
         let avail = lookahead_end - y_start;
         for i in 0..avail {
-            stream.fetch_into(
+            R::fetch_row(
+                stream,
                 (y_start + i) as u32,
                 &mut stripe_buf[i * row_bytes..(i + 1) * row_bytes],
             );
@@ -1073,13 +1089,13 @@ pub(crate) struct StripeBlockStats {
 /// SIMD'd block-stats kernel for one full 8-row stripe. Returns
 /// counts + variance min/max so the outer pipeline can compute the
 /// `variance_spread` heterogeneity feature for free (no extra pass).
-fn stripe_block_stats_dispatch(
-    stripe_rows: &[u8], // exactly rows * row_bytes bytes
+fn stripe_block_stats_dispatch<R: ChunkInput>(
+    stripe_rows: &[R], // exactly rows * row_bytes elements
     row_bytes: usize,
     blocks_x: usize,
     rows: usize, // stripe height (STRIPE_H for full stripes, < 8 for the tail)
 ) -> StripeBlockStats {
-    incant!(stripe_block_stats_simd(
+    incant!(stripe_block_stats_simd::<R>(
         stripe_rows,
         row_bytes,
         blocks_x,
@@ -1705,11 +1721,11 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
 /// the FMA chain directly.
 #[allow(clippy::too_many_arguments)] // SIMD kernel — token + 3 row slices + dims + scratch + accumulators
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-fn accumulate_laplacian_simd<const BT601: bool>(
+fn accumulate_laplacian_simd<const BT601: bool, R: ChunkInput>(
     token: Token,
-    prev_row: &[u8],
-    cur_row: &[u8],
-    next_row: &[u8],
+    prev_row: &[R],
+    cur_row: &[R],
+    next_row: &[R],
     width: usize,
     kr: f32,
     kg: f32,
@@ -1733,14 +1749,15 @@ fn accumulate_laplacian_simd<const BT601: bool>(
     }
     for x in 0..width {
         let off = x * 3;
-        prev_l[x] = kr * prev_row[off] as f32
-            + kg * prev_row[off + 1] as f32
-            + kb * prev_row[off + 2] as f32;
-        cur_l[x] =
-            kr * cur_row[off] as f32 + kg * cur_row[off + 1] as f32 + kb * cur_row[off + 2] as f32;
-        next_l[x] = kr * next_row[off] as f32
-            + kg * next_row[off + 1] as f32
-            + kb * next_row[off + 2] as f32;
+        prev_l[x] = kr * prev_row[off].to_f32()
+            + kg * prev_row[off + 1].to_f32()
+            + kb * prev_row[off + 2].to_f32();
+        cur_l[x] = kr * cur_row[off].to_f32()
+            + kg * cur_row[off + 1].to_f32()
+            + kb * cur_row[off + 2].to_f32();
+        next_l[x] = kr * next_row[off].to_f32()
+            + kg * next_row[off + 1].to_f32()
+            + kb * next_row[off + 2].to_f32();
     }
 
     // Stencil over interior columns 1..width-1. Process 8 pixels per
@@ -1810,10 +1827,10 @@ fn accumulate_laplacian_simd<const BT601: bool>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn accumulate_laplacian_dispatch(
-    prev_row: &[u8],
-    cur_row: &[u8],
-    next_row: &[u8],
+fn accumulate_laplacian_dispatch<R: ChunkInput>(
+    prev_row: &[R],
+    cur_row: &[R],
+    next_row: &[R],
     width: usize,
     weights: &crate::luma::LumaWeights,
     prev_l: &mut [f32],
@@ -1825,7 +1842,7 @@ fn accumulate_laplacian_dispatch(
     let kg = weights.kg;
     let kb = weights.kb;
     let (s, sq, n) = if weights.is_bt601_baseline() {
-        incant!(accumulate_laplacian_simd::<true>(
+        incant!(accumulate_laplacian_simd::<true, R>(
             prev_row,
             cur_row,
             next_row,
@@ -1839,7 +1856,7 @@ fn accumulate_laplacian_dispatch(
             &mut stats.laplacian_histogram
         ))
     } else {
-        incant!(accumulate_laplacian_simd::<false>(
+        incant!(accumulate_laplacian_simd::<false, R>(
             prev_row,
             cur_row,
             next_row,

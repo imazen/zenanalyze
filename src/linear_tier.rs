@@ -232,3 +232,54 @@ fn fetch_f32_preserves_superwhite_where_u8_clips() {
     );
     assert_eq!(u8row[0], 255, "u8 fetch must clamp super-white to 255");
 }
+
+/// End-to-end HDR-correct proof: the f32 tier-1 path SEES super-white. A PQ image
+/// split between diffuse-white and 3× diffuse-white highlights has large
+/// linear-light Variance, where the old RGB8-clamp path collapsed both to 255 → ~0.
+#[test]
+fn linear_light_variance_sees_superwhite_highlights() {
+    use linear_srgb::tf::linear_to_pq;
+    use zenpixels::TransferFunction;
+
+    let (w, h) = (64u32, 64u32);
+    // PQ16 image: left half at `lo` nits, right half at `hi` nits (gray, R=G=B).
+    let mk_pq = |lo_nits: f32, hi_nits: f32| -> Vec<u8> {
+        let q = |nits: f32| (linear_to_pq(nits / 10000.0).clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+        let (pl, ph) = (q(lo_nits), q(hi_nits));
+        let mut buf = Vec::with_capacity((w * h * 6) as usize);
+        for _y in 0..h {
+            for x in 0..w {
+                let v = if x < w / 2 { pl } else { ph };
+                for _c in 0..3 {
+                    buf.extend_from_slice(&v.to_ne_bytes());
+                }
+            }
+        }
+        buf
+    };
+    let desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+    let lin_var = |buf: &[u8]| -> f32 {
+        let q =
+            AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance)).with_linear_light(true);
+        analyze_features(
+            PixelSlice::new(buf, w, h, (w * 6) as usize, desc).unwrap(),
+            &q,
+        )
+        .unwrap()
+        .get_f32(AnalysisFeature::Variance)
+        .unwrap()
+    };
+    // Uniform diffuse-white (203 nits) — control: ~0 variance either way.
+    let var_flat = lin_var(&mk_pq(203.0, 203.0));
+    assert!(
+        var_flat < 1.0,
+        "uniform diffuse-white ~0 variance, got {var_flat}"
+    );
+    // Diffuse-white vs 3× diffuse-white (609 nits) highlights — in u8 both clamp to
+    // 255 (≈0 var); the f32 path keeps the 609-nit half at ~765 → large variance.
+    let var_hi = lin_var(&mk_pq(203.0, 609.0));
+    assert!(
+        var_hi > 1000.0,
+        "super-white highlights must raise linear-light variance (f32 path, not clamped), got {var_hi}"
+    );
+}
