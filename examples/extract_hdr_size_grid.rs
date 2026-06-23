@@ -24,6 +24,7 @@
 
 use image::{ImageBuffer, ImageReader, Rgb};
 use linear_srgb::tf::{hlg_to_linear, linear_to_hlg, linear_to_pq, pq_to_linear};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::fmt::Write as _;
@@ -346,6 +347,23 @@ fn main() -> ExitCode {
         std::fs::create_dir_all(od).ok();
     }
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
+    // Qualified `name@hex8` headers under `--features api` (legacy bare `feat_<name>`
+    // without); the zentrain loaders accept either form.
+    #[cfg(feature = "api")]
+    let col_headers: Vec<String> = {
+        let qmap: HashMap<&str, String> = zenanalyze::versioning::feature_qualified_names()
+            .into_iter()
+            .collect();
+        cols.iter()
+            .map(|c| {
+                qmap.get(c.name())
+                    .cloned()
+                    .unwrap_or_else(|| format!("feat_{}", c.name()))
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "api"))]
+    let col_headers: Vec<String> = cols.iter().map(|c| format!("feat_{}", c.name())).collect();
     let n = files.len();
     let nthreads = args.threads.min(n.max(1));
     let chunk = n.div_ceil(nthreads).max(1);
@@ -389,8 +407,8 @@ fn main() -> ExitCode {
         "variant_name\tcontent_class\twidth\theight\tprimaries\ttransfer"
     )
     .ok();
-    for c in &cols {
-        write!(w, "\tfeat_{}", c.name()).ok();
+    for h in &col_headers {
+        write!(w, "\t{h}").ok();
     }
     writeln!(w).ok();
     let (mut tok, mut tfail) = (0usize, 0usize);

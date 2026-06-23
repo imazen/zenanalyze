@@ -208,6 +208,23 @@ fn main() -> ExitCode {
     };
     std::fs::create_dir_all(&args.out_dir).ok();
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
+    // Qualified `name@hex8` headers under `--features api` (legacy bare `feat_<name>`
+    // without); the zentrain loaders accept either form.
+    #[cfg(feature = "api")]
+    let col_headers: Vec<String> = {
+        let qmap: HashMap<&str, String> = zenanalyze::versioning::feature_qualified_names()
+            .into_iter()
+            .collect();
+        cols.iter()
+            .map(|c| {
+                qmap.get(c.name())
+                    .cloned()
+                    .unwrap_or_else(|| format!("feat_{}", c.name()))
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "api"))]
+    let col_headers: Vec<String> = cols.iter().map(|c| format!("feat_{}", c.name())).collect();
     let n = variants.len();
     let nthreads = args.threads.min(n.max(1));
     let chunk = n.div_ceil(nthreads).max(1);
@@ -254,8 +271,8 @@ fn main() -> ExitCode {
         .unwrap_or_else(|e| panic!("create {}: {e}", args.features_out.display()));
     let mut w = std::io::BufWriter::new(f);
     write!(w, "variant_name\tcontent_class\twidth\theight").ok();
-    for c in &cols {
-        write!(w, "\tfeat_{}", c.name()).ok();
+    for h in &col_headers {
+        write!(w, "\t{h}").ok();
     }
     writeln!(w).ok();
     let (mut tok, mut tfail) = (0usize, 0usize);

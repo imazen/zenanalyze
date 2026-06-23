@@ -279,6 +279,23 @@ fn main() -> ExitCode {
         }
     };
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
+    // Qualified `name@hex8` headers under `--features api` (legacy bare `feat_<name>`
+    // without); the zentrain loaders accept either form.
+    #[cfg(feature = "api")]
+    let col_headers: Vec<String> = {
+        let qmap: HashMap<&str, String> = zenanalyze::versioning::feature_qualified_names()
+            .into_iter()
+            .collect();
+        cols.iter()
+            .map(|c| {
+                qmap.get(c.name())
+                    .cloned()
+                    .unwrap_or_else(|| format!("feat_{}", c.name()))
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "api"))]
+    let col_headers: Vec<String> = cols.iter().map(|c| format!("feat_{}", c.name())).collect();
     eprintln!(
         "manifest {} images, {} features/row, sizes {:?}, fractions {:?}",
         manifest.len(),
@@ -301,8 +318,8 @@ fn main() -> ExitCode {
         "image_path\timage_sha\tsplit\tcontent_class\tsource\tcrop_label\tsize_class\twidth\theight"
     )
     .unwrap();
-    for c in &cols {
-        write!(w, "\tfeat_{}", c.name()).unwrap();
+    for h in &col_headers {
+        write!(w, "\t{h}").unwrap();
     }
     writeln!(w).unwrap();
 
