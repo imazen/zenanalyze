@@ -34,7 +34,7 @@ zenpixels = { version = "0.2.14", default-features = false }
 |---|---|---|---|
 | _(default)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | **97** | Numeric drift bounded by the threshold contract; signatures semver-governed |
 | `experimental` | Two still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss`, `XybBquarterChromaLoss`) plus the deprecated `PaletteDensity`. | +3 → 100 | Metric definition or scale may still change; opt in only if you re-validate per patch |
-| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals — 10 features, the depth tier (ids 32–39, 46, 47). | +10 → **110** | Off by default (SDR hot path skips the tier); definitions may change per patch |
+| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals + the clip-and-separate `highlight_*` descriptors — 16 features, the depth tier (ids 32–39, 46, 47, 212–217). | +16 → **116** | Off by default (SDR hot path skips the tier); definitions may change per patch |
 
 > **As of the 0.2.x line, `experimental` is narrow.** ~58 features that used to
 > sit behind it (the `AqMap*`, `NoiseFloor*`, `QuantSurvival*`,
@@ -302,8 +302,8 @@ unless noted):
 
 ### Source-direct HDR / wide-gamut / bit-depth tier (`hdr` feature)
 
-These 10 features are gated behind the `hdr` cargo feature (ids 32–39, 46, 47).
-They read source samples without going through `RowConverter`, since
+These 16 features are gated behind the `hdr` cargo feature (ids 32–39, 46, 47,
+212–217). They read source samples without going through `RowConverter`, since
 `RowConverter` doesn't tonemap — a 4000-nit PQ source and a 100-nit-clipped
 SDR source would otherwise produce byte-identical RGB8 streams.
 
@@ -315,6 +315,7 @@ SDR source would otherwise produce byte-identical RGB8 streams.
 | `GamutCoverageSrgb` / `GamutCoverageP3` | **Descriptor-gap signal** — if a Rec.2020 source's pixels all live in the sRGB sub-gamut, encode at sRGB primaries and save the wide-gamut metadata + encoder modes |
 | `EffectiveBitDepth` | AVIF / JXL `bit_depth`, png `near_lossless_bits` (catches u8-promoted u16) |
 | `HdrPresent` | Composite "transfer claims HDR AND pixels are actually bright" — catches stale HDR flags |
+| `HighlightLumaMean` / `_Std`, `HighlightChromaMean` / `_Std`, `HighlightEdgeCount`, `HighlightOrientationRatio` | **Clip-and-separate** — the bounded HDR signal a picker reads alongside `with_diffuse_white_clip` content features (recovers the highlight extension at R²≈0.95) |
 
 ### Still-settling (`experimental` feature)
 
@@ -400,6 +401,29 @@ ceiling instead of clipping to a flat plateau, so the content tiers measure
 the real envelope. The default gamma narrowing stays the zero-copy fast path
 for SDR-calibrated thresholds; reach for linear-light when the depth tier
 flags HDR and you want the content features to follow it into the highlights.
+
+**Clip-and-separate, for a downstream picker (`with_diffuse_white_clip`).**
+Letting the content features *extend* with super-white entangles the HDR signal
+into every feature — and an A/B measurement showed that's *provably lossy* for the
+high-frequency chroma-sharpness family (no regime scalar can reconstruct it) and
+forces a model to learn a feature×headroom surface from scarce HDR data. The
+better-conditioned representation: pair `with_linear_light(true)` with
+`with_diffuse_white_clip(true)` so the content tiers clamp at diffuse white and
+stay **SDR-invariant**, then read the HDR signal from six bounded, additive
+`highlight_*` depth descriptors (`highlight_luma_mean`/`_std`,
+`highlight_chroma_mean`/`_std`, `highlight_edge_count`,
+`highlight_orientation_ratio`) — which recover the extension at median R²≈0.95.
+A plain model then works without a learned per-regime modulation. Extend stays the
+default (zero migration); clip-and-separate is the opt-in picker-facing form.
+
+**Normalizing for a model (`recommended_transform`).** Each feature carries its
+structural pre-standardization transform via
+`AnalysisFeature::recommended_transform() -> TransformHint` (`as_str` matches the
+common `FEATURE_TRANSFORMS` vocabulary): dimensions → `log`, the heavy-tailed
+variance / laplacian / edge-slope family → `log1p`, chroma-luma covariances →
+`signed_cbrt`, everything else `identity`. Apply it before z-scoring so
+heavy-tailed features don't dominate the gradient; override per-corpus if your own
+ablation finds better.
 
 The `tier_depth` reference convention is stable across the 0.2.x line:
 

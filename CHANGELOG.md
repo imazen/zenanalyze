@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **HDR "clip-and-separate" feature representation + per-feature transform floor.**
+  An A/B worktree investigation (`benchmarks/sdr_hdr_gamut_consistency_2026-06-23.md`)
+  measured two ways to represent HDR features for a downstream picker:
+  *extend-and-condition* (content features extend with super-white; the model
+  conditions on the regime) vs *clip-and-separate* (content features clipped to
+  display-white stay SDR-invariant, the HDR signal living in separate descriptors).
+  Extend-and-condition is **provably lossy** for ~12 high-frequency
+  chroma-sharpness features (no regime *scalar* reconstructs them — identical
+  `hdr_pixel_fraction` with a different highlight pixel-set yields different
+  features); clip-and-separate disentangles cleanly (the descriptors recover the
+  extension at median R²≈0.95) and is robust to HDR data scarcity (76 sources), so
+  it is the better picker-facing representation — and it sidesteps the
+  learn-a-conditioning-from-scarce-data trap that falsified the content-class
+  FiLM metric. Three additive (0.2.x, non-breaking) capabilities:
+  - **`AnalysisQuery::with_diffuse_white_clip(true)`** (clip mode) — clamps the
+    linear-light content tiers at diffuse white (`min(1.0)` before the sRGB OETF)
+    so super-white highlights flatten and the content features stay SDR-invariant.
+    `+∞` no-op when off, so the un-clipped linear-light path is byte-identical
+    (golden unchanged); `config_hash` mixes the flag on deviation.
+  - **6 highlight descriptors** (depth tier, ids 212–217, `hdr` feature):
+    `highlight_luma_mean` / `_std`, `highlight_chroma_mean` / `_std`,
+    `highlight_edge_count`, `highlight_orientation_ratio` — the bounded, additive
+    HDR signal computed over the super-white mask (chroma + orientation are what
+    recover the chroma-sharpness family). Golden re-bless was **purely additive**
+    (golden 110→116 rows; the 110 existing rows byte-identical, so existing hashes
+    + qualified names are unchanged).
+  - **`AnalysisFeature::recommended_transform() -> TransformHint`** (+ `as_str`) —
+    the structural pre-standardization transform every per-codec bake converged on
+    (dimensions → `log`, the variance / laplacian / edge-slope family → `log1p`,
+    chroma-luma covariances → `signed_cbrt`), so a model fitter inherits a
+    principled default rather than leaving heavy-tailed features (which dominate
+    the z-scored gradient) as identity.
 - **HDR-native f32 tier kernels + sRGB-OETF linear-light re-encode.** On HDR
   (PQ/HLG) input the default analyzer narrows to gamma RGB8, which treats the PQ
   peak as display-white and crushes content toward black (the imazen-26 HDR
