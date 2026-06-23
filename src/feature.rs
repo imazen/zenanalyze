@@ -1901,6 +1901,7 @@ pub(crate) const PAL_NEEDED_BY: FeatureSet = PALETTE_FEATURES;
 pub struct AnalysisQuery {
     features: FeatureSet,
     linear_light: bool,
+    diffuse_white_clip: bool,
 }
 
 impl AnalysisQuery {
@@ -1912,6 +1913,7 @@ impl AnalysisQuery {
         Self {
             features,
             linear_light: false,
+            diffuse_white_clip: false,
         }
     }
 
@@ -1944,6 +1946,28 @@ impl AnalysisQuery {
         self.linear_light
     }
 
+    /// Opt into **clipping the content tiers at diffuse white** (only meaningful
+    /// together with [`with_linear_light`](Self::with_linear_light)).
+    ///
+    /// When set, the linear-light row stream clamps each pixel's anchored-linear
+    /// value at diffuse white (`1.0`) before the sRGB OETF, so super-white HDR
+    /// highlights flatten to display-white and the content-tier features (variance,
+    /// edges, DCT, chroma, …) stay **SDR-invariant** instead of extending with the
+    /// highlights. The HDR signal is then carried separately by the depth tier's
+    /// `highlight_*` descriptors — the "clip-and-separate" representation, which is
+    /// better-conditioned for a downstream picker than entangling the highlight
+    /// extension into every content feature. Off by default; no effect without
+    /// `with_linear_light(true)` and none on the gamma path.
+    pub const fn with_diffuse_white_clip(mut self, on: bool) -> Self {
+        self.diffuse_white_clip = on;
+        self
+    }
+
+    /// Whether [`Self::with_diffuse_white_clip`] was requested.
+    pub const fn diffuse_white_clip(&self) -> bool {
+        self.diffuse_white_clip
+    }
+
     /// Opaque digest of the **value-affecting** analysis config, for the
     /// `zenanalyze-api` reuse key (`zenanalyze_api::Request::config_hash` /
     /// `Offer::config_hash`).
@@ -1971,6 +1995,10 @@ impl AnalysisQuery {
         let mut any = false;
         if self.linear_light {
             h = (h ^ 0x01).wrapping_mul(0x0000_0100_0000_01b3);
+            any = true;
+        }
+        if self.diffuse_white_clip {
+            h = (h ^ 0x02).wrapping_mul(0x0000_0100_0000_01b3);
             any = true;
         }
         // future value-affecting flags mix in here (on deviation from default).

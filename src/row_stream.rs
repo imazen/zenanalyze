@@ -57,14 +57,19 @@ fn anchor_scale(slice: &PixelSlice<'_>) -> f32 {
 /// ([`normalize_linear_row_f32`]) preserves it, and the depth tier carries the
 /// envelope separately.
 #[inline]
-fn normalize_linear_row(lin_bytes: &[u8], scale: f32, dst: &mut [u8]) {
+fn normalize_linear_row(lin_bytes: &[u8], scale: f32, clip: bool, dst: &mut [u8]) {
+    // `cap` clamps the anchored-linear value at diffuse white (1.0) when the
+    // diffuse-white-clip mode is on, so super-white highlights flatten to
+    // display-white and the content tiers stay SDR-invariant; `+∞` is a no-op
+    // (min(x, ∞) == x for all finite x), so the non-clip path is byte-identical.
+    let cap = if clip { 1.0 } else { f32::INFINITY };
     for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
         let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
         let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
         let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
-        out[0] = (linear_to_srgb_extended(r * scale) * 255.0).clamp(0.0, 255.0) as u8;
-        out[1] = (linear_to_srgb_extended(g * scale) * 255.0).clamp(0.0, 255.0) as u8;
-        out[2] = (linear_to_srgb_extended(b * scale) * 255.0).clamp(0.0, 255.0) as u8;
+        out[0] = (linear_to_srgb_extended((r * scale).min(cap)) * 255.0).clamp(0.0, 255.0) as u8;
+        out[1] = (linear_to_srgb_extended((g * scale).min(cap)) * 255.0).clamp(0.0, 255.0) as u8;
+        out[2] = (linear_to_srgb_extended((b * scale).min(cap)) * 255.0).clamp(0.0, 255.0) as u8;
     }
 }
 
@@ -79,14 +84,17 @@ fn normalize_linear_row(lin_bytes: &[u8], scale: f32, dst: &mut [u8]) {
 /// (1.0 = diffuse white); `linear_to_srgb_extended` is sign-preserving, so rare
 /// out-of-gamut negatives pass through as small negatives rather than NaNs.
 #[inline]
-fn normalize_linear_row_f32(lin_bytes: &[u8], scale: f32, dst: &mut [f32]) {
+fn normalize_linear_row_f32(lin_bytes: &[u8], scale: f32, clip: bool, dst: &mut [f32]) {
+    // See [`normalize_linear_row`] for `cap`: `1.0` flattens super-white when the
+    // clip mode is on; `+∞` is a no-op so the un-clipped path is unchanged.
+    let cap = if clip { 1.0 } else { f32::INFINITY };
     for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
         let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
         let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
         let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
-        out[0] = linear_to_srgb_extended(r * scale) * 255.0;
-        out[1] = linear_to_srgb_extended(g * scale) * 255.0;
-        out[2] = linear_to_srgb_extended(b * scale) * 255.0;
+        out[0] = linear_to_srgb_extended((r * scale).min(cap)) * 255.0;
+        out[1] = linear_to_srgb_extended((g * scale).min(cap)) * 255.0;
+        out[2] = linear_to_srgb_extended((b * scale).min(cap)) * 255.0;
     }
 }
 
@@ -151,6 +159,10 @@ enum Inner<'a> {
         /// OETF + ×255 to display range happen in `normalize_linear_row*`, so this
         /// stays the pure linear ×scale the exposure anchor physically is.
         scale: f32,
+        /// Diffuse-white-clip mode: when `true`, `normalize_linear_row*` clamps the
+        /// anchored-linear value at 1.0 (diffuse white) so super-white highlights
+        /// flatten and the content tiers stay SDR-invariant (clip-and-separate).
+        clip: bool,
     },
 }
 
@@ -227,7 +239,7 @@ impl<'a> RowStream<'a> {
     /// # Errors
     /// Returns the `RowConverter` construction error if the source isn't
     /// convertible to RGBF32_LINEAR.
-    pub fn new_normalized_linear(slice: PixelSlice<'a>) -> Result<Self, String> {
+    pub fn new_normalized_linear(slice: PixelSlice<'a>, clip: bool) -> Result<Self, String> {
         let width = slice.width();
         let height = slice.rows();
         let desc = slice.descriptor();
@@ -240,6 +252,7 @@ impl<'a> RowStream<'a> {
                 slice,
                 converter,
                 scale,
+                clip,
             },
             width,
             height,
@@ -300,10 +313,11 @@ impl<'a> RowStream<'a> {
                 slice,
                 converter,
                 scale,
+                clip,
             } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
-                normalize_linear_row(&self.lin_scratch[..len * 4], *scale, &mut dst[..len]);
+                normalize_linear_row(&self.lin_scratch[..len * 4], *scale, *clip, &mut dst[..len]);
             }
         }
     }
@@ -333,10 +347,16 @@ impl<'a> RowStream<'a> {
                 slice,
                 converter,
                 scale,
+                clip,
             } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
-                normalize_linear_row_f32(&self.lin_scratch[..len * 4], *scale, &mut dst[..len]);
+                normalize_linear_row_f32(
+                    &self.lin_scratch[..len * 4],
+                    *scale,
+                    *clip,
+                    &mut dst[..len],
+                );
             }
             Inner::Native(slice) => {
                 let row = slice.row(y);
@@ -395,12 +415,14 @@ impl<'a> RowStream<'a> {
                 slice,
                 converter,
                 scale,
+                clip,
             } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
                 normalize_linear_row(
                     &self.lin_scratch[..len * 4],
                     *scale,
+                    *clip,
                     &mut self.scratch[..len],
                 );
                 &self.scratch[..len]

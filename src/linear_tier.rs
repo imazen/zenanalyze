@@ -257,11 +257,11 @@ fn fetch_f32_preserves_superwhite_where_u8_clips() {
     let mk = || PixelSlice::new(&bytes, w, h, (w * 6) as usize, desc).unwrap();
 
     let mut f32row = vec![0f32; (w * 3) as usize];
-    RowStream::new_normalized_linear(mk())
+    RowStream::new_normalized_linear(mk(), false)
         .unwrap()
         .fetch_f32_into(0, &mut f32row);
     let mut u8row = vec![0u8; (w * 3) as usize];
-    RowStream::new_normalized_linear(mk())
+    RowStream::new_normalized_linear(mk(), false)
         .unwrap()
         .fetch_into(0, &mut u8row);
 
@@ -324,5 +324,52 @@ fn linear_light_variance_sees_superwhite_highlights() {
     assert!(
         var_hi > 1000.0,
         "super-white highlights must raise linear-light variance (f32 path, not clamped), got {var_hi}"
+    );
+}
+
+/// The diffuse-white-clip mode (clip-and-separate) flattens super-white: an HDR
+/// image split between diffuse white and a 3× super-white highlight reads large
+/// linear-light variance under the default (extend) path, but ~zero under clip —
+/// the highlights clamp to display-white, so the content tiers stay SDR-invariant
+/// and the HDR signal is left to the depth tier's highlight descriptors.
+#[test]
+fn diffuse_white_clip_flattens_superwhite() {
+    use linear_srgb::tf::linear_to_pq;
+    use zenpixels::TransferFunction;
+
+    let (w, h) = (64u32, 64u32);
+    let q = |nits: f32| (linear_to_pq(nits / 10000.0).clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+    let (pl, ph) = (q(203.0), q(609.0)); // diffuse white vs 3× (super-white)
+    let mut buf = Vec::with_capacity((w * h * 6) as usize);
+    for _y in 0..h {
+        for x in 0..w {
+            let v = if x < w / 2 { pl } else { ph };
+            for _c in 0..3 {
+                buf.extend_from_slice(&v.to_ne_bytes());
+            }
+        }
+    }
+    let desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+    let var = |clip: bool| -> f32 {
+        let q = AnalysisQuery::new(FeatureSet::just(AnalysisFeature::Variance))
+            .with_linear_light(true)
+            .with_diffuse_white_clip(clip);
+        analyze_features(
+            PixelSlice::new(&buf, w, h, (w * 6) as usize, desc).unwrap(),
+            &q,
+        )
+        .unwrap()
+        .get_f32(AnalysisFeature::Variance)
+        .unwrap()
+    };
+    let extend = var(false); // super-white survives → large variance
+    let clip = var(true); // highlights clamp to display-white → ~uniform → ~0
+    assert!(
+        extend > 1000.0,
+        "extend path must see super-white variance, got {extend}"
+    );
+    assert!(
+        clip < 1.0,
+        "clip path must flatten super-white to ~uniform, got {clip}"
     );
 }

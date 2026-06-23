@@ -464,6 +464,9 @@ pub fn analyze_features(
     // by default — the default path keeps its zero-copy fast paths and pays
     // nothing.
     let run_linear_light = query.linear_light();
+    // Diffuse-white-clip mode (clip-and-separate): only meaningful with
+    // linear-light, where it clamps the content tiers at diffuse white.
+    let run_clip = run_linear_light && query.diffuse_white_clip();
     // Source descriptor — captured up front so we can hand it back to
     // codecs verbatim via `AnalysisResults::source_descriptor()` even
     // after the analyzer's RowConverter / RowStream consumes the slice.
@@ -486,6 +489,7 @@ pub fn analyze_features(
                 run_xyb444,
                 run_xyb_bq,
                 run_linear_light,
+                run_clip,
             )?;
             Ok(raw.into_results(features, geometry, source_descriptor))
         }};
@@ -544,6 +548,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     run_xyb444: bool,
     run_xyb_bq: bool,
     run_linear_light: bool,
+    run_clip: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
     #[cfg(not(feature = "experimental"))]
     let _ = (run_xyb444, run_xyb_bq);
@@ -578,7 +583,7 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     // features, in the shared passes); the default keeps the zero-copy fast
     // paths.
     let mut stream = if run_linear_light {
-        RowStream::new_normalized_linear(slice).map_err(AnalyzeError::Convert)?
+        RowStream::new_normalized_linear(slice, run_clip).map_err(AnalyzeError::Convert)?
     } else {
         RowStream::new(slice).map_err(AnalyzeError::Convert)?
     };
@@ -772,6 +777,7 @@ pub fn __analyze_internal(
         true,  // xyb444_color_loss
         true,  // xyb_bquarter_chroma_loss
         false, // run_linear_light — oracle / dense extraction stays gamma
+        false, // run_clip — gamma path, no clip
     )?;
     Ok(raw.into_results(query.features, geometry, source_descriptor))
 }
@@ -799,6 +805,7 @@ pub(crate) fn analyze_full_raw_for_test(
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
         slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, false,
+        false,
     )
 }
 
