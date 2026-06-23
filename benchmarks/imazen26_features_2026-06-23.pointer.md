@@ -1,5 +1,17 @@
 # imazen-26 feature datasets — qualified-column regeneration (2026-06-23) — data pointer
 
+> **SUPERSEDED LATER THE SAME DAY (re-bless `1c7ae48f`).** The HDR f32-kernel work
+> added a second golden config pass (gamma + linear-light), which bumped **every**
+> feature hash. The canonical SDR artifacts are now the **`*_requalified.parquet`**
+> versions, re-headered to the final `name@hex8` names (e.g. `variance@8e9a50f1`):
+> `imazen26_features_2026-06-23_requalified.parquet` (246,819 rows) and
+> `imazen26_train_features_2026-06-23_requalified.parquet` (1,482 rows). **Values are
+> byte-identical** to the names-only versions below (re-header, not re-extract — the
+> default gamma path is unchanged by the linear-light work; verified
+> `variance` = 2736.566406 either way). HDR features were re-extracted under
+> linear-light instead — see
+> [`imazen26_hdr_grid_2026-06-23.pointer.md`](imazen26_hdr_grid_2026-06-23.pointer.md).
+
 Regeneration of the imazen-26 feature datasets so every feature column carries its
 **qualified `name@hex8` zenanalyze-api contract identity** instead of the bare
 `feat_<name>` form. **Feature values are byte-identical** to the 2026-06-22
