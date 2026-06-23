@@ -18,6 +18,31 @@ import pyarrow.parquet as pq
 KEY = ["image_sha", "crop_label", "size_class", "width", "height"]
 
 
+def _has_ver(c):
+    """True if `c` ends with a zenanalyze `@<8 hex>` version qualifier."""
+    at = c.rfind("@")
+    return (
+        at != -1
+        and len(c) - at - 1 == 8
+        and all(ch in "0123456789abcdef" for ch in c[at + 1:].lower())
+    )
+
+
+def _is_feat(c):
+    """A feature column: legacy bare `feat_<name>` OR qualified `<name>@hex8`."""
+    return c.startswith("feat_") or _has_ver(c)
+
+
+def _canonical(c):
+    """Canonical feature name, independent of a `feat_` prefix and an `@hex8` version
+    qualifier — so a bare re-extraction and a qualified one align column-for-column."""
+    if c.startswith("feat_"):
+        c = c[len("feat_"):]
+    if _has_ver(c):
+        c = c[: c.rfind("@")]
+    return c.lower()
+
+
 def load_sorted(path):
     t = pq.read_table(path)
     names = t.column_names
@@ -38,7 +63,7 @@ def main():
     ap.add_argument("new")
     ap.add_argument("--expect", default="", help="comma-separated features expected to change")
     args = ap.parse_args()
-    expect = set(f for f in args.expect.split(",") if f)
+    expect = set(_canonical(f) for f in args.expect.split(",") if f)
 
     old, on = load_sorted(args.old)
     new, nn = load_sorted(args.new)
@@ -46,8 +71,20 @@ def main():
     print(f"old: {old.num_rows} rows x {len(on)} cols")
     print(f"new: {new.num_rows} rows x {len(nn)} cols")
     ok = True
-    if on != nn:
-        print(f"!! SCHEMA differs: only-old={set(on)-set(nn)} only-new={set(nn)-set(on)}")
+    # META (non-feature) columns must match exactly; FEATURE columns match by CANONICAL
+    # name so a bare `feat_X` parquet and a qualified `X@hex8` re-extraction align.
+    meta_old = [c for c in on if not _is_feat(c)]
+    meta_new = [c for c in nn if not _is_feat(c)]
+    if meta_old != meta_new:
+        print(f"!! META columns differ: only-old={set(meta_old)-set(meta_new)} "
+              f"only-new={set(meta_new)-set(meta_old)}")
+        ok = False
+    feat_old = {_canonical(c): c for c in on if _is_feat(c)}
+    feat_new = {_canonical(c): c for c in nn if _is_feat(c)}
+    only_old, only_new = set(feat_old) - set(feat_new), set(feat_new) - set(feat_old)
+    if only_old or only_new:
+        print(f"!! FEATURE set differs (by canonical name): only-old={sorted(only_old)} "
+              f"only-new={sorted(only_new)}")
         ok = False
     if old.num_rows != new.num_rows:
         print(f"!! ROW COUNT differs: {old.num_rows} vs {new.num_rows}")
@@ -60,20 +97,20 @@ def main():
                 print(f"!! KEY column {k} not aligned after sort — cannot compare")
                 return 2
 
-    feats = [c for c in on if c.startswith("feat_")]
+    common = sorted(set(feat_old) & set(feat_new))
     changed = {}
-    for c in feats:
-        o = colvals(old, c).astype(np.float64)
-        n = colvals(new, c).astype(np.float64)
+    for canon in common:
+        o = colvals(old, feat_old[canon]).astype(np.float64)
+        n = colvals(new, feat_new[canon]).astype(np.float64)
         both_nan = np.isnan(o) & np.isnan(n)
         diff = (o != n) & ~both_nan
         nd = int(diff.sum())
         if nd:
             den = np.maximum.reduce([np.abs(o), np.abs(n), np.ones_like(o)])
             rel = np.where(diff, np.abs(o - n) / den, 0.0)
-            changed[c] = (nd, float(np.nanmax(rel)))
+            changed[canon] = (nd, float(np.nanmax(rel)))
 
-    print(f"\n{len(changed)} / {len(feats)} features changed:")
+    print(f"\n{len(changed)} / {len(common)} features changed:")
     for c, (nd, mx) in sorted(changed.items(), key=lambda kv: -kv[1][1]):
         tag = "expected" if c in expect else "!! UNEXPECTED"
         print(f"  {c:<34} {nd:>8} rows ({100*nd/old.num_rows:5.1f}%)  max-rel {mx:8.4%}  [{tag}]")
@@ -87,9 +124,10 @@ def main():
     if unexpected:
         print(f"\n!! UNEXPECTED changes (drift?): {sorted(unexpected)}")
         ok = False
-    if ok and expect:
-        print(f"\nOK — exactly the {len(expect)} expected features changed; the other "
-              f"{len(feats)-len(changed)} are byte-identical.")
+    if ok:
+        print(f"\nOK — {len(changed)} feature(s) changed"
+              + (f" (exactly the {len(expect)} expected)" if expect else "")
+              + f"; the other {len(common) - len(changed)} are byte-identical across the rename.")
     sys.exit(0 if ok else 1)
 
 
