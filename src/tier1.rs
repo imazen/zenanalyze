@@ -123,41 +123,49 @@ use deinterleave_dispatch::DeinterleaveRgb24Chunk8;
 /// already-linear row. `base` is an element index into `rows` either way (the row
 /// stride is `width * 3` elements for both).
 pub(crate) trait ChunkInput: Copy {
+    /// Deinterleave one 8-pixel RGB chunk (`&[Self; 24]`) into 3 × `[f32; 8]` planes.
     fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
-        rows: &[Self],
-        base: usize,
+        chunk: &[Self; 24],
         token: Tok,
     ) -> ([f32; 8], [f32; 8], [f32; 8]);
+    /// Widen one channel value to f32 (u8 → `value as f32`; f32 → identity) for the
+    /// scalar edge / chroma-gradient stencil.
+    fn to_f32(self) -> f32;
 }
 
 impl ChunkInput for u8 {
     #[inline(always)]
     fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
-        rows: &[u8],
-        base: usize,
+        chunk: &[u8; 24],
         token: Tok,
     ) -> ([f32; 8], [f32; 8], [f32; 8]) {
-        let chunk: &[u8; 24] = (&rows[base..base + 24]).try_into().unwrap();
         token.rgb24_chunk8(chunk)
+    }
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self as f32
     }
 }
 
 impl ChunkInput for f32 {
     #[inline(always)]
     fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
-        rows: &[f32],
-        base: usize,
+        chunk: &[f32; 24],
         _token: Tok,
     ) -> ([f32; 8], [f32; 8], [f32; 8]) {
         let mut r = [0.0f32; 8];
         let mut g = [0.0f32; 8];
         let mut b = [0.0f32; 8];
         for i in 0..8 {
-            r[i] = rows[base + i * 3];
-            g[i] = rows[base + i * 3 + 1];
-            b[i] = rows[base + i * 3 + 2];
+            r[i] = chunk[i * 3];
+            g[i] = chunk[i * 3 + 1];
+            b[i] = chunk[i * 3 + 2];
         }
         (r, g, b)
+    }
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self
     }
 }
 
@@ -944,8 +952,8 @@ fn compute_stripe_phase(
 
 /// Runtime dispatch wrapper for the magetypes f32x8 row pass.
 #[allow(clippy::too_many_arguments)]
-fn accumulate_row_dispatch(
-    rgb: &[u8],
+fn accumulate_row_dispatch<R: ChunkInput>(
+    rgb: &[R],
     row_off: usize,
     next_row_off: Option<usize>,
     width: usize,
@@ -972,7 +980,7 @@ fn accumulate_row_dispatch(
     // - FeatureSet::SUPPORTED → `<*, true, true>`
     let is_bt601 = weights.is_bt601_baseline();
     let row_stats = match (is_bt601, full, skin) {
-        (true, true, true) => incant!(accumulate_row_simd::<true, true, true>(
+        (true, true, true) => incant!(accumulate_row_simd::<true, true, true, R>(
             rgb,
             row_off,
             next_row_off,
@@ -981,7 +989,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (true, true, false) => incant!(accumulate_row_simd::<true, true, false>(
+        (true, true, false) => incant!(accumulate_row_simd::<true, true, false, R>(
             rgb,
             row_off,
             next_row_off,
@@ -990,7 +998,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (true, false, true) => incant!(accumulate_row_simd::<true, false, true>(
+        (true, false, true) => incant!(accumulate_row_simd::<true, false, true, R>(
             rgb,
             row_off,
             next_row_off,
@@ -999,7 +1007,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (true, false, false) => incant!(accumulate_row_simd::<true, false, false>(
+        (true, false, false) => incant!(accumulate_row_simd::<true, false, false, R>(
             rgb,
             row_off,
             next_row_off,
@@ -1008,7 +1016,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (false, true, true) => incant!(accumulate_row_simd::<false, true, true>(
+        (false, true, true) => incant!(accumulate_row_simd::<false, true, true, R>(
             rgb,
             row_off,
             next_row_off,
@@ -1017,7 +1025,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (false, true, false) => incant!(accumulate_row_simd::<false, true, false>(
+        (false, true, false) => incant!(accumulate_row_simd::<false, true, false, R>(
             rgb,
             row_off,
             next_row_off,
@@ -1026,7 +1034,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (false, false, true) => incant!(accumulate_row_simd::<false, false, true>(
+        (false, false, true) => incant!(accumulate_row_simd::<false, false, true, R>(
             rgb,
             row_off,
             next_row_off,
@@ -1035,7 +1043,7 @@ fn accumulate_row_dispatch(
             kg,
             kb
         )),
-        (false, false, false) => incant!(accumulate_row_simd::<false, false, false>(
+        (false, false, false) => incant!(accumulate_row_simd::<false, false, false, R>(
             rgb,
             row_off,
             next_row_off,
@@ -1127,7 +1135,8 @@ fn stripe_block_stats_simd<R: ChunkInput>(
             // current target_feature region; on AVX2 it emits 6×vpshufb
             // + 3×vpor + 3×vpmovzxbd + 3×vcvtdq2ps in place of the
             // 21×vpinsrb scatter the autovectorizer used to produce.
-            let (r_arr, g_arr, b_arr) = R::load_chunk8(stripe_rows, base, token);
+            let chunk: &[R; 24] = (&stripe_rows[base..base + 24]).try_into().unwrap();
+            let (r_arr, g_arr, b_arr) = R::load_chunk8(chunk, token);
             let r_v = f32x8::load(token, &r_arr);
             let g_v = f32x8::load(token, &g_arr);
             let b_v = f32x8::load(token, &b_arr);
@@ -1208,9 +1217,9 @@ fn stripe_block_stats_simd<R: ChunkInput>(
 /// `#[magetypes]` macro lets LLVM autovec the simple stencil).
 #[allow(clippy::too_many_arguments)] // SIMD kernel — token + slices + strides + accumulators
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
+fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R: ChunkInput>(
     token: Token,
-    rgb: &[u8],
+    rgb: &[R],
     row_off: usize,
     next_row_off: Option<usize>,
     width: usize,
@@ -1314,11 +1323,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     let chunks = row.chunks_exact(24);
     let remainder = chunks.remainder();
     for chunk in chunks {
-        let c: &[u8; 24] = chunk.try_into().unwrap();
-        // Deinterleave via garb's tier-specialized chunk primitive
-        // (replaces the 21-vpinsrb autovec scatter — see the
-        // `deinterleave_dispatch` trait at the top of this file).
-        let (r_arr, g_arr, b_arr) = token.rgb24_chunk8(c);
+        let c: &[R; 24] = chunk.try_into().unwrap();
+        // Deinterleave via ChunkInput (u8 → garb's tier-specialized vpshufb
+        // primitive, the SDR fast path; f32 → gather of an already-linear row).
+        let (r_arr, g_arr, b_arr) = R::load_chunk8(c, token);
         let r = f32x8::load(token, &r_arr);
         let g = f32x8::load(token, &g_arr);
         let b = f32x8::load(token, &b_arr);
@@ -1433,9 +1441,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
     // the SIMD lanes for bit-equal cross-tail consistency on the
     // skin-tone gate. FULL-only accumulators are gated identically.
     for px in remainder.chunks_exact(3) {
-        let r = px[0] as f32;
-        let g = px[1] as f32;
-        let b = px[2] as f32;
+        let r = px[0].to_f32();
+        let g = px[1].to_f32();
+        let b = px[2].to_f32();
         let l = kr * r + kg * g + kb * b;
         let cb = (b - l) * (1.0 / 255.0);
         let cr = (r - l) * (1.0 / 255.0);
@@ -1501,9 +1509,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         let mut nr_iter = nr.chunks_exact(24);
 
         for chunk in edge_chunks {
-            let c: &[u8; 24] = chunk.try_into().unwrap();
-            let r_chunk: &[u8; 24] = right_iter.next().unwrap().try_into().unwrap();
-            let d_chunk: &[u8; 24] = nr_iter.next().unwrap().try_into().unwrap();
+            let c: &[R; 24] = chunk.try_into().unwrap();
+            let r_chunk: &[R; 24] = right_iter.next().unwrap().try_into().unwrap();
+            let d_chunk: &[R; 24] = nr_iter.next().unwrap().try_into().unwrap();
             // Stage gradient and mask values across the 8 lanes so the
             // sqrt + mask-multiply that produces `edge_grad_sum` /
             // `edge_grad_sq_sum` can run as ONE f32x8 sqrt + 2
@@ -1514,13 +1522,13 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             let mut grad_sq_arr = [0.0f32; 8];
             let mut mask_arr = [0.0f32; 8];
             for i in 0..8 {
-                let cr_ = c[i * 3] as f32;
-                let cg_ = c[i * 3 + 1] as f32;
-                let cb_ = c[i * 3 + 2] as f32;
+                let cr_ = c[i * 3].to_f32();
+                let cg_ = c[i * 3 + 1].to_f32();
+                let cb_ = c[i * 3 + 2].to_f32();
                 let l = kr * cr_ + kg * cg_ + kb * cb_;
-                let rr_ = r_chunk[i * 3] as f32;
-                let rg_ = r_chunk[i * 3 + 1] as f32;
-                let rb_ = r_chunk[i * 3 + 2] as f32;
+                let rr_ = r_chunk[i * 3].to_f32();
+                let rg_ = r_chunk[i * 3 + 1].to_f32();
+                let rb_ = r_chunk[i * 3 + 2].to_f32();
                 let lr = kr * rr_ + kg * rg_ + kb * rb_;
                 let gx = lr - l;
                 let mut grad_sq = gx * gx;
@@ -1537,9 +1545,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
 
                 let mut gy: f32 = 0.0;
                 if has_next {
-                    let ld = kr * d_chunk[i * 3] as f32
-                        + kg * d_chunk[i * 3 + 1] as f32
-                        + kb * d_chunk[i * 3 + 2] as f32;
+                    let ld = kr * d_chunk[i * 3].to_f32()
+                        + kg * d_chunk[i * 3 + 1].to_f32()
+                        + kb * d_chunk[i * 3 + 2].to_f32();
                     gy = ld - l;
                     grad_sq += gy * gy;
                 }
@@ -1599,14 +1607,14 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
         let processed = (width - 1) / 8 * 8;
         for x in processed..width - 1 {
             let off = row_off + x * 3;
-            let cr_ = rgb[off] as f32;
-            let cg_ = rgb[off + 1] as f32;
-            let cb_ = rgb[off + 2] as f32;
+            let cr_ = rgb[off].to_f32();
+            let cg_ = rgb[off + 1].to_f32();
+            let cb_ = rgb[off + 2].to_f32();
             let l = kr * cr_ + kg * cg_ + kb * cb_;
             let roff = row_off + (x + 1) * 3;
-            let rr_ = rgb[roff] as f32;
-            let rg_ = rgb[roff + 1] as f32;
-            let rb_ = rgb[roff + 2] as f32;
+            let rr_ = rgb[roff].to_f32();
+            let rg_ = rgb[roff + 1].to_f32();
+            let rb_ = rgb[roff + 2].to_f32();
             let lr = kr * rr_ + kg * rg_ + kb * rb_;
             let gx = lr - l;
             let mut grad_sq = gx * gx;
@@ -1624,8 +1632,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool>(
             let mut gy: f32 = 0.0;
             if has_next {
                 let doff = next_row_off.unwrap() + x * 3;
-                let ld =
-                    kr * rgb[doff] as f32 + kg * rgb[doff + 1] as f32 + kb * rgb[doff + 2] as f32;
+                let ld = kr * rgb[doff].to_f32()
+                    + kg * rgb[doff + 1].to_f32()
+                    + kb * rgb[doff + 2].to_f32();
                 gy = ld - l;
                 grad_sq += gy * gy;
             }
