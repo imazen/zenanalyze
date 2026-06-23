@@ -642,7 +642,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             );
         }
         if T2 && width >= 3 && height >= 3 {
-            tier2_chroma::populate_tier2(&mut raw, &mut stream, pixel_budget);
+            if run_linear_light {
+                tier2_chroma::populate_tier2::<f32>(&mut raw, &mut stream, pixel_budget);
+            } else {
+                tier2_chroma::populate_tier2::<u8>(&mut raw, &mut stream, pixel_budget);
+            }
         }
         if T3 && width >= 8 && height >= 8 {
             tier3::populate_tier3(&mut raw, &mut stream, hf_max_blocks, run_dct);

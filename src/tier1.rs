@@ -134,6 +134,10 @@ pub(crate) trait ChunkInput: Copy + Default {
     /// Fetch one display-domain row from the stream into `dst` (u8 → `fetch_into`, the
     /// SDR/gamma path; f32 → `fetch_f32_into`, the HDR-correct unclamped path).
     fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [Self]);
+    /// Narrow back to display-range `u8` (u8 → identity, byte-identical SDR; f32 →
+    /// clamp `[0,255]`). Used only by integer-domain scalar tails that can't take f32
+    /// (e.g. tier-2's quantized-YCbCr chroma tail); the f32 SIMD bulk stays unclamped.
+    fn to_u8_clamped(self) -> u8;
 }
 
 impl ChunkInput for u8 {
@@ -151,6 +155,10 @@ impl ChunkInput for u8 {
     #[inline(always)]
     fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [u8]) {
         stream.fetch_into(y, dst);
+    }
+    #[inline(always)]
+    fn to_u8_clamped(self) -> u8 {
+        self
     }
 }
 
@@ -177,6 +185,10 @@ impl ChunkInput for f32 {
     #[inline(always)]
     fn fetch_row(stream: &mut RowStream<'_>, y: u32, dst: &mut [f32]) {
         stream.fetch_f32_into(y, dst);
+    }
+    #[inline(always)]
+    fn to_u8_clamped(self) -> u8 {
+        self.clamp(0.0, 255.0) as u8
     }
 }
 

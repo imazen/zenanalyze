@@ -15,6 +15,7 @@
 
 use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
+use super::tier1::ChunkInput;
 use archmage::{incant, magetypes};
 
 /// Quantized integer YCbCr approximation, originally from
@@ -48,9 +49,13 @@ fn rgb_to_ycbcr_q(r: u8, g: u8, b: u8) -> (i32, i32, i32) {
 }
 
 #[inline(always)]
-fn pixel_at(row: &[u8], x: usize) -> (i32, i32, i32) {
+fn pixel_at<R: ChunkInput>(row: &[R], x: usize) -> (i32, i32, i32) {
     let off = x * 3;
-    rgb_to_ycbcr_q(row[off], row[off + 1], row[off + 2])
+    rgb_to_ycbcr_q(
+        row[off].to_u8_clamped(),
+        row[off + 1].to_u8_clamped(),
+        row[off + 2].to_u8_clamped(),
+    )
 }
 
 #[inline(always)]
@@ -102,7 +107,7 @@ struct ChromaSharpnessBreakdown {
 /// `pixel_budget` controls how aggressively to subsample triplets.
 /// At default (500_000) the analyzer caps work at ~1 ms regardless
 /// of image size. Pass `usize::MAX` for a full-image scan.
-fn image_sharpness_breakdown(
+fn image_sharpness_breakdown<R: ChunkInput>(
     stream: &mut RowStream<'_>,
     width: usize,
     height: usize,
@@ -132,17 +137,17 @@ fn image_sharpness_breakdown(
 
     // Three rolling rows. With stride = 1 we rotate (row2 → row0)
     // between iters; with stride > 1 we always pull three fresh rows.
-    let mut row0 = vec![0u8; row_bytes];
-    let mut row1 = vec![0u8; row_bytes];
-    let mut row2 = vec![0u8; row_bytes];
+    let mut row0 = vec![R::default(); row_bytes];
+    let mut row1 = vec![R::default(); row_bytes];
+    let mut row2 = vec![R::default(); row_bytes];
 
     // Deinterleave scratch, allocated once and reused for every sampled
     // row-group (see RowGroupScratch). Was nine `vec![0.0; len]`s per group.
     let mut scratch = RowGroupScratch::with_width(width);
 
-    stream.fetch_into(0, &mut row0);
-    stream.fetch_into(1, &mut row1);
-    stream.fetch_into(2, &mut row2);
+    R::fetch_row(stream, 0, &mut row0);
+    R::fetch_row(stream, 1, &mut row1);
+    R::fetch_row(stream, 2, &mut row2);
 
     // u64 (not usize) so 32-bit builds don't overflow:
     // gradient_diff_ycbcr can return values up to ~437K per pixel.
@@ -192,12 +197,12 @@ fn image_sharpness_breakdown(
         }
         if triplet_stride == 1 {
             core::mem::swap(&mut row0, &mut row2);
-            stream.fetch_into((y0 + 1) as u32, &mut row1);
-            stream.fetch_into(need_y2 as u32, &mut row2);
+            R::fetch_row(stream, (y0 + 1) as u32, &mut row1);
+            R::fetch_row(stream, need_y2 as u32, &mut row2);
         } else {
-            stream.fetch_into(y0 as u32, &mut row0);
-            stream.fetch_into((y0 + 1) as u32, &mut row1);
-            stream.fetch_into(need_y2 as u32, &mut row2);
+            R::fetch_row(stream, y0 as u32, &mut row0);
+            R::fetch_row(stream, (y0 + 1) as u32, &mut row1);
+            R::fetch_row(stream, need_y2 as u32, &mut row2);
         }
     }
     // Global mean over all sampled triplets — scale-invariant (same
@@ -323,14 +328,16 @@ impl RowGroupScratch {
 }
 
 /// Runtime-dispatched entry to the SIMD'd row-group kernel.
-fn process_row_group_dispatch(
-    row0: &[u8],
-    row1: &[u8],
-    row2: &[u8],
+fn process_row_group_dispatch<R: ChunkInput>(
+    row0: &[R],
+    row1: &[R],
+    row2: &[R],
     width: usize,
     scratch: &mut RowGroupScratch,
 ) -> RowGroupStats {
-    incant!(process_row_group_simd(row0, row1, row2, width, scratch))
+    incant!(process_row_group_simd::<R>(
+        row0, row1, row2, width, scratch
+    ))
 }
 
 /// Process one 3-row group: compute every horizontal triplet
@@ -343,11 +350,11 @@ fn process_row_group_dispatch(
 /// scalar tiers via `#[magetypes]`; runtime-selected through
 /// `process_row_group_dispatch`.
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-fn process_row_group_simd(
+fn process_row_group_simd<R: ChunkInput>(
     token: Token,
-    row0: &[u8],
-    row1: &[u8],
-    row2: &[u8],
+    row0: &[R],
+    row1: &[R],
+    row2: &[R],
     width: usize,
     // Caller-owned deinterleave scratch (each field length ≥ `width`), reused
     // across every row-group so this hot kernel allocates nothing. Sub-sliced
@@ -428,24 +435,24 @@ fn process_row_group_simd(
     // (measured 3× regression at 4 MP).
     for i in 0..row0_len {
         let off = i * 3;
-        let r = row0[off] as f32;
-        let g = row0[off + 1] as f32;
-        let b = row0[off + 2] as f32;
+        let r = row0[off].to_f32();
+        let g = row0[off + 1].to_f32();
+        let b = row0[off + 2].to_f32();
         y0[i] = 3.0 * r + 5.0 * g + b;
         cb0[i] = 3.0 * b - 2.0 * g - r + 3.0 * 255.0;
         cr0[i] = 6.0 * r - 5.0 * g - b + 6.0 * 255.0;
     }
     for i in 0..row12_len {
         let off = i * 3;
-        let r = row1[off] as f32;
-        let g = row1[off + 1] as f32;
-        let b = row1[off + 2] as f32;
+        let r = row1[off].to_f32();
+        let g = row1[off + 1].to_f32();
+        let b = row1[off + 2].to_f32();
         y1[i] = 3.0 * r + 5.0 * g + b;
         cb1[i] = 3.0 * b - 2.0 * g - r + 3.0 * 255.0;
         cr1[i] = 6.0 * r - 5.0 * g - b + 6.0 * 255.0;
-        let r = row2[off] as f32;
-        let g = row2[off + 1] as f32;
-        let b = row2[off + 2] as f32;
+        let r = row2[off].to_f32();
+        let g = row2[off + 1].to_f32();
+        let b = row2[off + 2].to_f32();
         y2[i] = 3.0 * r + 5.0 * g + b;
         cb2[i] = 3.0 * b - 2.0 * g - r + 3.0 * 255.0;
         cr2[i] = 6.0 * r - 5.0 * g - b + 6.0 * 255.0;
@@ -534,11 +541,31 @@ fn process_row_group_simd(
         let off_a = x * 3;
         let off_b = (x + 1) * 3;
         let off_c = (x + 2) * 3;
-        let a0 = rgb_to_ycbcr_q(row0[off_a], row0[off_a + 1], row0[off_a + 2]);
-        let b0 = rgb_to_ycbcr_q(row0[off_b], row0[off_b + 1], row0[off_b + 2]);
-        let c0 = rgb_to_ycbcr_q(row0[off_c], row0[off_c + 1], row0[off_c + 2]);
-        let a1 = rgb_to_ycbcr_q(row1[off_a], row1[off_a + 1], row1[off_a + 2]);
-        let a2 = rgb_to_ycbcr_q(row2[off_a], row2[off_a + 1], row2[off_a + 2]);
+        let a0 = rgb_to_ycbcr_q(
+            row0[off_a].to_u8_clamped(),
+            row0[off_a + 1].to_u8_clamped(),
+            row0[off_a + 2].to_u8_clamped(),
+        );
+        let b0 = rgb_to_ycbcr_q(
+            row0[off_b].to_u8_clamped(),
+            row0[off_b + 1].to_u8_clamped(),
+            row0[off_b + 2].to_u8_clamped(),
+        );
+        let c0 = rgb_to_ycbcr_q(
+            row0[off_c].to_u8_clamped(),
+            row0[off_c + 1].to_u8_clamped(),
+            row0[off_c + 2].to_u8_clamped(),
+        );
+        let a1 = rgb_to_ycbcr_q(
+            row1[off_a].to_u8_clamped(),
+            row1[off_a + 1].to_u8_clamped(),
+            row1[off_a + 2].to_u8_clamped(),
+        );
+        let a2 = rgb_to_ycbcr_q(
+            row2[off_a].to_u8_clamped(),
+            row2[off_a + 1].to_u8_clamped(),
+            row2[off_a + 2].to_u8_clamped(),
+        );
         let h = gradient_diff_ycbcr(a0, b0, c0);
         let v = gradient_diff_ycbcr(a0, a1, a2);
         sumh_cb_acc += h.0 as u64;
@@ -564,10 +591,14 @@ fn process_row_group_simd(
 /// `pixel_budget` controls Tier 2 stride sampling — same budget unit
 /// as Tier 1. Default (500_000) caps work at ~1 ms regardless of
 /// image size; `usize::MAX` runs the full triplet sweep.
-pub fn populate_tier2(out: &mut RawAnalysis, stream: &mut RowStream<'_>, pixel_budget: usize) {
+pub fn populate_tier2<R: ChunkInput>(
+    out: &mut RawAnalysis,
+    stream: &mut RowStream<'_>,
+    pixel_budget: usize,
+) {
     let w = stream.width() as usize;
     let h = stream.height() as usize;
-    let bd = image_sharpness_breakdown(stream, w, h, pixel_budget);
+    let bd = image_sharpness_breakdown::<R>(stream, w, h, pixel_budget);
 
     const NORM: f32 = 1e5;
     out.cb_horiz_sharpness = bd.cb.horiz as f32 / NORM;
