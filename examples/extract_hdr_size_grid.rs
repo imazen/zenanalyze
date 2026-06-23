@@ -24,6 +24,7 @@
 
 use image::{ImageBuffer, ImageReader, Rgb};
 use linear_srgb::tf::{hlg_to_linear, linear_to_hlg, linear_to_pq, pq_to_linear};
+#[cfg(feature = "api")]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
