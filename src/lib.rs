@@ -649,7 +649,11 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
             }
         }
         if T3 && width >= 8 && height >= 8 {
-            tier3::populate_tier3(&mut raw, &mut stream, hf_max_blocks, run_dct);
+            if run_linear_light {
+                tier3::populate_tier3::<f32>(&mut raw, &mut stream, hf_max_blocks, run_dct);
+            } else {
+                tier3::populate_tier3::<u8>(&mut raw, &mut stream, hf_max_blocks, run_dct);
+            }
         }
         // Strict-equality grayscale classifier — runtime axis. Walks
         // every row with early exit at the first non-gray pixel. Uses

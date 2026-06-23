@@ -8,6 +8,7 @@
 
 use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
+use super::tier1::ChunkInput;
 use archmage::{incant, magetypes};
 
 /// Cap on sampled 8×8 luma blocks for the Tier 3 DCT pass
@@ -77,7 +78,7 @@ pub(crate) const MIN_BLOCKS_FOR_PERCENTILE: u32 = 100;
 /// `hf_max_blocks` caps the number of 8×8 luma blocks sampled for the
 /// high-frequency DCT energy ratio. Pass [`DEFAULT_HF_MAX_BLOCKS`] to
 /// match the oracle-trained reference; lower for proxy-server speed.
-pub fn populate_tier3(
+pub fn populate_tier3<R: ChunkInput>(
     out: &mut RawAnalysis,
     stream: &mut RowStream<'_>,
     hf_max_blocks: usize,
@@ -87,7 +88,7 @@ pub fn populate_tier3(
     out.luma_histogram_entropy = h_stats.entropy;
     let _ = h_stats;
     if run_dct {
-        let dct = dct_stats(stream, hf_max_blocks);
+        let dct = dct_stats::<R>(stream, hf_max_blocks);
         out.high_freq_energy_ratio = dct.high_freq_ratio;
         // The libwebp α metrics and patch_fraction land in cfg-gated
         // RawAnalysis fields; the DCT pass that produces them runs
@@ -858,7 +859,7 @@ const DCT_COEF_T: [[f32; 8]; 8] = {
 /// Pulls 8 rows at a time (one block-row's worth) and samples the
 /// `bx` columns selected by `block_idx % stride`. Keeps memory at
 /// 8 × width × 3 bytes regardless of image size.
-fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
+fn dct_stats<R: ChunkInput>(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let width = stream.width() as usize;
     let height = stream.height() as usize;
     if width < 8 || height < 8 {
@@ -1027,7 +1028,7 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
     let mut spectral_slope_sum: f64 = 0.0;
     let mut spectral_slope_count: u32 = 0;
     let row_bytes = width * 3;
-    let mut block_buf = vec![0u8; 8 * row_bytes]; // 8 rows of one block-row
+    let mut block_buf = vec![R::default(); 8 * row_bytes]; // 8 rows of one block-row
     let mut block_idx = 0usize;
 
     for by in 0..blocks_y {
@@ -1042,7 +1043,8 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
 
         // Pull 8 contiguous rows for the block-row.
         for i in 0..8 {
-            stream.fetch_into(
+            R::fetch_row(
+                stream,
                 (by * 8 + i) as u32,
                 &mut block_buf[i * row_bytes..(i + 1) * row_bytes],
             );
@@ -1068,9 +1070,9 @@ fn dct_stats(stream: &mut RowStream<'_>, max_blocks: usize) -> Tier3DctStats {
                 for x in 0..8 {
                     let off = (bx * 8 + x) * 3;
                     let p = &row[off..off + 3];
-                    let r = p[0] as i32;
-                    let g = p[1] as i32;
-                    let b = p[2] as i32;
+                    let r = p[0].to_f32() as i32;
+                    let g = p[1].to_f32() as i32;
+                    let b = p[2].to_f32() as i32;
                     let l_i = (qr * r + qg * g + qb * b + 128) >> 8;
                     // Cb / Cr keep their BT.601-derived integer
                     // matrix here. The per-primaries adjustment
