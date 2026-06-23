@@ -6,11 +6,13 @@
 //! for both. `sdr_in_hdr_envelope_matches_sdr_normal` proves this for Variance;
 //! this probe measures EVERY feature so the gap is visible.
 //!
-//! Today the linear-light override only re-derives Variance on normalized
-//! linear; the other content tiers still run on the PQ→RGB8 narrowing, which
-//! collapses the SDR-in-PQ envelope. This probe quantifies exactly which
-//! features are already SDR/HDR-invariant and which still need the normalized
-//! representation.
+//! **Status (2026-06-23):** the f32 tier kernels + the sRGB-OETF linear-light
+//! re-encode made the content tiers read diffuse-white-normalized linear-light,
+//! not the old PQ→RGB8 narrowing — so SDR-in-PQ now matches SDR-normal:
+//! **95/99 content features invariant within 3%** (only HighFreqEnergyRatio /
+//! AqMapStd / NoiseFloor*P75/P90 straggle ≤6%). This probe is the synthetic
+//! regression signal; the real-content + super-white + gamut sweep is
+//! `sdr_hdr_gamut_sweep`.
 //!
 //! Run: cargo run --release --features experimental,hdr --example sdr_hdr_consistency
 
