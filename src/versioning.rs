@@ -47,10 +47,12 @@
 //!
 //! The corpus spans tiny/photo/screen/line-art/palette/alpha content **and HDR**
 //! — PQ `RGB16`, Bt2020 wide-gamut, and super-white `RGBF32_LINEAR` cases that
-//! fire the depth tier under the `hdr` feature — under the default gamma config.
-//! (Linear-light is a *separate* reuse axis, `zenanalyze_api`'s `config_hash`,
-//! not folded into the code-version hash; the corpus can grow a second config
-//! pass when more features have linear paths.) The keystone is the
+//! fire the depth tier under the `hdr` feature. Each case is extracted under **both
+//! configs** — default gamma *and* linear-light — since the f32 tier kernels gave
+//! tier 1/2/3 real linear paths; the linear-light columns version that code (the HDR
+//! cases carry super-white the gamma columns clip, the SDR cases pin the sRGB OETF
+//! round-trip). Which config produced an on-disk value is tagged orthogonally by
+//! `zenanalyze_api`'s `config_hash`; the golden versions the code regardless. The keystone is the
 //! `every_feature_varies` lint: a feature constant across the
 //! corpus is *unversioned* (a math change preserving the constant wouldn't move
 //! the hash), so every feature must take ≥2 distinct values. That lint is only
@@ -614,18 +616,23 @@ mod tests {
         ]
     }
 
-    /// Per-feature ordered value vectors across the corpus under the **default
-    /// (gamma) config**. The linear-light config is a *separate* reuse axis
-    /// (`zenanalyze_api`'s `config_hash`), not folded into the code-version hash;
-    /// extend this with a second pass (`case.extract(true)`) once enough features
-    /// have linear paths to make the extra golden columns worth their bytes
-    /// (today only `variance` differs, so they would be ~99% redundant).
+    /// Per-feature ordered value vectors across the corpus under **both configs** —
+    /// the default gamma pass (`extract(false)`) then the linear-light pass
+    /// (`extract(true)`). The linear-light pass is now worth its bytes: the f32
+    /// tier kernels gave tier 1/2/3 real linear paths, so on the HDR cases the
+    /// linear-light columns carry the super-white-extended values the gamma columns
+    /// can't (and the SDR cases pin the sRGB round-trip the OETF re-encode performs).
+    /// Folding both into the golden versions the linear-light *code* — a later change
+    /// to the OETF / anchor / f32 load moves the hash, so linear-light-extracted
+    /// vectors on disk are never silently reinterpreted. (Which config produced a
+    /// given on-disk value is still carried orthogonally by `zenanalyze_api`'s
+    /// `config_hash`; the golden versions the code, the config_hash tags the run.)
     fn extract_matrix() -> Vec<(String, Vec<FeatureValue>)> {
         let cases = corpus();
         let mut order: Vec<u16> = Vec::new();
         let mut rows: std::collections::BTreeMap<u16, Vec<FeatureValue>> =
             std::collections::BTreeMap::new();
-        for linear in [false] {
+        for linear in [false, true] {
             for case in &cases {
                 for (id, v) in case.extract(linear) {
                     if !rows.contains_key(&id) {

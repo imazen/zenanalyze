@@ -20,6 +20,7 @@
 
 use core::ops::Range;
 
+use linear_srgb::precise::linear_to_srgb_extended;
 use zenpixels::{PixelDescriptor, PixelSlice, TransferFunction};
 use zenpixels_convert::RowConverter;
 
@@ -46,38 +47,46 @@ fn anchor_scale(slice: &PixelSlice<'_>) -> f32 {
 }
 
 /// Quantize one RGBF32_LINEAR row (as native-endian f32 bytes, 12 B/px) to
-/// display-range RGB8 by `value * scale`, clamped to [0, 255]. `scale` folds
-/// the diffuse-white anchor and the 255 range factor. Super-white HDR (after
-/// the anchor) hard-clips to 255 — the content tiers see the display-range
-/// structure; the depth tier captures the real HDR envelope separately.
+/// display-range RGB8. `scale` is the diffuse-white **linear** anchor (1.0 = diffuse
+/// white); the per-channel pipeline is `linear → ×anchor → sRGB OETF → ×255`, so the
+/// displayable range lands in perceptual sRGB **identical to the default gamma path**
+/// (an SDR scene scores the same whether delivered as SDR or in an HDR envelope, to
+/// sRGB round-trip precision). The exposure anchor stays in linear — where it is
+/// physically a ×scale — and the OETF is the perceptual re-encode. Super-white HDR
+/// (after the anchor) hard-clips to 255 here — RGB8 cannot hold it; the f32 path
+/// ([`normalize_linear_row_f32`]) preserves it, and the depth tier carries the
+/// envelope separately.
 #[inline]
 fn normalize_linear_row(lin_bytes: &[u8], scale: f32, dst: &mut [u8]) {
     for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
         let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
         let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
         let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
-        out[0] = (r * scale).clamp(0.0, 255.0) as u8;
-        out[1] = (g * scale).clamp(0.0, 255.0) as u8;
-        out[2] = (b * scale).clamp(0.0, 255.0) as u8;
+        out[0] = (linear_to_srgb_extended(r * scale) * 255.0).clamp(0.0, 255.0) as u8;
+        out[1] = (linear_to_srgb_extended(g * scale) * 255.0).clamp(0.0, 255.0) as u8;
+        out[2] = (linear_to_srgb_extended(b * scale) * 255.0).clamp(0.0, 255.0) as u8;
     }
 }
 
 /// Decode + diffuse-white-anchor one `RGBF32_LINEAR` row to **unclamped**
-/// display-scaled f32 (`value * scale`, NO clamp) — the HDR-correct counterpart to
-/// [`normalize_linear_row`]. Super-white HDR survives as `> 255.0` instead of
-/// hard-clipping, so the content tiers (once ported to read f32) see the full
-/// envelope, not just the display range. `scale` folds the diffuse-white anchor +
-/// the 255 range factor, so display-white lands at `255.0` exactly as the u8 path —
-/// keeping the feature *scale* identical to SDR while preserving highlights.
+/// display-scaled f32 — the HDR-correct counterpart to [`normalize_linear_row`].
+/// Same `linear → ×anchor → sRGB OETF → ×255` pipeline, but **no upper clamp**, so
+/// super-white HDR (linear past the diffuse-white anchor) survives as `> 255.0`
+/// instead of hard-clipping. Below diffuse white the values are byte-for-byte the
+/// perceptual sRGB the u8 / default-gamma paths produce (to round-trip precision);
+/// above it the OETF extends past 255.0, so the content tiers see the genuine HDR
+/// highlight signal rather than a clipped plateau. `scale` is the linear anchor
+/// (1.0 = diffuse white); `linear_to_srgb_extended` is sign-preserving, so rare
+/// out-of-gamut negatives pass through as small negatives rather than NaNs.
 #[inline]
 fn normalize_linear_row_f32(lin_bytes: &[u8], scale: f32, dst: &mut [f32]) {
     for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
         let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
         let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
         let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
-        out[0] = r * scale;
-        out[1] = g * scale;
-        out[2] = b * scale;
+        out[0] = linear_to_srgb_extended(r * scale) * 255.0;
+        out[1] = linear_to_srgb_extended(g * scale) * 255.0;
+        out[2] = linear_to_srgb_extended(b * scale) * 255.0;
     }
 }
 
@@ -125,16 +134,22 @@ enum Inner<'a> {
     },
     /// Diffuse-white-normalized linear-light path (opt-in, linear-light
     /// analysis only). Decodes the source row to RGBF32_LINEAR, applies the
-    /// diffuse-white exposure anchor (a linear ×scale, NOT a tone curve), and
-    /// quantizes back to display-range RGB8. Every content tier then reads the
-    /// same normalized-linear bytes, so SDR-in-HDR-envelope content yields the
-    /// same features as plain SDR — by construction, in one shared pass.
+    /// diffuse-white exposure anchor (a linear ×scale, NOT a tone curve), then
+    /// re-encodes through the sRGB OETF to display range. Because the OETF matches
+    /// the default gamma path's perceptual encoding, the **displayable** range
+    /// yields the same features as plain SDR (to sRGB round-trip precision) — an
+    /// SDR scene scores identically whether delivered as SDR or in an HDR envelope.
+    /// The u8 fetch clips super-white to 255; the f32 fetch
+    /// ([`RowStream::fetch_f32_into`]) lets it extend past 255 so the content tiers
+    /// see HDR highlights, not a clipped plateau.
     LinearNormalized {
         slice: PixelSlice<'a>,
         /// Source descriptor → RGBF32_LINEAR.
         converter: RowConverter,
-        /// `anchor_scale(slice) * 255`: linear[0,1] → [0,255] display range,
-        /// with PQ/HLG exposure normalized to the signaled diffuse white.
+        /// `anchor_scale(slice)`: the **linear** diffuse-white anchor (1.0 = diffuse
+        /// white, PQ/HLG exposure normalized to the signaled diffuse white). The sRGB
+        /// OETF + ×255 to display range happen in `normalize_linear_row*`, so this
+        /// stays the pure linear ×scale the exposure anchor physically is.
         scale: f32,
     },
 }
@@ -216,7 +231,7 @@ impl<'a> RowStream<'a> {
         let width = slice.width();
         let height = slice.rows();
         let desc = slice.descriptor();
-        let scale = anchor_scale(&slice) * 255.0;
+        let scale = anchor_scale(&slice);
         let converter = RowConverter::new(desc, PixelDescriptor::RGBF32_LINEAR)
             .map_err(|e| format!("RowConverter::new (linear) failed: {:?}", e))?;
         let w = width as usize;
