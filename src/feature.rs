@@ -2060,6 +2060,83 @@ impl AnalysisQuery {
 pub(crate) const DEFAULT_PIXEL_BUDGET: usize = 500_000;
 pub(crate) const DEFAULT_HF_MAX_BLOCKS: usize = 1024;
 
+/// A recommended **pre-standardization transform** for a feature, from its
+/// structural value distribution — *not* corpus-dependent.
+///
+/// zenanalyze emits raw feature values (it surfaces signals; the consumer
+/// decides). But the *shape* of each feature's distribution is structural:
+/// `variance` is a sum-of-squares (heavy-tailed on any corpus), a `*_fraction`
+/// is bounded `[0, 1]`, a dimension is a strictly-positive wide-range count. A
+/// model fitter should apply this transform before z-scoring — bakes that skip
+/// it leave heavy-tailed features dominating the gradient — or override
+/// per-corpus when its own ablation finds better. Variant names match the common
+/// `FEATURE_TRANSFORMS` vocabulary, so [`Self::as_str`] drops straight into a
+/// trainer config.
+///
+/// This is the structural *floor* every per-codec bake converged on (dimensions
+/// → `log`, the variance / laplacian / edge-slope family → `log1p`); per-feature
+/// sweep refinement (winsor / clip / quantile) stays a consumer concern.
+#[non_exhaustive]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum TransformHint {
+    /// Already well-scaled — bounded fractions / ratios, small counts, booleans,
+    /// the in-`[0, 1]` gamut & highlight-chroma/orientation descriptors.
+    Identity,
+    /// `log1p(x) = ln(1 + x)` — heavy-tailed non-negative magnitudes that can be
+    /// `0` (variance, laplacian-variance, DCT energies, edge-slope, highlight
+    /// luma stats).
+    Log1p,
+    /// `ln(x)` — strictly-positive wide-dynamic-range quantities (pixel
+    /// dimensions, luminance nits).
+    Log,
+    /// `sign(x) · |x|^(1/3)` — signed, heavy-tailed on both sides (the chroma-luma
+    /// covariances).
+    SignedCbrt,
+}
+
+impl TransformHint {
+    /// The transform's canonical name, matching the `FEATURE_TRANSFORMS`
+    /// vocabulary used by the zentrain / zenpredict transform layer.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Identity => "identity",
+            Self::Log1p => "log1p",
+            Self::Log => "log",
+            Self::SignedCbrt => "signed_cbrt",
+        }
+    }
+}
+
+impl AnalysisFeature {
+    /// The recommended [`TransformHint`] for this feature — the structural
+    /// pre-standardization transform a model fitter should default to.
+    ///
+    /// Keyed on the stable [`id`](Self::id), so the table needs no `cfg` gating:
+    /// ids of features compiled out of this build simply never occur (the value
+    /// you call this on is always a compiled-in variant).
+    #[must_use]
+    pub const fn recommended_transform(self) -> TransformHint {
+        match self.id() {
+            // Strictly-positive wide-dynamic-range → log.
+            56 | 58 | 59 // pixel_count, min_dim, max_dim
+            | 32 | 33 // peak_luminance_nits, p99_luminance_nits
+            => TransformHint::Log,
+            // Heavy-tailed non-negative magnitudes (can be 0) → log1p.
+            0 | 8 | 9 // variance, laplacian_variance, variance_spread
+            | 81 | 82 | 83 | 84 | 85 | 105 | 106 | 107 // laplacian_variance pcts + peak
+            | 50 | 42 // edge_slope_stdev, aq_map_std
+            | 21 | 22 // dct_compressibility_y / _uv
+            | 212 | 213 // highlight_luma_mean / _std
+            => TransformHint::Log1p,
+            // Signed, heavy-tailed both sides → signed cube-root.
+            132 | 133 // chroma_luma_covariance_cb / _cr
+            => TransformHint::SignedCbrt,
+            _ => TransformHint::Identity,
+        }
+    }
+}
+
 #[doc(hidden)]
 impl AnalysisQuery {
     /// **Unstable. Tests / oracle re-extraction only.** Lets the
@@ -2714,6 +2791,29 @@ mod tests {
         r.set(AnalysisFeature::DistinctColorBins, 1234_u32);
         r.set(AnalysisFeature::AlphaPresent, true);
         r
+    }
+
+    #[test]
+    fn recommended_transform_floor() {
+        use AnalysisFeature::*;
+        // Heavy-tailed magnitudes → log1p.
+        assert_eq!(Variance.recommended_transform(), TransformHint::Log1p);
+        assert_eq!(
+            LaplacianVariance.recommended_transform(),
+            TransformHint::Log1p
+        );
+        assert_eq!(VarianceSpread.recommended_transform(), TransformHint::Log1p);
+        // Dimensions (strictly-positive wide range) → log.
+        assert_eq!(PixelCount.recommended_transform(), TransformHint::Log);
+        assert_eq!(MinDim.recommended_transform(), TransformHint::Log);
+        assert_eq!(MaxDim.recommended_transform(), TransformHint::Log);
+        // A bounded fraction is already well-scaled → identity.
+        assert_eq!(EdgeDensity.recommended_transform(), TransformHint::Identity);
+        // Names match the FEATURE_TRANSFORMS vocabulary.
+        assert_eq!(TransformHint::Identity.as_str(), "identity");
+        assert_eq!(TransformHint::Log1p.as_str(), "log1p");
+        assert_eq!(TransformHint::Log.as_str(), "log");
+        assert_eq!(TransformHint::SignedCbrt.as_str(), "signed_cbrt");
     }
 
     #[test]
