@@ -114,6 +114,53 @@ mod deinterleave_dispatch {
 }
 use deinterleave_dispatch::DeinterleaveRgb24Chunk8;
 
+/// Source pixel element for the tier kernels — `u8` (gamma display bytes, the SDR
+/// fast path) or `f32` (display-scaled linear, the HDR-correct path where
+/// super-white survives as `> 255.0`). Both deinterleave one 8-pixel RGB chunk
+/// into 3 × `[f32; 8]` planes for the shared f32x8 compute, so there is ONE kernel
+/// body (no drift) — the only per-type difference is this load. `u8` keeps garb's
+/// tuned `vpshufb` deinterleave (no SDR regression); `f32` is a plain gather of an
+/// already-linear row. `base` is an element index into `rows` either way (the row
+/// stride is `width * 3` elements for both).
+pub(crate) trait ChunkInput: Copy {
+    fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
+        rows: &[Self],
+        base: usize,
+        token: Tok,
+    ) -> ([f32; 8], [f32; 8], [f32; 8]);
+}
+
+impl ChunkInput for u8 {
+    #[inline(always)]
+    fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
+        rows: &[u8],
+        base: usize,
+        token: Tok,
+    ) -> ([f32; 8], [f32; 8], [f32; 8]) {
+        let chunk: &[u8; 24] = (&rows[base..base + 24]).try_into().unwrap();
+        token.rgb24_chunk8(chunk)
+    }
+}
+
+impl ChunkInput for f32 {
+    #[inline(always)]
+    fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(
+        rows: &[f32],
+        base: usize,
+        _token: Tok,
+    ) -> ([f32; 8], [f32; 8], [f32; 8]) {
+        let mut r = [0.0f32; 8];
+        let mut g = [0.0f32; 8];
+        let mut b = [0.0f32; 8];
+        for i in 0..8 {
+            r[i] = rows[base + i * 3];
+            g[i] = rows[base + i * 3 + 1];
+            b[i] = rows[base + i * 3 + 2];
+        }
+        (r, g, b)
+    }
+}
+
 // Luma weights are no longer constants — they're picked per-source-
 // primaries by `crate::luma::LumaWeights::for_primaries(...)` and
 // threaded into the SIMD kernels as `kr / kg / kb` parameters.
@@ -1040,9 +1087,9 @@ fn stripe_block_stats_dispatch(
 /// values for one block-row. Lane-wise min/max plus lane-summed luma /
 /// luma² accumulators are reduced to scalar at the end of each block.
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
-fn stripe_block_stats_simd(
+fn stripe_block_stats_simd<R: ChunkInput>(
     token: Token,
-    stripe_rows: &[u8],
+    stripe_rows: &[R],
     row_bytes: usize,
     blocks_x: usize,
     rows: usize,
@@ -1080,8 +1127,7 @@ fn stripe_block_stats_simd(
             // current target_feature region; on AVX2 it emits 6×vpshufb
             // + 3×vpor + 3×vpmovzxbd + 3×vcvtdq2ps in place of the
             // 21×vpinsrb scatter the autovectorizer used to produce.
-            let chunk: &[u8; 24] = (&stripe_rows[base..base + 24]).try_into().unwrap();
-            let (r_arr, g_arr, b_arr) = token.rgb24_chunk8(chunk);
+            let (r_arr, g_arr, b_arr) = R::load_chunk8(stripe_rows, base, token);
             let r_v = f32x8::load(token, &r_arr);
             let g_v = f32x8::load(token, &g_arr);
             let b_v = f32x8::load(token, &b_arr);

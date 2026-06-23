@@ -28,16 +28,44 @@ rewrite.
   linear-light row-stream already feeds every tier (it's the *RGB8 clamp* that loses
   HDR, not a Variance-only limitation).
 
-## Remaining (the kernel port — the bulk)
+## Validated pattern (PROVEN — compiles, SDR byte-identical)
 
-1. **Generic row load over u8 / f32 (no SDR perf regression).** Keep the u8 SIMD fast
-   path for the default SDR case; add an f32 path for HDR-correct. Make each kernel's
-   load generic over a row source that yields `f32x8` lanes — u8 inner widens
-   (`u8→f32x8`, today's path), f32 inner loads `fetch_f32_into` rows directly. The
-   `f32x8`/`f64` compute body is shared verbatim, so there is **one implementation**
-   (no drift — `two code paths → bug` rule). Files: `tier1.rs` (`extract_tier1_into_dispatch`,
-   the `[f32;8]` load at the top), `tier2_chroma.rs`, `tier3.rs` (DCT/entropy/AQ/noise),
-   `palette.rs`. `borrow_row` / `fetch_range` need f32 twins too.
+The clean port is a **`ChunkInput` trait** (in `tier1.rs`) parameterizing *only* the
+per-chunk load; the `f32x8` compute body stays shared verbatim, so there is **one
+implementation** (no drift). `u8` keeps garb's tuned `vpshufb` deinterleave (zero SDR
+regression); `f32` is a plain gather of an already-display-scaled-linear row. `base` is
+an element index for both (row stride `width*3` elements).
+
+```rust
+pub(crate) trait ChunkInput: Copy {
+    fn load_chunk8<Tok: DeinterleaveRgb24Chunk8>(rows: &[Self], base: usize, token: Tok)
+        -> ([f32;8],[f32;8],[f32;8]);
+}   // impl for u8 (garb), impl for f32 (gather)
+```
+
+Per kernel the change is ~2 lines: `fn k<R: ChunkInput>(token, rows: &[R], …)` and the
+deinterleave becomes `let (r,g,b) = R::load_chunk8(rows, base, token);`. **Done +
+verified:** `stripe_block_stats_simd<R>` — `incant!` infers `R=u8` at the call site,
+`golden_is_stable` + 8 math-lock tests pass byte-identical, `fetch_f32_into` foundation
+in + tested.
+
+## Remaining (the kernel port — the bulk, ~many hours)
+
+1. **Port the rest of the kernels** with the proven pattern:
+   - `accumulate_row_simd<const BT601, const FULL, const SKIN>` — add `R` *after* the
+     const generics (`incant!`'s `::<true,true,true>` turbofish leaves `R` to be inferred
+     from `rgb: &[R]`); two deinterleave sites (~line 1317, 1504); CHECK the scalar edge
+     stencil for any direct `rgb[i] as f32` byte reads → they already widen to f32, just
+     index `&[R]` (R: Into<f32>-ish — add a `to_f32()` to `ChunkInput` if needed).
+   - the Laplacian SIMD pass; `tier2_chroma.rs`; `tier3.rs` (DCT/entropy/AQ/noise);
+     `palette.rs`. Each: same `<R: ChunkInput>` + `R::load_chunk8`.
+2. **Add `ChunkInput::fetch_row(stream, y, &mut [Self])`** (u8 → `fetch_into`, f32 →
+   `fetch_f32_into`) and make each tier's `extract_*` orchestration generic over `R`
+   (stripe/scratch buffers `Vec<R>`, fetch via `R::fetch_row`, scalar luma reads via a
+   `ChunkInput::to_f32`).
+3. **Dispatch.** `lib.rs` ~580: `run_linear_light` ⇒ build the f32-linear stream and call
+   `extract_tier{1,2,3}::<f32>` / `scan_palette::<f32>`. Retire the RGB8-clamp
+   `LinearNormalized` mode (or keep only as the cheap SDR-in-HDR-envelope normalizer).
 2. **Dispatch.** `lib.rs` ~580: when `run_linear_light`, build the f32-linear stream and
    route the tiers through the f32 load. Retire the RGB8-clamp `LinearNormalized` mode
    (or keep it only as the cheap SDR-in-HDR-envelope normalizer — decide during the port).
