@@ -79,6 +79,61 @@ fn linear_light_flag_changes_variance_end_to_end() {
     );
 }
 
+/// The diffuse-white-normalized linear path is a ROW-STREAM transform
+/// (`RowStream::new_normalized_linear`), so EVERY content tier (1/2/3 + palette)
+/// reads the normalized-linear bytes — not just `Variance`. A dark textured field
+/// (where sRGB and linear diverge most) must move *many* tier features, proving the
+/// linear-light coverage is tier-wide and not a Variance-only prototype.
+#[test]
+fn linear_light_moves_all_rowstream_tiers_not_just_variance() {
+    let (w, h) = (128usize, 128usize);
+    // 8×8 checkerboard between two shadow levels: edges + DCT energy + texture, all
+    // in the shadow range where the sRGB EOTF bends hardest away from linear.
+    let mut buf = vec![0u8; w * h * 3];
+    for y in 0..h {
+        for x in 0..w {
+            let v = if ((x / 8) + (y / 8)) % 2 == 0 {
+                12u8
+            } else {
+                44u8
+            };
+            let p = (y * w + x) * 3;
+            buf[p] = v;
+            buf[p + 1] = v;
+            buf[p + 2] = v;
+        }
+    }
+    let mk =
+        || PixelSlice::new(&buf, w as u32, h as u32, w * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+    let g = analyze_features(mk(), &AnalysisQuery::new(FeatureSet::SUPPORTED)).unwrap();
+    let l = analyze_features(
+        mk(),
+        &AnalysisQuery::new(FeatureSet::SUPPORTED).with_linear_light(true),
+    )
+    .unwrap();
+    let mut moved = Vec::new();
+    for f in FeatureSet::SUPPORTED.iter() {
+        if let (Some(a), Some(b)) = (g.get_f32(f), l.get_f32(f))
+            && a.is_finite()
+            && b.is_finite()
+            && (a - b).abs() > 1e-4 * a.abs().max(1.0)
+        {
+            moved.push(f.name());
+        }
+    }
+    std::eprintln!("linear-light moved {} features: {:?}", moved.len(), moved);
+    assert!(
+        moved.len() > 5,
+        "linear-light must move many tier features, not just Variance; moved {}: {:?}",
+        moved.len(),
+        moved
+    );
+    assert!(
+        moved.contains(&"variance"),
+        "Variance must still move under linear-light"
+    );
+}
+
 /// A uniform field reads ~zero variance through the normalized-linear stream.
 #[test]
 fn uniform_field_is_zero_variance() {

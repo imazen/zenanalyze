@@ -1383,8 +1383,9 @@ mod feature_vector_tests {
     /// normalization (anchor → 1.0, no tone curve) makes the Variance match by
     /// construction. The default gamma path does NOT hold — it treats the PQ peak
     /// (10000 nits) as display white and crushes the content to near-black; the
-    /// second half of this test pins that contrast. (Other content features join
-    /// as their linear kernels land; today the linear path normalizes Variance.)
+    /// second half of this test pins that contrast. (The normalized-linear row
+    /// stream feeds every content tier, so all the luminance/contrast features are
+    /// computed in linear light; this test pins Variance.)
     #[test]
     fn sdr_in_hdr_envelope_matches_sdr_normal() {
         use feature::{AnalysisFeature as AF, AnalysisQuery, FeatureSet};
