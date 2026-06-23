@@ -195,3 +195,40 @@ fn honors_signaled_diffuse_white() {
         "default (203) must mis-normalize a 100-nit envelope: default {v_default} vs sdr {v_sdr}"
     );
 }
+
+/// Foundation for the f32 HDR-correct tier path: `RowStream::fetch_f32_into`
+/// preserves super-white HDR as `> 255.0`, where the u8 `fetch_into` path
+/// hard-clips to 255. This is exactly the information the (in-progress) f32 tier
+/// kernels need to see the full envelope instead of the display-clipped range.
+#[test]
+fn fetch_f32_preserves_superwhite_where_u8_clips() {
+    use crate::row_stream::RowStream;
+    use linear_srgb::tf::linear_to_pq;
+    use zenpixels::TransferFunction;
+
+    let (w, h) = (8u32, 2u32);
+    // Each pixel sits at 2× the default diffuse-white (203 nits) in linear — above
+    // display-white. PQ stores linear normalized to the 10000-nit peak.
+    let above = 2.0 * 203.0 / 10000.0;
+    let pix16 = (linear_to_pq(above).clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+    let bytes: Vec<u8> = (0..(w * h * 3)).flat_map(|_| pix16.to_ne_bytes()).collect();
+    let desc = PixelDescriptor::RGB16.with_transfer(TransferFunction::Pq);
+    let mk = || PixelSlice::new(&bytes, w, h, (w * 6) as usize, desc).unwrap();
+
+    let mut f32row = vec![0f32; (w * 3) as usize];
+    RowStream::new_normalized_linear(mk())
+        .unwrap()
+        .fetch_f32_into(0, &mut f32row);
+    let mut u8row = vec![0u8; (w * 3) as usize];
+    RowStream::new_normalized_linear(mk())
+        .unwrap()
+        .fetch_into(0, &mut u8row);
+
+    // 2× display-white ≈ 510 in the f32 path (display-white = 255); u8 clamps to 255.
+    assert!(
+        f32row[0] > 300.0,
+        "f32 fetch must preserve super-white (>255), got {}",
+        f32row[0]
+    );
+    assert_eq!(u8row[0], 255, "u8 fetch must clamp super-white to 255");
+}

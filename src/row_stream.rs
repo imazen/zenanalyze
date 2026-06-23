@@ -62,6 +62,25 @@ fn normalize_linear_row(lin_bytes: &[u8], scale: f32, dst: &mut [u8]) {
     }
 }
 
+/// Decode + diffuse-white-anchor one `RGBF32_LINEAR` row to **unclamped**
+/// display-scaled f32 (`value * scale`, NO clamp) — the HDR-correct counterpart to
+/// [`normalize_linear_row`]. Super-white HDR survives as `> 255.0` instead of
+/// hard-clipping, so the content tiers (once ported to read f32) see the full
+/// envelope, not just the display range. `scale` folds the diffuse-white anchor +
+/// the 255 range factor, so display-white lands at `255.0` exactly as the u8 path —
+/// keeping the feature *scale* identical to SDR while preserving highlights.
+#[inline]
+fn normalize_linear_row_f32(lin_bytes: &[u8], scale: f32, dst: &mut [f32]) {
+    for (px, out) in lin_bytes.chunks_exact(12).zip(dst.chunks_exact_mut(3)) {
+        let r = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
+        let g = f32::from_ne_bytes([px[4], px[5], px[6], px[7]]);
+        let b = f32::from_ne_bytes([px[8], px[9], px[10], px[11]]);
+        out[0] = r * scale;
+        out[1] = g * scale;
+        out[2] = b * scale;
+    }
+}
+
 /// Pull RGB8 rows from any [`PixelSlice`].
 ///
 /// Holds either:
@@ -270,6 +289,63 @@ impl<'a> RowStream<'a> {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
                 normalize_linear_row(&self.lin_scratch[..len * 4], *scale, &mut dst[..len]);
+            }
+        }
+    }
+
+    /// Fetch row `y` as **display-scaled f32** into `dst[..width*3]` — the
+    /// f32-linear counterpart to [`Self::fetch_into`] that the HDR-correct
+    /// (f32-kernel) tier path reads. For the linear-normalized inner, super-white
+    /// HDR survives as `> 255.0` (no clamp); the gamma inners widen their u8 bytes
+    /// to f32 unchanged (`0..=255`). Display-white is `255.0` either way, so the
+    /// feature scale matches the u8 path.
+    ///
+    /// Foundation for the f32 tier-kernel HDR-correct path (see
+    /// `docs/f32-hdr-kernels-plan.md`); not yet wired into the tiers.
+    ///
+    /// # Panics
+    /// Panics if `y >= height` or `dst.len() < width * 3`.
+    pub fn fetch_f32_into(&mut self, y: u32, dst: &mut [f32]) {
+        assert!(
+            y < self.height,
+            "row {y} out of bounds (height={})",
+            self.height
+        );
+        let len = self.width as usize * 3;
+        assert!(dst.len() >= len, "dst too small for one RGB f32 row");
+        match &mut self.inner {
+            Inner::LinearNormalized {
+                slice,
+                converter,
+                scale,
+            } => {
+                let src = slice.row(y);
+                converter.convert_row(src, &mut self.lin_scratch[..len * 4], self.width);
+                normalize_linear_row_f32(&self.lin_scratch[..len * 4], *scale, &mut dst[..len]);
+            }
+            Inner::Native(slice) => {
+                let row = slice.row(y);
+                for (d, &b) in dst[..len].iter_mut().zip(&row[..len]) {
+                    *d = b as f32;
+                }
+            }
+            Inner::StripAlpha8 { slice, rgb_idx } => {
+                strip_alpha_row(
+                    slice.row(y),
+                    self.width as usize,
+                    *rgb_idx,
+                    &mut self.scratch[..len],
+                );
+                for (d, &b) in dst[..len].iter_mut().zip(&self.scratch[..len]) {
+                    *d = b as f32;
+                }
+            }
+            Inner::Convert { slice, converter } => {
+                let src = slice.row(y);
+                converter.convert_row(src, &mut self.scratch[..len], self.width);
+                for (d, &b) in dst[..len].iter_mut().zip(&self.scratch[..len]) {
+                    *d = b as f32;
+                }
             }
         }
     }
