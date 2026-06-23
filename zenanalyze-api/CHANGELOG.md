@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-23
+
 First release — the version-unifying feature contract for the zenanalyze picker tree.
 `no_std + alloc`, no dependencies, `forbid(unsafe_code)`. The README is the crate doc (every
 example is a compiled doctest) plus a coverage tripwire that fails the build if a public item
@@ -25,4 +27,5 @@ is undocumented.
 - `Select` / `Request` (the consumer's ask), `Catalog` (`union` + availability queries),
   `FormatError`.
 
-[Unreleased]: https://github.com/imazen/zenanalyze/commits/main
+[Unreleased]: https://github.com/imazen/zenanalyze/compare/zenanalyze-api-v0.1.0...HEAD
+[0.1.0]: https://github.com/imazen/zenanalyze/releases/tag/zenanalyze-api-v0.1.0

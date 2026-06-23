@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.93"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/imazen/zenanalyze"
-description = "Frozen, version-unifying feature contract for the zenanalyze picker tree: Request (what a codec wants) + Offer (a self-describing feature result) so a dozen codecs on different zenanalyze/zenpredict versions can share one extraction pass. Pure transport — no feature definitions."
+description = "Version-unifying feature contract for the zenanalyze picker tree: Request (what a codec wants) + Offer (a self-describing feature result) so a dozen codecs on different zenanalyze/zenpredict versions can share one extraction pass. Pure transport — no feature definitions."
 keywords = ["image", "features", "codec", "picker", "contract"]
 categories = ["multimedia::images", "no-std"]
 
