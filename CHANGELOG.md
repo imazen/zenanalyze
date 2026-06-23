@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-23
+
 ### Added
 
 - **Content-hash feature versioning + golden test set** (`versioning` module).
@@ -36,75 +38,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diverge per tier, and a few cross a decision threshold to 0.0-vs-nonzero that no
   tolerance bridges; the version *hash* (text-derived) stays platform-independent.
   Diagnosis: `docs/feature-cross-platform-divergence-2026-06-20.md`.
-- **Dep-free feature serialization contract** — `zenanalyze_api::provenance`
-  (zero-dep, additive on the frozen 1.x). A `zenanalyze-provenance/1` text block
-  records the three legs of a serialized feature set's reuse key — `analyzer_version`,
-  `config_hash`, `descriptor_hash` — plus each feature's `version_hash`, so a
-  training run years later can validate reuse **feature-by-feature**
-  (`OwnedProvenance::parse` + `feature_is_reusable`). `write_provenance` serializes;
-  the format is forward-compatible (unknown headers ignored). zenanalyze adds
-  `versioning::descriptor_hash` / `descriptor_hash_of` (a stable digest of the
-  value-affecting input framing: transfer / primaries / alpha / diffuse-white — bit
-  depth deliberately excluded, since SDR u8/u16/f32 converge) and
-  `OwnedOffer::provenance(descriptor_hash)` (gated on `api`), to stamp straight into
-  Parquet key-value metadata. An end-to-end test runs extract → stamp → parse →
-  validate-against-live-analyzer, and confirms a descriptor mismatch falls out.
-- **zentrain + Parquet provenance plumbing** — the serialization contract wired
-  through the training pipeline. `extract_features_for_picker --features api` now
-  emits a `<table>.provenance` sidecar (one block per extraction: RGB8-sRGB
-  framing, gamma config, per-feature version hashes via
-  `feature_set_provenance`). `benchmarks/tsv_to_parquet.py` carries any sidecar
-  into the Parquet key-value metadata on conversion; `zentrain/tools/_provenance.py`
-  gains a pure-Python mirror of the format (`parse_provenance_block`,
-  `write_provenance_block`, `feature_is_reusable`, `embed_provenance_in_table`,
-  `provenance_from_parquet`, `assert_consistent_provenance` — no new deps);
-  `train_hybrid.py` records the FEATURES table's block into the model JSON
-  (`feature_provenance`) and warns if it disagrees with the declared coarse
-  reuse-key stamps. New `zentrain-pytests` CI job runs the (previously un-CI'd)
-  zentrain tool tests, including 11 new serialization-provenance tests.
-- **Training-side reuse-key provenance (zentrain)** — the "outside-in" half so
-  baked picker models can carry the stamps and actually reuse a shared feature
-  `Offer`. New `zentrain/tools/_provenance.py` (`stamps_from_provenance` +
-  `workspace_provenance`); `train_hybrid.py` and `train_multi_codec.py` read an
-  optional `ANALYSIS_PROVENANCE` from the codec config and emit the three stamps
-  into the model JSON (which `bake_picker.py` already forwards). Undeclared → no
-  stamps → the baked model safely runs its own pass. Documented template in
-  `zentrain/examples/zenjpeg_picker_config.py`. The source-of-truth is *declared*
-  (the extractor's exact zenanalyze version isn't auto-guessed — a wrong version
-  stamp would be a soundness risk).
-- **`OwnedOffer` + the opt-in `api` feature** — the producer side of the
-  `zenanalyze-api` contract. `OwnedOffer::extract(rgb, w, h, &query)` runs one
-  analysis pass and owns the dense `(names, values)` + reuse key;
-  `as_offer() -> zenanalyze_api::Offer<'_>` lends the borrowed contract type (the
-  `PathBuf`→`&Path` pattern), so a dozen codecs on different zenanalyze versions
-  can share one extraction. Gated behind `api` (off by default; pulls the
-  zero-dep `zenanalyze-api` 1.0). The owned holder lives in this impl crate, not
-  the frozen contract, so `Offer` stays a minimal borrowed type. An end-to-end
-  test runs extract → offer → `reuse_for` (reuse on match, own-pass on
-  config/version/coverage miss) — the real-use validation of the frozen shape.
+- **`zenanalyze-api` feature contract (published `0.1.0`) + the opt-in `api` feature.**
+  The cross-version contract that lets a dozen codecs on different zenanalyze versions
+  share one feature-extraction pass. The producer
+  `extract_offer(rgb, w, h, &query, descriptor_hash) -> OwnedOffer` runs one analysis
+  pass and yields a self-describing `Offer` whose cells are **qualified `name@hex8`
+  identities** (the per-feature code version folded into the name via
+  `zenanalyze_api::NamedFeature::fold_hash`) carrying native `Value`s; a consumer builds
+  a `zenanalyze_api::Request` from its baked model's qualified columns and negotiates
+  reuse **purely by qualified name** (`reuse_for` / `satisfies`), own-passing on any
+  miss. The contract crate (zero-dep, `no_std + alloc`) carries only transport types —
+  `NamedFeature`, `Value`, `FeatureResult` / `OwnedFeatureResult`, `Offer` /
+  `OwnedOffer`, `Provenance`, `Select` / `Request`, `Catalog` — and is at **0.1.x**
+  (settles in 0.x, freezes at 1.0). The `(analyzer_version, feature_defs_version,
+  config_hash)` stamps are now **informational `Provenance`**, not a reuse gate: reuse
+  keys on per-feature qualified name, so drift in one feature only misses that feature.
+- **Qualified column names end-to-end.** `versioning::feature_qualified_names()` (behind
+  `api`) maps every feature `name -> name@hex8`, blessed into the committed
+  `benchmarks/feature_qualified_names.tsv` (a golden tripwire keeps it synced). The
+  `extract_features_*` examples emit qualified `name@hex8` headers under `--features
+  api`; the zentrain loaders (`_picker_lib`, `train_hybrid`, …) accept **both** bare
+  `feat_*` and qualified columns, matching a bare keep-list against qualified columns by
+  canonical name. The imazen-26 feature parquets were regenerated with qualified columns
+  (values byte-identical; `benchmarks/qualify_parquet_columns.py` + the now
+  canonical-aware `validate_reextract.py`).
 - **`AnalysisQuery::config_hash() -> u64`** — opaque digest of the value-affecting
-  analysis config for the `zenanalyze-api` reuse key. `0` = canonical default
-  (gamma); `with_linear_light(true)` deviates to a stable nonzero. Lets a codec
-  refuse to reuse linear-light features against a gamma-trained model (the same
-  feature name produces different values under the flag, while `feature_defs_version`
-  stays fixed). Ignores the feature set and crate-internal budgets; new
-  value-affecting flags fold in without changing the frozen `zenanalyze-api`.
-- **Co-versioning, type-free feature contract for the picker crate tree**
-  (additive — free functions, core types only, so multiple zenanalyze majors can
-  link in one build):
-  - `AnalysisFeature::from_name` / `feature_id_by_name` — the reverse of
-    `name`/`feature_name`, resolving a (optionally `feat_`-prefixed) column name
-    to a feature. Every wired codec picker currently re-implements this by hand.
-  - `resolve_feature_ids(&[S]) -> Option<Vec<u16>>` — the blessed bind step:
-    resolves a baked model's feature-column NAME list to ids (in order),
-    returning a **core `Vec<u16>`** the caller owns. With `feature_vector`
-    (`&[u16]` in, `&[f32]` out) a codec binds model↔analyzer holding no
-    zenanalyze type, so the data path stays valid even when several zenanalyze
-    versions are linked at once.
-  - `feature_defs_version()` — monotonic version of the feature *numeric
-    definitions*. Cross-major drift is guaranteed by the Cargo pin; this is the
-    within-major backstop (bake next to the model, check at load). Freezes at 1.0.
-  - Contract + data structures + examples: `docs/feature-contract-pr-2026-06-19.md`.
+  analysis config, feeding the informational `Provenance`. `0` = canonical default
+  (gamma); `with_linear_light(true)` deviates to a stable nonzero.
+- **Type-free codec-bind helpers** (core types only, so several zenanalyze majors can
+  link in one build): `AnalysisFeature::from_name` / `feature_id_by_name`,
+  `resolve_feature_ids(&[S]) -> Option<Vec<u16>>`, `feature_vector` (`&[u16]` in, `&[f32]`
+  out), and `feature_defs_version()` (the within-major numeric-defs backstop; cross-major
+  drift is guaranteed by the Cargo pin).
+- **zentrain provenance plumbing.** `extract_features_for_picker --features api` writes a
+  `<table>.provenance` sidecar (the `zenanalyze-provenance/1` block — analyzer version +
+  config + RGB8-sRGB framing + per-feature version hash, built from the public API);
+  `benchmarks/tsv_to_parquet.py` carries it into Parquet key-value metadata;
+  `zentrain/tools/_provenance.py` mirrors the format in pure Python and `train_hybrid.py`
+  records + checks it. A `zentrain-pytests` CI job runs the zentrain tool tests.
 
 - **Linear-light Variance is now HDR-correct (diffuse-white normalized).** The
   opt-in linear path (below) was generalized from RGB8-only/sRGB to **any format
@@ -239,7 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output as plain data rather than as a clashing `AnalysisResults` type. New
   public items: `feature::{PackError, MissingFeatures}`. Additive — no break.
 
-## [0.2.0] - 2026-06-01
+### Earlier 0.2.0-line milestone (2026-06-01)
 
 ### BREAKING (semver-correct minor bump; the "0.1.x-forever" freeze is retired for this release)
 

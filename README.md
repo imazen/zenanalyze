@@ -13,7 +13,7 @@ smaller**.
 [dependencies]
 zenanalyze = "0.2.0"
 # Naming the source PixelDescriptor / ColorPrimaries off a result needs zenpixels too:
-zenpixels = { version = "0.2.11", default-features = false }
+zenpixels = { version = "0.2.14", default-features = false }
 # Opt in to the still-settling XYB color-loss + deprecated palette-density signals:
 # zenanalyze = { version = "0.2.0", features = ["experimental"] }
 # Opt in to source-direct HDR / wide-gamut / bit-depth signals (the depth tier):
