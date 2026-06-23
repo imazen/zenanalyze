@@ -388,6 +388,19 @@ Gamma 2.2 / Linear / PQ / HLG — to linear nits. Two views of the same
 source: the SDR-display view for trained thresholds, the source-direct view
 for HDR / wide-gamut signal.
 
+**Opt-in linear-light content analysis (`with_linear_light`).** Those two
+views are the *default*. For HDR-correct *content* features — not just the
+depth-tier signals — set `AnalysisQuery::with_linear_light(true)`. The row
+stream decodes to linear, applies the diffuse-white exposure **anchor** (a
+×scale, not a tonemap), re-encodes through the sRGB OETF, and feeds the
+content tiers in f32. Below diffuse white an HDR scene then scores like the
+equivalent SDR scene — the displayable range is the same perceptual sRGB the
+default path produces — and super-white above the anchor survives past the u8
+ceiling instead of clipping to a flat plateau, so the content tiers measure
+the real envelope. The default gamma narrowing stays the zero-copy fast path
+for SDR-calibrated thresholds; reach for linear-light when the depth tier
+flags HDR and you want the content features to follow it into the highlights.
+
 The `tier_depth` reference convention is stable across the 0.2.x line:
 
 | Transfer | Linear 1.0 maps to | Convention |
