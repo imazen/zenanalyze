@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **HDR-native f32 tier kernels + sRGB-OETF linear-light re-encode.** On HDR
+  (PQ/HLG) input the default analyzer narrows to gamma RGB8, which treats the PQ
+  peak as display-white and crushes content toward black (the imazen-26 HDR
+  features measured `variance` ~0.09× / `edge_density` ~0.006× of the SDR
+  equivalent). Tier 1/2/3 are now generic over a `ChunkInput` load type
+  (`tier1::ChunkInput`): `u8` keeps garb's tuned `vpshufb` deinterleave (SDR fast
+  path, byte-identical) while `f32` feeds the kernels unclamped display-scaled
+  rows, so super-white HDR survives at f32 precision instead of clipping to 255.
+  The shared `f32x8` compute body is unchanged (one implementation, no drift). The
+  opt-in linear-light path (`with_linear_light(true)`) now re-encodes through the
+  sRGB OETF **after** the diffuse-white exposure anchor (`linear → ×anchor → sRGB
+  OETF → ×255`, via `linear_srgb::precise::linear_to_srgb_extended`): below diffuse
+  white an SDR scene scores the same whether delivered as SDR or carried in an HDR
+  envelope (to sRGB round-trip precision — the displayable range is perceptually
+  identical to the default gamma path); above it super-white extends past 255 as
+  the genuine HDR-only signal. Re-extracting the imazen-26 HDR features under
+  linear-light recovers realistic content values (`variance` +31×, `edge_density`
+  +27× vs the crushed gamma extraction). The golden now extracts every corpus case
+  under **both** configs (gamma + linear-light), versioning the f32 linear-light
+  code: re-blessed `src/versioning_golden.tsv` (26→52 values/feature; the gamma
+  columns are byte-identical, so SDR is provably untouched) bumps all 110 feature
+  hashes and the committed `benchmarks/feature_qualified_names.tsv`. `config_hash`
+  still tags which config produced an on-disk value; the golden versions the code.
 - **Content-hash feature versioning + golden test set** (`versioning` module).
   `feature_version_hash(feature) -> Option<u64>` fingerprints each feature's
   computation from a committed golden (its values over a fixed synthetic corpus)
@@ -60,8 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   api`; the zentrain loaders (`_picker_lib`, `train_hybrid`, …) accept **both** bare
   `feat_*` and qualified columns, matching a bare keep-list against qualified columns by
   canonical name. The imazen-26 feature parquets were regenerated with qualified columns
-  (values byte-identical; `benchmarks/qualify_parquet_columns.py` + the now
-  canonical-aware `validate_reextract.py`).
+  (`benchmarks/qualify_parquet_columns.py` + the now canonical-aware
+  `validate_reextract.py`). Note: the later two-config golden re-bless (gamma +
+  linear-light) bumped every feature hash again, so the qualified column names are
+  those of the final blessed set; SDR/gamma values stay byte-identical, while the
+  HDR parquets carry the corrected linear-light values.
 - **`AnalysisQuery::config_hash() -> u64`** — opaque digest of the value-affecting
   analysis config, feeding the informational `Provenance`. `0` = canonical default
   (gamma); `with_linear_light(true)` deviates to a stable nonzero.

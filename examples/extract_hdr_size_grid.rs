@@ -382,7 +382,12 @@ fn main() -> ExitCode {
             .chunks(chunk)
             .map(|ch| {
                 s.spawn(move || {
-                    let query = AnalysisQuery::new(FeatureSet::SUPPORTED);
+                    // HDR sources MUST analyze under linear-light: the default gamma
+                    // path narrows PQ/HLG to display RGB8 and crushes content toward
+                    // black. Linear-light anchors diffuse white and (post sRGB OETF)
+                    // keeps super-white past 255 so the tier features see the real
+                    // envelope. config_hash tags these rows as linear-light.
+                    let query = AnalysisQuery::new(FeatureSet::SUPPORTED).with_linear_light(true);
                     let mut buf = String::new();
                     let (mut ok, mut fail) = (0usize, 0usize);
                     for p in ch {

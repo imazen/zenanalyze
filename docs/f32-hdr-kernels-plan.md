@@ -86,8 +86,24 @@ in + tested.
    dry-run clean, semver-checks OK; tag `zenanalyze-v0.2.0` → GitHub release → publish),
    then resume the sibling-repo migration.
 
-## Status
+## Status — kernels + OETF + golden DONE (2026-06-23)
 
-Foundation done + tested + pushed. The kernel port (step 1) is a careful SIMD load-path
-refactor across tier1/2/3 + palette — a focused multi-hour effort that should be done
-deliberately (perf + golden discipline), not rushed.
+- **Kernel port DONE.** `ChunkInput` generic landed across tier1 (`3c582d6a`), tier2
+  (`7b672560`), tier3 (`cabf7f6a`); palette confirmed R-agnostic (uses `borrow_row`,
+  no port). SDR byte-identical the whole way (golden_is_stable + 219 lib tests).
+- **OETF decision DONE (`1c7ae48f`).** The linear-light path re-encodes through the
+  sRGB OETF after the exposure anchor (`linear → ×anchor → OETF → ×255`), so below
+  diffuse white SDR scores the same as the gamma path (round-trip precision) and
+  super-white extends past 255. This resolved "hdr vs sdr scoring differences below
+  diffuse white": they match below, HDR extends above.
+- **Golden + hashes DONE (`1c7ae48f`).** `extract_matrix` runs both configs
+  (`[false, true]`); golden re-blessed 26→52 values/feature (gamma columns
+  byte-identical), all 110 feature hashes + `feature_qualified_names.tsv` updated.
+- **HDR data re-extracted + verified.** `extract_hdr_size_grid` now analyzes under
+  linear-light; the imazen-26 HDR grid (1216 rows) recovers `variance` +31×,
+  `edge_density` +27× vs the crushed gamma extraction.
+
+Remaining: reconcile the SDR imazen-26 parquets to the final qualified names (values
+unchanged — re-header or re-extract); perf-validate the SDR u8 path (zenbench, no
+`target-cpu=native`); publish 0.2.0 (gated: README + CI-green-all-platforms + GitHub
+release); migrate sibling repos.
