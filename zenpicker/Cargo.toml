@@ -29,7 +29,7 @@ api = ["dep:zenanalyze-api"]
 zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false }
 # The frozen, version-unifying feature contract. Optional (gated by `api`), 1.0
 # and zero-dep so it unifies across a multi-version build.
-zenanalyze-api = { version = "1.0.0", path = "../zenanalyze-api", optional = true }
+zenanalyze-api = { version = "0.1.0", path = "../zenanalyze-api", optional = true }
 
 [dev-dependencies]
 # Bake tiny ZNPR models for the `feature_request` integration test (api feature).

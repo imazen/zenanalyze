@@ -209,11 +209,14 @@ pub const ALL_LABELS_CSV: &str = "jpeg,webp,jxl,avif,png,gif";
 /// across many encode requests.
 pub struct MetaPicker<'b> {
     predictor: Predictor<'b>,
-    /// Model feature-column names, collected once at construction so
-    /// [`feature_request`](Self::feature_request) can lend them inside a
-    /// `zenanalyze_api::Request` without re-walking the metadata per call.
+    /// The model's feature columns parsed once into `zenanalyze_api::NamedFeature`
+    /// identities (qualified `name@hex8`), so [`feature_request`](Self::feature_request)
+    /// can lend them inside a `Select::Features` without re-parsing per call. `Some` only
+    /// when **every** column is a valid qualified name; `None` for a pre-`name@hash` bake
+    /// (or no columns), so such a model can't reuse and always runs its own pass — never a
+    /// wrong-length vector from a vacuously-satisfied empty request.
     #[cfg(feature = "api")]
-    feature_names: alloc::vec::Vec<&'b str>,
+    wants: Option<alloc::vec::Vec<zenanalyze_api::NamedFeature<'b>>>,
 }
 
 impl<'b> MetaPicker<'b> {
@@ -234,34 +237,37 @@ impl<'b> MetaPicker<'b> {
     pub fn new(model: &'b Model) -> Self {
         Self {
             #[cfg(feature = "api")]
-            feature_names: model.feature_columns().collect(),
+            wants: {
+                let cols: alloc::vec::Vec<&str> = model.feature_columns().collect();
+                let parsed: alloc::vec::Vec<_> = cols
+                    .iter()
+                    .copied()
+                    .filter_map(zenanalyze_api::NamedFeature::parse)
+                    .collect();
+                // only reusable when every column is a qualified `name@hex8`
+                (!cols.is_empty() && parsed.len() == cols.len()).then_some(parsed)
+            },
             predictor: Predictor::new(model),
         }
     }
 
-    /// Build a [`zenanalyze_api::Request`] for this picker's model — its feature
-    /// column names plus the three-part reuse key (`analyzer_version`,
-    /// `feature_defs_version`, `config_hash`) read off the baked metadata.
+    /// Build a [`zenanalyze_api::Request`] for this picker's model — its feature columns as
+    /// qualified `name@hex8` identities (each carrying the per-feature **code** version).
     ///
-    /// A caller negotiates a shared feature [`Offer`](zenanalyze_api::Offer) with
-    /// `offer.reuse_for(&picker.feature_request())`: `Some(vec)` feeds straight
-    /// into [`pick`](Self::pick), `None` means run an own `zenanalyze` pass. The
-    /// returned `Request` borrows `self`; drop it before calling the `&mut self`
+    /// A caller negotiates a shared [`Offer`](zenanalyze_api::Offer) with
+    /// `offer.reuse_for(&picker.feature_request())`: `Some(vec)` feeds straight into
+    /// [`pick`](Self::pick), `None` (or `!offer.satisfies(..)`) means run an own `zenanalyze`
+    /// pass. The returned `Request` borrows `self`; drop it before the `&mut self`
     /// [`pick`].
     ///
-    /// Stamps absent on older bakes default to `("", 0, 0)`, which matches no
-    /// real offer — so a pre-stamp model safely always runs its own pass rather
-    /// than risk a wrong reuse. Requires the `api` feature.
+    /// `None` for a model whose columns aren't all qualified (a pre-`name@hash` bake) — it
+    /// can't reuse, so the caller runs its own pass. Requires the `api` feature.
     #[cfg(feature = "api")]
     #[must_use]
-    pub fn feature_request(&self) -> zenanalyze_api::Request<'_> {
-        let model = self.predictor.model();
-        zenanalyze_api::Request::new(
-            &self.feature_names,
-            model.analyzer_version().unwrap_or(""),
-            model.feature_defs_version().unwrap_or(0),
-            model.feature_config_hash().unwrap_or(0),
-        )
+    pub fn feature_request(&self) -> Option<zenanalyze_api::Request<'_>> {
+        self.wants
+            .as_ref()
+            .map(|w| zenanalyze_api::Request::new(zenanalyze_api::Select::Features(w)))
     }
 
     /// Borrow the underlying predictor — useful when the caller

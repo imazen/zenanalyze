@@ -191,13 +191,62 @@ def main() -> int:
                 f"cols={cols}, n_rows={len(feats)}"
             )
 
+    # Cases 10-13: QUALIFIED `name@hex8` columns (the zenanalyze-api contract
+    # identity). A bare `feat_*` keep-list must still select them by canonical
+    # name, and the ACTUAL qualified column name is returned (so the bake carries
+    # the qualified identity through).
+    qualified_tsv = (
+        "image_path\tsize_class\ta@11111111\tb@22222222\n"
+        "img1.png\tsmall\t1.0\t2.0\n"
+        "img2.png\tlarge\t3.0\t4.0\n"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "fxq.tsv"
+        p.write_text(qualified_tsv)
+
+        # Case 10: no filter — qualified cols identified as features.
+        feats, cols = _picker_lib.load_features_raw(p, None)
+        if cols != ["a@11111111", "b@22222222"]:
+            fails.append(f"CASE 10: expected qualified cols, got {cols}")
+        else:
+            print(f"CASE 10 OK: qualified no-filter -> cols={cols}")
+
+        # Case 11: a bare keep-list selects a qualified column by canonical
+        # name, returning the actual qualified name.
+        feats, cols = _picker_lib.load_features_raw(p, ["feat_b"])
+        if cols != ["b@22222222"]:
+            fails.append(f"CASE 11: expected ['b@22222222'], got {cols}")
+        else:
+            print(f"CASE 11 OK: bare [feat_b] -> qualified cols={cols}")
+
+        # Case 12: keep-list order preserved across qualified columns.
+        feats, cols = _picker_lib.load_features_raw(p, ["feat_a", "feat_b"])
+        if cols != ["a@11111111", "b@22222222"]:
+            fails.append(f"CASE 12: expected both in order, got {cols}")
+        else:
+            print(f"CASE 12 OK: order preserved -> cols={cols}")
+
+        # Case 13: strict missing still raises (canonical name absent).
+        try:
+            _picker_lib.load_features_raw(p, ["feat_missing"])
+        except SystemExit as e:
+            print(f"CASE 13 OK: strict missing on qualified -> SystemExit({e})")
+        else:
+            fails.append("CASE 13: expected SystemExit, got normal return")
+
     if fails:
         print("\nFAIL:", file=sys.stderr)
         for f in fails:
             print(f"  - {f}", file=sys.stderr)
         return 1
-    print("\nALL 9 CASES PASS")
+    print("\nALL 13 CASES PASS")
     return 0
+
+
+def test_load_features_raw_cases():
+    """pytest entry point — runs every `load_features_raw` case (bare + qualified)
+    so CI actually gates them (the script `main()` returns nonzero on any failure)."""
+    assert main() == 0
 
 
 if __name__ == "__main__":

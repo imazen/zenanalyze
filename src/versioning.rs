@@ -140,6 +140,31 @@ pub fn feature_version_hash_by_name(name: &str) -> Option<u64> {
     version_hash_for_name(name)
 }
 
+/// The qualified `name@hex8` identity of every **versioned** feature in this build (one per
+/// golden row), sorted by name — the canonical vocabulary a trainer/baker stamps as a
+/// model's `feature_columns` so the picker negotiates per-feature reuse against an
+/// [`crate::extract_offer`] result. The hex is
+/// [`fold_hash`](zenanalyze_api::NamedFeature::fold_hash) of [`feature_version_hash`];
+/// build-stable, changing only when a feature's golden row (its version) changes.
+/// `benchmarks/feature_qualified_names.tsv` is a committed copy kept in sync by a golden
+/// tripwire test — that file, not a re-derivation, is what Python tooling reads (replicating
+/// the hash off-Rust risks a silent mismatch). Requires the `api` feature.
+#[cfg(feature = "api")]
+#[must_use]
+pub fn feature_qualified_names() -> Vec<(&'static str, String)> {
+    use zenanalyze_api::NamedFeature;
+    let mut out: Vec<(&'static str, String)> = golden_rows()
+        .iter()
+        .filter_map(|(key, values)| {
+            let name = key.strip_prefix("feat_")?;
+            let hash = NamedFeature::fold_hash(hash_row(crate::analyzer_version(), values));
+            Some((name, NamedFeature::qualified_for(name, hash)))
+        })
+        .collect();
+    out.sort_unstable_by_key(|(name, _)| *name);
+    out
+}
+
 /// The parsed golden as `(feat_<name>, values_text)` rows, parsed once.
 fn golden_rows() -> &'static Vec<(String, String)> {
     static ROWS: OnceLock<Vec<(String, String)>> = OnceLock::new();
@@ -788,6 +813,33 @@ mod tests {
             constant.is_empty(),
             "these features never vary across the corpus → they are unversioned; \
              add a case that exercises them: {constant:?}"
+        );
+    }
+
+    /// The qualified-name table Python tooling reads (`benchmarks/feature_qualified_names.tsv`)
+    /// must match the live computation — re-bless with the SAME `ZENANALYZE_BLESS_GOLDEN=1`
+    /// whenever the golden changes (the qualified hex derives from it). `--features api`.
+    #[cfg(feature = "api")]
+    #[test]
+    fn feature_qualified_names_match_committed() {
+        let rendered: String = super::feature_qualified_names()
+            .iter()
+            .map(|(name, qualified)| format!("{name}\t{qualified}\n"))
+            .collect();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benchmarks/feature_qualified_names.tsv"
+        );
+        if std::env::var_os("ZENANALYZE_BLESS_GOLDEN").is_some() {
+            std::fs::write(path, &rendered).expect("write feature_qualified_names.tsv");
+            eprintln!("blessed feature_qualified_names.tsv: {path}");
+            return;
+        }
+        let committed = std::fs::read_to_string(path).unwrap_or_default();
+        assert_eq!(
+            committed, rendered,
+            "benchmarks/feature_qualified_names.tsv is stale — re-bless: \
+             ZENANALYZE_BLESS_GOLDEN=1 cargo test --features api feature_qualified_names_match_committed"
         );
     }
 

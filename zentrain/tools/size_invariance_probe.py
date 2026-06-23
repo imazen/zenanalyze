@@ -156,7 +156,8 @@ def load_features_tsv(path: Path, feat_cols: list[str]):
     out = {}
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
+        # Feature columns: legacy bare `feat_*` OR qualified `name@hex8`.
+        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_") or "@" in c]
         # Order MUST match the bake's feat_cols (the picker's first
         # n_feat inputs are positionally defined).
         missing = [c for c in feat_cols if c not in all_cols]

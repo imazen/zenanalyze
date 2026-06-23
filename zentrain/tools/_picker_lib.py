@@ -161,6 +161,33 @@ def load_pareto_raw(path: Path) -> tuple[dict, dict]:
     return rows, config_names
 
 
+def _has_version_suffix(c: str) -> bool:
+    """True if `c` ends with a zenanalyze `@<8 lowercase hex>` version qualifier."""
+    at = c.rfind("@")
+    if at == -1 or len(c) - at - 1 != 8:
+        return False
+    return all(ch in "0123456789abcdef" for ch in c[at + 1:])
+
+
+def _is_feature_col(c: str) -> bool:
+    """A feature column is the legacy bare `feat_<name>` OR a qualified
+    `<name>@hex8` (the zenanalyze-api contract identity). Metadata columns
+    (image_path, split, …) match neither."""
+    return c.startswith("feat_") or _has_version_suffix(c)
+
+
+def _canonical_feat(c: str) -> str:
+    """Canonical name for matching a keep-list entry against a column,
+    independent of `feat_` prefix and `@hex8` version: strip a leading
+    `feat_`, strip a trailing `@hex8`, lowercase."""
+    c = c.strip()
+    if c.startswith("feat_"):
+        c = c[len("feat_"):]
+    if _has_version_suffix(c):
+        c = c[: c.rfind("@")]
+    return c.lower()
+
+
 def load_features_raw(
     path: Path,
     keep_features: list[str] | None,
@@ -193,10 +220,23 @@ def load_features_raw(
     feats: dict = {}
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
+        all_cols = [c for c in rdr.fieldnames if _is_feature_col(c)]
         if keep_features is not None:
-            cols = [c for c in keep_features if c in all_cols]
-            missing = [c for c in keep_features if c not in all_cols]
+            # Match the keep-list against columns by canonical name (so a bare
+            # `feat_*` keep-list still selects qualified `name@hex8` columns), but
+            # KEEP the actual column name — data lookup + the bake carry the
+            # qualified identity through.
+            by_canon: dict = {}
+            for c in all_cols:
+                by_canon.setdefault(_canonical_feat(c), c)
+            cols = [
+                by_canon[k]
+                for c0 in keep_features
+                if (k := _canonical_feat(c0)) in by_canon
+            ]
+            missing = [
+                c0 for c0 in keep_features if _canonical_feat(c0) not in by_canon
+            ]
             if missing and strict:
                 raise SystemExit(f"missing feature columns in TSV: {missing}")
         else:

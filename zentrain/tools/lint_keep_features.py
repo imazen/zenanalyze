@@ -63,10 +63,19 @@ _FALLBACK_CODEC = "cross_codec"
 
 
 def _norm(name):
-    """Normalize a feature name: strip a leading 'feat_', lowercase, trim."""
+    """Normalize a feature name: strip a leading 'feat_', a trailing '@hex8'
+    version qualifier, lowercase, trim."""
     name = name.strip().strip('"').strip("'").strip()
     if name.startswith("feat_"):
         name = name[len("feat_"):]
+    # strip a trailing `@<8 lowercase hex>` zenanalyze version qualifier
+    at = name.rfind("@")
+    if (
+        at != -1
+        and len(name) - at - 1 == 8
+        and all(ch in "0123456789abcdef" for ch in name[at + 1:].lower())
+    ):
+        name = name[:at]
     return name.lower()
 
 

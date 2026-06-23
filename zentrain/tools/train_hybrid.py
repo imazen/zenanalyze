@@ -1112,10 +1112,18 @@ def _apply_feature_transform(
 
 
 def load_features(path):
+    from _picker_lib import _canonical_feat, _is_feature_col
+
     feats = {}
     fieldnames, columns = _read_table_columns(Path(path))
-    all_cols = [c for c in fieldnames if c.startswith("feat_")]
-    cols = [c for c in KEEP_FEATURES if c in all_cols]
+    all_cols = [c for c in fieldnames if _is_feature_col(c)]
+    # Match the (bare `feat_*`) KEEP_FEATURES against possibly-qualified
+    # `name@hex8` columns by canonical name; keep the actual column name so the
+    # bake carries the qualified identity through. (Mirrors _picker_lib.)
+    by_canon = {}
+    for c in all_cols:
+        by_canon.setdefault(_canonical_feat(c), c)
+    cols = [by_canon[k] for kf in KEEP_FEATURES if (k := _canonical_feat(kf)) in by_canon]
     # Per-column transforms and (optional) params from the codec
     # config. Params come from FEATURE_TRANSFORM_PARAMS — a
     # {feat_name: [param0, param1, ...]} dict on the codec config

@@ -1,6 +1,6 @@
 [package]
 name = "zenanalyze-api"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT OR Apache-2.0"
@@ -16,11 +16,14 @@ categories = ["multimedia::images", "no-std"]
 # which is what lets it freeze. No dependencies (core + alloc only) so nothing it
 # pulls in can force a version split either.
 #
-# VERSION POLICY: this crate is 1.0 and evolves ONLY additively (new pub items,
-# new fields on the #[non_exhaustive] Request/Offer). It must NEVER go to 2.0 —
-# Cargo only unifies semver-compatible versions, so a 2.0 would split the linked
-# ecosystem into two incompatible contract types. A 0.x line would be worse
-# still (0.1 and 0.2 don't even unify). Hence 1.0, frozen-but-extensible.
+# VERSION POLICY: the surface is still settling, so the crate is at 0.1.x — a
+# single-version in-house contract for now (Cargo doesn't unify 0.1 with 0.2).
+# Once it stabilizes it FREEZES at 1.0 and evolves ONLY additively (new pub items,
+# new fields on #[non_exhaustive] types); it must NEVER go to 2.0 — from 1.0 on
+# Cargo unifies every 1.x, so a dozen zenanalyze versions can share one contract
+# type, which a 2.0 (or staying on 0.x) would split. The shape is already built
+# for that freeze (private fields + #[non_exhaustive]); reaching 1.0 is a version
+# bump, not a redesign.
 
 [dependencies]
 

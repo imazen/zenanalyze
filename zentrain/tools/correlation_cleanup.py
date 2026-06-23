@@ -90,7 +90,10 @@ def load_features(path: Path):
     feat_cols = None
     with open(path) as f:
         rdr = csv.DictReader(f, delimiter="\t")
-        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_")]
+        # Feature columns: legacy bare `feat_*` OR qualified `name@hex8`
+        # (the zenanalyze-api contract identity). Metadata column names have
+        # neither marker.
+        all_cols = [c for c in rdr.fieldnames if c.startswith("feat_") or "@" in c]
         feat_cols = all_cols
         n_dropped = 0
         for r in rdr:

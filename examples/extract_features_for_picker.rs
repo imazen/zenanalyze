@@ -8,7 +8,10 @@
 //! `zenanalyze::analyze_features_rgb8` with `FeatureSet::SUPPORTED`,
 //! and emits the standard zentrain features TSV schema:
 //!
-//!   image_path  size_class  width  height  feat_<name>...
+//!   image_path  size_class  width  height  <feature-col>...
+//!
+//! where each feature column is the qualified `name@hex8` contract identity when built
+//! `--features api`, else the legacy bare `feat_<name>`.
 //!
 //! plus the manifest pass-through columns:
 //!
@@ -239,6 +242,26 @@ fn main() -> ExitCode {
     let cols: Vec<AnalysisFeature> = FeatureSet::SUPPORTED.iter().collect();
     eprintln!("extracting {} features per (image, size)", cols.len());
 
+    // Feature-column headers. With the `api` feature each is the qualified `name@hex8`
+    // contract identity (so a regenerated table negotiates per-feature reuse and the picker
+    // bake carries qualified columns straight through); without it, the legacy bare
+    // `feat_<name>`. The zentrain loaders accept either form.
+    #[cfg(feature = "api")]
+    let col_headers: Vec<String> = {
+        let qmap: HashMap<&str, String> = zenanalyze::versioning::feature_qualified_names()
+            .into_iter()
+            .collect();
+        cols.iter()
+            .map(|c| {
+                qmap.get(c.name())
+                    .cloned()
+                    .unwrap_or_else(|| format!("feat_{}", c.name()))
+            })
+            .collect()
+    };
+    #[cfg(not(feature = "api"))]
+    let col_headers: Vec<String> = cols.iter().map(|c| format!("feat_{}", c.name())).collect();
+
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -252,27 +275,50 @@ fn main() -> ExitCode {
         "image_path\timage_sha\tsplit\tcontent_class\tsource\tsize_class\twidth\theight"
     )
     .unwrap();
-    for c in &cols {
-        write!(w, "\tfeat_{}", c.name()).unwrap();
+    for h in &col_headers {
+        write!(w, "\t{h}").unwrap();
     }
     writeln!(w).unwrap();
 
     let query = AnalysisQuery::new(FeatureSet::SUPPORTED);
 
-    // Stamp the extraction's serialization provenance next to the table, so a
-    // training run years later can validate reuse feature-by-feature (the
-    // `zenanalyze-provenance/1` block: analyzer version + config + RGB8-sRGB
-    // framing + per-feature version hashes). Needs the `api` feature for the
-    // single-source serializer; without it the table is simply unstamped (safe —
-    // a consumer with no provenance runs its own pass).
+    // Stamp the extraction's fine-grained serialization provenance next to the table,
+    // so a training run years later can validate reuse feature-by-feature: the
+    // `zenanalyze-provenance/1` block — analyzer version + config + the RGB8-sRGB framing
+    // descriptor + a per-feature version hash. That per-feature hash is the SAME fold the
+    // contract carries in each qualified `name@hex8` identity (`zenanalyze_api::NamedFeature`),
+    // written here in decimal so the three stay consistent. `zentrain/tools/_provenance.py`'s
+    // `parse_provenance_block` reads exactly this format and `tsv_to_parquet.py` carries it
+    // into the Parquet key-value metadata. Needs the `api` feature for the qualified-name
+    // source; without it the table is simply unstamped (safe — a consumer with no provenance
+    // runs its own pass).
     #[cfg(feature = "api")]
     {
+        use std::collections::HashMap;
         let prov_path = args.output.with_extension("provenance");
-        let prov = zenanalyze::feature_set_provenance(
-            &query,
-            zenanalyze::versioning::rgb8_srgb_descriptor_hash(),
-        );
-        match std::fs::write(&prov_path, &prov) {
+        let descriptor = zenanalyze::versioning::rgb8_srgb_descriptor_hash();
+        // name -> the u32 fold carried in each qualified `name@hex8`, as the block's decimal.
+        let folds: HashMap<&str, u32> = zenanalyze::versioning::feature_qualified_names()
+            .into_iter()
+            .filter_map(|(name, qualified)| {
+                let hex = qualified.rsplit('@').next()?;
+                u32::from_str_radix(hex, 16).ok().map(|h| (name, h))
+            })
+            .collect();
+        let mut block = String::from("zenanalyze-provenance/1\n");
+        block.push_str(&format!(
+            "analyzer_version={}\n",
+            zenanalyze::analyzer_version()
+        ));
+        block.push_str(&format!("config_hash={}\n", query.config_hash()));
+        block.push_str(&format!("descriptor_hash={descriptor}\n"));
+        block.push_str("[features]\n");
+        for c in &cols {
+            if let Some(h) = folds.get(c.name()) {
+                block.push_str(&format!("{}={h}\n", c.name()));
+            }
+        }
+        match std::fs::write(&prov_path, &block) {
             Ok(()) => eprintln!("wrote provenance sidecar: {}", prov_path.display()),
             Err(e) => eprintln!("warning: provenance sidecar not written: {e}"),
         }
@@ -280,7 +326,7 @@ fn main() -> ExitCode {
     #[cfg(not(feature = "api"))]
     eprintln!(
         "note: built without --features api; no provenance sidecar written \
-         (the feature serialization contract needs the api feature)"
+         (the qualified-name source needs the api feature)"
     );
 
     let mut total_done = 0usize;

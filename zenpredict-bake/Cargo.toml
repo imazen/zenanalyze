@@ -77,7 +77,7 @@ zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = fal
 # Full producer->consumer loop test: build a zenanalyze_api::Request from a baked
 # Model's accessors and negotiate an Offer. Dev-only — the baker doesn't depend
 # on the contract.
-zenanalyze-api = { version = "1.0.0", path = "../zenanalyze-api" }
+zenanalyze-api = { version = "0.1.0", path = "../zenanalyze-api" }
 
 [[bench]]
 name = "predict"
