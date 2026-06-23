@@ -542,6 +542,40 @@ features_table! {
     /// safe but doesn't actually use the full Rec.2020 gamut either.
     #[cfg(feature = "hdr")]
     GamutCoverageP3 = 47 : f32 => gamut_coverage_p3,
+    // -- Highlight descriptors (the "separate" half of clip-and-separate) -------
+    // Computed over the super-white highlight mask (pixels above the SDR
+    // threshold). With the content tiers clipped at diffuse white
+    // (`AnalysisQuery::with_diffuse_white_clip`), these carry the HDR extension
+    // signal as a small, bounded, additive group — measured to recover the
+    // content-feature extension at median R²≈0.95, far better-conditioned for a
+    // picker than entangling the extension into every content feature. All `0`
+    // for SDR (no highlights). Ids 212–217 (the dense-percentile branch reserves
+    // 122–211).
+    /// `f32`. Mean luminance (nits) of the super-white highlight pixels. `0` for SDR.
+    #[cfg(feature = "hdr")]
+    HighlightLumaMean = 212 : f32 => highlight_luma_mean,
+    /// `f32`. Std-dev of highlight luminance (nits) — how spread the highlight
+    /// brightness is.
+    #[cfg(feature = "hdr")]
+    HighlightLumaStd = 213 : f32 => highlight_luma_std,
+    /// `f32`. Mean linear saturation `(max−min)/max` of the highlight pixels — how
+    /// colourful the highlights are. Recovers chroma-sensitive content features the
+    /// luma-only descriptors miss.
+    #[cfg(feature = "hdr")]
+    HighlightChromaMean = 214 : f32 => highlight_chroma_mean,
+    /// `f32`. Std-dev of highlight saturation.
+    #[cfg(feature = "hdr")]
+    HighlightChromaStd = 215 : f32 => highlight_chroma_std,
+    /// `f32`. Strong-edge density within the highlight region: adjacent-sample
+    /// relative-luma jumps `> 10 %` (horizontal + vertical), per highlight pixel.
+    /// Recovers the texture / laplacian-variance extension.
+    #[cfg(feature = "hdr")]
+    HighlightEdgeCount = 216 : f32 => highlight_edge_count,
+    /// `f32`. Fraction `[0, 1]` of highlight edges that are horizontal,
+    /// `H / (H + V)`. `0.5` ≈ isotropic; the directional signal that recovers the
+    /// chroma-sharpness family (`cb/cr_horiz/vert_sharpness`). `0` for no highlights.
+    #[cfg(feature = "hdr")]
+    HighlightOrientationRatio = 217 : f32 => highlight_orientation_ratio,
     /// `f32`. Fraction `[0, 1]` of sampled luma 8×8 blocks where
     /// ≥ 90 % of AC energy lives in the lowest-zigzag positions —
     /// **smooth-content / gradient signal**. Drives JXL
@@ -1857,6 +1891,12 @@ pub(crate) const DEPTH_FEATURES: FeatureSet = {
         s = s.with(AnalysisFeature::HdrPresent);
         s = s.with(AnalysisFeature::GamutCoverageSrgb);
         s = s.with(AnalysisFeature::GamutCoverageP3);
+        s = s.with(AnalysisFeature::HighlightLumaMean);
+        s = s.with(AnalysisFeature::HighlightLumaStd);
+        s = s.with(AnalysisFeature::HighlightChromaMean);
+        s = s.with(AnalysisFeature::HighlightChromaStd);
+        s = s.with(AnalysisFeature::HighlightEdgeCount);
+        s = s.with(AnalysisFeature::HighlightOrientationRatio);
     }
     s
 };
@@ -2588,11 +2628,12 @@ mod tests {
         // returns `None` for both kinds of holes, so a single
         // `if let Some(f) = …` walk handles them uniformly.
         let mut active = 0u32;
-        // Iterate past the HVS-feature block (max id 137 as of
-        // 2026-05-17, SpectralSlopeY). Bump the upper bound when new
-        // ids land — `assert_eq!` below catches drift between
+        // Iterate past the highlight-descriptor block (max id 217,
+        // HighlightOrientationRatio — ids 212–217, the dense-percentile
+        // branch reserves 122–211). Bump the upper bound when new ids
+        // land — `assert_eq!` below catches drift between
         // SUPPORTED.len() and this loop's walked range.
-        for id in 0..160u16 {
+        for id in 0..218u16 {
             if RESERVED_RETIRED_IDS.contains(&id) {
                 continue;
             }

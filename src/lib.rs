@@ -747,6 +747,12 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
         raw.hdr_present = depth_stats.hdr_present;
         raw.gamut_coverage_srgb = depth_stats.gamut_coverage_srgb;
         raw.gamut_coverage_p3 = depth_stats.gamut_coverage_p3;
+        raw.highlight_luma_mean = depth_stats.highlight_luma_mean;
+        raw.highlight_luma_std = depth_stats.highlight_luma_std;
+        raw.highlight_chroma_mean = depth_stats.highlight_chroma_mean;
+        raw.highlight_chroma_std = depth_stats.highlight_chroma_std;
+        raw.highlight_edge_count = depth_stats.highlight_edge_count;
+        raw.highlight_orientation_ratio = depth_stats.highlight_orientation_ratio;
     }
 
     Ok((raw, geometry))

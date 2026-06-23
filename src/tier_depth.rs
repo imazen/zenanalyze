@@ -117,6 +117,20 @@ pub(crate) struct DepthStats {
     /// means the source is downcastable to P3 (a smaller container
     /// than Rec.2020 but wider than sRGB).
     pub gamut_coverage_p3: f32,
+    /// Mean luminance (nits) of the super-white highlight pixels (above
+    /// [`SDR_THRESHOLD_NITS`]). `0` when there are no highlights.
+    pub highlight_luma_mean: f32,
+    /// Std-dev of highlight luminance (nits).
+    pub highlight_luma_std: f32,
+    /// Mean linear saturation `(max−min)/max` of the highlight pixels.
+    pub highlight_chroma_mean: f32,
+    /// Std-dev of highlight saturation.
+    pub highlight_chroma_std: f32,
+    /// Strong-edge density within the highlight region — adjacent-sample
+    /// relative-luma jumps `> 10 %` (H + V), per highlight pixel.
+    pub highlight_edge_count: f32,
+    /// Fraction `[0, 1]` of highlight edges that are horizontal, `H / (H + V)`.
+    pub highlight_orientation_ratio: f32,
 }
 
 /// Histogram-bin count for percentile estimation. 256 bins on a
@@ -433,6 +447,8 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             hdr_present: false,
             gamut_coverage_srgb: trivial_srgb_cover,
             gamut_coverage_p3: trivial_p3_cover,
+            // SDR content in an HDR-capable container — no super-white highlights.
+            ..DepthStats::default()
         };
     }
 
@@ -449,6 +465,24 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     let mut wide_gamut_pixels: u32 = 0;
     let mut peak_nits: f32 = 0.0;
     let mut wide_gamut_peak: f32 = 0.0;
+
+    // Highlight descriptors — accumulated over the super-white mask (pixels with
+    // luma > SDR_THRESHOLD_NITS). `0` everywhere when the image has no highlights.
+    let mut hl_count: u32 = 0;
+    let mut hl_luma_sum = 0.0f64;
+    let mut hl_luma_sq = 0.0f64;
+    let mut hl_chroma_sum = 0.0f64;
+    let mut hl_chroma_sq = 0.0f64;
+    let mut hl_h_edges: u32 = 0;
+    let mut hl_v_edges: u32 = 0;
+    // Per-sampled-row luma + highlight-mask, kept one row back for the H/V edge
+    // scan (a 2-row sliding window over the sampling grid).
+    let mut cur_luma: Vec<f32> = Vec::with_capacity(width);
+    let mut cur_hdr: Vec<bool> = Vec::with_capacity(width);
+    let mut prev_luma: Vec<f32> = Vec::new();
+    let mut prev_hdr: Vec<bool> = Vec::new();
+    // A "strong edge" is a >10% relative luma jump between adjacent highlights.
+    const HL_EDGE_REL: f32 = 0.10;
 
     // Gamut downcast counters. For each pixel, project the linear
     // RGB from source primaries to {sRGB, P3} and count pixels whose
@@ -546,12 +580,18 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
         // `log2_midp` pass (Pass 4) instead of a per-pixel scalar `log2`.
         let n_pixels = lin_buf.len() / nch;
         nits_buf.clear();
+        cur_luma.clear();
+        cur_hdr.clear();
         for pi in 0..n_pixels {
             let linears = &lin_buf[pi * nch..pi * nch + nch];
             let mut linear_max = 0.0f32;
+            let mut linear_min = f32::INFINITY;
             for &l in linears {
                 if l > linear_max {
                     linear_max = l;
+                }
+                if l < linear_min {
+                    linear_min = l;
                 }
             }
             let linear_luma = if color_channels >= 3 {
@@ -571,9 +611,23 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             if linear_max > 1.0 {
                 wide_gamut_pixels += 1;
             }
-            if nits > SDR_THRESHOLD_NITS {
+            let is_hl = nits > SDR_THRESHOLD_NITS;
+            if is_hl {
                 hdr_pixels += 1;
+                hl_count += 1;
+                hl_luma_sum += nits as f64;
+                hl_luma_sq += (nits as f64) * (nits as f64);
+                // Linear saturation: 0 = achromatic, 1 = one channel fully dominant.
+                let sat = if linear_max > 1e-6 {
+                    ((linear_max - linear_min) / linear_max).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                hl_chroma_sum += sat as f64;
+                hl_chroma_sq += (sat as f64) * (sat as f64);
             }
+            cur_luma.push(linear_luma);
+            cur_hdr.push(is_hl);
             // Gamut-coverage projections (only meaningful for ≥ 3
             // colour channels — grayscale by construction has the
             // pixel sitting on the achromatic axis, in every gamut).
@@ -614,6 +668,32 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
             // `v ≥ 0` (nits ≥ 0), so `as usize` floors; clamp to the top bin.
             hist[(v as usize).min(HIST_BINS - 1)] += 1;
         }
+
+        // Highlight edges: a >10% relative luma jump between two adjacent
+        // highlight samples. Horizontal = within this row; vertical = same column
+        // against the previous sampled row.
+        for pi in 1..cur_hdr.len() {
+            if cur_hdr[pi] && cur_hdr[pi - 1] {
+                let (a, b) = (cur_luma[pi], cur_luma[pi - 1]);
+                if (a - b).abs() > HL_EDGE_REL * a.max(b).max(1e-6) {
+                    hl_h_edges += 1;
+                }
+            }
+        }
+        if !prev_hdr.is_empty() {
+            let n = cur_hdr.len().min(prev_hdr.len());
+            for pi in 0..n {
+                if cur_hdr[pi] && prev_hdr[pi] {
+                    let (a, b) = (cur_luma[pi], prev_luma[pi]);
+                    if (a - b).abs() > HL_EDGE_REL * a.max(b).max(1e-6) {
+                        hl_v_edges += 1;
+                    }
+                }
+            }
+        }
+        std::mem::swap(&mut prev_luma, &mut cur_luma);
+        std::mem::swap(&mut prev_hdr, &mut cur_hdr);
+
         y += row_step;
     }
 
@@ -673,6 +753,40 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
     let gamut_coverage_srgb = srgb_in as f32 / total_f;
     let gamut_coverage_p3 = p3_in as f32 / total_f;
 
+    // Highlight descriptors from the super-white accumulators. All `0` when the
+    // image carries no highlights (`hl_count == 0`), so SDR content reads zeros.
+    let (
+        highlight_luma_mean,
+        highlight_luma_std,
+        highlight_chroma_mean,
+        highlight_chroma_std,
+        highlight_edge_count,
+        highlight_orientation_ratio,
+    ) = if hl_count > 0 {
+        let n = hl_count as f64;
+        let lmean = hl_luma_sum / n;
+        let lstd = (hl_luma_sq / n - lmean * lmean).max(0.0).sqrt();
+        let cmean = hl_chroma_sum / n;
+        let cstd = (hl_chroma_sq / n - cmean * cmean).max(0.0).sqrt();
+        let total_edges = (hl_h_edges + hl_v_edges) as f32;
+        let edge_density = total_edges / hl_count as f32;
+        let orient = if total_edges > 0.0 {
+            hl_h_edges as f32 / total_edges
+        } else {
+            0.0
+        };
+        (
+            lmean as f32,
+            lstd as f32,
+            cmean as f32,
+            cstd as f32,
+            edge_density,
+            orient,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    };
+
     DepthStats {
         peak_nits,
         p99_nits,
@@ -684,6 +798,12 @@ pub(crate) fn scan_depth(slice: &PixelSlice<'_>, pixel_budget: usize) -> DepthSt
         hdr_present,
         gamut_coverage_srgb,
         gamut_coverage_p3,
+        highlight_luma_mean,
+        highlight_luma_std,
+        highlight_chroma_mean,
+        highlight_chroma_std,
+        highlight_edge_count,
+        highlight_orientation_ratio,
     }
 }
 
