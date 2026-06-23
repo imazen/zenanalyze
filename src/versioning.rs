@@ -52,7 +52,12 @@
 //! tier 1/2/3 real linear paths; the linear-light columns version that code (the HDR
 //! cases carry super-white the gamma columns clip, the SDR cases pin the sRGB OETF
 //! round-trip). Which config produced an on-disk value is tagged orthogonally by
-//! `zenanalyze_api`'s `config_hash`; the golden versions the code regardless. The keystone is the
+//! `zenanalyze_api`'s `config_hash`; the golden versions the code regardless. The
+//! linear-light columns' *cross-platform live* check is **x86-reference-only** (the
+//! sRGB OETF is powf/fmla-heavy and lands threshold/count features on their decision
+//! boundary on HDR content, so portable platforms flip them discretely); the
+//! deterministic gamma columns are the portable tripwire, and the text-derived hash
+//! versions both everywhere. The keystone is the
 //! `every_feature_varies` lint: a feature constant across the
 //! corpus is *unversioned* (a math change preserving the constant wouldn't move
 //! the hash), so every feature must take ≥2 distinct values. That lint is only
@@ -900,9 +905,23 @@ mod tests {
             // i686-divergent features are now ENFORCED with a relaxed i686 budget
             // (see I686_TOLERANCE_OVERRIDES), so their divergence stays bounded.
             let enforce = reference || !XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
+            // The golden carries two config passes per feature: gamma (cases 0..N)
+            // then linear-light (N..2N). The linear-light path runs the sRGB OETF
+            // (powf + fmla) and lands many threshold/count features right on their
+            // decision boundary on HDR content, so on portable platforms those
+            // columns flip *discretely* (e.g. a 34→35 bin count, not a bounded
+            // drift) and no honest tolerance bridges them. They are versioned via
+            // the text-derived hash and value-checked on the x86 reference (the
+            // golden-reference job, ZENANALYZE_GOLDEN_REFERENCE=1); the deterministic
+            // gamma columns are the portable cross-platform tripwire.
+            let checked = if reference {
+                values.len()
+            } else {
+                values.len() / 2
+            };
             let mut max_dev = 0.0f32;
             let mut first_drift: Option<String> = None;
-            for (i, (v, e)) in values.iter().zip(expected).enumerate() {
+            for (i, (v, e)) in values.iter().zip(expected).take(checked).enumerate() {
                 max_dev = max_dev.max(rel_dev(*v, e));
                 if first_drift.is_none() && !value_matches(*v, e, tol) {
                     first_drift = Some(format!(
