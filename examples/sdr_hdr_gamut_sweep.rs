@@ -171,6 +171,7 @@ fn process(
     args: &Args,
     gamma_q: &AnalysisQuery,
     linear_q: &AnalysisQuery,
+    linear_clip_q: &AnalysisQuery,
 ) -> Option<String> {
     let img = ImageReader::open(path).ok()?.decode().ok()?;
     let img = if img.width().max(img.height()) > args.max_dim {
@@ -229,13 +230,27 @@ fn process(
         .with_primaries(ColorPrimaries::Bt709);
     for &hr in HEADROOMS {
         let pq = synth_pq(&rgb, thresh, hr);
-        let ctx = Arc::new(
-            ColorContext::default().with_diffuse_white(DiffuseWhite::new(DIFFUSE_WHITE_NITS)),
-        );
-        if let Ok(slice) = PixelSlice::new(&pq, w, h, (w * 6) as usize, hdr)
-            && let Ok(r) = analyze_features(slice.with_color_context(ctx), linear_q)
+        let mk_slice = || {
+            let ctx = Arc::new(
+                ColorContext::default().with_diffuse_white(DiffuseWhite::new(DIFFUSE_WHITE_NITS)),
+            );
+            PixelSlice::new(&pq, w, h, (w * 6) as usize, hdr).map(|s| s.with_color_context(ctx))
+        };
+        // (1) extend — linear-light, super-white survives.
+        if let Ok(slice) = mk_slice()
+            && let Ok(r) = analyze_features(slice, linear_q)
         {
             emit(&mut buf, &stem, &cc, "hdr", hr, (w, h), &feature_cells(&r));
+        }
+        // (2) clip — linear-light + diffuse-white clip, content stays SDR-invariant.
+        //     The BT.2446A tone-map representation was A/B-tested out-of-tree (it
+        //     collapses cross-image discriminability ~7×, see
+        //     docs/hdr-feature-representation-2026-06-23.md); not re-added here to
+        //     keep the example on registry zenpixels-convert.
+        if let Ok(slice) = mk_slice()
+            && let Ok(r) = analyze_features(slice, linear_clip_q)
+        {
+            emit(&mut buf, &stem, &cc, "hdr_clip", hr, (w, h), &feature_cells(&r));
         }
     }
     Some(buf)
@@ -259,6 +274,9 @@ fn main() -> Result<(), String> {
 
     let gamma_q = AnalysisQuery::new(FeatureSet::SUPPORTED);
     let linear_q = AnalysisQuery::new(FeatureSet::SUPPORTED).with_linear_light(true);
+    let linear_clip_q = AnalysisQuery::new(FeatureSet::SUPPORTED)
+        .with_linear_light(true)
+        .with_diffuse_white_clip(true);
 
     let mut out = String::from("stem\tcontent_class\tvariant\theadroom\twidth\theight");
     for c in header_cells() {
@@ -268,13 +286,26 @@ fn main() -> Result<(), String> {
     out.push('\n');
 
     let (mut ok, mut fail) = (0usize, 0usize);
-    for p in &files {
-        match process(p, &args, &gamma_q, &linear_q) {
+    let t0 = std::time::Instant::now();
+    let total = files.len();
+    for (i, p) in files.iter().enumerate() {
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+        match process(p, &args, &gamma_q, &linear_q, &linear_clip_q) {
             Some(rows) => {
                 out.push_str(&rows);
                 ok += 1;
             }
             None => fail += 1,
+        }
+        eprintln!(
+            "[{}/{}] {:.1}s ok={ok} fail={fail} :: {stem}",
+            i + 1,
+            total,
+            t0.elapsed().as_secs_f32(),
+        );
+        // Incremental flush: partial data survives an interrupt + progress is observable.
+        if (i + 1) % 10 == 0 {
+            let _ = std::fs::write(&args.features_out, &out);
         }
     }
     std::fs::write(&args.features_out, out)
