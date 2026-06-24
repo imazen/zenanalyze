@@ -452,6 +452,17 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # distribution, so skipping the transform at inference produces
     # silently-wrong predictions.
     feat_transforms = model.get("feature_transforms")
+    # Resolve to all n_inputs by name/layout. The trainer emits transforms
+    # parallel to feat_cols (the analyzed features, which occupy the first n_feat
+    # input slots); the trailing engineered extra_axes carry no transform and are
+    # therefore identity. This mirrors encode_feature_bounds' pad-to-n_inputs and
+    # keeps the runtime's strict `len == n_inputs` safety check intact (#70-A1).
+    # The feat_cols-first layout is the one validated in derive_extra_axes.
+    n_inputs = int(model["n_inputs"])
+    if isinstance(feat_transforms, list) and 0 < len(feat_transforms) < n_inputs:
+        feat_transforms = list(feat_transforms) + ["identity"] * (
+            n_inputs - len(feat_transforms)
+        )
     _VALID_RUNTIME_TRANSFORMS = {
         "identity", "log", "log1p", "signed_log1p",
         "signed_sqrt", "signed_cbrt",
@@ -489,6 +500,12 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # (≥1 edge). Omit the metadata entry entirely when every line is
     # empty.
     feat_transform_params = model.get("feature_transform_params")
+    # Pad params parallel to the resolved feature_transforms — an empty params
+    # row means "no params" (identity) — for the trailing extra_axes.
+    if isinstance(feat_transform_params, list) and 0 < len(feat_transform_params) < n_inputs:
+        feat_transform_params = list(feat_transform_params) + [
+            [] for _ in range(n_inputs - len(feat_transform_params))
+        ]
     if (
         isinstance(feat_transform_params, list)
         and feat_transform_params
