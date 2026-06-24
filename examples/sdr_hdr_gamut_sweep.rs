@@ -250,7 +250,15 @@ fn process(
         if let Ok(slice) = mk_slice()
             && let Ok(r) = analyze_features(slice, linear_clip_q)
         {
-            emit(&mut buf, &stem, &cc, "hdr_clip", hr, (w, h), &feature_cells(&r));
+            emit(
+                &mut buf,
+                &stem,
+                &cc,
+                "hdr_clip",
+                hr,
+                (w, h),
+                &feature_cells(&r),
+            );
         }
     }
     Some(buf)
