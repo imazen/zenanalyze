@@ -403,7 +403,7 @@ OUTPUT_SPECS: dict = {}
 SPARSE_OVERRIDES: list = []
 
 
-def load_codec_config(name: str):
+def load_codec_config(name: str, drop_features=None):
     """Import a codec-config module and bind its exports to module-level
     names this script consumes. The codec module must define:
       PARETO, FEATURES, OUT_JSON, OUT_LOG, ZQ_TARGETS, KEEP_FEATURES,
@@ -440,6 +440,23 @@ def load_codec_config(name: str):
     OUT_JSON = Path(mod.OUT_JSON)
     ZQ_TARGETS = list(mod.ZQ_TARGETS)
     KEEP_FEATURES = list(mod.KEEP_FEATURES)
+    # Leave-one-out (LOO) ablation hook: drop named features before any downstream
+    # use. Spearman/correlation cleanup only catches monotonic redundancy; LOO
+    # retrains without each feature to measure its true marginal contribution.
+    if drop_features:
+        drop = {f.strip() for f in drop_features if f and f.strip()}
+        unknown = drop - set(KEEP_FEATURES)
+        if unknown:
+            sys.stderr.write(
+                f"  load_codec_config: --drop-features had {len(unknown)} name(s) "
+                f"not in KEEP_FEATURES (ignored): {sorted(unknown)[:5]}\n"
+            )
+        _before = len(KEEP_FEATURES)
+        KEEP_FEATURES = [f for f in KEEP_FEATURES if f not in drop]
+        sys.stderr.write(
+            f"  load_codec_config: dropped {_before - len(KEEP_FEATURES)} feature(s) "
+            f"-> KEEP_FEATURES {_before} -> {len(KEEP_FEATURES)}\n"
+        )
     parse_config_name = mod.parse_config_name
     # Optional axis schema — fall back to module defaults (zenjpeg shape)
     # when the codec config doesn't declare. Pre-existing zenjpeg config
@@ -2549,6 +2566,16 @@ def main():
         "experiments like LeakyReLU-vs-ReLU pass --seed N.",
     )
     parser.add_argument(
+        "--drop-features",
+        type=str,
+        default=None,
+        help="Comma-separated feature names to REMOVE from the codec "
+        "config's KEEP_FEATURES before training. Drives leave-one-out "
+        "(LOO) feature ablation: retrain with one feature dropped, "
+        "compare val mean overhead to the full-set baseline. Unknown "
+        "names are ignored with a stderr warning.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit with code 1 when any safety threshold is violated. "
@@ -2601,7 +2628,10 @@ def main():
     if args.seed is not None:
         SEED = args.seed
         sys.stderr.write(f"  seed override: SEED={SEED:#x}\n")
-    load_codec_config(args.codec_config)
+    load_codec_config(
+        args.codec_config,
+        drop_features=(args.drop_features.split(",") if args.drop_features else None),
+    )
 
     # CLI overrides — take precedence over codec config defaults.
     global METRIC_COLUMN, METRIC_DIRECTION
