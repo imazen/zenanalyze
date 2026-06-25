@@ -1,5 +1,39 @@
 # everything.md — zen training/picker/metric ecosystem
 
+> ## ⚠️ STALE — most of this doc is the May 2026 recovery cycle (SUPERSEDED 2026-06-25)
+>
+> The bulk below was compiled 2026-05-09..05-20 and the recovery cycle it
+> tracks has long concluded. Verified-current sources of truth, by topic:
+>
+> - **zensim ship-state:** the shipped `ZensimProfile::A` bake is
+>   **`v47_strict_qat_native_2026-05-27.bin`** (27 KB, a **372-feature**
+>   372→128→64 masked-monotone QAT-native MLP, rotated 2026-05-27). Ground
+>   truth: `zensim/zensim/src/profile.rs` (`mlp_bake_a_v47_qat` +
+>   `PROFILE_A`, `extended_features:true` + `compute_iw_features:true`) and
+>   `zensim/zensim/weights/manifests/v47_strict_qat.toml` (`n_inputs = 372`).
+>   Repro: `zensim/REPRODUCE_V47.md`. The old V0_4/V0_5/V0_16/`v_balanced_v3`
+>   "champions" named below are dead — V39 was relegated to `zensim-experimental`.
+> - **Cross-codec sweeping:** the "v16 cross-codec BLOCKED" claim (§3) is
+>   **FALSE/resolved.** The **zenfleet job system** (zenmetrics
+>   `crates/zenfleet-*` + `zenmetrics jobexec` + `scripts/jobsys/fleet`)
+>   plus the 2026-06-24 multi-codec GPU runs (179k+ fully-scored cells across
+>   jpeg/png/avif/webp/hdr) supersede it. See
+>   `~/work/zen/DATA_PROVENANCE.md` (2026-06-24 sections),
+>   `zenmetrics/docs/RUNNING_JOBS.md`, `zenmetrics/docs/PLAN_SWEEPS.md`,
+>   and `zenmetrics/docs/SCORING_DATA_2026-06-24.md`.
+> - **Sweep infra:** `Dockerfile.sweep.v13` / `scripts/sweep/onstart_v3.sh`
+>   are **gone**. Current: `Dockerfile.sweep.v26`/`.v27`/`.split`,
+>   `scripts/sweep/onstart_unified.sh`, `scripts/jobsys/fleet` (the ONE
+>   canonical fleet command). Feature sidecars now carry **372** feat.
+> - **Per-codec / cross-codec picker tables (§2):** superseded by the
+>   2026-06-23/24 fleet picker work (`zenmetrics/benchmarks/picker_fleet_2026-06-23.md`)
+>   and the JXL_LOSSY_KNOBSPACE_ABLATION_PROGRAM. The dated rows below are
+>   historical.
+>
+> Everything past this banner is preserved as-is for history. Spot-fixes
+> flagged inline as **[STALE 2026-06-25]**. Always cross-check live
+> `git log` / source / `DATA_PROVENANCE.md` before acting on anything here.
+
 **Compiled 2026-05-09. Latest substantive update: 2026-05-20 (V11
 substrate retrospective + multi-codec sweep coverage audit). Forensic
 reconstruction across `zenmetrics`, `zenanalyze` (zenpicker +
@@ -17,6 +51,11 @@ here — recovery cycles are still landing.
 ## 00. Latest state (2026-05-20) — V11 substrate retrospective + sweep coverage
 
 ### zensim Balanced trail ship
+
+> **[STALE 2026-06-25]** `PreviewV0_5Balanced` / `v_balanced_v3_2026-05-20.bin`
+> is NOT shipped — that bake file does not exist in `zensim/zensim/weights/`.
+> The shipped `ZensimProfile::A` is **`v47_strict_qat_native_2026-05-27.bin`**
+> (372-feature QAT-native, rotated 2026-05-27). See the top banner.
 
 **`PreviewV0_5Balanced`** = V_22-mix-LARGE+iwssim s3 packed +
 **V10 BalancedV3 spline calibration** (V9 PCHIP mechanism, shipped
@@ -145,6 +184,12 @@ zensim is the **user-facing quality dial**. Five priorities, in order:
 - Metrics in q < 30 or q > 95 bands.
 
 ### Current shipped state (zensim main `e902d519`, 2026-05-10)
+
+> **[STALE 2026-06-25]** This describes the 2026-05-10 ship (V0_5/V0_15/V0_16
+> via `v0_4_2026-04-30.bin`). The current shipped `ZensimProfile::A` bake is
+> **`v47_strict_qat_native_2026-05-27.bin`** (372-feature, rotated 2026-05-27).
+> Held-out panel for the shipped bake (per `profile.rs`): CID22 0.8657 / KADID
+> 0.7933 / TID 0.7927 / KonJND 0.4185 / AIC-3 0.7680 / AIC-4 0.8854. See banner.
 
 `zensim/weights/v0_4_2026-04-30.bin` is **V0_5 SSIM2-proxy MLP**
 (swapped in by tick 2 of the champion loop). Numbers (full-dataset
@@ -593,10 +638,14 @@ not parameter tuning:
    tick 404. Multi-hours.
 3. **KonJND-1k dataset restoration** — `/mnt/v/dataset/konjnd-1k/`
    missing. Blocked on external source.
+   > **[STALE 2026-06-25]** No longer blocked: the dataset is present at
+   > **`/mnt/v/datasets/KonJND-1k/`** (note plural `datasets`, capitalized
+   > name) and is consumed by the v47-strict manifest (`[inputs.konjnd_dense]`).
 4. **AIC-4 dataset full download** — URL stale. Blocked.
 5. **dssim Rust binary extension** — multi-hour.
 
 **Ship state**: `zensim/weights/v0_16_2026-05-12.bin` (single bake).
+<!-- [STALE 2026-06-25] Ship state is now v47_strict_qat_native_2026-05-27.bin (372-feat). See top banner. -->
 Multi-bake runtime is the smallest cycle-7 win and the only one that
 unlocks the documented 2-bake +0.0100 combined gain.
 
@@ -625,14 +674,16 @@ unlocks the documented 2-bake +0.0100 combined gain.
 │   ├── crates/butteraugli-gpu/    CubeCL multi-vendor butteraugli (max + pnorm3)
 │   ├── crates/dssim-gpu/          CubeCL DSSIM
 │   ├── crates/ssim2-gpu/          CubeCL SSIMULACRA2
-│   ├── crates/zensim-gpu/         CubeCL zensim 228-feature extractor
+│   ├── crates/zensim-gpu/         CubeCL zensim feature extractor (372-feat for the v47-strict ship; was 228/300)
 │   ├── crates/zenmetrics-cli/    Unified score / batch / compare / sweep CLI (binary `zenmetrics`)
 │   ├── crates/zenmetrics-corpus/  Test image corpus
-│   ├── scripts/sweep/             vast.ai launcher, onstart_v3.sh worker, janitor, atomic chunk claim
-│   ├── Dockerfile.sweep.v13       Latest sweep image (build context = ~/work/zen for sibling path-deps)
+│   ├── scripts/jobsys/fleet       [2026-06-25] ONE canonical fleet command (zenfleet job system); old onstart_v3.sh/janitor GONE
+│   ├── scripts/sweep/             onstart_unified.sh worker, etc. (onstart_v3.sh GONE)
+│   ├── Dockerfile.sweep.v26/.v27  [2026-06-25] Current sweep images (Dockerfile.sweep.v13 GONE)
+│   ├── crates/zenfleet-*          [2026-06-25] 14-crate job system (core/ctl/worker/ledger/vastai/hetzner/...)
 │   └── docs/                      CUBECL_GOTCHAS, SSIM2_GPU_HANDOFF, RECOVERY_REGISTER_2026-05-08
-└── zensim/                        Perceptual quality metric crate (XYB pyramid, 228/300 features)
-    ├── zensim/                    Core library — V0_2 always-on, V0_4 gated behind __experimental_versions
+└── zensim/                        Perceptual quality metric crate (XYB pyramid; 228 base / 300 extended / 372 full-IW; ship = 372)
+    ├── zensim/                    Core library — ZensimProfile::A = v47-strict 372-feat MLP (V0_4/V39 moved to zensim-experimental)
     ├── zensim-bench/              dataset_metric_baseline + score-mapping calibration + KonJND anchor
     ├── zensim-regress/            Visual regression testing (independent semver)
     ├── zensim-validate/           Linear-weight trainer + dataset loaders (CID22/KADID/TID/KonJND)
@@ -734,11 +785,16 @@ bake → zensim `include_bytes!` loads it under `__experimental_versions`.
 Owns: the path from `(reference_image, distorted_image) →
 metric_values` plus the orchestrator that drives a codec-grid sweep on
 vast.ai. Specifically: (a) the unified `zenmetrics` CLI
-(score/batch/compare/sweep), (b) four CubeCL-based multi-vendor GPU
-metric crates (butteraugli-gpu, ssim2-gpu, dssim-gpu, zensim-gpu), (c)
-the docker image and onstart script that workers run, (d) the
-chunk-claim + janitor + diagnostics fleet management, (e) the per-cell
-zensim 300-feature parquet sidecar that lands as training data.
+(score/batch/compare/sweep/jobexec), (b) CubeCL-based multi-vendor GPU
+metric crates (butteraugli-gpu, ssim2-gpu, dssim-gpu, zensim-gpu,
+cvvdp-gpu), (c) the docker image and onstart script that workers run,
+(d) the **zenfleet job system** (14 `zenfleet-*` crates +
+`scripts/jobsys/fleet` — content-addressed per-cell jobs, R2-lease
+atomic claim, resumable ledger; replaced the old chunk-claim + janitor
+model), (e) the per-cell zensim **372-feature** parquet sidecar that
+lands as training data.
+<!-- [STALE 2026-06-25] was "300-feature"; current ship sidecar carries 372 feat (v47-strict). -->
+
 
 Does **not** own: model training, picker decisions, encoder defaults,
 rate-distortion curves. Does not own the metric implementations
@@ -749,6 +805,15 @@ with those CPU crates.
 ---
 
 ## 2. Cutting edge — what's the best of each thing today
+
+> **[STALE 2026-06-25]** The per-codec and cross-codec picker tables in this
+> section are dated 2026-05-04..07 and have been **superseded** by the
+> 2026-06-23/24 fleet picker work (`zenmetrics/benchmarks/picker_fleet_2026-06-23.md`,
+> trained on the 179k-cell multi-codec GPU-metric data) and the
+> JXL_LOSSY_KNOBSPACE_ABLATION_PROGRAM (zenmetrics). The "best known" bakes,
+> dates, holdout numbers, and wiring status below are historical — do not treat
+> them as the current cutting edge. The zensim metric-profile table further
+> down is corrected inline.
 
 ### Per-codec pickers (intra-codec)
 
@@ -814,10 +879,16 @@ Cost ≤30 min. Synthetic labels exist in the rebalanced corpus's
 
 ### zensim metric profile
 
+> **[STALE 2026-06-25]** The shipped profile is now the **v47-strict** row
+> (first row below); the "Default ship" / "Ship under `__experimental_versions`"
+> labels on the V0_2 / V0_4 rows are historical (V0_4/V39 moved to
+> `zensim-experimental`). KADID/TID here are pre-v47 numbers.
+
 | Profile | Path | Status | CID22 SROCC | KADID | TID |
 |---|---|---|---|---|---|
-| **PreviewV0_2** | `zensim/profile.rs:443-674` (228-element f64 array) | **Default ship; `ZensimProfile::latest()`** | 0.8676 (with 475-pair leak; true number lower, not re-measured) | 0.8192 | 0.8427 |
-| **PreviewV0_4** | `zensim/weights/v0_4_2026-04-30.bin` (60932 B, ZNPR v2) | **Ship under `__experimental_versions`** | 0.8893 | 0.8432 | 0.8401 |
+| **ZensimProfile::A (v47-strict)** | `zensim/zensim/weights/v47_strict_qat_native_2026-05-27.bin` (27 KB, 372→128→64 QAT-native, ZNPR) | **SHIPPED (default, 2026-06-25); `ProfileParams PROFILE_A`** | 0.8657 | 0.7933 | 0.7927 |
+| **PreviewV0_2** | `zensim/profile.rs:443-674` (228-element f64 array) | ~~Default ship~~ superseded by v47-strict; still backs `ZensimProfile` linear fallback | 0.8676 (with 475-pair leak; true number lower, not re-measured) | 0.8192 | 0.8427 |
+| **PreviewV0_4 (V39)** | ~~`zensim/weights/v0_4_2026-04-30.bin`~~ now `zensim-experimental/weights/v39_v32plus_spline_seed17_2026-05-25.bin` | ~~Ship under `__experimental_versions`~~ relegated to `zensim-experimental` (dial non-invertible) | 0.8893 | 0.8432 | 0.8401 |
 | **V0_5 SSIM2-proxy** (cherry-pick candidate) | `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_ssim2_holdout_20260501T045510.bin` | Recovery register's recommended swap-in | **0.8934** | **0.8505** | **0.8492** |
 | V0_5 multi-codec (FAILED) | `s3://zentrain/v_next-training/2026-05-07/bakes/v0_5_2026-05-07_multicodec.bin` | **Archived, not shipping** | 0.8609 | 0.3697 (catastrophic) | 0.6298 |
 | V0_6 + FiLM rebalanced (val_mean leader, unverified) | `/mnt/v/output/zensim/v06-rebalance/runs/v06_film_rebal_20260506T081152.bin` | PR #31 OPEN; **CID22 missing from val set** | unverified | 0.8488 | 0.8386 |
@@ -859,6 +930,15 @@ then, zenpredict 0.1.0 stays on crates.io as v2-only.
 - TSV outputs landed at `s3://zentrain/sweep-v15-2026-05-06/zenjpeg/`
 
 ### Docker image
+> **[STALE 2026-06-25]** `Dockerfile.sweep.v13` and `onstart_v3.sh` no longer
+> exist. Current sweep images: `Dockerfile.sweep.v26`/`.v27`/`.split`
+> (canonical ghcr package: `zenmetrics-sweep`, variants are TAGS not new
+> names). Current worker onstart: `scripts/sweep/onstart_unified.sh`. The
+> whole `onstart_v3.sh` worker described in this section is the deprecated
+> chunk-claim model; the canonical path is now the zenfleet job system
+> (`scripts/jobsys/fleet` + `zenmetrics jobexec`, see banner). The build
+> still uses `~/work/zen` as context for sibling path-deps.
+
 - **Current**: `Dockerfile.sweep.v13` (commit `aba984c`, 2026-05-08, on local `master` only)
 - Image: `ghcr.io/imazen/zenmetrics-sweep:0.6.3`
 - Build context: **`~/work/zen` (parent of zenmetrics + zenjpeg + zenanalyze)** — required for sibling path-deps
@@ -897,7 +977,17 @@ Destroys whole fleet when TSVs reach target.
 Prints fleet-aggregate work_min vs waste_min %, per-worker recent vs
 lifetime cells/min.
 
-### v16 cross-codec sweep — BLOCKED
+### v16 cross-codec sweep — ~~BLOCKED~~ RESOLVED 2026-06-25
+> **[STALE 2026-06-25]** This is no longer blocked. Cross-codec sweeping works
+> via the **zenfleet job system** (per-cell content-addressed jobs, R2-lease
+> atomic claim, resumable ledger, declare→gap→reconcile) — see
+> `zenmetrics/docs/RUNNING_JOBS.md` + `docs/PLAN_SWEEPS.md`. The 2026-06-24
+> multi-codec GPU runs produced **179,864 fully-scored cells** across
+> jpeg/png/avif/webp/hdr (6 metrics + 372 feat); see
+> `~/work/zen/DATA_PROVENANCE.md` + `zenmetrics/docs/SCORING_DATA_2026-06-24.md`.
+> The May "all metric columns blank" failure (below) was the old chunk-mode
+> worker; the job-system executor (`zenmetrics jobexec`) replaced it.
+
 - 25-box vast.ai launch (v16w / v16a / v16j) at $1.25/hr produced TSV
   rows with **all metric columns blank**. Workers reported `[done]` rows
   with chunk-key fields populated but no measurements.
@@ -916,6 +1006,12 @@ lifetime cells/min.
   3. Run a 1-chunk smoke before scaling.
 
 ### Parquet sidecar schema (zenmetrics-cli + sweep)
+> **[STALE 2026-06-25]** Current sidecars carry **372** zensim features
+> (`feat_0..feat_371`), matching the v47-strict ship, and the 2026-06-24 runs
+> add multiple metric columns (6 GPU metrics). The 305-col / 300-feat layout
+> below is the pre-v47 schema. See `~/work/zen/DATA_PROVENANCE.md` for the
+> current column set.
+
 305 columns:
 ```
 image_path: utf8 not null
@@ -1481,6 +1577,16 @@ CLI:
 ---
 
 ## 11. Recovery cycle status (as of 2026-05-08 → 2026-05-09)
+
+> **[STALE 2026-06-25] CONCLUDED.** This is the 2026-05-08 snapshot. The
+> recovery cycle is long over: Phase 3 ("re-train champion") concluded — the
+> v47-strict 372-feature bake shipped 2026-05-27 (CID22 0.8657 on the held-out
+> panel, exceeding the dial-correctness gate; the V0_4 0.8893 SROCC was on a
+> non-invertible dial that scored identity=0). The training pipeline is the
+> Rust/burn path in zentrain (not the scaffolded Python `zensim_metric_train.py`).
+> Phase 4 ("zenfleet job system + minimization") is built: 14 `zenfleet-*`
+> crates + `scripts/jobsys/fleet` drove the 2026-06-24 179k-cell multi-codec
+> runs. Treat the per-phase rows below as history.
 
 | Phase | Status | What landed | What's pending |
 |---|---|---|---|
