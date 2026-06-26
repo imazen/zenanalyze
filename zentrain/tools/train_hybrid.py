@@ -1681,6 +1681,61 @@ def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask)
     return out
 
 
+def evaluate_topk_verify(pred_bytes_log, actual_bytes_log, reach, mask, ks=(1, 2, 3, 4, 5, 6, 7)):
+    """Predict-top-K-then-verify picker design.
+
+    A pure content picker (K=1 = raw argmin) leaves a residual oracle gap
+    (here ~2.4%). This measures the alternative *narrow-by-content,
+    finalize-by-RD-check* design: rank the cells by the picker's PREDICTED
+    bytes, take the K predicted-cheapest reachable cells, then — simulating a
+    real encode of just those K — pick the one with min ACTUAL bytes among
+    them. Overhead is vs the true per-row oracle (min actual over all
+    reachable cells). K=1 reproduces evaluate_argmin's overhead; K=n_reachable
+    -> 0% (the oracle is always inside the verified set).
+
+    Per K it reports mean/p50/p90/p99/max overhead %, the hit-rate (fraction
+    of rows whose oracle cell falls within the predicted top-K), and the mean
+    number of cells actually verified (<=K, capped by the reachable count).
+    This is exactly the data needed to answer "can a content picker + a small
+    encode-verify step reach <=1% achieved RD, and at what K (encode budget)?"
+    """
+    n_rows = pred_bytes_log.shape[0]
+    acc = {k: {"ovh": [], "hit": 0, "verified": []} for k in ks}
+    n_used = 0
+    for i in range(n_rows):
+        m = reach[i] & mask
+        if not np.any(m):
+            continue
+        n_used += 1
+        ab = np.where(m, np.exp(actual_bytes_log[i]), np.inf)
+        pb = np.where(m, np.exp(np.clip(pred_bytes_log[i], -30, 30)), np.inf)
+        oracle = int(np.argmin(ab))
+        oracle_bytes = float(ab[oracle])
+        order = np.argsort(pb, kind="stable")  # predicted-cheapest first; unreachable (inf) sort last
+        n_reach = int(np.count_nonzero(m))
+        for k in ks:
+            kk = min(k, n_reach)
+            topk = order[:kk]
+            best_actual = float(ab[topk].min())
+            acc[k]["ovh"].append((best_actual - oracle_bytes) / oracle_bytes)
+            acc[k]["hit"] += int(oracle in set(int(x) for x in topk))
+            acc[k]["verified"].append(kk)
+    out = {}
+    for k in ks:
+        ovh = np.asarray(acc[k]["ovh"]) if acc[k]["ovh"] else np.zeros(1)
+        out[k] = {
+            "mean_pct": float(100 * ovh.mean()),
+            "p50_pct": float(100 * np.percentile(ovh, 50)),
+            "p90_pct": float(100 * np.percentile(ovh, 90)),
+            "p99_pct": float(100 * np.percentile(ovh, 99)),
+            "max_pct": float(100 * ovh.max()),
+            "hit_rate": float(acc[k]["hit"] / max(n_used, 1)),
+            "mean_verified": float(np.mean(acc[k]["verified"])) if acc[k]["verified"] else 0.0,
+            "n_rows": int(n_used),
+        }
+    return out
+
+
 def evaluate_scalars(pred_scalars, actual_scalars, reach):
     """Per-axis RMSE + MAE on scalar predictions, over reachable cells
     (where the target exists). Rows below SCALAR_SENTINELS[axis] (when
@@ -3014,6 +3069,20 @@ def main():
         f"\nStudent metrics: argmin mean overhead {student_argmin['mean_pct']:.2f}% "
         f"argmin_acc {student_argmin['argmin_acc']:.1%}\n"
     )
+
+    # --- Top-K-verify: does narrowing-by-content + encode-verifying the K
+    # predicted-cheapest cells reach <=1% achieved RD, and at what K?
+    student_topk = evaluate_topk_verify(pred_bytes, bl_va, rch_va, all_mask)
+    sys.stderr.write(
+        "\nTop-K-verify (rank by predicted bytes, encode-verify K cheapest, pick min actual):\n"
+    )
+    for k in sorted(student_topk):
+        r = student_topk[k]
+        sys.stderr.write(
+            f"  K={k}: mean {r['mean_pct']:.3f}%  p50 {r['p50_pct']:.3f}%  "
+            f"p90 {r['p90_pct']:.3f}%  p99 {r['p99_pct']:.2f}%  max {r['max_pct']:.2f}%  "
+            f"oracle-in-topK {r['hit_rate']:.1%}  (~{r['mean_verified']:.1f} encodes/row)\n"
+        )
     sys.stderr.write(
         "  scalar RMSE: " + "  ".join(
             f"{axis} {student_scalars[axis]:.4f}" for axis in SCALAR_AXES
