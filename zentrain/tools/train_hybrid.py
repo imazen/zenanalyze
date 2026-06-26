@@ -2835,14 +2835,37 @@ def main():
         + n_scalar_axes
     ) * n_cells
 
-    rng = np.random.default_rng(SEED)
-    images = sorted({m[0] for m in meta})
-    rng.shuffle(images)
-    n_val = max(1, int(len(images) * HOLDOUT_FRAC))
-    val_set = set(images[:n_val])
-    tr = np.array([i for i, m in enumerate(meta) if m[0] not in val_set])
-    va = np.array([i for i, m in enumerate(meta) if m[0] in val_set])
-    sys.stderr.write(f"Train rows: {len(tr)}, val rows: {len(va)}\n")
+    # CANONICAL split — by ORIGIN image, last-digit parity. origin_split.py
+    # (zenmetrics/scripts/picker) is the ONE source of truth: {0,2,4,6,8}=train,
+    # {1,3,5}=val, {7,9}=test; every sizing/crop/encode derivative inherits the
+    # origin's bucket so nothing leaks. Replaces the old seeded per-rendition 20%
+    # shuffle (per-rendition → scale leakage; random → irreproducible). Train only
+    # ever sees even-origin content. See docs/CLEAN_PICKER_PROGRAM.md.
+    try:
+        from origin_split import origin_stem as _origin_stem, split_of as _origin_split_of
+    except ImportError as _e:
+        raise SystemExit(
+            "train_hybrid needs the canonical origin_split on PYTHONPATH "
+            "(zenmetrics/scripts/picker/origin_split.py) — refusing to fall back to a "
+            f"leaky random split. Add scripts/picker to PYTHONPATH. ({_e})"
+        )
+    _spl = [_origin_split_of(m[0]) for m in meta]
+    n_unsplit = sum(1 for s in _spl if s is None)
+    tr = np.array([i for i, s in enumerate(_spl) if s == "train"])
+    va = np.array([i for i, s in enumerate(_spl) if s == "val"])
+    te = np.array([i for i, s in enumerate(_spl) if s == "test"])
+    n_origins = len({_origin_stem(m[0]) for m in meta})
+    n_rend = len({m[0] for m in meta})
+    sys.stderr.write(
+        f"Origin even/odd split (train_hybrid via origin_split.py): "
+        f"train {len(tr)} / val {len(va)} / test {len(te)} rows "
+        f"({n_origins} origins, {n_rend} renditions; {n_unsplit} unsplittable rows dropped)\n"
+    )
+    if len(va) == 0:
+        raise SystemExit(
+            "0 validation rows (no origins ending in 1/3/5). Train on the full "
+            "imazen-26 corpus, not a train-biased even-only set."
+        )
 
     Xs_tr, Xs_va = Xs[tr], Xs[va]
     Xe_tr, Xe_va = Xe[tr], Xe[va]
@@ -2855,6 +2878,11 @@ def main():
     time_log_va = time_log[va] if time_log is not None else None
     metric_log_tr = metric_log[tr] if metric_log is not None else None
     metric_log_va = metric_log[va] if metric_log is not None else None
+    # Held-out TEST slices (origins ending 7/9) — evaluated after val, never trained on.
+    Xe_te = Xe[te]
+    bl_te = bytes_log[te]
+    rch_te = reach[te]
+    meta_te = [meta[i] for i in te]
 
     # --- Teacher
     bytes_quantile = args.bytes_quantile if args.objective == "zensim_strict" else None
@@ -2987,6 +3015,7 @@ def main():
     scaler = StandardScaler()
     Xe_tr_s = scaler.fit_transform(Xe_tr)
     Xe_va_s = scaler.transform(Xe_va)
+    Xe_te_s = scaler.transform(Xe_te) if len(te) else Xe_va_s[:0]
     if args.hard_example_weighting != "none" and args.activation != "leakyrelu":
         sys.stderr.write(
             "  WARNING: --hard-example-weighting is leakyrelu-only; "
@@ -3099,6 +3128,30 @@ def main():
         f"argmin_acc {student_argmin_tr['argmin_acc']:.1%} "
         f"(gap to val: {student_argmin['mean_pct'] - student_argmin_tr['mean_pct']:+.2f}pp)\n"
     )
+
+    # --- Held-out TEST (origins ending 7/9) — the honest generalization number.
+    # NEVER trained or tuned on; reported alongside val so the gap val→test shows
+    # any val overfit. See docs/CLEAN_PICKER_PROGRAM.md.
+    student_argmin_te = None
+    student_topk_te = None
+    if len(te):
+        Y_te_pred = _predict_via_coefs(student, Xe_te_s, args.activation)
+        pred_bytes_te = Y_te_pred[:, :n_cells]
+        student_argmin_te = evaluate_argmin(pred_bytes_te, bl_te, rch_te, meta_te, all_mask)
+        student_topk_te = evaluate_topk_verify(pred_bytes_te, bl_te, rch_te, all_mask)
+        sys.stderr.write(
+            f"\n  TEST (7/9 origins): argmin mean {student_argmin_te['mean_pct']:.2f}% "
+            f"argmin_acc {student_argmin_te['argmin_acc']:.1%} "
+            f"(val→test gap {student_argmin_te['mean_pct'] - student_argmin['mean_pct']:+.2f}pp)\n"
+        )
+        for k in sorted(student_topk_te):
+            r = student_topk_te[k]
+            sys.stderr.write(
+                f"    TEST K={k}: mean {r['mean_pct']:.3f}%  p90 {r['p90_pct']:.3f}%  "
+                f"oracle-in-topK {r['hit_rate']:.1%}\n"
+            )
+    else:
+        sys.stderr.write("  TEST: 0 rows (no 7/9 origins in this corpus)\n")
 
     # Per-row val breakdown for stratification
     val_per_row = evaluate_argmin_per_row(
