@@ -400,6 +400,29 @@ pub mod keys {
     /// within-major drift the name-based schema hash can't (a feature keeping its
     /// name while its math moves). Absent on models baked before this key.
     pub const FEATURE_DEFS_VERSION: &str = "zentrain.feature_defs_version";
+    /// bytes — `[u8; n_outputs]`, one small compute-tier rank per
+    /// output index (the codec config that output cell encodes).
+    /// Lower = cheaper/faster; higher = more CPU (e.g. for JXL,
+    /// effort `e1`..`e9`; for any codec, an opaque cost rank the
+    /// bake assigns). Lets a runtime mask out "too expensive"
+    /// configs under a caller-supplied time budget WITHOUT each
+    /// codec shipping its own per-cell tier table — see
+    /// [`crate::Model::cell_compute_tiers`] and the generic
+    /// [`crate::argmin::tier_mask`] helper.
+    ///
+    /// Optional: bakers omit the key entirely when they have no
+    /// tier information, and the runtime treats absence as a no-op
+    /// (all cells admitted, no masking) so older bins still load.
+    /// Decoded as raw bytes (one `u8` per output), so it round-trips
+    /// identically on every target.
+    ///
+    /// Behind the opt-in `topk` feature (also reachable under
+    /// `advanced`), alongside its reader
+    /// [`crate::Model::cell_compute_tiers`] and the
+    /// [`crate::argmin::tier_mask`] helper.
+    #[cfg(any(feature = "topk", feature = "advanced"))]
+    pub const CELL_COMPUTE_TIER: &str = "zentrain.cell_compute_tier";
+
     /// numeric (u64) — `zenanalyze::AnalysisQuery::config_hash()` at bake time:
     /// the value-affecting analysis-config digest the model was trained under
     /// (`0` = canonical default / gamma). The third part of the `zenanalyze-api`

@@ -901,6 +901,47 @@ impl Model {
         Some(u64::from_le_bytes(arr))
     }
 
+    /// Per-output compute-tier ranks from the
+    /// [`CELL_COMPUTE_TIER`](crate::keys::CELL_COMPUTE_TIER) metadata
+    /// key: one small `u8` per output index (the codec config that
+    /// output cell encodes), lower = cheaper. Empty slice when the
+    /// key is absent (older bakes) — a graceful no-op, so a caller
+    /// can `if !tiers.is_empty()` and skip tier masking entirely. The
+    /// per-output length (`== n_outputs`) is the bake's contract; this
+    /// accessor returns whatever bytes the key carries.
+    ///
+    /// Pair with the generic [`crate::argmin::tier_mask`] helper to
+    /// build an [`crate::AllowedMask`] data slice that admits only
+    /// "fast enough" cells under a caller-supplied budget, without
+    /// the codec maintaining its own tier table.
+    ///
+    /// Zero-copy: the returned slice borrows the model's backing
+    /// bytes. One `u8` per output, so no alignment / endianness
+    /// concerns.
+    ///
+    /// Behind the opt-in `topk` feature (also reachable under
+    /// `advanced`).
+    #[cfg(any(feature = "topk", feature = "advanced"))]
+    pub fn cell_compute_tiers(&self) -> &[u8] {
+        let raw = self
+            .header
+            .metadata
+            .slice("metadata", &self.bytes)
+            .expect("metadata validated at parse time");
+        // Re-walk the (small, ≤30-entry) blob for the one key. Each
+        // `MetadataEntry.value` borrows `raw` (== `&self.bytes`), not
+        // the temporary `Metadata` Vec, so copying the `&[u8]` field
+        // out detaches it from the `Metadata`'s lifetime and lets it
+        // outlive the `match`. Any byte length is a valid `[u8; N]`,
+        // so there's no wrong-width rejection — the per-output length
+        // (== n_outputs) is the caller's contract.
+        Metadata::parse(raw)
+            .expect("metadata blob parse validated at parse time")
+            .get(crate::keys::CELL_COMPUTE_TIER)
+            .map(|entry| entry.value)
+            .unwrap_or(&[])
+    }
+
     /// Per-output [`OutputSpec`] table.
     pub fn output_specs(&self) -> &[OutputSpec] {
         if self.header.output_specs.is_empty() {

@@ -426,6 +426,23 @@ impl<'a> Predictor<'a> {
         self.model.feature_transforms()
     }
 
+    /// Per-output compute-tier ranks declared by the bake (the
+    /// [`CELL_COMPUTE_TIER`](crate::keys::CELL_COMPUTE_TIER)
+    /// metadata). Convenience re-export of
+    /// [`Model::cell_compute_tiers`] so callers holding a `Predictor`
+    /// don't need to thread the model through. Empty slice when the
+    /// bake carries no tier table (graceful no-op).
+    ///
+    /// Behind the opt-in `topk` feature (also reachable under
+    /// `advanced`). Feed into [`crate::argmin::tier_mask`] to build a
+    /// "fast configs only" mask under a caller-supplied budget.
+    ///
+    /// [`Model::cell_compute_tiers`]: crate::Model::cell_compute_tiers
+    #[cfg(any(feature = "topk", feature = "advanced"))]
+    pub fn cell_compute_tiers(&self) -> &[u8] {
+        self.model.cell_compute_tiers()
+    }
+
     /// Pick the argmin output index over the masked set.
     pub fn argmin_masked(
         &mut self,
@@ -477,7 +494,18 @@ impl<'a> Predictor<'a> {
         ))
     }
 
-    #[cfg(feature = "advanced")]
+    /// Run the forward pass, then return the top-`K` lowest-scoring
+    /// output indices the `mask` permits, ascending (best first).
+    /// Slots beyond the number of mask-allowed entries are `None`.
+    ///
+    /// Behind the opt-in `topk` feature (also reachable under
+    /// `advanced`) — a stable, minimal picker-facing surface, so a
+    /// per-codec picker or `zenpicker` can run the proven
+    /// "predict-top-K then encode-verify" path (`K = 3` typically) at
+    /// runtime. Same masking + score-transform + offsets options as
+    /// [`Self::argmin_masked`]; same NaN / tie-break / mask-length
+    /// contract as [`argmin::argmin_masked_top_k`].
+    #[cfg(any(feature = "topk", feature = "advanced"))]
     pub fn argmin_masked_top_k<const K: usize>(
         &mut self,
         features: &[f32],
@@ -497,7 +525,12 @@ impl<'a> Predictor<'a> {
         ))
     }
 
-    #[cfg(feature = "advanced")]
+    /// Top-`K` over a sub-range of the output vector (hybrid-heads
+    /// layout — see [`Self::argmin_masked_in_range`]). Returned
+    /// indices are within the sub-range. Behind the opt-in `topk`
+    /// feature (also reachable under `advanced`) — same support
+    /// guarantee as [`Self::argmin_masked_top_k`].
+    #[cfg(any(feature = "topk", feature = "advanced"))]
     pub fn argmin_masked_top_k_in_range<const K: usize>(
         &mut self,
         features: &[f32],

@@ -153,18 +153,25 @@ The `argmin` family is generic — it's "argmin over a slice with a boolean filt
   - `uniform: f32` — added to every cell's score. Same for all cells, so on its own it never changes the pick (e.g. caller-side ICC/EXIF overhead).
   - `per_output: Option<&'a [f32]>` — per-cell additive (e.g. per-config container/ICC bytes). When `Some`, its length **must equal the argmin's working slice** (full `n_outputs` for `argmin_masked`, the sub-range length for `*_in_range`), else `PredictError::OffsetsLenMismatch`. This is the term that can actually shift the pick. Pass `None` (or `ArgminOffsets::uniform(x)` for uniform-only) when you have no per-cell table.
 
-Default-on: `argmin_masked`, `argmin_masked_in_range`.
+Default-on (stable, always compiled): `argmin_masked`, `argmin_masked_in_range`.
 
-Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_confidence*`, `argmin_masked_with_scorer*`, `threshold_mask`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and the output-space OOD check (`OutputBound`, `output_first_out_of_distribution`). The feature-space OOD check (`FeatureBound`, `first_out_of_distribution`) is default-on. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
+Behind the opt-in **`topk`** feature (default-off, stable — `--features topk`, also reachable under `advanced`): **`argmin_masked_top_k::<K>`** / **`argmin_masked_top_k_in_range::<K>`** (top-`K` lowest-scoring indices, ascending, for the "predict-top-K then encode-verify" picker path — `K = 3` typically) as both free fns and `Predictor` methods, plus **`tier_mask`** + the compute-tier reader (see [Compute-tier masking](#compute-tier-masking)). Kept off the default surface so a `predict` / `argmin_masked`-only consumer pays no extra public API or top-K monomorphization — the cost is opt-in.
+
+Behind the `advanced` feature (default-off): the closure-scorer hybrids `argmin_masked_with_scorer*` / `argmin_masked_top_k_with_scorer*`, `pick_with_confidence*`, `threshold_mask`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and the output-space OOD check (`OutputBound`, `output_first_out_of_distribution`). `advanced` also re-exposes the whole `topk` surface for back-compat. The feature-space OOD check (`FeatureBound`, `first_out_of_distribution`) is default-on. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
+
+### Compute-tier masking
+
+Behind the opt-in `topk` feature (also reachable under `advanced`). A bake MAY carry an optional `zentrain.cell_compute_tier` metadata key — `[u8; n_outputs]`, one small compute-tier rank per output cell (lower = cheaper to encode; e.g. JXL effort `e1`..`e9`, or any codec's opaque cost rank). `Model::cell_compute_tiers()` (or `Predictor::cell_compute_tiers()`) returns it as a zero-copy `&[u8]`, **empty** when the bake omits it — so older bins still load and the caller just skips tier masking. The generic `argmin::tier_mask(tiers, max_tier, out)` fills a `&mut [bool]` admitting only cells whose tier is `<= max_tier`; AND it into your constraint mask before `argmin_masked` / `argmin_masked_top_k` to express "fast configs only" under a time budget, with no per-codec tier table.
 
 ## Features
 
 | Feature | Default | What it gates |
 |---|---|---|
 | `std` | yes | `std::error::Error` trait impls |
-| `advanced` | no | safety / rescue / output_specs typed API / top-K argmin + scorer hybrids — see "Decision math" above |
+| `topk` | no | **stable, minimal** picker surface: top-`K` argmin query (`argmin_masked_top_k*`, free fns + `Predictor` methods) + compute-tier masking (`tier_mask`, `Model`/`Predictor::cell_compute_tiers`, `keys::CELL_COMPUTE_TIER`) — see "Decision math" above |
+| `advanced` | no | safety / rescue / output_specs typed API / closure-scorer argmin hybrids / `pick_with_confidence` / `threshold_mask` — see "Decision math" above. Also re-exposes the `topk` surface for back-compat. |
 
-The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. The default surface follows normal 0.x semver. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
+The default surface and the `topk` surface follow normal 0.x semver (and the default surface stays byte-identical to a `predict`-only consumer — enabling `topk` is the only way to add the top-K API + its compile cost). The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
 
 `no_std + alloc` builds drop only the `std::error::Error` impls. All numeric work — including `f32::exp` for `ScoreTransform::Exp` — runs identically via the unconditional `libm` dependency.
 

@@ -194,11 +194,39 @@ pub fn argmin_masked(
 /// permits, ascending (best first). Slots beyond the number of
 /// allowed entries are `None`. `K` is generic to keep the call
 /// site allocation-free; in practice `K = 2` is what codec rescue
-/// logic wants (cached second-best).
+/// logic wants (cached second-best), and `K = 3` is what the
+/// "predict-top-K then encode-verify" picker path wants.
+///
+/// Behind the opt-in `topk` feature (also reachable under
+/// `advanced`) — a stable, minimal picker-facing surface kept off
+/// the default API so the default build's public surface and
+/// monomorphization stay byte-identical to a `predict` /
+/// `argmin_masked`-only consumer. Same support guarantee as
+/// [`argmin_masked`], so a per-codec picker or [`zenpicker`] can
+/// request the top-K candidate output indices (same masking,
+/// score-transform, and range options). The closure-scorer variants
+/// `*_with_scorer`, the confidence helpers, and `threshold_mask` stay
+/// behind `advanced`.
 ///
 /// Same NaN, tie-breaking, and mask-length contract as
 /// [`argmin_masked`].
-#[cfg(feature = "advanced")]
+///
+/// [`zenpicker`]: https://docs.rs/zenpicker
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(any(feature = "topk", feature = "advanced"))] {
+/// use zenpredict::{AllowedMask, ScoreTransform, argmin};
+///
+/// let scores = [3.0_f32, 1.0, 4.0, 1.5, 9.0];
+/// let mask_data = [true; 5];
+/// let mask = AllowedMask::new(&mask_data);
+/// let top = argmin::argmin_masked_top_k::<3>(&scores, &mask, ScoreTransform::Identity, None);
+/// assert_eq!(top, [Some(1), Some(3), Some(0)]); // 1.0, 1.5, 3.0
+/// # }
+/// ```
+#[cfg(any(feature = "topk", feature = "advanced"))]
 pub fn argmin_masked_top_k<const K: usize>(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
@@ -263,7 +291,17 @@ pub fn argmin_masked_in_range(
     let slice = predictions.get(start..end)?;
     argmin_masked(slice, mask, transform, offsets)
 }
-#[cfg(feature = "advanced")]
+
+/// Top-`K` over a sub-range `predictions[range.0..range.1]`, masked
+/// by `mask` (whose `len()` must be `>= range.1 - range.0`).
+/// Returned indices are *within the sub-range*. Behind the opt-in
+/// `topk` feature (also reachable under `advanced`) — same support
+/// guarantee as [`argmin_masked_top_k`].
+///
+/// Returns all-`None` when the range is out of bounds (`end >
+/// predictions.len()` or `start > end`) — the in-range argmin
+/// scalar form returns `None` on the same condition.
+#[cfg(any(feature = "topk", feature = "advanced"))]
 pub fn argmin_masked_top_k_in_range<const K: usize>(
     predictions: &[f32],
     range: (usize, usize),
@@ -276,6 +314,58 @@ pub fn argmin_masked_top_k_in_range<const K: usize>(
         return [None; K];
     }
     argmin_masked_top_k::<K>(&predictions[start..end], mask, transform, offsets)
+}
+
+/// Fill `out[i] = tiers[i] <= max_tier` — an [`AllowedMask`] data
+/// slice that admits only output cells whose compute-tier rank is at
+/// most `max_tier`, masking out everything more expensive.
+///
+/// Behind the opt-in `topk` feature (also reachable under
+/// `advanced`). Generic and codec-agnostic: pair it with a bake's
+/// [`zentrain.cell_compute_tier`](crate::keys::CELL_COMPUTE_TIER)
+/// table ([`Model::cell_compute_tiers`]) so any codec can express
+/// "fast configs only" under a caller-supplied time budget without
+/// shipping its own per-cell tier table. AND the result into the
+/// codec's constraint mask before calling [`argmin_masked`] /
+/// [`argmin_masked_top_k`].
+///
+/// `out.len()` must equal `tiers.len()`; mismatched lengths **panic**
+/// in debug and release (same discipline as [`AllowedMask`]'s
+/// length contract — a short `out` would silently admit the
+/// unwritten tail).
+///
+/// Absent tier metadata is a graceful no-op at the call site: when
+/// [`Model::cell_compute_tiers`] returns an empty slice, skip the
+/// AND entirely (admit every cell). This helper is only invoked when
+/// a tier table is actually present.
+///
+/// [`Model::cell_compute_tiers`]: crate::Model::cell_compute_tiers
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(any(feature = "topk", feature = "advanced"))] {
+/// use zenpredict::argmin::tier_mask;
+///
+/// // Per-cell compute tiers (e.g. JXL effort e1..e3 → 1,2,3).
+/// let tiers = [1_u8, 3, 2, 3, 1];
+/// let mut gate = [false; 5];
+/// tier_mask(&tiers, 2, &mut gate); // admit tiers <= 2
+/// assert_eq!(gate, [true, false, true, false, true]);
+/// # }
+/// ```
+#[cfg(any(feature = "topk", feature = "advanced"))]
+pub fn tier_mask(tiers: &[u8], max_tier: u8, out: &mut [bool]) {
+    assert_eq!(
+        tiers.len(),
+        out.len(),
+        "tier_mask: tiers.len() ({}) != out.len() ({})",
+        tiers.len(),
+        out.len(),
+    );
+    for (slot, &t) in out.iter_mut().zip(tiers.iter()) {
+        *slot = t <= max_tier;
+    }
 }
 
 /// Argmin under a caller-supplied score function. `scorer(i)` is

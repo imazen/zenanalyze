@@ -23,7 +23,9 @@ exclude = [
 # Render the complete API. The `advanced` typed subsystems are
 # feature-gated; without this docs.rs builds only the default surface
 # and intra-doc links from default items into the gated API break.
-features = ["advanced"]
+# `topk` is gated independently of `advanced` (each item is
+# `cfg(any(topk, advanced))`), so render both to document the full API.
+features = ["topk", "advanced"]
 
 [lib]
 name = "zenpredict"
@@ -35,19 +37,39 @@ default = ["std"]
 # `no_std + alloc` via the unconditional `libm` dependency — no
 # transform degrades when `std` is off.
 std = []
+# STABLE, minimal picker-facing surface (default-OFF). Opt in to the
+# top-K candidate query for the "predict-top-K then encode-verify"
+# picker path plus the compute-tier masking helpers, WITHOUT pulling
+# the unstable `advanced` grab-bag. Gating it (rather than shipping it
+# on the default surface) keeps the default public API + default-build
+# monomorphization byte-identical to a `predict` / `argmin_masked`-only
+# consumer, so the top-K cost stays opt-in and measurable.
+#
+# Items: `argmin_masked_top_k*` (free fns + `Predictor` methods),
+# `tier_mask`, `Model`/`Predictor::cell_compute_tiers`, and the
+# `keys::CELL_COMPUTE_TIER` metadata key. Each is gated
+# `cfg(any(feature = "topk", feature = "advanced"))`, so it's also
+# reachable under `advanced` (back-compat) without `advanced` having
+# to pull `topk`.
+#
+# Unlike `advanced`, this surface follows normal 0.x semver — it does
+# not carry the "may change shape" caveat.
+topk = []
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety
 # metadata reader (`safety::*`), two-shot rescue framework
-# (`rescue::*`), and cached top-K argmin / scorer hybrids
-# (`argmin_masked_top_k*`, `pick_with_confidence*`,
-# `*_with_scorer*`). The wire format parses these sections
+# (`rescue::*`), and the closure-scorer / confidence argmin hybrids
+# (`*_with_scorer*`, `pick_with_confidence*`, `threshold_mask`). The
+# stable `topk` items are ALSO reachable under `advanced` (via their
+# `cfg(any(topk, advanced))` gate) so code that gated on `advanced`
+# keeps compiling. The wire format parses the corresponding sections
 # unconditionally — gating only controls the typed Rust API. Codec
 # runtimes that only call `predict` / `argmin_masked` stay lean by
 # default; per-codec pickers that need the extras opt in.
 #
-# NOT YET STABILIZED: unlike the default surface, items behind
-# `advanced` may change shape or be removed in a 0.2.x patch. Pin a
-# specific version if you depend on them. (Distinct from
+# NOT YET STABILIZED: unlike the default and `topk` surfaces, items
+# behind `advanced` may change shape or be removed in a 0.2.x patch.
+# Pin a specific version if you depend on them. (Distinct from
 # `zenanalyze`'s `experimental`, which gates unstable feature
 # numerics rather than extra API.)
 advanced = []

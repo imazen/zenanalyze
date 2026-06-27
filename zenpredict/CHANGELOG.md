@@ -13,6 +13,32 @@
 
 ### Added
 
+- **New opt-in `topk` feature (default-OFF): stable top-K query + compute-tier
+  mask.** A minimal, stable picker-facing surface — distinct from the unstable
+  `advanced` grab-bag — kept off the default API so the default public surface
+  and default-build monomorphization stay **byte-identical** to a `predict` /
+  `argmin_masked`-only consumer (verified: `cargo public-api` diff on default
+  features is empty vs the prior release; the top-K cost is now opt-in and
+  measurable). Enabled by `--features topk`, and also reachable under `advanced`
+  (each item is gated `cfg(any(topk, advanced))`) for back-compat. Items:
+  - `argmin_masked_top_k::<K>` / `argmin_masked_top_k_in_range::<K>` (free fns)
+    and the matching `Predictor` methods — top-`K` lowest-scoring indices
+    (ascending) for the proven "predict-top-K then encode-verify" picker path
+    (`K = 3` typically). Same masking + score-transform + offsets +
+    NaN/tie-break/mask-length contract as `argmin_masked`.
+  - `keys::CELL_COMPUTE_TIER` (bytes, `[u8; n_outputs]` — one compute-tier rank
+    per output, lower = cheaper), `Model::cell_compute_tiers()` /
+    `Predictor::cell_compute_tiers()` accessors (zero-copy `&[u8]`, empty when
+    absent — older bins still load, a graceful no-op), and the codec-agnostic
+    `argmin::tier_mask(tiers, max_tier, out)` that fills an `AllowedMask` data
+    slice admitting only cells at or below a caller-supplied tier budget, so any
+    codec can mask "fast configs only" without its own per-cell table. Bakers
+    (zentrain) populate the key when tier info is available.
+
+  The closure-scorer (`*_with_scorer`), confidence (`pick_with_confidence*`),
+  and `threshold_mask` variants stay behind `advanced`. `cargo semver-checks`:
+  no update required on the default, `topk`, or `advanced` surface. (571cf1a)
+
 - **Model self-describes its feature provenance** for the `zenanalyze-api`
   offer/reuse contract: three metadata keys `keys::ANALYZER_VERSION` (utf8),
   `keys::FEATURE_DEFS_VERSION` (u32), `keys::FEATURE_CONFIG_HASH` (u64), and
