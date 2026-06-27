@@ -2494,6 +2494,21 @@ def main():
         "Default: codec config value.",
     )
     parser.add_argument(
+        "--pareto",
+        default=None,
+        help="Override codec config's PARETO path (the sweep TSV/parquet to "
+        "train on). Lets a caller point the trainer at a freshly-merged pareto "
+        "without editing the codec config (e.g. a re-sweep's omni_to_pareto "
+        "output). Default: codec config value.",
+    )
+    parser.add_argument(
+        "--features",
+        default=None,
+        help="Override codec config's FEATURES path (the variant_name-keyed "
+        "feature TSV joined to the pareto). Pair with --pareto so both inputs "
+        "come from the same fresh run. Default: codec config value.",
+    )
+    parser.add_argument(
         "--time-budget-multiplier",
         type=float,
         default=0.0,
@@ -2689,7 +2704,13 @@ def main():
     )
 
     # CLI overrides — take precedence over codec config defaults.
-    global METRIC_COLUMN, METRIC_DIRECTION
+    global METRIC_COLUMN, METRIC_DIRECTION, PARETO, FEATURES
+    if args.pareto is not None:
+        PARETO = Path(args.pareto)
+        sys.stderr.write(f"  CLI override: PARETO={PARETO}\n")
+    if args.features is not None:
+        FEATURES = Path(args.features)
+        sys.stderr.write(f"  CLI override: FEATURES={FEATURES}\n")
     if args.metric_column is not None:
         METRIC_COLUMN = args.metric_column
         sys.stderr.write(f"  CLI override: METRIC_COLUMN={METRIC_COLUMN!r}\n")
