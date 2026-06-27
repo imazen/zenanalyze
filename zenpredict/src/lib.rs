@@ -142,13 +142,20 @@ pub mod rescue;
 mod safety;
 pub mod wire;
 
+// Default-surface picker selection kit: the masked argmin/top-K
+// ranking plus the runtime constraint masks (`mask_at_least` =
+// target-quality floor, `mask_at_most` = perf/cost ceiling). Top-K
+// lives here — not in each consumer — so the masking / score-transform
+// / NaN / tie-break contract is defined once. The verify *loop* (rank
+// → encode → measure → pick) is the codec's to compose over these.
 pub use argmin::{
     AllowedMask, ArgminOffsets, ScoreTransform, argmin_masked, argmin_masked_in_range,
+    argmin_masked_top_k, argmin_masked_top_k_in_range, mask_at_least, mask_at_most,
 };
 #[cfg(feature = "advanced")]
 pub use argmin::{
-    argmin_masked_top_k, argmin_masked_top_k_in_range, argmin_masked_top_k_with_scorer,
-    argmin_masked_with_scorer, pick_with_confidence, pick_with_confidence_in_range, threshold_mask,
+    argmin_masked_top_k_with_scorer, argmin_masked_with_scorer, pick_with_confidence,
+    pick_with_confidence_in_range,
 };
 pub use bounds::{FeatureBound, first_out_of_distribution};
 #[cfg(feature = "advanced")]

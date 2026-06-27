@@ -37,19 +37,19 @@ default = ["std"]
 std = []
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety
-# metadata reader (`safety::*`), two-shot rescue framework
-# (`rescue::*`), and cached top-K argmin / scorer hybrids
-# (`argmin_masked_top_k*`, `pick_with_confidence*`,
-# `*_with_scorer*`). The wire format parses these sections
-# unconditionally — gating only controls the typed Rust API. Codec
-# runtimes that only call `predict` / `argmin_masked` stay lean by
-# default; per-codec pickers that need the extras opt in.
+# metadata reader (`safety::*`), the two-shot rescue framework
+# (`rescue::*`), and the closure-scorer / confidence argmin hybrids
+# (`*_with_scorer*`, `pick_with_confidence*`). The wire format parses
+# the corresponding sections unconditionally — gating only controls the
+# typed Rust API. Codec runtimes that only call `predict` /
+# `argmin_masked` (or the default-surface top-K + constraint masks)
+# stay lean by default; per-codec pickers that need the extras opt in.
 #
 # NOT YET STABILIZED: unlike the default surface, items behind
 # `advanced` may change shape or be removed in a 0.2.x patch. Pin a
-# specific version if you depend on them. (Distinct from
-# `zenanalyze`'s `experimental`, which gates unstable feature
-# numerics rather than extra API.)
+# specific version if you depend on them. (Distinct from `zenanalyze`'s
+# `experimental`, which gates unstable feature numerics rather than
+# extra API.)
 advanced = []
 
 [dependencies]

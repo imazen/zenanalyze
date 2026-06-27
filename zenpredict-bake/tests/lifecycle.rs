@@ -7,7 +7,7 @@ use zenpredict::keys;
 use zenpredict::{
     Activation, AllowedMask, ArgminOffsets, FeatureBound, Metadata, MetadataType, Model, Predictor,
     RescueDecision, RescuePolicy, RescueStrategy, ScoreTransform, WeightDtype,
-    first_out_of_distribution, should_rescue, threshold_mask,
+    first_out_of_distribution, mask_at_least, should_rescue,
 };
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
@@ -272,13 +272,13 @@ fn rescue_workflow_two_shot() {
 }
 
 #[test]
-fn threshold_mask_combines_with_constraint_mask() {
+fn mask_at_least_combines_with_constraint_mask() {
     // Reach rates: most cells safe at 0.99, one cell unsafe at 0.6,
     // one cell missing data (NaN).
     let rates = [0.99, 0.99, 0.6, f32::NAN, 0.95, 0.99];
     let constraint_mask = [true, true, true, true, false, true];
     let mut reach_gate = [false; 6];
-    threshold_mask(&rates, 0.95, &mut reach_gate);
+    mask_at_least(&rates, 0.95, &mut reach_gate);
     let combined: Vec<bool> = constraint_mask
         .iter()
         .zip(&reach_gate)

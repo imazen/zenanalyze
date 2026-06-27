@@ -153,18 +153,22 @@ The `argmin` family is generic — it's "argmin over a slice with a boolean filt
   - `uniform: f32` — added to every cell's score. Same for all cells, so on its own it never changes the pick (e.g. caller-side ICC/EXIF overhead).
   - `per_output: Option<&'a [f32]>` — per-cell additive (e.g. per-config container/ICC bytes). When `Some`, its length **must equal the argmin's working slice** (full `n_outputs` for `argmin_masked`, the sub-range length for `*_in_range`), else `PredictError::OffsetsLenMismatch`. This is the term that can actually shift the pick. Pass `None` (or `ArgminOffsets::uniform(x)` for uniform-only) when you have no per-cell table.
 
-Default-on: `argmin_masked`, `argmin_masked_in_range`.
+Default-on (stable, always compiled) — the full per-image selection kit: `argmin_masked`, `argmin_masked_in_range`, the top-`K` query **`argmin_masked_top_k::<K>`** / **`argmin_masked_top_k_in_range::<K>`** (top-`K` lowest-scoring indices, ascending, for the "predict-top-K then encode-verify" path — `K = 3` typically; free fns + `Predictor` methods), and the runtime constraint masks **`mask_at_least`** / **`mask_at_most`** (see [Runtime constraint masks](#runtime-constraint-masks)). Top-K lives here, not re-implemented in each codec, so the masking / score-transform / NaN / tie-break contract is defined once.
 
-Behind the `advanced` feature (default-off): `argmin_masked_top_k*`, `pick_with_confidence*`, `argmin_masked_with_scorer*`, `threshold_mask`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and the output-space OOD check (`OutputBound`, `output_first_out_of_distribution`). The feature-space OOD check (`FeatureBound`, `first_out_of_distribution`) is default-on. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
+Behind the `advanced` feature (default-off): the closure-scorer hybrids `argmin_masked_with_scorer*` / `argmin_masked_top_k_with_scorer*`, `pick_with_confidence*`, the two-shot `rescue` policy types, `safety::*` accessors, the typed `output_spec` API (`predict_with_specs`, `OutputValue`, `apply_spec`), and the output-space OOD check (`OutputBound`, `output_first_out_of_distribution`). The feature-space OOD check (`FeatureBound`, `first_out_of_distribution`) is default-on. Wire-format slots for `output_specs` / `discrete_sets` / `sparse_overrides` parse unconditionally; the feature gates only the typed Rust API.
+
+### Runtime constraint masks
+
+`mask_at_least(values, floor, out)` and `mask_at_most(values, limit, out)` fill a `&mut [bool]` from a caller-supplied per-cell `f32` attribute: `mask_at_least` admits `values[i] >= floor` (a **target-quality** floor — predicted ssim2 / zensim / reach rate ≥ target), `mask_at_most` admits `values[i] <= limit` (a **perf / compute ceiling** — encode cost ≤ budget). Both are runtime inputs you dial in per call; `NaN` fails either constraint (an unknown attribute is never admitted). AND the masks into your constraint mask before `argmin_masked` / `argmin_masked_top_k` to express "cheapest config that reaches the target quality within the perf budget" — with no per-codec masking code and no baked tier table. The codec owns where the `values` come from (a model output head, a bake table, or its own config grammar). The encode-verify *loop* (rank → encode the top-K → measure → pick) is the codec's to compose over these primitives.
 
 ## Features
 
 | Feature | Default | What it gates |
 |---|---|---|
 | `std` | yes | `std::error::Error` trait impls |
-| `advanced` | no | safety / rescue / output_specs typed API / top-K argmin + scorer hybrids — see "Decision math" above |
+| `advanced` | no | safety / rescue / output_specs typed API / closure-scorer argmin hybrids / `pick_with_confidence` — see "Decision math" above |
 
-The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. The default surface follows normal 0.x semver. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
+The default surface follows normal 0.x semver. The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
 
 `no_std + alloc` builds drop only the `std::error::Error` impls. All numeric work — including `f32::exp` for `ScoreTransform::Exp` — runs identically via the unconditional `libm` dependency.
 

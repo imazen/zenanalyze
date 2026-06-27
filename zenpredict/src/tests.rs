@@ -81,15 +81,14 @@ fn pick_with_confidence_inf_when_only_one_allowed() {
 }
 
 #[test]
-#[cfg(feature = "advanced")]
-fn threshold_mask_finite_gate() {
-    // INFINITY is non-finite → treated like NaN, gated out. The
-    // mask gate is intentionally finite-only because `INFINITY` in
-    // a reach-rate table conventionally means "missing data" not
-    // "always reached."
+fn mask_at_least_finite_gate() {
+    // INFINITY is non-finite → treated like NaN, gated out. The mask
+    // is intentionally finite-only: a non-finite attribute (NaN or
+    // INFINITY) conventionally means "missing data," never "always
+    // passes."
     let rates = [0.99, 0.5, f32::NAN, 0.95, f32::INFINITY];
     let mut out = [false; 5];
-    argmin::threshold_mask(&rates, 0.95, &mut out);
+    argmin::mask_at_least(&rates, 0.95, &mut out);
     assert_eq!(out, [true, false, false, true, false]);
 }
 
@@ -120,6 +119,144 @@ fn first_out_of_distribution_finds_first() {
 fn metadata_empty_blob_yields_empty() {
     let m = Metadata::parse(&[]).unwrap();
     assert!(m.is_empty());
+}
+
+// --- Default-surface selection kit: top-K query + constraint masks ---
+//
+// Top-K and the runtime constraint masks (`mask_at_least` /
+// `mask_at_most`) live on the default surface so the masking /
+// score-transform / NaN / tie-break contract is defined once, not
+// re-derived in each codec consumer.
+mod topk_surface {
+    use super::*;
+
+    #[test]
+    fn stable_top_k_sorted_indices() {
+        let pred = [3.0f32, 1.0, 4.0, 1.5, 9.0];
+        let mask = [true; 5];
+        let m = AllowedMask::new(&mask);
+        // Free function.
+        let top = argmin::argmin_masked_top_k::<3>(&pred, &m, ScoreTransform::Identity, None);
+        assert_eq!(top, [Some(1), Some(3), Some(0)]);
+        // Re-exported at crate root under the same gate.
+        let top2 = crate::argmin_masked_top_k::<2>(&pred, &m, ScoreTransform::Identity, None);
+        assert_eq!(top2, [Some(1), Some(3)]);
+    }
+
+    #[test]
+    fn stable_top_k_respects_mask_and_fills_none() {
+        // Only 2 cells allowed but K=3 ⇒ third slot is None.
+        let pred = [3.0f32, 1.0, 4.0, 1.5, 9.0];
+        let mask = [false, true, false, true, false];
+        let m = AllowedMask::new(&mask);
+        let top = argmin::argmin_masked_top_k::<3>(&pred, &m, ScoreTransform::Identity, None);
+        assert_eq!(top, [Some(1), Some(3), None]);
+    }
+
+    #[test]
+    fn stable_top_k_in_range_indices_are_local() {
+        // Sub-range [2..5] of the output; returned indices are within
+        // the sub-range (0..3), not absolute.
+        let pred = [9.0f32, 9.0, 4.0, 1.5, 3.0];
+        let mask = [true; 3];
+        let m = AllowedMask::new(&mask);
+        let top = argmin::argmin_masked_top_k_in_range::<2>(
+            &pred,
+            (2, 5),
+            &m,
+            ScoreTransform::Identity,
+            None,
+        );
+        // sub-slice = [4.0, 1.5, 3.0] ⇒ argmin order 1 (1.5), 2 (3.0).
+        assert_eq!(top, [Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn stable_top_k_in_range_out_of_bounds_all_none() {
+        let pred = [1.0f32, 2.0, 3.0];
+        let mask = [true; 2];
+        let m = AllowedMask::new(&mask);
+        let top = argmin::argmin_masked_top_k_in_range::<2>(
+            &pred,
+            (2, 9), // end > len
+            &m,
+            ScoreTransform::Identity,
+            None,
+        );
+        assert_eq!(top, [None, None]);
+    }
+
+    // --- constraint masks: mask_at_least (quality floor) +
+    //     mask_at_most (perf/cost ceiling) ---
+
+    #[test]
+    fn mask_at_least_admits_floor_inclusive_nan_fails() {
+        // Boundary: value == floor is ADMITTED; NaN never admitted.
+        let quality = [0.99f32, 0.5, f32::NAN, 0.95];
+        let mut out = [false; 4];
+        crate::mask_at_least(&quality, 0.95, &mut out);
+        assert_eq!(out, [true, false, false, true]);
+    }
+
+    #[test]
+    fn mask_at_most_admits_ceiling_inclusive_nan_fails() {
+        // Boundary: value == limit is ADMITTED; NaN (unknown cost) is
+        // never admitted under a limit.
+        let cost = [1.0f32, 8.0, f32::NAN, 3.0];
+        let mut out = [false; 4];
+        crate::mask_at_most(&cost, 3.0, &mut out);
+        assert_eq!(out, [true, false, false, true]);
+    }
+
+    #[test]
+    #[should_panic(expected = "mask_at_least")]
+    fn mask_at_least_length_mismatch_panics() {
+        let v = [1.0f32, 2.0, 3.0];
+        let mut out = [false; 2]; // len 2 != 3
+        crate::mask_at_least(&v, 1.0, &mut out);
+    }
+
+    #[test]
+    #[should_panic(expected = "mask_at_most")]
+    fn mask_at_most_length_mismatch_panics() {
+        let v = [1.0f32, 2.0, 3.0];
+        let mut out = [false; 2]; // len 2 != 3
+        crate::mask_at_most(&v, 1.0, &mut out);
+    }
+
+    #[test]
+    fn perf_limit_and_target_quality_compose_then_top_k() {
+        // The intended runtime shape: rank by predicted cost (bytes),
+        // but first constrain by a perf ceiling AND a quality floor —
+        // both runtime inputs — by ANDing their masks. Cell 1 is the
+        // cheapest by score but too slow (perf 8 > limit 3); cell 4 is
+        // cheap + fast but below the quality target. So the admissible
+        // cheapest is cell 3.
+        let scores = [3.0f32, 1.0, 4.0, 1.5, 0.5]; // predicted cost (bytes)
+        let perf = [1.0f32, 8.0, 2.0, 3.0, 1.0]; // encode cost
+        let quality = [0.97f32, 0.99, 0.96, 0.98, 0.80]; // predicted quality
+
+        let mut gate_perf = [false; 5];
+        let mut gate_qual = [false; 5];
+        crate::mask_at_most(&perf, 3.0, &mut gate_perf); // perf <= 3
+        crate::mask_at_least(&quality, 0.95, &mut gate_qual); // quality >= 0.95
+
+        // AND the two runtime-constraint masks together.
+        let mut gate = [false; 5];
+        for ((g, &p), &q) in gate.iter_mut().zip(gate_perf.iter()).zip(gate_qual.iter()) {
+            *g = p && q;
+        }
+        // perf<=3: [T,F,T,T,T]; qual>=.95: [T,T,T,T,F] ⇒ AND [T,F,T,T,F]
+        assert_eq!(gate, [true, false, true, true, false]);
+
+        let m = AllowedMask::new(&gate);
+        let pick = argmin::argmin_masked(&scores, &m, ScoreTransform::Identity, None);
+        assert_eq!(pick, Some(3)); // cheapest admissible (score 1.5)
+
+        // Top-K over the same admissible set, for an encode-verify pass.
+        let top = argmin::argmin_masked_top_k::<2>(&scores, &m, ScoreTransform::Identity, None);
+        assert_eq!(top, [Some(3), Some(0)]); // 1.5 then 3.0
+    }
 }
 
 #[test]

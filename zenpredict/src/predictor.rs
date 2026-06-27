@@ -477,7 +477,16 @@ impl<'a> Predictor<'a> {
         ))
     }
 
-    #[cfg(feature = "advanced")]
+    /// Run the forward pass, then return the top-`K` lowest-scoring
+    /// output indices the `mask` permits, ascending (best first).
+    /// Slots beyond the number of mask-allowed entries are `None`.
+    ///
+    /// On the default surface, so a per-codec picker or `zenpicker` can
+    /// run the proven "predict-top-K then encode-verify" path (`K = 3`
+    /// typically) at runtime without re-implementing the ranking
+    /// contract. Same masking + score-transform + offsets options as
+    /// [`Self::argmin_masked`]; same NaN / tie-break / mask-length
+    /// contract as [`argmin::argmin_masked_top_k`].
     pub fn argmin_masked_top_k<const K: usize>(
         &mut self,
         features: &[f32],
@@ -497,7 +506,10 @@ impl<'a> Predictor<'a> {
         ))
     }
 
-    #[cfg(feature = "advanced")]
+    /// Top-`K` over a sub-range of the output vector (hybrid-heads
+    /// layout — see [`Self::argmin_masked_in_range`]). Returned
+    /// indices are within the sub-range. Same support guarantee as
+    /// [`Self::argmin_masked_top_k`].
     pub fn argmin_masked_top_k_in_range<const K: usize>(
         &mut self,
         features: &[f32],

@@ -13,6 +13,38 @@
 
 ### Added
 
+- **Default-surface picker selection kit: top-K query + runtime constraint
+  masks (no feature gate).** Centralizes the masked top-`K` ranking and the
+  perf/quality constraint masks on zenpredict's default API so per-codec
+  pickers (and `zenpicker`) compose the proven "predict-top-K then
+  encode-verify" path **without** re-implementing the masking / score-transform
+  / NaN / tie-break contract in each consumer, and without an extra crate
+  dependency. Items:
+  - `argmin_masked_top_k::<K>` / `argmin_masked_top_k_in_range::<K>` (free fns +
+    `Predictor` methods) — top-`K` lowest-scoring indices, ascending (`K = 3`
+    typical). Same masking + score-transform + offsets + NaN/tie-break/mask-length
+    contract as `argmin_masked`. (Were behind `advanced`; now default.)
+  - `argmin::mask_at_least(values, floor, out)` — admit `values[i] >= floor`, a
+    **target-quality** floor (predicted ssim2 / zensim / reach rate ≥ target).
+    This is the former `advanced` `threshold_mask`, renamed + promoted to
+    default.
+  - `argmin::mask_at_most(values, limit, out)` — **new**, admit
+    `values[i] <= limit`, a **perf / compute ceiling** (encode cost ≤ budget).
+    Both masks take a caller-supplied per-cell `f32` attribute + a runtime
+    threshold; `NaN` fails the constraint. AND them into the constraint mask to
+    express "cheapest config reaching the target quality within the perf budget."
+
+  The verify *loop* (rank → encode → measure → pick) stays in each codec — these
+  are the generic primitives it composes over. The closure-scorer
+  (`*_with_scorer`) and confidence (`pick_with_confidence*`) helpers stay behind
+  `advanced`.
+
+  Supersedes the earlier opt-in `topk`-feature proposal (PR #86) and its baked
+  `u8` compute-tier system — the `topk` Cargo feature, `keys::CELL_COMPUTE_TIER`,
+  `Model`/`Predictor::cell_compute_tiers()`, and the `u8` `tier_mask` are removed;
+  perf is now a runtime-constrained `f32` attribute (`mask_at_most`), not a baked
+  opaque rank.
+
 - **Model self-describes its feature provenance** for the `zenanalyze-api`
   offer/reuse contract: three metadata keys `keys::ANALYZER_VERSION` (utf8),
   `keys::FEATURE_DEFS_VERSION` (u32), `keys::FEATURE_CONFIG_HASH` (u64), and

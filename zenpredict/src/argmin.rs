@@ -194,11 +194,34 @@ pub fn argmin_masked(
 /// permits, ascending (best first). Slots beyond the number of
 /// allowed entries are `None`. `K` is generic to keep the call
 /// site allocation-free; in practice `K = 2` is what codec rescue
-/// logic wants (cached second-best).
+/// logic wants (cached second-best), and `K = 3` is what the
+/// "predict-top-K then encode-verify" picker path wants.
+///
+/// On the default surface, so a per-codec picker or [`zenpicker`] can
+/// request the top-K candidate output indices for the proven
+/// "predict-top-K then encode-verify" path **without** re-implementing
+/// the masking / score-transform / NaN / tie-break contract in the
+/// consumer — that contract lives here, once, alongside
+/// [`argmin_masked`]. Same masking, score-transform, and range options
+/// as [`argmin_masked`]. The closure-scorer variants `*_with_scorer`
+/// and the confidence helpers stay behind `advanced`.
 ///
 /// Same NaN, tie-breaking, and mask-length contract as
 /// [`argmin_masked`].
-#[cfg(feature = "advanced")]
+///
+/// [`zenpicker`]: https://docs.rs/zenpicker
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::{AllowedMask, ScoreTransform, argmin};
+///
+/// let scores = [3.0_f32, 1.0, 4.0, 1.5, 9.0];
+/// let mask_data = [true; 5];
+/// let mask = AllowedMask::new(&mask_data);
+/// let top = argmin::argmin_masked_top_k::<3>(&scores, &mask, ScoreTransform::Identity, None);
+/// assert_eq!(top, [Some(1), Some(3), Some(0)]); // 1.0, 1.5, 3.0
+/// ```
 pub fn argmin_masked_top_k<const K: usize>(
     predictions: &[f32],
     mask: &AllowedMask<'_>,
@@ -263,7 +286,15 @@ pub fn argmin_masked_in_range(
     let slice = predictions.get(start..end)?;
     argmin_masked(slice, mask, transform, offsets)
 }
-#[cfg(feature = "advanced")]
+
+/// Top-`K` over a sub-range `predictions[range.0..range.1]`, masked
+/// by `mask` (whose `len()` must be `>= range.1 - range.0`).
+/// Returned indices are *within the sub-range*. Same support
+/// guarantee as [`argmin_masked_top_k`].
+///
+/// Returns all-`None` when the range is out of bounds (`end >
+/// predictions.len()` or `start > end`) — the in-range argmin
+/// scalar form returns `None` on the same condition.
 pub fn argmin_masked_top_k_in_range<const K: usize>(
     predictions: &[f32],
     range: (usize, usize),
@@ -456,41 +487,81 @@ pub(crate) fn pick_confidence_from_top_k(
     Some((best, (s_second - s_best).max(0.0)))
 }
 
-/// Fill `out[i] = rates[i].is_finite() && rates[i] >= threshold`.
-/// Generic version of the picker's old `reach_gate_mask` —
-/// thresholding a per-output score against a runtime-chosen value.
+/// Fill `out[i] = values[i].is_finite() && values[i] >= floor` — admit
+/// only cells whose per-cell attribute meets a **runtime floor**. The
+/// canonical use is a **target-quality** constraint: keep cells whose
+/// predicted quality (ssim2 / zensim / reach rate) is at least the
+/// caller's target. The companion [`mask_at_most`] expresses a ceiling
+/// (e.g. a perf / encode-cost limit).
 ///
-/// Codec consumers AND this against their constraint mask before
-/// calling [`argmin_masked`].
+/// Both are generic over a caller-supplied per-cell `f32` attribute —
+/// the codec owns where the values come from (a model output head, a
+/// bake table, or its own config grammar). AND the result into the
+/// constraint mask before calling [`argmin_masked`] /
+/// [`argmin_masked_top_k`]; combine several (quality floor AND perf
+/// ceiling AND …) by ANDing their masks together.
 ///
-/// `out.len()` must equal `rates.len()`.
+/// `NaN` fails the constraint (`is_finite()` is false) — an unknown /
+/// missing-data attribute is never admitted. `out.len()` must equal
+/// `values.len()` (mismatch panics, same discipline as [`AllowedMask`]).
 ///
 /// # Examples
 ///
 /// ```
-/// use zenpredict::argmin::threshold_mask;
+/// use zenpredict::argmin::mask_at_least;
 ///
-/// // Per-cell reach rates from the bake. NaN means "missing data."
-/// let rates = [0.99, 0.5, f32::NAN, 0.95];
+/// // Per-cell predicted quality; admit cells reaching the target.
+/// let quality = [0.99, 0.5, f32::NAN, 0.95];
 /// let mut gate = [false; 4];
-/// threshold_mask(&rates, 0.95, &mut gate);
+/// mask_at_least(&quality, 0.95, &mut gate); // quality >= 0.95
 /// assert_eq!(gate, [true, false, false, true]);
 /// ```
-#[cfg(feature = "advanced")]
-pub fn threshold_mask(rates: &[f32], threshold: f32, out: &mut [bool]) {
+pub fn mask_at_least(values: &[f32], floor: f32, out: &mut [bool]) {
     assert_eq!(
-        rates.len(),
+        values.len(),
         out.len(),
-        "threshold_mask: rates.len() ({}) != out.len() ({})",
-        rates.len(),
+        "mask_at_least: values.len() ({}) != out.len() ({})",
+        values.len(),
         out.len(),
     );
-    for (i, &r) in rates.iter().enumerate() {
-        // NaN rates fail the threshold (is_finite() is false). Used
-        // for "missing data" sentinel — see `tier3_floor` percentile
-        // features that emit NaN when the per-feature sample count
-        // floor isn't met.
-        out[i] = r.is_finite() && r >= threshold;
+    for (slot, &v) in out.iter_mut().zip(values.iter()) {
+        // NaN fails (is_finite() is false): an unknown attribute is
+        // never admitted under a constraint.
+        *slot = v.is_finite() && v >= floor;
+    }
+}
+
+/// Fill `out[i] = values[i].is_finite() && values[i] <= limit` — admit
+/// only cells whose per-cell attribute is within a **runtime ceiling**.
+/// The canonical use is a **perf / compute limit**: keep only configs
+/// whose encode cost (or any cost attribute) is at most the caller's
+/// budget, dropping everything too expensive. Mirror of
+/// [`mask_at_least`]; see it for the shared contract.
+///
+/// `NaN` fails the constraint — a cell with unknown cost is never
+/// admitted under a limit. `out.len()` must equal `values.len()`.
+///
+/// # Examples
+///
+/// ```
+/// use zenpredict::argmin::mask_at_most;
+///
+/// // Per-cell encode cost (e.g. ms, or a relative effort score).
+/// let cost = [1.0, 8.0, f32::NAN, 3.0];
+/// let mut gate = [false; 4];
+/// mask_at_most(&cost, 3.0, &mut gate); // cost <= 3.0
+/// assert_eq!(gate, [true, false, false, true]);
+/// ```
+pub fn mask_at_most(values: &[f32], limit: f32, out: &mut [bool]) {
+    assert_eq!(
+        values.len(),
+        out.len(),
+        "mask_at_most: values.len() ({}) != out.len() ({})",
+        values.len(),
+        out.len(),
+    );
+    for (slot, &v) in out.iter_mut().zip(values.iter()) {
+        *slot = v.is_finite() && v <= limit;
     }
 }
 
