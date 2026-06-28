@@ -9,7 +9,7 @@ keywords = ["image", "analysis", "features", "codec", "saliency"]
 categories = ["multimedia::images"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
-readme = "README.md"
+readme = "README.crates.md"
 exclude = [
   # Dev tooling / CI — not useful to crates.io consumers
   ".github/**",

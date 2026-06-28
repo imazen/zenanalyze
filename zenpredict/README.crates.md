@@ -1,4 +1,6 @@
-# zenpredict [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenanalyze/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenanalyze/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenpredict?style=flat-square)](https://crates.io/crates/zenpredict) [![lib.rs](https://img.shields.io/crates/v/zenpredict?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenpredict) [![docs.rs](https://img.shields.io/docsrs/zenpredict?style=flat-square)](https://docs.rs/zenpredict) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenpredict?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenpredict
 
 Zero-copy MLP runtime. Parse a packed binary model (ZNPR v3), run scaler + layer-by-layer forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg / zenwebp / zenavif / zenjxl picker selection and zensim perceptual distance.
 

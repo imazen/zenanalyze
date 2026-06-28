@@ -1,4 +1,6 @@
-# zenanalyze [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenanalyze/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenanalyze/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenanalyze?style=flat-square)](https://crates.io/crates/zenanalyze) [![lib.rs](https://img.shields.io/crates/v/zenanalyze?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenanalyze) [![docs.rs](https://img.shields.io/docsrs/zenanalyze?style=flat-square)](https://docs.rs/zenanalyze) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-blue?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenanalyze
 
 Streaming image content analyzer for adaptive codec pipelines. One pass over a
 `zenpixels::PixelSlice` extracts the numeric features that decision trees,

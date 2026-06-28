@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
 repository = "https://github.com/imazen/zenanalyze"
-description = "Codec-family meta-picker. Given image features + a quality target + an allowed-family mask, picks one of {jpeg, webp, jxl, avif, png, gif}; per-codec pickers handle config selection within the chosen family. Loads a baked ZNPR v2 model via zenpredict."
+description = "Codec-family meta-picker. Given image features + a quality target + an allowed-family mask, picks one of {jpeg, webp, jxl, avif, png, gif}; per-codec pickers handle config selection within the chosen family. Loads a baked ZNPR v3 model via zenpredict."
 keywords = ["mlp", "inference", "codec", "picker", "no-std"]
 categories = ["multimedia::images", "no-std"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
-readme = "README.md"
+readme = "README.crates.md"
 
 [lib]
 name = "zenpicker"

@@ -9,7 +9,7 @@ keywords = ["mlp", "inference", "zero-copy", "no-std"]
 categories = ["multimedia::images", "no-std"]
 authors = ["Lilith River <lilith@imazen.io>"]
 rust-version = "1.93"
-readme = "README.md"
+readme = "README.crates.md"
 exclude = [
   # Dev/CI tooling
   "deny.toml",

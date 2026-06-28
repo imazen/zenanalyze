@@ -1,4 +1,6 @@
-# zenpicker [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenanalyze/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenanalyze/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenpicker?style=flat-square)](https://crates.io/crates/zenpicker) [![lib.rs](https://img.shields.io/crates/v/zenpicker?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenpicker) [![docs.rs](https://img.shields.io/docsrs/zenpicker?style=flat-square)](https://docs.rs/zenpicker) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-blue?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenpicker
 
 Codec-family meta-picker. Given image features + a quality target + an allowed-family mask, picks one of `{jpeg, webp, jxl, avif, png, gif}`. Per-codec pickers (separate ZNPR v3 bakes shipped by the codec crate) handle config selection within the chosen family.
 

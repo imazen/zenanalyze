@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **README overhaul across the three published library crates** (`zenanalyze`,
+  `zenpredict`, `zenpicker`): standardized shields.io badge rows (CI / crates.io /
+  lib.rs / docs.rs / MSRV / license — flat-square, no `branch=`, dual-license
+  badge for the AGPL/Commercial crates), `## Quick start` dependency + minimal
+  example blocks, the canonical crosslink footer, and a generated crates.io
+  `README.crates.md` (no badges, absolute links) wired via
+  `readme = "README.crates.md"` in each crate's `Cargo.toml`.
+- **Stale-claim fixes:** zenpicker now documents ZNPR **v3** (was v2, but it
+  depends on the v3-only zenpredict 0.2.0) and `MetaPicker::new(&model)` (was the
+  pre-0.2.0 by-value form); the root companion-crate table lists zenpredict at
+  `0.2.x` / ZNPR v3; the `experimental + hdr` surface is described as 116 features
+  (was a stale 110, pre the 6 `highlight_*` descriptors). zenpicker `Cargo.toml`
+  description corrected v2 → v3.
+
 ## [0.2.0] - 2026-06-23
 
 ### Added
