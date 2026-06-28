@@ -4,30 +4,41 @@
 //! The picker chooses, per `(image, requested-quality)`, the codec config
 //! cell with the least bytes that reaches the target. GBDT is tabular SOTA
 //! and often beats small MLPs on ~100-feature problems — so this A/B trains
-//! all three on the SAME grouped-by-image held-out split and compares the
-//! decision metric the codec actually cares about: **held-out argmin
-//! accuracy** (fraction of rows whose predicted least-bytes cell equals the
-//! true least-bytes cell) + the **byte overhead** of the pick.
+//! all three on the SAME held-out split and compares the decision metric
+//! the codec actually cares about: **held-out argmin accuracy** + the
+//! **byte overhead** of the pick (mean AND the p90/p99/worst tail).
 //!
 //! All three predict the same target — per-cell `bytes_log` (regression),
 //! masked to reachable cells — then `argmin(pred, mask=reach)`:
 //!   - **MLP**: one net, `n_cells` outputs, masked-NaN MSE (the shipped trainer).
-//!   - **GBDT** (`gbdt`): one gradient-boosted regressor per cell, fit on that
-//!     cell's reaching rows (the distillation-teacher shape).
+//!   - **GBDT** (`gbdt`): one gradient-boosted regressor per cell.
 //!   - **RF** (`smartcore` RandomForestRegressor): same per-cell shape.
 //!
-//! Tree models train per-cell over independent cells, so they parallelize
-//! trivially with rayon-over-cells if needed (kept sequential here — the MLP
-//! fit dominates wall time anyway).
+//! ## Origin split (vs the in-tool grouped split)
 //!
-//! Usage:
-//!   picker_tree_ab --input <parquet> [--codec zenjpeg] [--val-frac 0.2] [--seed 0]
+//! The shipped `--val-frac` path groups by `image_path` — which LEAKS
+//! across renditions (different sizes of one origin land on both sides).
+//! For a fair held-out number, pass `--split-map <parquet>` (a tiny
+//! image_path→split table) + `--eval-split val|test`; rows are then
+//! partitioned by the canonical even/odd-by-origin `split` column (no
+//! leakage). Train rows are always `split=="train"`.
 //!
-//! On the real zenjpeg sweep the scalar knobs (chroma_scale/lambda) are
-//! excluded from the cell key (they're within-cell scalars), giving the 12
-//! categorical cells the MLP parity run used.
+//! ## Dataset export (for the Python CART comparison)
+//!
+//! `--dump-dir <DIR>` writes the EXACT built dataset (raw features incl.
+//! zq_norm, per-cell `bytes_log`, oracle pick, per-row split) so an
+//! external sklearn CART can be fit/evaluated against the IDENTICAL
+//! cells/reach/oracle — making its overhead directly comparable to the
+//! GBDT/MLP numbers here. Also writes per-model per-row overhead TSVs.
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::Path;
+
+use arrow::array::{Array, StringArray};
+use parquet::arrow::ProjectionMask;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use gbdt::config::Config as GbdtConfig;
 use gbdt::decision_tree::{Data, DataVec, ValueType};
@@ -52,6 +63,16 @@ fn main() {
     let mut codec: Option<String> = None;
     let mut val_frac = 0.2f64;
     let mut seed = 0u64;
+    let mut split_map: Option<String> = None;
+    let mut eval_split = "val".to_string();
+    let mut dump_dir: Option<String> = None;
+    let mut codec_tag = "codec".to_string();
+    let mut skip_rf = false;
+    let mut skip_mlp = false;
+    let mut max_train = 0usize;
+    let mut mlp_iter = 250usize;
+    let mut rf_trees = 60usize;
+    let mut perm_val_cap = 6000usize;
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -59,8 +80,27 @@ fn main() {
             "--codec" => codec = it.next().cloned(),
             "--val-frac" => val_frac = it.next().and_then(|s| s.parse().ok()).unwrap_or(val_frac),
             "--seed" => seed = it.next().and_then(|s| s.parse().ok()).unwrap_or(seed),
+            "--split-map" => split_map = it.next().cloned(),
+            "--eval-split" => eval_split = it.next().cloned().unwrap_or(eval_split),
+            "--dump-dir" => dump_dir = it.next().cloned(),
+            "--codec-tag" => codec_tag = it.next().cloned().unwrap_or(codec_tag),
+            "--skip-rf" => skip_rf = true,
+            "--skip-mlp" => skip_mlp = true,
+            "--max-train" => {
+                max_train = it.next().and_then(|s| s.parse().ok()).unwrap_or(max_train)
+            }
+            "--mlp-iter" => mlp_iter = it.next().and_then(|s| s.parse().ok()).unwrap_or(mlp_iter),
+            "--rf-trees" => rf_trees = it.next().and_then(|s| s.parse().ok()).unwrap_or(rf_trees),
+            "--perm-val-cap" => {
+                perm_val_cap = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(perm_val_cap)
+            }
             "-h" | "--help" => {
-                eprintln!("picker_tree_ab --input <parquet> [--codec C] [--val-frac F] [--seed N]");
+                eprintln!(
+                    "picker_tree_ab --input <parquet> [--codec C] [--split-map <parquet> --eval-split val|test] [--val-frac F] [--seed N] [--dump-dir DIR] [--codec-tag TAG] [--skip-rf] [--skip-mlp] [--max-train N] [--mlp-iter N] [--rf-trees N] [--perm-val-cap N]"
+                );
                 return;
             }
             other => {
@@ -74,29 +114,78 @@ fn main() {
         std::process::exit(1);
     };
 
-    // Exclude the scalar knobs from the cell key so cells are the categorical
-    // tuple (matches the MLP parity run's 12 cells), not the full config grid.
-    let axes = vec![
-        ScalarAxisSpec::new("chroma_scale", None),
-        ScalarAxisSpec::new("lambda", Some(0.0)),
-    ];
+    // No scalar axes: the unified plan-cell schema makes the cell key the
+    // `cell` value directly (see pareto_dataset::cell_key_from_knob), so
+    // every distinct categorical config is its own cell.
+    let axes: Vec<ScalarAxisSpec> = Vec::new();
     let zq = default_zq_targets();
     let ds = build_picker_dataset_with(Path::new(&input), codec.as_deref(), &zq, &axes)
         .expect("build picker dataset");
-    let (train, val) = grouped_split_picker(&ds, val_frac);
+
+    // --- Split: origin (split column) if a split-map is given, else the
+    // in-tool grouped-by-image_path split (leaky across renditions). ---
+    let (train, val, split_kind) = if let Some(sm) = &split_map {
+        let map = load_split_map(sm);
+        let mut train = Vec::new();
+        let mut val = Vec::new();
+        let mut missing = 0usize;
+        for (i, img) in ds.image_ids.iter().enumerate() {
+            match map.get(img).map(String::as_str) {
+                Some("train") => train.push(i),
+                Some(s) if s == eval_split => val.push(i),
+                Some(_) => {} // a third split not selected for eval
+                None => missing += 1,
+            }
+        }
+        if missing > 0 {
+            eprintln!("[picker_tree_ab] WARN {missing} rows had no split-map entry (dropped)");
+        }
+        (train, val, format!("origin split (train -> {eval_split})"))
+    } else {
+        let (t, v) = grouped_split_picker(&ds, val_frac);
+        (
+            t,
+            v,
+            format!("grouped-by-image_path val_frac={val_frac} (LEAKY)"),
+        )
+    };
+
+    // Subsample train (all models + standardizer see the SAME rows) so the
+    // hand-rolled single-threaded MLP stays tractable. 0 = use all.
+    let train = if max_train > 0 && train.len() > max_train {
+        let perm = shuffled_perm(train.len(), seed ^ 0x5A5A_5A5A);
+        let mut t: Vec<usize> = perm.iter().take(max_train).map(|&i| train[i]).collect();
+        t.sort_unstable();
+        eprintln!(
+            "[picker_tree_ab] train subsampled to {} rows (was {})",
+            t.len(),
+            perm.len()
+        );
+        t
+    } else {
+        train
+    };
+
     let (mean, scale) = fit_standardizer(&ds.features, ds.n_in, &train);
     let x_std = standardize_all(&ds.features, ds.n_in, &mean, &scale);
 
     eprintln!(
-        "[picker_tree_ab] {} rows | {} features (+zq_norm) | {} cells | train {} / val {}",
+        "[picker_tree_ab] codec={codec_tag} {} rows | {} features (+zq_norm) | {} cells | {} | train {} / val {}",
         ds.n_rows(),
         ds.feature_names.len(),
         ds.n_cells,
+        split_kind,
         train.len(),
         val.len()
     );
 
-    // --- MLP (single 128,128 fit, matches the parity run) ---
+    let valrows: Vec<Vec<f64>> = val
+        .iter()
+        .map(|&r| x_std[r * ds.n_in..(r + 1) * ds.n_in].to_vec())
+        .collect();
+
+    // --- MLP (single 128,128 fit, matches the parity run). Keep the model
+    // so we can extract per-row predictions for the tail analysis. ---
     let grid = vec![GridPoint {
         hidden: vec![128, 128],
         lr: 2e-3,
@@ -104,51 +193,89 @@ fn main() {
     }];
     let base = MlpConfig {
         seed,
+        max_iter: mlp_iter,
+        n_iter_no_change: 25,
         ..Default::default()
     };
-    let (mlp_acc, mlp_ov, mlp_srocc) =
-        match run_search(&ds, &x_std, &train, &val, &grid, &base, |_| {}) {
-            Some(r) => (
-                r.best_eval.argmin_acc,
-                r.best_eval.overhead_mean,
-                r.best_eval.bytes_panel.srocc,
-            ),
-            None => (f64::NAN, f64::NAN, f64::NAN),
-        };
-    eprintln!("[picker_tree_ab] MLP done: argmin={mlp_acc:.4}");
+    let mlp_res = if skip_mlp {
+        None
+    } else {
+        run_search(&ds, &x_std, &train, &val, &grid, &base, |_| {})
+    };
+    let mlp_pred: Vec<f64> = match &mlp_res {
+        Some(r) => {
+            let n_cells = ds.n_cells;
+            let mut pred = vec![f64::NAN; val.len() * n_cells];
+            for (vi, row) in valrows.iter().enumerate() {
+                let out = r.best_model.predict(row);
+                pred[vi * n_cells..(vi + 1) * n_cells].copy_from_slice(&out[0..n_cells]);
+            }
+            pred
+        }
+        None => vec![f64::NAN; val.len() * ds.n_cells],
+    };
+    let (mlp_acc, mlp_mean, mlp_rows) = score_rows(&mlp_pred, ds.n_cells, &ds, &val);
+    let mlp_srocc = mlp_res
+        .as_ref()
+        .map(|r| r.best_eval.bytes_panel.srocc)
+        .unwrap_or(f64::NAN);
+    let mlp_niter = mlp_res.as_ref().map(|r| r.best_model.n_iter).unwrap_or(0);
+    eprintln!("[picker_tree_ab] MLP done: argmin={mlp_acc:.4} (n_iter={mlp_niter}/{mlp_iter})");
 
-    // --- GBDT (gbdt, per cell) — retain the cell models so we can permute
-    // features for importance below. ---
-    let valrows: Vec<Vec<f64>> = val
-        .iter()
-        .map(|&r| x_std[r * ds.n_in..(r + 1) * ds.n_in].to_vec())
-        .collect();
+    // --- GBDT (gbdt, per cell) — retained for permutation importance. ---
     let gbdt_cells = train_gbdt_cells(&ds, &x_std, &train);
     let gbdt_pred = predict_gbdt(&gbdt_cells, ds.n_cells, &valrows);
-    let (gbdt_acc, gbdt_ov) = score_predmatrix(&gbdt_pred, ds.n_cells, &ds, &val);
+    let (gbdt_acc, gbdt_mean, gbdt_rows) = score_rows(&gbdt_pred, ds.n_cells, &ds, &val);
     eprintln!("[picker_tree_ab] GBDT done: argmin={gbdt_acc:.4}");
 
     // --- RF (smartcore, per cell) ---
-    let rf_pred = train_per_cell(&ds, &x_std, &train, &val, |xrows, y, _n_in| {
-        let xm = DenseMatrix::from_2d_vec(&xrows.to_vec()).expect("dense matrix");
-        let params = RandomForestRegressorParameters::default()
-            .with_n_trees(100)
-            .with_max_depth(8)
-            .with_seed(seed);
-        let rf = RandomForestRegressor::fit(&xm, &y.to_vec(), params).expect("rf fit");
-        Box::new(move |valrows: &[Vec<f64>]| -> Vec<f64> {
-            let xv = DenseMatrix::from_2d_vec(&valrows.to_vec()).expect("dense matrix");
-            rf.predict(&xv).expect("rf predict")
-        })
-    });
-    let (rf_acc, rf_ov) = score_predmatrix(&rf_pred, ds.n_cells, &ds, &val);
-    eprintln!("[picker_tree_ab] RF done: argmin={rf_acc:.4}");
+    let (rf_acc, rf_mean, rf_rows) = if skip_rf {
+        (f64::NAN, f64::NAN, Vec::new())
+    } else {
+        let rf_pred = train_per_cell(&ds, &x_std, &train, &val, |xrows, y, _n_in| {
+            let xm = DenseMatrix::from_2d_vec(&xrows.to_vec()).expect("dense matrix");
+            let params = RandomForestRegressorParameters::default()
+                .with_n_trees(rf_trees)
+                .with_max_depth(8)
+                .with_seed(seed);
+            let rf = RandomForestRegressor::fit(&xm, &y.to_vec(), params).expect("rf fit");
+            Box::new(move |valrows: &[Vec<f64>]| -> Vec<f64> {
+                let xv = DenseMatrix::from_2d_vec(&valrows.to_vec()).expect("dense matrix");
+                rf.predict(&xv).expect("rf predict")
+            })
+        });
+        let (a, m, r) = score_rows(&rf_pred, ds.n_cells, &ds, &val);
+        eprintln!("[picker_tree_ab] RF done: argmin={a:.4}");
+        (a, m, r)
+    };
 
-    println!("\n=== picker A/B (held-out, grouped by image) ===");
-    println!("model            argmin_acc   byte_overhead_mean");
-    println!("MLP (128,128)    {mlp_acc:.4}       {mlp_ov:.4}   (bytes-SROCC {mlp_srocc:.4})");
-    println!("GBDT (gbdt)      {gbdt_acc:.4}       {gbdt_ov:.4}");
-    println!("RF (smartcore)   {rf_acc:.4}       {rf_ov:.4}");
+    // --- Report table: argmin acc + overhead mean + TAIL (p50/p90/p99/worst) ---
+    let mlp_ov: Vec<f64> = mlp_rows.iter().flatten().map(|r| r.ov).collect();
+    let gbdt_ov: Vec<f64> = gbdt_rows.iter().flatten().map(|r| r.ov).collect();
+    let rf_ov: Vec<f64> = rf_rows.iter().flatten().map(|r| r.ov).collect();
+    let (m_mean, m_p50, m_p90, m_p99, m_worst) = summarize(&mlp_ov);
+    let (g_mean, g_p50, g_p90, g_p99, g_worst) = summarize(&gbdt_ov);
+    let (r_mean, r_p50, r_p90, r_p99, r_worst) = summarize(&rf_ov);
+    let _ = (mlp_mean, gbdt_mean, rf_mean);
+
+    println!("\n=== picker A/B — codec={codec_tag} | {split_kind} ===");
+    println!(
+        "model            argmin_acc   ov_mean   ov_p50   ov_p90   ov_p99   ov_WORST   (extra)"
+    );
+    println!(
+        "MLP (128,128)    {mlp_acc:.4}      {:.4}   {:.4}   {:.4}   {:.4}   {:.4}   (bytes-SROCC {mlp_srocc:.4})",
+        m_mean, m_p50, m_p90, m_p99, m_worst
+    );
+    println!(
+        "GBDT (gbdt)      {gbdt_acc:.4}      {:.4}   {:.4}   {:.4}   {:.4}   {:.4}",
+        g_mean, g_p50, g_p90, g_p99, g_worst
+    );
+    if !skip_rf {
+        println!(
+            "RF (smartcore)   {rf_acc:.4}      {:.4}   {:.4}   {:.4}   {:.4}   {:.4}",
+            r_mean, r_p50, r_p90, r_p99, r_worst
+        );
+    }
     let best = [("MLP", mlp_acc), ("GBDT", gbdt_acc), ("RF", rf_acc)]
         .into_iter()
         .filter(|(_, a)| a.is_finite())
@@ -157,12 +284,7 @@ fn main() {
         println!("\nwinner (argmin accuracy): {name} @ {acc:.4}");
     }
 
-    // --- Permutation feature importance on the GBDT (the A/B winner) ---
-    // Shuffle a feature (or a whole ρ≥0.9 redundancy group) across the
-    // held-out rows; the drop in argmin accuracy is its importance. The
-    // GROUPED view is the honest one: correlated twins split single-feature
-    // credit, so a feature can look useless alone while its group carries
-    // real signal (the §4.2 methodology point).
+    // --- Permutation feature importance on the GBDT ---
     let feat_name = |f: usize| -> String {
         if f < ds.feature_names.len() {
             ds.feature_names[f].clone()
@@ -170,15 +292,35 @@ fn main() {
             "zq_norm".to_string()
         }
     };
-    let per_feat =
-        permutation_importance(&gbdt_cells, ds.n_cells, &ds, &val, &valrows, gbdt_acc, seed);
+    // Cap val for the (ranking-robust) permutation importance to bound cost.
+    let perm_val: Vec<usize> = if val.len() > perm_val_cap {
+        let step = (val.len() / perm_val_cap).max(1);
+        val.iter().step_by(step).copied().collect()
+    } else {
+        val.clone()
+    };
+    let perm_valrows: Vec<Vec<f64>> = perm_val
+        .iter()
+        .map(|&r| x_std[r * ds.n_in..(r + 1) * ds.n_in].to_vec())
+        .collect();
+    let perm_pred = predict_gbdt(&gbdt_cells, ds.n_cells, &perm_valrows);
+    let (perm_base_acc, _, _) = score_rows(&perm_pred, ds.n_cells, &ds, &perm_val);
+    let per_feat = permutation_importance(
+        &gbdt_cells,
+        ds.n_cells,
+        &ds,
+        &perm_val,
+        &perm_valrows,
+        perm_base_acc,
+        seed,
+    );
     println!("\n=== GBDT permutation importance — per feature (argmin-acc drop) ===");
-    for (f, drop) in per_feat.iter().take(15) {
+    for (f, drop) in per_feat.iter().take(20) {
         println!("  {:+.4}  {}", drop, feat_name(*f));
     }
     let nonpos = per_feat.iter().filter(|(_, d)| *d <= 0.0).count();
     println!(
-        "  ... ({nonpos}/{} features individually non-positive — many are redundant twins; see groups)",
+        "  ... ({nonpos}/{} features individually non-positive — many redundant twins; see groups)",
         per_feat.len()
     );
 
@@ -187,31 +329,177 @@ fn main() {
         &gbdt_cells,
         ds.n_cells,
         &ds,
-        &val,
-        &valrows,
-        gbdt_acc,
+        &perm_val,
+        &perm_valrows,
+        perm_base_acc,
         &groups,
         seed,
     );
     println!(
-        "\n=== GBDT permutation importance — by ρ≥0.9 redundancy group ({} feats → {} groups) ===",
+        "\n=== GBDT permutation importance — by rho>=0.9 redundancy group ({} feats -> {} groups) ===",
         ds.n_in,
         groups.len()
     );
-    for (grp, drop) in grp_imp.iter().take(12) {
-        let mut members: Vec<String> = grp.iter().take(4).map(|&f| feat_name(f)).collect();
-        if grp.len() > 4 {
-            members.push(format!("+{} more", grp.len() - 4));
+    for (grp, drop) in grp_imp.iter().take(15) {
+        let mut members: Vec<String> = grp.iter().take(5).map(|&f| feat_name(f)).collect();
+        if grp.len() > 5 {
+            members.push(format!("+{} more", grp.len() - 5));
         }
         println!("  {:+.4}  [{}]", drop, members.join(", "));
     }
+
+    // --- Dataset + per-row dump for the external CART comparison ---
+    if let Some(dir) = &dump_dir {
+        std::fs::create_dir_all(dir).expect("mkdir dump-dir");
+        let train_set: HashMap<usize, ()> = train.iter().map(|&r| (r, ())).collect();
+        dump_dataset(dir, &codec_tag, &ds, &split_map, &eval_split, &train_set);
+        if !skip_mlp {
+            dump_perrow(dir, &codec_tag, "mlp", &ds, &val, &mlp_rows);
+        }
+        dump_perrow(dir, &codec_tag, "gbdt", &ds, &val, &gbdt_rows);
+        if !skip_rf {
+            dump_perrow(dir, &codec_tag, "rf", &ds, &val, &rf_rows);
+        }
+        eprintln!("[picker_tree_ab] dumped dataset + per-row TSVs to {dir}");
+    }
 }
 
-/// Train one regressor per cell on its reaching train rows and produce a
-/// `val.len() × n_cells` row-major prediction matrix. `fit_cell(xrows, y,
-/// n_in)` returns a closure that predicts a batch of rows. Cells with fewer
-/// than [`MIN_CELL_ROWS`] reaching rows fall back to the constant cell mean
-/// (`+inf` if none, so the masked argmin never picks an unlearnable cell).
+/// Read a tiny image_path/image_basename -> split table.
+fn load_split_map(path: &str) -> HashMap<String, String> {
+    let file = File::open(path).expect("open split-map parquet");
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect("split-map reader builder");
+    let schema = builder.schema().clone();
+    let pos = |name: &str| schema.fields().iter().position(|f| f.name() == name);
+    let img_idx = pos("image_basename")
+        .or_else(|| pos("image_path"))
+        .expect("split-map needs image_basename or image_path");
+    let split_idx = pos("split").expect("split-map needs split column");
+    let parquet_schema = builder.parquet_schema().clone();
+    let mask = ProjectionMask::roots(&parquet_schema, [img_idx, split_idx]);
+    let reader = builder
+        .with_projection(mask)
+        .build()
+        .expect("split-map reader");
+    let mut map = HashMap::new();
+    for batch in reader {
+        let batch = batch.expect("split-map batch");
+        let bs = batch.schema();
+        let bi = bs
+            .fields()
+            .iter()
+            .position(|f| f.name() == "image_basename" || f.name() == "image_path")
+            .expect("img in batch");
+        let bsp = bs
+            .fields()
+            .iter()
+            .position(|f| f.name() == "split")
+            .expect("split in batch");
+        let imgs = batch
+            .column(bi)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("img col utf8");
+        let splits = batch
+            .column(bsp)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("split col utf8");
+        for i in 0..imgs.len() {
+            if !imgs.is_null(i) && !splits.is_null(i) {
+                map.entry(imgs.value(i).to_string())
+                    .or_insert_with(|| splits.value(i).to_string());
+            }
+        }
+    }
+    map
+}
+
+/// Per-row score: overhead, picked cell, true-best cell, reachable count.
+struct RowScore {
+    ov: f64,
+    pick: usize,
+    best: usize,
+    n_reach: usize,
+}
+
+/// Per-row argmin accuracy + mean byte overhead + per-row detail from a
+/// `val.len() x n_cells` prediction matrix vs the within-cell-optimal.
+fn score_rows(
+    pred: &[f64],
+    n_cells: usize,
+    ds: &PickerDataset,
+    val: &[usize],
+) -> (f64, f64, Vec<Option<RowScore>>) {
+    let mut per = Vec::with_capacity(val.len());
+    let mut hits = 0usize;
+    let mut scored = 0usize;
+    let mut ovsum = 0.0f64;
+    for (vi, &r) in val.iter().enumerate() {
+        let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];
+        let truth = &ds.bytes_log[r * n_cells..(r + 1) * n_cells];
+        let pick = argmin_masked(&pred[vi * n_cells..(vi + 1) * n_cells], reach);
+        let best = argmin_masked(truth, reach);
+        let n_reach = reach.iter().filter(|&&b| b).count();
+        if let (Some(pk), Some(bk)) = (pick, best) {
+            scored += 1;
+            if pk == bk {
+                hits += 1;
+            }
+            let ov = (truth[pk] - truth[bk]).exp() - 1.0;
+            ovsum += ov;
+            per.push(Some(RowScore {
+                ov,
+                pick: pk,
+                best: bk,
+                n_reach,
+            }));
+        } else {
+            per.push(None);
+        }
+    }
+    let acc = if scored > 0 {
+        hits as f64 / scored as f64
+    } else {
+        f64::NAN
+    };
+    let mean = if scored > 0 {
+        ovsum / scored as f64
+    } else {
+        f64::NAN
+    };
+    (acc, mean, per)
+}
+
+/// (mean, p50, p90, p99, worst) of a slice of overheads.
+fn summarize(ovs: &[f64]) -> (f64, f64, f64, f64, f64) {
+    if ovs.is_empty() {
+        return (f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN);
+    }
+    let mut v = ovs.to_vec();
+    v.sort_by(|a, b| a.total_cmp(b));
+    let pct = |p: f64| -> f64 {
+        let idx = (((v.len() - 1) as f64) * p).round() as usize;
+        v[idx.min(v.len() - 1)]
+    };
+    let mean = v.iter().sum::<f64>() / v.len() as f64;
+    (mean, pct(0.50), pct(0.90), pct(0.99), *v.last().unwrap())
+}
+
+/// Index of the smallest `vals[c]` over cells where `reach[c]`. NaN never wins.
+fn argmin_masked(vals: &[f64], reach: &[bool]) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    let mut bv = f64::INFINITY;
+    for (c, (&v, &re)) in vals.iter().zip(reach).enumerate() {
+        if re && v < bv {
+            bv = v;
+            best = Some(c);
+        }
+    }
+    best
+}
+
+/// Train one regressor per cell on its reaching train rows -> `val.len() x
+/// n_cells` row-major prediction matrix.
 fn train_per_cell<F>(
     ds: &PickerDataset,
     x_std: &[f64],
@@ -259,62 +547,12 @@ where
     pred
 }
 
-/// Held-out argmin accuracy + mean byte overhead from a `val.len() × n_cells`
-/// prediction matrix vs the true within-cell-optimal. Pick = `argmin(pred,
-/// mask=reach)`; overhead = `exp(true_bytes_log[pick] − true_bytes_log[best])
-/// − 1`.
-fn score_predmatrix(pred: &[f64], n_cells: usize, ds: &PickerDataset, val: &[usize]) -> (f64, f64) {
-    let mut hits = 0usize;
-    let mut scored = 0usize;
-    let mut overhead_sum = 0.0f64;
-    for (vi, &r) in val.iter().enumerate() {
-        let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];
-        let truth = &ds.bytes_log[r * n_cells..(r + 1) * n_cells];
-        let pick = argmin_masked(&pred[vi * n_cells..(vi + 1) * n_cells], reach);
-        let best = argmin_masked(truth, reach);
-        if let (Some(pk), Some(bk)) = (pick, best) {
-            scored += 1;
-            if pk == bk {
-                hits += 1;
-            }
-            overhead_sum += (truth[pk] - truth[bk]).exp() - 1.0;
-        }
-    }
-    let acc = if scored > 0 {
-        hits as f64 / scored as f64
-    } else {
-        f64::NAN
-    };
-    let ov = if scored > 0 {
-        overhead_sum / scored as f64
-    } else {
-        f64::NAN
-    };
-    (acc, ov)
-}
-
-/// Index of the smallest `vals[c]` over cells where `reach[c]`. `None` if no
-/// cell is reachable. NaN predictions never win (NaN comparisons are false).
-fn argmin_masked(vals: &[f64], reach: &[bool]) -> Option<usize> {
-    let mut best: Option<usize> = None;
-    let mut bv = f64::INFINITY;
-    for (c, (&v, &re)) in vals.iter().zip(reach).enumerate() {
-        if re && v < bv {
-            bv = v;
-            best = Some(c);
-        }
-    }
-    best
-}
-
-/// A per-cell GBDT regressor, or a constant fallback for cells with too few
-/// reaching train rows to learn from.
+/// A per-cell GBDT regressor, or a constant fallback.
 enum GbdtCell {
     Model(GBDT),
     Const(f64),
 }
 
-/// Fit one GBDT (or constant fallback) per cell on its reaching train rows.
 fn train_gbdt_cells(ds: &PickerDataset, x_std: &[f64], train: &[usize]) -> Vec<GbdtCell> {
     let n_cells = ds.n_cells;
     let n_in = ds.n_in;
@@ -360,7 +598,6 @@ fn train_gbdt_cells(ds: &PickerDataset, x_std: &[f64], train: &[usize]) -> Vec<G
     cells
 }
 
-/// Predict the `valrows.len() × n_cells` bytes_log matrix from retained cells.
 fn predict_gbdt(cells: &[GbdtCell], n_cells: usize, valrows: &[Vec<f64>]) -> Vec<f64> {
     let mut pred = vec![f64::NAN; valrows.len() * n_cells];
     for (c, cell) in cells.iter().enumerate() {
@@ -386,7 +623,6 @@ fn predict_gbdt(cells: &[GbdtCell], n_cells: usize, valrows: &[Vec<f64>]) -> Vec
     pred
 }
 
-/// Deterministic Fisher–Yates permutation (SplitMix64-seeded).
 fn shuffled_perm(n: usize, seed: u64) -> Vec<usize> {
     let mut state = seed ^ 0x9E37_79B9_7F4A_7C15;
     let mut next = || {
@@ -404,8 +640,6 @@ fn shuffled_perm(n: usize, seed: u64) -> Vec<usize> {
     v
 }
 
-/// Per-feature permutation importance: shuffle each input column across the
-/// held-out rows, measure the drop in GBDT argmin accuracy. Sorted desc.
 fn permutation_importance(
     cells: &[GbdtCell],
     n_cells: usize,
@@ -424,16 +658,13 @@ fn permutation_importance(
             row[f] = orig[perm[i]];
         }
         let pred = predict_gbdt(cells, n_cells, &sv);
-        let (acc, _) = score_predmatrix(&pred, n_cells, ds, val);
+        let (acc, _, _) = score_rows(&pred, n_cells, ds, val);
         out.push((f, base_acc - acc));
     }
     out.sort_by(|a, b| b.1.total_cmp(&a.1));
     out
 }
 
-/// Correlation redundancy groups: union-find features whose |Pearson| ≥ `thr`
-/// over the train rows. `x_std` is per-column standardized over train, so the
-/// correlation is the mean product.
 fn corr_groups(x_std: &[f64], n_in: usize, train: &[usize], thr: f64) -> Vec<Vec<usize>> {
     let n = train.len() as f64;
     let mut parent: Vec<usize> = (0..n_in).collect();
@@ -473,9 +704,6 @@ fn corr_groups(x_std: &[f64], n_in: usize, train: &[usize], thr: f64) -> Vec<Vec
     map.into_values().collect()
 }
 
-/// Grouped permutation importance: shuffle every column in a redundancy group
-/// with the SAME permutation (preserving within-group correlation, breaking
-/// correlation with the target), measure the argmin-acc drop. Sorted desc.
 #[allow(clippy::too_many_arguments)]
 fn group_perm_importance(
     cells: &[GbdtCell],
@@ -498,9 +726,139 @@ fn group_perm_importance(
             }
         }
         let pred = predict_gbdt(cells, n_cells, &sv);
-        let (acc, _) = score_predmatrix(&pred, n_cells, ds, val);
+        let (acc, _, _) = score_rows(&pred, n_cells, ds, val);
         out.push((grp.clone(), base_acc - acc));
     }
     out.sort_by(|a, b| b.1.total_cmp(&a.1));
     out
+}
+
+/// Dump the exact built dataset: raw features (incl. zq_norm as the last
+/// column) + per-cell bytes_log + per-row split/oracle, so an external
+/// sklearn CART can be fit/evaluated against the IDENTICAL cells/oracle.
+fn dump_dataset(
+    dir: &str,
+    codec_tag: &str,
+    ds: &PickerDataset,
+    split_map: &Option<String>,
+    eval_split: &str,
+    train_set: &HashMap<usize, ()>,
+) {
+    let n_rows = ds.n_rows();
+    let n_in = ds.n_in;
+    let n_cells = ds.n_cells;
+
+    // Per-row split label.
+    let smap = split_map.as_ref().map(|p| load_split_map(p));
+    let split_of = |img: &str| -> String {
+        match &smap {
+            Some(m) => m.get(img).cloned().unwrap_or_else(|| "?".into()),
+            None => "?".into(),
+        }
+    };
+
+    // X (raw features incl. zq_norm), f32 LE, row-major n_rows x n_in.
+    let xpath = format!("{dir}/{codec_tag}_X.f32");
+    let mut xw = BufWriter::new(File::create(&xpath).expect("create X"));
+    let mut buf = Vec::with_capacity(n_in * 4);
+    for r in 0..n_rows {
+        buf.clear();
+        for j in 0..n_in {
+            buf.extend_from_slice(&(ds.features[r * n_in + j] as f32).to_le_bytes());
+        }
+        xw.write_all(&buf).expect("write X row");
+    }
+    xw.flush().ok();
+
+    // bytes_log, f32 LE, row-major n_rows x n_cells (NaN = unreachable).
+    let bpath = format!("{dir}/{codec_tag}_byteslog.f32");
+    let mut bw = BufWriter::new(File::create(&bpath).expect("create byteslog"));
+    let mut bbuf = Vec::with_capacity(n_cells * 4);
+    for r in 0..n_rows {
+        bbuf.clear();
+        for c in 0..n_cells {
+            bbuf.extend_from_slice(&(ds.bytes_log[r * n_cells + c] as f32).to_le_bytes());
+        }
+        bw.write_all(&bbuf).expect("write byteslog row");
+    }
+    bw.flush().ok();
+
+    // rows.tsv: idx split image_id target_zq oracle_cell n_reach
+    let rpath = format!("{dir}/{codec_tag}_rows.tsv");
+    let mut rw = BufWriter::new(File::create(&rpath).expect("create rows.tsv"));
+    writeln!(
+        rw,
+        "idx\tsplit\timage_id\ttarget_zq\toracle_cell\tn_reach\tin_train"
+    )
+    .ok();
+    for r in 0..n_rows {
+        let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];
+        let truth = &ds.bytes_log[r * n_cells..(r + 1) * n_cells];
+        let oracle = argmin_masked(truth, reach).map(|c| c as i64).unwrap_or(-1);
+        let n_reach = reach.iter().filter(|&&b| b).count();
+        let in_train = train_set.contains_key(&r) as u8;
+        writeln!(
+            rw,
+            "{r}\t{}\t{}\t{}\t{oracle}\t{n_reach}\t{in_train}",
+            split_of(&ds.image_ids[r]),
+            ds.image_ids[r],
+            ds.target_zq[r]
+        )
+        .ok();
+    }
+    rw.flush().ok();
+
+    // meta.json
+    let meta = serde_json::json!({
+        "codec": codec_tag,
+        "eval_split": eval_split,
+        "n_rows": n_rows,
+        "n_in": n_in,
+        "n_image_feats": n_in - 1,
+        "n_cells": n_cells,
+        "feature_names": ds.feature_names,
+        "cell_labels": ds.cell_labels,
+        "zq_targets": ds.zq_targets,
+        "layout": "X.f32 row-major [n_rows x n_in] (last col = zq_norm); byteslog.f32 row-major [n_rows x n_cells], NaN=unreachable",
+    });
+    std::fs::write(
+        format!("{dir}/{codec_tag}_meta.json"),
+        serde_json::to_string_pretty(&meta).unwrap(),
+    )
+    .expect("write meta");
+}
+
+/// Per-row overhead TSV for one model on the eval rows.
+fn dump_perrow(
+    dir: &str,
+    codec_tag: &str,
+    model: &str,
+    ds: &PickerDataset,
+    val: &[usize],
+    rows: &[Option<RowScore>],
+) {
+    let path = format!("{dir}/{codec_tag}_perrow_{model}.tsv");
+    let mut w = BufWriter::new(File::create(&path).expect("create perrow tsv"));
+    writeln!(
+        w,
+        "model\timage_id\ttarget_zq\tn_reach\toverhead\tpick_cell\tbest_cell\thit"
+    )
+    .ok();
+    for (vi, &r) in val.iter().enumerate() {
+        if let Some(rs) = &rows[vi] {
+            writeln!(
+                w,
+                "{model}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}",
+                ds.image_ids[r],
+                ds.target_zq[r],
+                rs.n_reach,
+                rs.ov,
+                rs.pick,
+                rs.best,
+                (rs.pick == rs.best) as u8
+            )
+            .ok();
+        }
+    }
+    w.flush().ok();
 }

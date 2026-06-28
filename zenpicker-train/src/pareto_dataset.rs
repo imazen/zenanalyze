@@ -234,6 +234,16 @@ fn cell_key_from_knob(knob_json: &str, scalar_axes: &[ScalarAxisSpec]) -> String
         Some(o) => o,
         None => return format!("raw:{knob_json}"),
     };
+    // Unified plan-cell schema: {"cell":"...","fp":"...","plan":"..."}.
+    // The categorical pick axis IS the `cell` value; `fp` is a per-config
+    // fingerprint (many fp per cell — 210 fp / 30 cells for webp) and
+    // `plan` is constant, so neither is a categorical cell axis. Folding
+    // them into the key over-splits the cells ~7x and breaks the
+    // within-cell-optimal formulation. (Old zenjpeg schema lacks "cell"
+    // and falls through to the canonical-axis logic below.)
+    if let Some(cell) = obj.get("cell").and_then(|c| c.as_str()) {
+        return cell.to_string();
+    }
     let is_scalar = |k: &str| scalar_axes.iter().any(|a| a.name == k);
     let mut parts: Vec<String> = Vec::new();
     // Canonical order: subsampling, progressive, sharp_yuv, effort,
