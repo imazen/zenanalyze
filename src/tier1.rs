@@ -618,6 +618,19 @@ pub(crate) fn extract_tier1_into_dispatch<R: ChunkInput>(
     // ---------- Reduce ----------
     let n = sampled_pixels as f64;
     if n < 1.0 {
+        // No pixels sampled at all — the image is shorter than one stripe
+        // (e.g. a 4-row input), so the tier-1 reduce below would divide by
+        // zero. The percentile / windowed features are UNDEFINED here: NaN
+        // them (#49) so they drop to None and `analyze_features` recovers
+        // them by mirror-tiling, instead of leaving a misleading 0.0. The
+        // other tier-1 outputs keep their 0.0 defaults (their value at zero
+        // samples).
+        out.laplacian_variance_p50 = f32::NAN;
+        out.laplacian_variance_p75 = f32::NAN;
+        out.laplacian_variance_p90 = f32::NAN;
+        out.laplacian_variance_p99 = f32::NAN;
+        out.laplacian_variance_peak = f32::NAN;
+        out.luma_kurtosis = f32::NAN;
         return;
     }
     let luma_mean = stats.luma_sum / n;
@@ -696,7 +709,18 @@ pub(crate) fn extract_tier1_into_dispatch<R: ChunkInput>(
         // its OOD-bounds machinery.
         const MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE: u64 = 1024;
         let total: u64 = stats.laplacian_histogram.iter().map(|&c| c as u64).sum();
-        if total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE {
+        // #49: floor on the GEOMETRIC interior count too, not just the
+        // histogram total. At tiny widths the laplacian pass accumulates
+        // padded / zero-initialized stripe lanes (inflating `total` past the
+        // floor with bogus zero-∇² samples that pile into bin 0), so a
+        // `total`-only check would wrongly emit a 0.0 percentile instead of
+        // marking it undefined. `(w-2)*(h-2)` is the true ceiling on interior
+        // pixels and can't be inflated — below the floor → NaN (dropped to
+        // None), which `analyze_features` then recovers by mirror-tiling.
+        let geom_interior = (w.saturating_sub(2) as u64) * (h.saturating_sub(2) as u64);
+        if geom_interior < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE
+            || total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE
+        {
             out.laplacian_variance_p50 = f32::NAN;
             out.laplacian_variance_p75 = f32::NAN;
             out.laplacian_variance_p90 = f32::NAN;
@@ -774,7 +798,9 @@ pub(crate) fn extract_tier1_into_dispatch<R: ChunkInput>(
         // numerical stability — central moments cancel out the offset
         // and avoid catastrophic cancellation when E[X²] ≫ Var(X).
         // O(256) reduction; runs once at end of Tier 1.
-        if total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE {
+        if geom_interior < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE
+            || total < MIN_PIXELS_FOR_LAPLACIAN_PERCENTILE
+        {
             out.luma_kurtosis = f32::NAN;
         } else {
             let inv_total = 1.0 / total as f64;

@@ -23,6 +23,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (was a stale 110, pre the 6 `highlight_*` descriptors). zenpicker `Cargo.toml`
   description corrected v2 → v3.
 
+### Fixed
+
+- **#49 — tiny inputs now produce content-aware features intrinsically, with zero
+  external handling.** `analyze_features` mirror-tiles any input below the
+  percentile sample floors (`min(w,h) < 128 px`) up to ≥128 px and fills only the
+  would-be-NaN percentile / windowed features from the tiled pass (native-primary),
+  so training, every codec's inference path, and any future caller get content-aware
+  values at ANY size by construction. Fixed the two silent-`0.0` sources that
+  previously masked the floor (a too-small image reported a misleading `0.0` instead
+  of "undefined"): tier3 `dct_stats` zero-block early returns now emit `NaN`, and
+  `populate_tier3` is no longer gated on `width/height >= 8` (the per-pixel luma
+  histogram now runs sub-8); the tier1 laplacian-percentile / kurtosis floor now
+  checks the geometric interior count `(w-2)*(h-2)` (the SIMD pass over-counts padded
+  stripe lanes at tiny widths) and NaNs on the sub-stripe `n<1` bail. Recovery is
+  generalized over bytes-per-pixel, so `u16 ≡ u8` holds at tiny sizes. Canonical
+  `mirror_tile` spec lives in `mirror_tile_packed`; the interim Python
+  `tile_fill_tiny_features.py` is retired. Golden re-blessed; new
+  `sample_count_floor` recovery tests (byte-match an explicit mirror-tile reference
+  across 4×4 … 127×10, incl. 2×32 / 64×4).
+
 ## [0.2.0] - 2026-06-23
 
 ### Added

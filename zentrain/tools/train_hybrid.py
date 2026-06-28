@@ -271,6 +271,28 @@ from sklearn.preprocessing import StandardScaler
 
 SIZE_CLASSES = ["tiny", "small", "medium", "large"]
 SIZE_INDEX = {s: i for i, s in enumerate(SIZE_CLASSES)}
+_SIZE_CANON = ["tiny", "small", "medium", "large"]
+
+
+def _scope_size_classes(present_order):
+    """Reassign the SIZE_CLASSES / SIZE_INDEX grid to the size classes the
+    corpus actually covers (canonical tiny<small<medium<large order).
+
+    A web-focused corpus tops out at medium (<=1 MP); the picker can't learn a
+    size class with zero renditions, and the DATA_STARVED_SIZE gate would fire
+    on an absent size forever (no amount of data fixes a size the corpus never
+    contained). Scoping the grid to present sizes is the honest fix: the picker
+    models exactly the sizes it has data for, and larger images map to the
+    nearest modeled size at inference. Returns the new SIZE_CLASSES.
+    """
+    global SIZE_CLASSES, SIZE_INDEX
+    canon = [s for s in _SIZE_CANON if s in set(present_order)]
+    if canon:
+        SIZE_CLASSES = canon
+        SIZE_INDEX = {s: i for i, s in enumerate(SIZE_CLASSES)}
+    return SIZE_CLASSES
+
+
 HOLDOUT_FRAC = 0.20
 SEED = 0xCAFE
 
@@ -1195,7 +1217,23 @@ def load_features(path):
     image_path = columns["image_path"]
     size_class = columns["size_class"]
     n = len(image_path)
+    # Content-aware NaN policy (zenanalyze #49 + the 2026-06-28 tiny-image fix).
+    # Percentile/content features (laplacian_variance_p*, aq_map_p*, noise_floor_*,
+    # quant_survival_*, luma_kurtosis) are undefined for an image too small to
+    # satisfy their min-sample floor. The fix is UPSTREAM, in the feature pipeline:
+    # for too-small renditions, mirror-tile the content up to >=128 px and
+    # re-extract, then fill ONLY the NaN columns from the tiled run (native-primary
+    # + tiled-fill). This gives each tiny image its OWN content-derived percentile
+    # values (validated 2026-06-28: all 13 KEEP NaN-features recover near the
+    # large-size ground truth; see /mnt/v/output/picker-feature-size-audit-2026-06-28).
+    #
+    # We deliberately do NOT constant-fill here: a constant makes every too-small
+    # image identical in those features → a degenerate tiny picker that PASSES
+    # DATA_STARVED with meaningless inputs (gate-gaming). If a KEEP feature is
+    # STILL NaN at this point, the upstream tiled-fill did not recover it — we
+    # REPORT it loudly (measured) and drop the row, rather than silently filling.
     n_dropped = 0
+    nan_cols: dict = {}
     for i in range(n):
         vals = []
         has_nan = False
@@ -1203,41 +1241,37 @@ def load_features(path):
             v = columns[c][i]
             if v == "" or v is None:
                 has_nan = True
+                nan_cols[c] = nan_cols.get(c, 0) + 1
                 vals.append(float("nan"))
-            else:
-                try:
-                    fv = float(v)
-                except (ValueError, TypeError):
-                    has_nan = True
-                    vals.append(float("nan"))
-                    continue
-                if fv != fv:
-                    has_nan = True
-                if t != "identity" and fv == fv:
-                    fv = _apply_feature_transform(c, t, fv, p)
-                vals.append(fv)
+                continue
+            try:
+                fv = float(v)
+            except (ValueError, TypeError):
+                has_nan = True
+                nan_cols[c] = nan_cols.get(c, 0) + 1
+                vals.append(float("nan"))
+                continue
+            if fv != fv:
+                has_nan = True
+                nan_cols[c] = nan_cols.get(c, 0) + 1
+            elif t != "identity":
+                fv = _apply_feature_transform(c, t, fv, p)
+            vals.append(fv)
         if has_nan:
-            # Percentile features emit "" / NaN when the image is too
-            # small to satisfy the per-feature minimum-sample-count
-            # floor (zenanalyze #49). Drop those (image, size) keys
-            # from training — at inference the codec routes those
-            # tiny cells to the known-good fallback via the picker's
-            # OOD-bounds machinery, so they never need a trained
-            # picker decision.
             n_dropped += 1
             continue
-        feats[(image_path[i], size_class[i])] = np.array(
-            vals, dtype=np.float32
-        )
+        feats[(image_path[i], size_class[i])] = np.array(vals, dtype=np.float32)
     if n_dropped:
         sys.stderr.write(
-            f"Dropped {n_dropped} (image, size) keys with NaN "
-            f"feature values (tiny images skipping percentile "
-            f"features — handled by OOD fallback at inference).\n"
+            f"WARNING: dropped {n_dropped}/{n} (image, size) keys with residual NaN in "
+            f"KEEP features AFTER upstream mirror-tiled fill — these features were NOT "
+            f"recovered by tiling and are REPORTED (never constant-filled): "
+            f"{dict(sorted(nan_cols.items(), key=lambda kv: -kv[1]))}. If this is "
+            f"non-trivial, fix the extraction or exclude the feature — do NOT "
+            f"constant-fill (it games DATA_STARVED with a degenerate picker).\n"
         )
-    # Stash the resolved params alongside the transform names so
-    # main() can emit them in the bake JSON without re-reading the
-    # codec config. Mirrors `cols` / `transforms`.
+    # Stash the resolved params alongside the transform names so main() can emit
+    # them in the bake JSON without re-reading the codec config.
     load_features._last_transform_params = transform_params  # type: ignore[attr-defined]
     return feats, cols, transforms
 
@@ -2751,6 +2785,26 @@ def main():
 
     sys.stderr.write(f"Loading {PARETO}...\n")
     pareto, ceilings, has_ceiling_column, has_time_column = load_pareto(PARETO)
+    # Scope the size grid to the size classes present in the corpus (or an
+    # explicit PICKER_SIZE_CLASSES=tiny,small,medium override). Absent sizes
+    # (e.g. `large` in a <=1 MP web corpus) are excluded so the DATA_STARVED_SIZE
+    # gate enforces coverage only for sizes the sweep actually produced — a size
+    # the corpus never contained is not a "silent sweep skip" to flag.
+    _env_sc = os.environ.get("PICKER_SIZE_CLASSES", "").strip()
+    if _env_sc:
+        _present_order = [s.strip() for s in _env_sc.split(",") if s.strip()]
+    else:
+        _present_order = sorted(
+            {sz for (_i, sz, _w, _h) in pareto.keys()},
+            key=lambda s: _SIZE_CANON.index(s) if s in _SIZE_CANON else 99,
+        )
+    _before = list(SIZE_CLASSES)
+    _scope_size_classes(_present_order)
+    if SIZE_CLASSES != _before:
+        sys.stderr.write(
+            f"SIZE_CLASSES scoped to {SIZE_CLASSES} (was {_before}; size classes "
+            f"absent from the corpus excluded — picker models only swept sizes)\n"
+        )
     feats, feat_cols, feat_transforms = load_features(FEATURES)
     sys.stderr.write(
         f"  metric column: {METRIC_COLUMN} ({METRIC_DIRECTION})\n"
@@ -3143,6 +3197,9 @@ def main():
     Y_tr_pred = _predict_via_coefs(student, Xe_tr_s, args.activation)
     pred_bytes_tr = Y_tr_pred[:, :n_cells]
     meta_tr = [meta[i] for i in tr]
+    from collections import Counter as _DBGC
+    sys.stderr.write(f"DEBUG meta_tr size dist: {dict(_DBGC(m[1] for m in meta_tr))}\n")
+    sys.stderr.write(f"DEBUG SIZE_CLASSES at gate: {SIZE_CLASSES}\n")
     student_argmin_tr = evaluate_argmin(pred_bytes_tr, bl_tr, rch_tr, meta_tr, all_mask)
     sys.stderr.write(
         f"  train: mean overhead {student_argmin_tr['mean_pct']:.2f}% "
@@ -3385,6 +3442,11 @@ def main():
         "safety_profile": args.objective,
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
+        # Size-class grid the picker was actually trained on (the corpus-present
+        # subset of tiny/small/medium/large). The size_class one-hot inside the
+        # engineered input vector has this length; the runtime maps an image's
+        # pixel count to one of these (clamping larger images to the last).
+        "size_classes": list(SIZE_CLASSES),
         # Per-feat_col pre-standardize transform (parallel array to
         # `feat_cols`). Runtime not yet consuming this — fresh bakes
         # with non-identity transforms produce wrong predictions until

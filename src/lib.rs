@@ -472,6 +472,30 @@ pub fn analyze_features(
     // after the analyzer's RowConverter / RowStream consumes the slice.
     let source_descriptor = slice.descriptor();
 
+    // #49 intrinsic tiny-input handling: capture a packed copy of the source
+    // NOW — before the dispatch below consumes `slice` — when the input is
+    // below the percentile/windowed feature sample floors in either axis, so we
+    // can mirror-tile and recover the would-be-NaN features after the native
+    // pass. Works for any packed descriptor (so a u16 source recovers exactly
+    // like its u8 promotion — the `u16 ≡ u8` invariant holds at tiny sizes);
+    // for the RGB8 picker path the tiled bytes are byte-identical to the
+    // zentrain `tile_fill` reference. `stride >= row_bytes` skips anything
+    // sub-sampled where a packed per-pixel copy wouldn't be well-defined.
+    let in_w = slice.width();
+    let in_h = slice.rows();
+    let in_bpp = source_descriptor.bytes_per_pixel();
+    let in_row_bytes = in_w as usize * in_bpp;
+    let tiny_src: Option<Vec<u8>> =
+        if in_w.min(in_h) < MIN_TILE_DIM && in_bpp > 0 && slice.stride() >= in_row_bytes {
+            let mut buf = Vec::with_capacity(in_row_bytes * in_h as usize);
+            for y in 0..in_h {
+                buf.extend_from_slice(&slice.row(y)[..in_row_bytes]);
+            }
+            Some(buf)
+        } else {
+            None
+        };
+
     macro_rules! dispatch {
         ($pal:literal, $t2:literal, $t3:literal, $a:literal) => {{
             let (raw, geometry) = analyze_specialized_raw::<$pal, $t2, $t3, $a>(
@@ -491,10 +515,10 @@ pub fn analyze_features(
                 run_linear_light,
                 run_clip,
             )?;
-            Ok(raw.into_results(features, geometry, source_descriptor))
+            raw.into_results(features, geometry, source_descriptor)
         }};
     }
-    match (pal, t2, t3, alpha) {
+    let mut results = match (pal, t2, t3, alpha) {
         (false, false, false, false) => dispatch!(false, false, false, false),
         (false, false, false, true) => dispatch!(false, false, false, true),
         (false, false, true, false) => dispatch!(false, false, true, false),
@@ -511,7 +535,105 @@ pub fn analyze_features(
         (true, true, false, true) => dispatch!(true, true, false, true),
         (true, true, true, false) => dispatch!(true, true, true, false),
         (true, true, true, true) => dispatch!(true, true, true, true),
+    };
+
+    // #49 recovery (native-primary): if any requested feature was dropped (NaN)
+    // by a sample floor on this too-small input, mirror-tile the captured source
+    // up to >= MIN_TILE_DIM and fill ONLY the dropped features from the tiled
+    // pass — every value that survived natively is kept exactly as-is. The tiled
+    // dims are >= MIN_TILE_DIM in both axes, so the recursive call never re-tiles
+    // (its own `tiny_src` capture is `None`). Training and inference go through
+    // this same path, so they see identical features at any size with zero
+    // external handling.
+    if let Some(src) = tiny_src
+        && features.iter().any(|f| results.get(f).is_none())
+    {
+        let (tiled, tw, th) = mirror_tile_packed(&src, in_w, in_h, in_bpp, MIN_TILE_DIM);
+        if let Ok(tiled_slice) =
+            PixelSlice::new(&tiled, tw, th, tw as usize * in_bpp, source_descriptor)
+            && let Ok(tiled_results) = analyze_features(tiled_slice, query)
+        {
+            for f in features.iter() {
+                if results.get(f).is_none()
+                    && let Some(v) = tiled_results.get_f32(f)
+                    && v.is_finite()
+                {
+                    results.set(f, v);
+                }
+            }
+        }
     }
+
+    Ok(results)
+}
+
+/// Minimum width/height (px) below which the percentile / windowed content
+/// features (`laplacian_variance_p*`, `aq_map_p*`, `noise_floor_*`,
+/// `quant_survival_*`, `info_weight_p90`, `luma_kurtosis`, …) lack the sample
+/// / block count their estimators need and would otherwise be dropped
+/// (zenanalyze #49). [`analyze_features`] internally mirror-tiles any RGB8
+/// input below this in either axis up to `>= MIN_TILE_DIM` and fills only the
+/// would-be-NaN features from the tiled pass, so callers get content-aware
+/// features at ANY size with zero external handling.
+///
+/// 128 was chosen by measurement: mirror-tiling to 96 px already recovers all
+/// extracted features; 128 is a safe margin (audit
+/// `/mnt/v/output/picker-feature-size-audit-2026-06-28`).
+const MIN_TILE_DIM: u32 = 128;
+
+/// Mirror-tile a packed `bpp`-bytes-per-pixel buffer up to `>= min_dim` px in
+/// each axis using alternating horizontal/vertical flips, so the tiling is
+/// seamless — a plain repeat would inject false edges at the seams and inflate
+/// `laplacian_variance`.
+///
+/// CANONICAL SPEC — for the RGB8 path (`bpp == 3`) this is byte-identical to the
+/// reference the picker training features were extracted with
+/// (`zentrain/tools/tile_fill_tiny_features.py::mirror_tile`):
+///   - tile counts: `nx = ceil(min_dim / w)` if `w < min_dim` else 1; `ny`
+///     likewise on `h`.
+///   - tile `(i, j)` is the source flipped left-right iff `i` is odd and
+///     flipped up-down iff `j` is odd; columns are concatenated, then rows.
+///     No crop — the result is `>= min_dim` in each tiled axis.
+///
+/// Generalising over `bpp` (rather than hard-coding RGB8's 3) keeps the tiling
+/// purely geometric, so a u16 source tiles exactly like its u8 promotion.
+/// Returns `(tiled, tiled_w, tiled_h)` with `tiled_w = w * nx`,
+/// `tiled_h = h * ny`. `src` must be exactly `w * h * bpp` packed bytes.
+pub(crate) fn mirror_tile_packed(
+    src: &[u8],
+    w: u32,
+    h: u32,
+    bpp: usize,
+    min_dim: u32,
+) -> (Vec<u8>, u32, u32) {
+    let (w, h, md) = (w as usize, h as usize, min_dim as usize);
+    let nx = if w < md { md.div_ceil(w) } else { 1 };
+    let ny = if h < md { md.div_ceil(h) } else { 1 };
+    let row = w * bpp;
+    let out_row = w * nx * bpp;
+    let oh = h * ny;
+    let mut out = vec![0u8; out_row * oh];
+    for oy in 0..oh {
+        let j = oy / h;
+        let ly = oy % h;
+        // flip up-down on odd tile-rows
+        let sy = if j % 2 == 1 { h - 1 - ly } else { ly };
+        let src_row = &src[sy * row..sy * row + row];
+        let dst_row = &mut out[oy * out_row..oy * out_row + out_row];
+        for i in 0..nx {
+            let dst = &mut dst_row[i * row..i * row + row];
+            if i % 2 == 1 {
+                // flip left-right: reverse pixel order
+                for x in 0..w {
+                    let s = (w - 1 - x) * bpp;
+                    dst[x * bpp..x * bpp + bpp].copy_from_slice(&src_row[s..s + bpp]);
+                }
+            } else {
+                dst.copy_from_slice(src_row);
+            }
+        }
+    }
+    (out, (w * nx) as u32, oh as u32)
 }
 
 /// Const-bool-monomorphized analyzer body. Returns the dense
@@ -653,7 +775,12 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
                 tier2_chroma::populate_tier2::<u8>(&mut raw, &mut stream, pixel_budget);
             }
         }
-        if T3 && width >= 8 && height >= 8 {
+        // No `width/height >= 8` guard: `dct_stats` (inside `populate_tier3`)
+        // handles the too-small / zero-block case internally by emitting NaN
+        // for the percentile features (#49), so a too-small input reports
+        // those as undefined instead of leaving a stale 0.0 default that
+        // `analyze_features` then can't recover by mirror-tiling.
+        if T3 {
             if run_linear_light {
                 tier3::populate_tier3::<f32>(&mut raw, &mut stream, hf_max_blocks, run_dct);
             } else {

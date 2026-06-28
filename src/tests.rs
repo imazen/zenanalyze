@@ -536,13 +536,22 @@ fn tiny_3x3_runs_tier1_and_tier2() {
 }
 
 #[test]
-fn tiny_7x7_runs_tier1_and_tier2_only() {
-    // 7×7 is the largest size where Tier 3 still short-circuits.
+fn tiny_7x7_dct_blocks_short_circuit_luma_histogram_runs() {
+    // 7×7 is below the 8×8 DCT-block floor, so the Tier-3 *block* stats
+    // short-circuit: high_freq_energy_ratio stays 0.0 and the aq/noise/quant +
+    // laplacian percentiles NaN out (recoverable via #49 mirror-tiling). The
+    // per-pixel luma histogram needs no 8×8 block, so it runs and yields a real
+    // finite entropy — the #49 fix removed the size guard that used to skip the
+    // whole tier for sub-8 inputs.
     let rgb = synth_rgb(7, 7, 99);
     let out = analyze_rgb8(&rgb, 7, 7);
     assert_well_formed(&out, 7, 7);
     assert_eq!(out.high_freq_energy_ratio, 0.0);
-    assert_eq!(out.luma_histogram_entropy, 0.0);
+    assert!(
+        out.luma_histogram_entropy.is_finite(),
+        "luma histogram runs on 7×7: {}",
+        out.luma_histogram_entropy
+    );
 }
 
 #[test]
@@ -3487,6 +3496,20 @@ mod sample_count_floor {
         crate::analyze_features(slice, &q).unwrap()
     }
 
+    /// Explicit mirror-tile reference: tile the synth image up to `>= 128`
+    /// px via the canonical [`crate::mirror_tile_rgb8`], then analyze the
+    /// (already large) tiled buffer directly — no internal re-tile fires.
+    /// The #49 recovery inside [`crate::analyze_features`] must reproduce
+    /// these exact values for every feature it fills (byte-identical).
+    fn run_tiled_ref(w: u32, h: u32, seed: u32) -> crate::feature::AnalysisResults {
+        let rgb = synth_rgb(w, h, seed);
+        let (tiled, tw, th) = crate::mirror_tile_packed(&rgb, w, h, 3, 128);
+        let stride = (tw as usize) * 3;
+        let slice = PixelSlice::new(&tiled, tw, th, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+        let q = AnalysisQuery::new(percentile_set());
+        crate::analyze_features(slice, &q).unwrap()
+    }
+
     /// Unit-level invariant: a NaN written into a `RawAnalysis` field
     /// drops out of the converted `AnalysisResults` rather than
     /// surfacing as `Some(NaN)` for the codec to misinterpret.
@@ -3517,17 +3540,28 @@ mod sample_count_floor {
         );
     }
 
-    /// Tiny image — well below every percentile floor. Every gated
-    /// feature must drop out of the result map.
+    /// Tiny image — well below every percentile floor. #49: the extractor
+    /// internally mirror-tiles to `>= 128` px and recovers every gated
+    /// feature (content-aware, not constant-filled), and the recovered
+    /// value matches the explicit mirror-tile reference byte-for-byte.
+    /// 32×32 is below BOTH floors (900 interior < 1024, 16 blocks < 100),
+    /// so every percentile feature is recovered → all equal the reference.
     #[test]
-    fn tiny_image_drops_all_percentile_features() {
+    fn tiny_image_recovers_all_percentile_features_via_tiling() {
         let r = run_at(32, 32, 0);
+        let ref_r = run_tiled_ref(32, 32, 0);
         for f in PERCENTILE_FEATURES {
+            let got = r.get_f32(*f);
             assert!(
-                r.get(*f).is_none(),
-                "32×32 image should drop {f:?} (id={}) below the sample-count floor — got {:?}",
+                got.is_some_and(|x| x.is_finite()),
+                "32×32 should recover finite {f:?} (id={}) via #49 tiling — got {:?}",
                 f.id(),
                 r.get(*f),
+            );
+            assert_eq!(
+                got,
+                ref_r.get_f32(*f),
+                "recovered {f:?} must equal the canonical mirror-tile reference",
             );
         }
     }
@@ -3558,31 +3592,39 @@ mod sample_count_floor {
         }
     }
 
-    /// Image just below the tier3 floor. 79×79 → 9×9 = 81 blocks <
-    /// 100. tier3 percentiles should drop; tier1 laplacian (77×77 =
-    /// 5929 interior pixels) stays above 1024 and survives.
+    /// Image just below the tier3 block floor (79×79 → 9×9 = 81 blocks <
+    /// 100). #49: the tier3 percentiles are now recovered via internal
+    /// mirror-tiling and match the explicit tiled reference; the tier1
+    /// laplacian survived natively (77×77 = 5929 interior > 1024) and is
+    /// kept unchanged by the native-primary merge (so it is finite but is
+    /// NOT compared to the tiled reference — it never went through tiling).
     #[test]
-    fn boundary_below_drops_tier3_keeps_tier1_laplacian() {
+    fn boundary_below_recovers_tier3_keeps_tier1_laplacian() {
         let r = run_at(79, 79, 0);
+        let ref_r = run_tiled_ref(79, 79, 0);
         for f in &[
             AnalysisFeature::AqMapP50,
             AnalysisFeature::AqMapP99,
             AnalysisFeature::NoiseFloorYP50,
             AnalysisFeature::QuantSurvivalYP50,
         ] {
+            let got = r.get_f32(*f);
             assert!(
-                r.get(*f).is_none(),
-                "79×79 (81 blocks < 100 floor) should drop {f:?} — got {:?}",
+                got.is_some_and(|x| x.is_finite()),
+                "79×79 tier3 {f:?} should be recovered via #49 tiling — got {:?}",
                 r.get(*f),
             );
+            assert_eq!(
+                got,
+                ref_r.get_f32(*f),
+                "recovered tier3 {f:?} must equal the mirror-tile reference",
+            );
         }
-        // Laplacian percentile floor is on interior-pixel count (1024);
-        // 79×79 → 77×77 = 5929 interior, well above. Should survive.
+        // tier1 laplacian survived natively; native-primary keeps it as-is.
         assert!(
-            r.get(AnalysisFeature::LaplacianVarianceP50)
-                .and_then(|v| v.as_f32())
+            r.get_f32(AnalysisFeature::LaplacianVarianceP50)
                 .is_some_and(|x| x.is_finite()),
-            "tier1 laplacian floor is per-pixel; 79×79 should survive",
+            "tier1 laplacian (native, 5929 interior > 1024) must stay finite",
         );
     }
 
@@ -3634,6 +3676,44 @@ mod sample_count_floor {
                     .is_some_and(|x| x.is_finite()),
                 "{f:?} must survive on tiny image — only the percentile siblings are gated",
             );
+        }
+    }
+
+    /// #49 size-sweep ground truth — across a range of too-small sizes,
+    /// including the extreme/degenerate aspect ratios the picker corpus
+    /// now includes (4×4, 8×8, 2×32, 64×4), every percentile feature is
+    /// recovered finite AND equals the canonical mirror-tile reference
+    /// exactly (the native-primary merge is byte-identical to an explicit
+    /// tile-then-extract). All sizes here are below BOTH the laplacian
+    /// interior-pixel floor (1024) and the tier3 block floor (100), so the
+    /// full set is recovered and the equality holds for every feature.
+    #[test]
+    fn tiny_recovery_matches_tiled_reference_across_sizes() {
+        for &(w, h) in &[
+            (4u32, 4u32),
+            (8, 8),
+            (16, 16),
+            (32, 32),
+            (2, 32),
+            (64, 4),
+            (127, 10),
+        ] {
+            let r = run_at(w, h, 7);
+            let ref_r = run_tiled_ref(w, h, 7);
+            for f in PERCENTILE_FEATURES {
+                let got = r.get_f32(*f);
+                assert!(
+                    got.is_some_and(|x| x.is_finite()),
+                    "{w}×{h}: {f:?} (id={}) must recover finite via #49 tiling — got {:?}",
+                    f.id(),
+                    r.get(*f),
+                );
+                assert_eq!(
+                    got,
+                    ref_r.get_f32(*f),
+                    "{w}×{h}: recovered {f:?} must equal the mirror-tile reference",
+                );
+            }
         }
     }
 }
@@ -4044,14 +4124,14 @@ mod hvs {
         );
     }
 
-    /// Below the Tier-3 minimum-sample floor, `info_weight_p90` is
-    /// statistically meaningless — the writer emits `f32::NAN` and
-    /// `AnalysisResults::set` drops it from the result, so `get`
-    /// returns `None`. The mean stays meaningful.
+    /// #49: below the tier3 block floor, `info_weight_p90` is recovered
+    /// via internal mirror-tiling (content-aware, not dropped); the mean
+    /// was always meaningful and stays finite.
     #[test]
-    fn tiny_image_drops_info_weight_p90_keeps_mean() {
-        // 32×32 → 16 blocks, well under the MIN_BLOCKS_FOR_PERCENTILE
-        // floor that gates the Tier-3 percentile reads.
+    fn tiny_image_recovers_info_weight_p90_keeps_mean() {
+        // 32×32 → 16 blocks, well under MIN_BLOCKS_FOR_PERCENTILE; #49
+        // mirror-tiles to >= 128 px so the percentile read has enough
+        // blocks and surfaces a content-derived value.
         let rgb = synth_rgb(32, 32, 0xDEAD);
         let q = rgb_query(&[
             AnalysisFeature::InfoWeightMean,
@@ -4064,11 +4144,11 @@ mod hvs {
                 .is_some_and(|x| x.is_finite()),
             "info_weight_mean must survive on tiny image"
         );
-        // p90 drops — the floor's NaN sentinel makes `set` skip it,
-        // so `get` returns None.
+        // p90 is now recovered via tiling rather than dropped.
         assert!(
-            r.get(AnalysisFeature::InfoWeightP90).is_none(),
-            "info_weight_p90 should be filtered out on tiny image"
+            r.get_f32(AnalysisFeature::InfoWeightP90)
+                .is_some_and(|x| x.is_finite()),
+            "info_weight_p90 must be recovered via #49 tiling on tiny image"
         );
     }
 }
