@@ -61,6 +61,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.neural_network import MLPRegressor
+from sklearn.tree import DecisionTreeClassifier
 
 
 # --- LeakyReLU student via PyTorch -------------------------------------------
@@ -1666,9 +1667,16 @@ def build_dataset(
 # ---------- Evaluation ----------
 
 
-def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
-    """Categorical argmin over allowed reachable cells."""
-    rows = evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask)
+def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask, veto=None):
+    """Categorical argmin over allowed reachable cells.
+
+    `veto` (optional `(n_rows, n_cells)` bool mask): cells the deployed picker
+    is forbidden from choosing for that row (feature-gated knob-veto safety
+    bounds, see `derive_knob_vetoes`). The oracle/actual-best is computed over
+    the UN-vetoed reachable set, so overhead reflects the true achievable
+    optimum vs the vetoed pick. `veto=None` → byte-identical to the un-vetoed
+    behavior."""
+    rows = evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask, veto=veto)
     if not rows:
         return {"n": 0, "argmin_acc": 0.0, "mean_pct": 0.0, "p50_pct": 0.0, "p90_pct": 0.0}
     overheads = np.array([r["overhead"] for r in rows], dtype=np.float64)
@@ -1685,11 +1693,19 @@ def evaluate_argmin(pred_bytes_log, actual_bytes_log, reach, meta, mask):
     }
 
 
-def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask):
+def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask, veto=None):
     """Like `evaluate_argmin` but returns the per-row breakdown so the
     safety-report code can stratify by zq / size_class and surface
     worst-case images. Each entry: image, size_class, zq, pick,
-    actual_best, overhead, predicted_bytes, actual_bytes."""
+    actual_best, overhead, predicted_bytes, actual_bytes.
+
+    `veto` (optional `(n_rows, n_cells)` bool): cells the deployed picker may
+    NOT choose for that row. The oracle (`actual_best`) is the argmin over the
+    UN-vetoed reachable set `reach[i] & mask`; the pick is the argmin over
+    `reach[i] & mask & ~veto[i]`, falling back to the un-vetoed reachable set if
+    every reachable cell is vetoed (never strand a row). Overhead = vetoed-pick
+    bytes vs true-oracle bytes. `veto=None` → byte-identical to the prior
+    behavior."""
     n_rows = pred_bytes_log.shape[0]
     out = []
     for i in range(n_rows):
@@ -1700,8 +1716,14 @@ def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask)
             continue
         ab = np.where(m, np.exp(actual), np.inf)
         pb = np.where(m, np.exp(np.clip(pred, -30, 30)), np.inf)
-        a = int(np.argmin(ab))
-        p = int(np.argmin(pb))
+        a = int(np.argmin(ab))  # true oracle over reachable&allowed (veto NOT applied)
+        if veto is not None:
+            m_pick = m & ~veto[i]
+            # fall back to the un-vetoed reachable set if the veto strands the row
+            pb_pick = np.where(m_pick, pb, np.inf) if np.any(m_pick) else pb
+            p = int(np.argmin(pb_pick))
+        else:
+            p = int(np.argmin(pb))
         out.append({
             "image": meta[i][0],
             "size_class": meta[i][1],
@@ -1713,6 +1735,210 @@ def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask)
             "actual_best_bytes": float(ab[a]),
         })
     return out
+
+
+def _veto_feature_matrix(meta_rows, feats, feat_cols):
+    """Per-row feature matrix (n_rows, n_feat), looked up by (image, size).
+    NaN/missing → 0.0 (matches the runtime's NaN handling; a row that has no
+    features simply can't fire a feature-gated rule)."""
+    n_rows = len(meta_rows)
+    F = np.zeros((n_rows, len(feat_cols)), dtype=np.float64)
+    for i, mr in enumerate(meta_rows):
+        fv = feats.get((mr[0], mr[1]))
+        if fv is not None:
+            F[i] = np.nan_to_num(np.asarray(fv, dtype=np.float64), nan=0.0)
+    return F
+
+
+def _axis_value_arrays(cells, categorical_axes):
+    """{axis -> (n_cells,) object array of each cell's value for that axis}."""
+    return {
+        ax: np.array([c.get(ax) for c in cells], dtype=object)
+        for ax in categorical_axes
+    }
+
+
+def derive_knob_vetoes(
+    cells,
+    categorical_axes,
+    pred_tr,
+    bl_tr,
+    rch_tr,
+    meta_tr,
+    feats,
+    feat_cols,
+    all_mask,
+    cat_overhead=0.50,
+    mean_budget_pp=0.40,
+):
+    """Greedily derive feature-gated per-(categorical-axis-value) safety vetoes
+    that bound the single-encode picker's worst-case RD overhead.
+
+    The K=1 (pure-argmin) picker catastrophically mis-sets a categorical toggle
+    (chroma/bd/qm) on a tiny fraction of images, blowing the WORST_ROW overhead
+    far past the 200% gate. A veto is a rule "forbid value V on axis A when
+    feature F </> thr"; firing it removes the offending cells from the picker's
+    reachable set for that row WITHOUT touching the oracle, so worst-case is
+    bounded while the achievable optimum is unchanged.
+
+    Port of /tmp/systematic_veto.py (validated to reproduce the avif tail
+    numbers). For each (axis, value V): fit a depth-1 stump predicting "V is
+    catastrophic for this row" (best-V-cell overhead vs oracle > `cat_overhead`),
+    yielding a candidate feature threshold + direction. Then greedily
+    forward-select the candidates that most reduce a weighted tail score
+    (`1000*>200 + 30*>150 + >100 + 0.5*max`) at a cumulative mean-overhead cost
+    <= `mean_budget_pp`, evaluated on the TRAIN picker (`pred_tr`). It does NOT
+    stop at train-pass: the catastrophic worst row MOVES across splits, so it
+    minimizes the whole train tail to cover every catastrophe mode
+    (mode-completeness) and leave val/test margin; it stops only when no
+    remaining candidate reduces the score within budget. `mean_budget_pp` 0.40
+    admits the 2nd veto (the binding constraint — the sub/chroma veto costs
+    ~0.25pp train mean and is rejected at 0.20, leaving val@334%).
+
+    Returns `list[{"axis", "value", "feat", "op", "threshold"}]` (op is "<"/">").
+    """
+    n_rows = pred_tr.shape[0]
+    n_cells = len(cells)
+    if n_rows == 0 or n_cells == 0 or not categorical_axes:
+        return []
+
+    axis_vals = _axis_value_arrays(cells, categorical_axes)
+    fidx = {c: i for i, c in enumerate(feat_cols)}
+    F = _veto_feature_matrix(meta_tr, feats, feat_cols)
+
+    base = rch_tr & all_mask[None, :]
+    AB = np.where(base, np.exp(bl_tr), np.inf)
+    PB = np.where(base, np.exp(np.clip(pred_tr, -30, 30)), np.inf)
+    oracle = AB.min(axis=1)  # true per-row oracle (never vetoed)
+
+    def value_overhead(cols):
+        # best reachable cell carrying this axis value vs the true oracle
+        if cols.size == 0:
+            return np.full(n_rows, np.inf)
+        return (AB[:, cols].min(axis=1) - oracle) / oracle
+
+    # --- candidate vetoes: one depth-1 stump per (axis, value) ---
+    cands = []
+    for ax in categorical_axes:
+        av = axis_vals[ax]
+        values = {v for v in av.tolist() if v is not None}
+        for V in sorted(values, key=lambda x: (str(type(x)), str(x))):
+            cols = np.where(av == V)[0]
+            vo = value_overhead(cols)
+            ok = np.isfinite(vo)
+            y = (vo > cat_overhead).astype(int)
+            if int(y[ok].sum()) < 20:
+                continue
+            clf = DecisionTreeClassifier(
+                max_depth=1, class_weight="balanced", min_samples_leaf=300
+            ).fit(F[ok], y[ok])
+            fi = int(clf.tree_.feature[0])
+            if fi < 0:  # no split found
+                continue
+            thr = float(clf.tree_.threshold[0])
+            # which side of the split is the catastrophic (class-1) side?
+            lc = clf.tree_.value[1][0][1] / clf.tree_.value[1][0].sum()
+            rc = clf.tree_.value[2][0][1] / clf.tree_.value[2][0].sum()
+            op = "<" if lc > rc else ">"
+            cands.append(
+                {"axis": ax, "value": V, "feat": feat_cols[fi], "op": op, "threshold": thr}
+            )
+
+    def fire(rule):
+        fv = F[:, fidx[rule["feat"]]]
+        return (fv < rule["threshold"]) if rule["op"] == "<" else (fv > rule["threshold"])
+
+    def allowed_mask(rules):
+        a = base.copy()
+        for r in rules:
+            a = a & ~(fire(r)[:, None] & (axis_vals[r["axis"]] == r["value"])[None, :])
+        stranded = ~a.any(axis=1)
+        if stranded.any():
+            a[stranded] = base[stranded]  # never strand a row
+        return a
+
+    def metrics(rules):
+        a = allowed_mask(rules)
+        pk = np.where(a, PB, np.inf).argmin(axis=1)
+        ov = (AB[np.arange(n_rows), pk] - oracle) / oracle * 100.0
+        return {
+            "mean": float(ov.mean()),
+            "mx": float(ov.max()),
+            "n200": int((ov > 200).sum()),
+            "n150": int((ov > 150).sum()),
+            "n100": int((ov > 100).sum()),
+        }
+
+    # Weighted tail score: bound catastrophes first (>200), then the broad
+    # tail (>150, >100), then the absolute max. Greedily add the veto that most
+    # reduces it. Do NOT stop at train-pass (n200==0): the catastrophic worst
+    # row MOVES across splits (a qm-only veto cleared train@196% but left
+    # val@333% on a sub/chroma mis-set), so we minimize the WHOLE train tail to
+    # cover every catastrophe mode (sub/bd/qm → mode-completeness) and leave
+    # val/test margin. Terminates when no candidate helps within mean_budget_pp.
+    def tail_score(m):
+        return 1000.0 * m["n200"] + 30.0 * m["n150"] + float(m["n100"]) + 0.5 * m["mx"]
+
+    base_m = metrics([])
+    chosen = []
+    cur = base_m
+    while True:
+        best = None
+        for c in cands:
+            if c in chosen:
+                continue
+            m = metrics(chosen + [c])
+            if m["mean"] - base_m["mean"] > mean_budget_pp:
+                continue
+            gain = tail_score(cur) - tail_score(m)
+            if gain > 1.0 and (best is None or gain > best[0]):
+                best = (gain, c, m)
+        if best is None:
+            break
+        chosen.append(best[1])
+        cur = best[2]
+        r = best[1]
+        sys.stderr.write(
+            f"  + knob-veto {r['axis']}={r['value']} when {r['feat']} {r['op']} "
+            f"{r['threshold']:.4g}  -> train max={cur['mx']:.0f}% >200={cur['n200']} "
+            f">150={cur['n150']} >100={cur['n100']} mean={cur['mean']:.2f}%\n"
+        )
+    sys.stderr.write(
+        f"  derive_knob_vetoes: {len(chosen)} veto(s) selected from {len(cands)} "
+        f"candidate(s); train tail base max={base_m['mx']:.0f}% (>200={base_m['n200']}) "
+        f"-> vetoed max={cur['mx']:.0f}% (>200={cur['n200']}) "
+        f"mean {base_m['mean']:.2f}%->{cur['mean']:.2f}%\n"
+    )
+    return chosen
+
+
+def build_veto_mask(vetoes, meta_rows, feats, feat_cols, cells, categorical_axes):
+    """Build the `(n_rows, n_cells)` bool veto mask for a split from the rules
+    returned by `derive_knob_vetoes`. For each row `meta=(img, size, zq)`, look
+    up `feats[(img, size)]`; for every rule whose feature condition fires, veto
+    all cells carrying that rule's (axis == value). Rows with no features key
+    get no veto (graceful)."""
+    n_rows = len(meta_rows)
+    n_cells = len(cells)
+    veto = np.zeros((n_rows, n_cells), dtype=bool)
+    if not vetoes:
+        return veto
+    fidx = {c: i for i, c in enumerate(feat_cols)}
+    axis_vals = _axis_value_arrays(cells, categorical_axes)
+    for i, mr in enumerate(meta_rows):
+        fv = feats.get((mr[0], mr[1]))
+        if fv is None:
+            continue  # no features for this row -> no veto
+        fv = np.nan_to_num(np.asarray(fv, dtype=np.float64), nan=0.0)
+        for r in vetoes:
+            col = fidx.get(r["feat"])
+            if col is None:
+                continue
+            val = fv[col]
+            fires = (val < r["threshold"]) if r["op"] == "<" else (val > r["threshold"])
+            if fires:
+                veto[i] |= axis_vals[r["axis"]] == r["value"]
+    return veto
 
 
 def evaluate_topk_verify(pred_bytes_log, actual_bytes_log, reach, mask, ks=(1, 2, 3, 4, 5, 6, 7)):
@@ -3221,6 +3447,40 @@ def main():
         f"(gap to val: {student_argmin['mean_pct'] - student_argmin_tr['mean_pct']:+.2f}pp)\n"
     )
 
+    # --- Feature-gated knob-veto safety bounds ---------------------------------
+    # The pure-argmin (K=1) single-encode picker catastrophically mis-sets a
+    # categorical toggle on a tiny fraction of images, blowing WORST_ROW past the
+    # 200% gate. Derive per-(axis,value) feature-gated vetoes on the TRAIN picker
+    # that bound the worst case (they shrink the picker's reachable set per row;
+    # the oracle is never vetoed), then apply them to val/test so the reported
+    # numbers AND the WORST_ROW gate reflect the DEPLOYED (vetoed) picker. The
+    # exact rules ship in the manifest (`knob_vetoes`) for the runtime to enforce.
+    knob_vetoes = derive_knob_vetoes(
+        cells, list(CATEGORICAL_AXES), pred_bytes_tr, bl_tr, rch_tr, meta_tr,
+        feats, feat_cols, all_mask,
+    )
+    veto_va = build_veto_mask(
+        knob_vetoes, meta_va, feats, feat_cols, cells, list(CATEGORICAL_AXES)
+    )
+    veto_te = (
+        build_veto_mask(knob_vetoes, meta_te, feats, feat_cols, cells, list(CATEGORICAL_AXES))
+        if len(te) else None
+    )
+    # Override the raw (un-vetoed) val student_argmin computed above with the
+    # vetoed picker so diag / manifest / summary report the deployed model.
+    # `student_argmin_tr` (train) is intentionally left UN-vetoed: it is the
+    # overfit reference (the raw-train vs raw-val gap logged just above), not a
+    # deployed-picker number.
+    if knob_vetoes:
+        student_argmin = evaluate_argmin(
+            pred_bytes, bl_va, rch_va, meta_va, all_mask, veto=veto_va
+        )
+        sys.stderr.write(
+            f"  after {len(knob_vetoes)} knob-veto(s): val mean overhead "
+            f"{student_argmin['mean_pct']:.2f}% (max {student_argmin['max_pct']:.1f}%, "
+            f"p99 {student_argmin['p99_pct']:.1f}%)\n"
+        )
+
     # --- Held-out TEST (origins ending 7/9) — the honest generalization number.
     # NEVER trained or tuned on; reported alongside val so the gap val→test shows
     # any val overfit. See docs/CLEAN_PICKER_PROGRAM.md.
@@ -3229,7 +3489,9 @@ def main():
     if len(te):
         Y_te_pred = _predict_via_coefs(student, Xe_te_s, args.activation)
         pred_bytes_te = Y_te_pred[:, :n_cells]
-        student_argmin_te = evaluate_argmin(pred_bytes_te, bl_te, rch_te, meta_te, all_mask)
+        student_argmin_te = evaluate_argmin(
+            pred_bytes_te, bl_te, rch_te, meta_te, all_mask, veto=veto_te
+        )
         student_topk_te = evaluate_topk_verify(pred_bytes_te, bl_te, rch_te, all_mask)
         sys.stderr.write(
             f"\n  TEST (7/9 origins): argmin mean {student_argmin_te['mean_pct']:.2f}% "
@@ -3245,9 +3507,10 @@ def main():
     else:
         sys.stderr.write("  TEST: 0 rows (no 7/9 origins in this corpus)\n")
 
-    # Per-row val breakdown for stratification
+    # Per-row val breakdown for stratification. Vetoed so the WORST_ROW gate
+    # (fed by `worst` below) reflects the deployed (knob-vetoed) picker.
     val_per_row = evaluate_argmin_per_row(
-        pred_bytes, bl_va, rch_va, meta_va, all_mask
+        pred_bytes, bl_va, rch_va, meta_va, all_mask, veto=veto_va
     )
     by_zq, by_size, by_zq_size = stratify_overheads(val_per_row)
     worst = worst_case_rows(val_per_row, top_pct=1.0, max_n=20)
@@ -3265,6 +3528,36 @@ def main():
                     f"{r['pick']}\t{r['actual_best']}\t{r['overhead']}\n"
                 )
         sys.stderr.write(f"  wrote per-row overheads → {args.dump_overheads}\n")
+        # Also save the raw eval arrays so safety-bound / mask experiments
+        # can re-run the argmin offline under arbitrary per-cell masks
+        # without retraining. Gated on --dump-overheads; additive.
+        _npz = args.dump_overheads.with_suffix(".eval.npz")
+        _arrs = dict(
+            pred_bytes=pred_bytes, actual_bytes=bl_va, reach=rch_va,
+            all_mask=all_mask,
+            images=np.array([r[0] for r in meta_va]),
+            sizes=np.array([r[1] for r in meta_va]),
+            zqs=np.array([int(r[2]) for r in meta_va]),
+            cells=np.array([str(c) for c in cells]),
+        )
+        if 'pred_bytes_te' in dir() and len(te):
+            _arrs.update(
+                te_pred_bytes=pred_bytes_te, te_actual_bytes=bl_te, te_reach=rch_te,
+                te_images=np.array([r[0] for r in meta_te]),
+                te_sizes=np.array([r[1] for r in meta_te]),
+                te_zqs=np.array([int(r[2]) for r in meta_te]),
+            )
+        # TRAIN arrays too — knob-veto rules are DERIVED on train, so offline
+        # tuning of the veto greedy (matching the deployed derivation) needs the
+        # train picker, not just val/test.
+        _arrs.update(
+            tr_pred_bytes=pred_bytes_tr, tr_actual_bytes=bl_tr, tr_reach=rch_tr,
+            tr_images=np.array([r[0] for r in meta_tr]),
+            tr_sizes=np.array([r[1] for r in meta_tr]),
+            tr_zqs=np.array([int(r[2]) for r in meta_tr]),
+        )
+        np.savez_compressed(_npz, **_arrs)
+        sys.stderr.write(f"  wrote eval arrays → {_npz}\n")
     per_cell = per_cell_diagnostics(cells, pred_bytes, bl_va, rch_va, n_cells)
     mlp_health = scan_mlp_weights(student, Xe_va_s)
 
@@ -3314,6 +3607,11 @@ def main():
         "by_zq_size": by_zq_size,
         "train_rows_by_size_zq": train_rows_by_size_zq,
         "worst_case": worst,
+        # Feature-gated knob-veto safety bounds derived on TRAIN and applied to
+        # the val/test numbers + the WORST_ROW gate above. Empty list when no
+        # veto was needed/found. Also shipped in hybrid_heads_manifest for the
+        # runtime to enforce on the deployed picker.
+        "knob_vetoes": knob_vetoes,
         "per_cell": per_cell,
         "mlp": mlp_health,
         "feature_bounds": feature_bounds,
@@ -3500,6 +3798,12 @@ def main():
             "categorical_axes": list(CATEGORICAL_AXES),
             "scalar_axes": list(SCALAR_AXES),
             "output_layout": output_layout,
+            # Feature-gated knob-veto safety bounds the runtime must enforce on
+            # the deployed single-encode picker: for each rule, when
+            # feat[`feat`] `op` `threshold` holds for the image, forbid every
+            # cell whose `axis` == `value`. Derived on TRAIN, validated to bound
+            # the WORST_ROW overhead. Empty list = no veto.
+            "knob_vetoes": knob_vetoes,
             "scalar_sentinels": sentinels_for_manifest,
             # Back-compat alias for runtime code that still reads the
             # old key. New code should use scalar_sentinels["lambda"].
