@@ -85,6 +85,16 @@ use crate::metadata::Metadata;
 /// [`Model::knob_vetoes`](crate::Model::knob_vetoes).
 pub const KNOB_VETOES_KEY: &str = "zenpicker.knob_vetoes";
 
+/// Sentinel `feat_idx` marking a veto that gates on the caller's **target zq**
+/// (the quality target) rather than an analyzed image feature — the `__zq__`
+/// pseudo-feature the trainer derives for quality-conditioned catastrophe
+/// bounds. It is `u16::MAX`, out of range for any real feature vector, so the
+/// plain [`apply_knob_vetoes`] masking pass *skips* it (it can't see target_zq);
+/// the picker-safety composition ([`crate::resolve_pre_argmin`]) recognizes the
+/// sentinel and applies it against the `target_zq` it already holds. MUST match
+/// `bake_picker.ZQ_VETO_SENTINEL`.
+pub(crate) const ZQ_VETO_SENTINEL: u16 = 0xFFFF;
+
 /// Comparison direction for a knob veto's feature gate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]

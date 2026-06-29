@@ -87,7 +87,7 @@
 //! # }
 //! ```
 
-use crate::knob_veto::{KnobVeto, apply_knob_vetoes};
+use crate::knob_veto::{KnobVeto, VetoOp, ZQ_VETO_SENTINEL, apply_knob_vetoes};
 use crate::unachievable_zone::{UnachievableZones, ZoneFallback};
 
 /// Outcome of the pre-argmin safety pipeline (steps 1-2).
@@ -134,7 +134,26 @@ pub fn resolve_pre_argmin(
         return PreArgminDecision::ZoneFallback(fb);
     }
     // Step 2: feature-gated knob vetoes mask the catastrophic-tail cells.
+    // (apply_knob_vetoes skips `__zq__` sentinel vetoes — feat_idx out of range.)
     apply_knob_vetoes(features, vetoes, allowed);
+    // Step 2b: `__zq__` vetoes gate on the caller's target quality (the sentinel
+    // feat_idx), which the feature-indexed pass above can't see. Apply them here
+    // using `target_zq`. NaN-safe: a non-finite target fires neither comparison.
+    for v in vetoes {
+        if v.feat_idx == ZQ_VETO_SENTINEL {
+            let fires = match v.op {
+                VetoOp::LessThan => target_zq < v.threshold,
+                VetoOp::GreaterThan => target_zq > v.threshold,
+            };
+            if fires {
+                for &c in v.cells {
+                    if let Some(slot) = allowed.get_mut(c as usize) {
+                        *slot = false;
+                    }
+                }
+            }
+        }
+    }
     PreArgminDecision::Argmin
 }
 
@@ -190,6 +209,33 @@ mod tests {
         let d = resolve_pre_argmin(&[123.0], 99.0, &zones, &[], &mut allowed);
         assert_eq!(d, PreArgminDecision::Argmin);
         assert_eq!(allowed, [true, true]);
+    }
+
+    #[test]
+    fn zq_sentinel_veto_gates_on_target_quality() {
+        // `__zq__` veto (sentinel feat_idx): forbid cell 0 when target_zq > 62.5.
+        // The plain feature pass can't see target_zq; resolve_pre_argmin applies it.
+        let zones = UnachievableZones::default();
+        let veto = KnobVeto {
+            feat_idx: ZQ_VETO_SENTINEL,
+            op: VetoOp::GreaterThan,
+            threshold: 62.5,
+            cells: &[0],
+        };
+        // target 70 > 62.5 → fires → cell 0 denied.
+        let mut a = [true, true, true];
+        let d = resolve_pre_argmin(&[1.0], 70.0, &zones, &[veto], &mut a);
+        assert_eq!(d, PreArgminDecision::Argmin);
+        assert_eq!(a, [false, true, true]);
+        // target 50 < 62.5 → does not fire.
+        let mut a2 = [true, true, true];
+        resolve_pre_argmin(&[1.0], 50.0, &zones, &[veto], &mut a2);
+        assert_eq!(a2, [true, true, true]);
+        // The feature-indexed pass alone (apply_knob_vetoes) must SKIP the
+        // sentinel (out of range) — features has no index 0xFFFF.
+        let mut a3 = [true, true, true];
+        crate::apply_knob_vetoes(&[1.0], &[veto], &mut a3);
+        assert_eq!(a3, [true, true, true]);
     }
 
     #[test]

@@ -296,6 +296,16 @@ def encode_output_bounds(model: dict) -> bytes:
 # `op` wire codes mirror zenpredict::VetoOp (0=LessThan/"<", 1=GreaterThan/">").
 _VETO_OP_CODES = {"<": 0, ">": 1}
 
+# A knob veto whose `feat` is the `__zq__` pseudo-feature gates on the TARGET zq
+# (the caller's quality target), not an analyzed image feature. It is encoded
+# with this sentinel feat_idx; the runtime (zenpredict picker_safety) recognizes
+# the sentinel and compares the target_zq it already holds. Out-of-range for any
+# real feature vector, so the plain `apply_knob_vetoes` masking pass skips it
+# (it's the composition layer that applies it). MUST match
+# zenpredict::ZQ_VETO_SENTINEL.
+ZQ_VETO_SENTINEL = 0xFFFF
+ZQ_VETO_FEAT_NAME = "__zq__"
+
 
 def resolve_knob_vetoes(model: dict) -> list[dict]:
     """Resolve the human-readable `hybrid_heads_manifest.knob_vetoes` rules
@@ -342,8 +352,15 @@ def resolve_knob_vetoes(model: dict) -> list[dict]:
         feat = r["feat"]
         op = r["op"]
         threshold = float(r["threshold"])
-        if feat not in fidx:
+        # The `__zq__` pseudo-feature gates on the caller's target zq, not a
+        # feat_cols feature — encode it with the sentinel feat_idx (the runtime
+        # composition compares target_zq).
+        if feat == ZQ_VETO_FEAT_NAME:
+            feat_idx = ZQ_VETO_SENTINEL
+        elif feat not in fidx:
             raise SystemExit(f"knob_veto feat {feat!r} not found in feat_cols")
+        else:
+            feat_idx = fidx[feat]
         if op not in _VETO_OP_CODES:
             raise SystemExit(f"knob_veto op {op!r} not in {sorted(_VETO_OP_CODES)}")
         # Cell ids carrying `axis == value`. `cell['id']` is the picker cell
@@ -358,7 +375,7 @@ def resolve_knob_vetoes(model: dict) -> list[dict]:
             "axis": axis,
             "value": value,
             "feat": feat,
-            "feat_idx": fidx[feat],
+            "feat_idx": feat_idx,
             "op": op,
             "op_code": _VETO_OP_CODES[op],
             "threshold": threshold,
