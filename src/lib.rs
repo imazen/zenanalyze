@@ -496,12 +496,25 @@ pub fn analyze_features(
             None
         };
 
+    // Experimental full-budget extraction (cfg `full-budgets`): const-folds to
+    // MAX sampling so chroma/percentile features see every pixel. Off by
+    // default → byte-identical to the crate-invariant DEFAULT budget.
+    let _pixel_budget = if cfg!(feature = "full-budgets") {
+        usize::MAX
+    } else {
+        feature::DEFAULT_PIXEL_BUDGET
+    };
+    let _hf_max_blocks = if cfg!(feature = "full-budgets") {
+        4096
+    } else {
+        feature::DEFAULT_HF_MAX_BLOCKS
+    };
     macro_rules! dispatch {
         ($pal:literal, $t2:literal, $t3:literal, $a:literal) => {{
             let (raw, geometry) = analyze_specialized_raw::<$pal, $t2, $t3, $a>(
                 slice,
-                feature::DEFAULT_PIXEL_BUDGET,
-                feature::DEFAULT_HF_MAX_BLOCKS,
+                _pixel_budget,
+                _hf_max_blocks,
                 palette_full_required,
                 palette_wants_grayscale,
                 tier1_wants_laplacian,

@@ -388,11 +388,20 @@ SCALAR_DISPLAY_RANGES: dict = {
 # metric the band makes the overhead look WORSE (jpeg δ=3: K=1 9.34%→9.98%).
 # AND — even complete — the band only helps ON-frontier quality-overshoot tails;
 # the multi-cell tail (jpeg/webp/avif) is OFF-frontier SUBSAMPLING mis-picks
-# (wrong 420/444 at the same quality), which no RD metric forgives. That tail
-# needs subsampling DISCRIMINATION (chroma features + higher sampling budget) and
-# K-verify, not this band. Kept as a default-off scaffold for the p90/p50 dial +
+# (wrong 420/444 at the same quality), which no RD metric forgives. (Full-budget
+# chroma re-extraction tested 2026-06-29 too: medium chroma features moved 0.0-
+# 0.1% — sampling is NOT the bottleneck; the chroma features are precise but not
+# discriminative enough.) Kept as a default-off scaffold for the p90/p50 dial +
 # on-frontier cases; see benchmarks/picker_k1_cross_codec_2026-06-29.md.
 REACH_UNDERSHOOT: float = 0.0
+
+# K-verify: how many top-predicted cells the DEPLOYED codec encodes + keeps the
+# best of (by actual bytes). 1 = single-encode K=1 (the default; most codecs).
+# A codec that can afford 2-3 encodes (e.g. zenjpeg) sets VERIFY_K > 1 — the
+# gate then evaluates the picker as best-of-top-K, matching deployment, so the
+# mean/p99/worst reflect what the codec actually ships. Set via --verify-k or a
+# codec config's VERIFY_K. Read inside evaluate_argmin_per_row.
+VERIFY_K: int = 1
 
 # Quality-metric column on the pareto TSV that the picker is trained
 # against. Defaults to "zensim" for back-compat with existing zenjpeg
@@ -474,7 +483,7 @@ def load_codec_config(name: str, drop_features=None):
     global PARETO, FEATURES, OUT_LOG, OUT_JSON
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
-    global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN, REACH_UNDERSHOOT
+    global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN, REACH_UNDERSHOOT, VERIFY_K
     global FEATURE_TRANSFORMS, FEATURE_TRANSFORM_PARAMS, OUTPUT_SPECS, SPARSE_OVERRIDES
     global ANALYSIS_PROVENANCE
     mod = importlib.import_module(name)
@@ -539,6 +548,10 @@ def load_codec_config(name: str, drop_features=None):
     # variant; absent / 0 = the strict p90 quality-safe default.
     if hasattr(mod, "REACH_UNDERSHOOT"):
         REACH_UNDERSHOOT = float(mod.REACH_UNDERSHOOT)
+    # Optional K-verify (--verify-k in main overrides). A codec config that can
+    # afford 2-3 encodes sets VERIFY_K > 1 so the gate evaluates best-of-top-K.
+    if hasattr(mod, "VERIFY_K"):
+        VERIFY_K = int(mod.VERIFY_K)
     # Optional — zenanalyze-api reuse-key provenance: which zenanalyze version +
     # AnalysisQuery config extracted this codec's features. Recorded into the
     # baked model so it can reuse a shared feature Offer. Undeclared -> no stamps
@@ -1760,9 +1773,19 @@ def evaluate_argmin_per_row(pred_bytes_log, actual_bytes_log, reach, meta, mask,
             m_pick = m & ~veto[i]
             # fall back to the un-vetoed reachable set if the veto strands the row
             pb_pick = np.where(m_pick, pb, np.inf) if np.any(m_pick) else pb
+        else:
+            pb_pick = pb
+        if VERIFY_K <= 1:
             p = int(np.argmin(pb_pick))
         else:
-            p = int(np.argmin(pb))
+            # K-verify (VERIFY_K > 1): the deployed codec encodes the top-VERIFY_K
+            # cheapest-PREDICTED reachable cells and keeps the best by ACTUAL
+            # bytes. `p == a` iff the oracle is among the verified top-K, so the
+            # overhead + argmin_acc reflect the codec's real K-encode behavior
+            # (not the single-pick K=1). Predicted ties broken stably.
+            order = np.argsort(pb_pick, kind="stable")
+            topk = [int(c) for c in order if np.isfinite(pb_pick[c])][:VERIFY_K]
+            p = min(topk, key=lambda c: ab[c]) if topk else int(np.argmin(pb_pick))
         out.append({
             "image": meta[i][0],
             "size_class": meta[i][1],
@@ -2982,6 +3005,16 @@ def main():
         "config's REACH_UNDERSHOOT when given.",
     )
     parser.add_argument(
+        "--verify-k",
+        type=int,
+        default=None,
+        help="K-verify: evaluate the picker as best-of-top-K (the codec encodes "
+        "the K cheapest-predicted reachable cells, keeps the best by actual "
+        "bytes). 1 = single-encode K=1 (default). Set 2-3 for codecs that can "
+        "afford a few encodes (e.g. zenjpeg). The safety gate then reflects the "
+        "deployed K. Overrides a codec config's VERIFY_K when given.",
+    )
+    parser.add_argument(
         "--metric-column",
         default=None,
         help="Override codec config's METRIC_COLUMN. Pareto-TSV column "
@@ -3208,10 +3241,18 @@ def main():
     )
 
     # CLI overrides — take precedence over codec config defaults.
-    global METRIC_COLUMN, METRIC_DIRECTION, PARETO, FEATURES, REACH_UNDERSHOOT
+    global METRIC_COLUMN, METRIC_DIRECTION, PARETO, FEATURES, REACH_UNDERSHOOT, VERIFY_K
     if args.reach_undershoot is not None:
         REACH_UNDERSHOOT = float(args.reach_undershoot)
         sys.stderr.write(f"  CLI override: REACH_UNDERSHOOT={REACH_UNDERSHOOT}\n")
+    if args.verify_k is not None:
+        VERIFY_K = int(args.verify_k)
+        sys.stderr.write(f"  CLI override: VERIFY_K={VERIFY_K}\n")
+    if VERIFY_K > 1:
+        sys.stderr.write(
+            f"  K-verify active: gate evaluates best-of-top-{VERIFY_K} (codec "
+            f"encodes {VERIFY_K} cheapest-predicted cells, keeps the best).\n"
+        )
     if REACH_UNDERSHOOT > 0:
         sys.stderr.write(
             f"  p50 RD-hugging band active: reach allows up to "
@@ -4064,6 +4105,11 @@ def main():
             "cells": cells,
             "categorical_axes": list(CATEGORICAL_AXES),
             "scalar_axes": list(SCALAR_AXES),
+            # K-verify: the codec should encode the top-`verify_k` cheapest-
+            # predicted reachable cells and keep the best by actual bytes. 1 =
+            # single-encode (most codecs). The safety report's overhead/p99/worst
+            # were evaluated at this K, so the deployment must honor it.
+            "verify_k": int(VERIFY_K),
             "output_layout": output_layout,
             # Feature-gated knob-veto safety bounds the runtime must enforce on
             # the deployed single-encode picker: for each rule, when

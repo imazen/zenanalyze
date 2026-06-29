@@ -36,6 +36,14 @@ name = "zenanalyze"
 
 [features]
 default = []
+# Experimental: extract at FULL sampling budget (pixel_budget = usize::MAX,
+# hf_max_blocks = 4096) instead of DEFAULT_PIXEL_BUDGET = 500_000 stride sampling.
+# Changes feature VALUES (not the schema) — an experimental extraction variant to
+# eval whether full-budget chroma sharpens subsampling discrimination for the
+# multi-cell pickers (medium >500k px is the only stride-sampled size + worst at
+# sub). A model trained on full-budget features must be served them at inference.
+# Off by default; the public budget stays a crate invariant.
+full-budgets = []
 # Opt into the `zenanalyze-api` producer surface: `OwnedOffer::extract` runs one
 # analysis pass and lends a `zenanalyze_api::Offer` (the frozen, version-unifying
 # feature contract) so a dozen codecs on different zenanalyze versions can share
