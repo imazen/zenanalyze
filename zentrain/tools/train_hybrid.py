@@ -1931,8 +1931,21 @@ def derive_knob_vetoes(
 
     def metrics(rules):
         a = allowed_mask(rules)
-        pk = np.where(a, PB, np.inf).argmin(axis=1)
-        ov = (AB[np.arange(n_rows), pk] - oracle) / oracle * 100.0
+        pa = np.where(a, PB, np.inf)
+        if VERIFY_K <= 1:
+            pk = pa.argmin(axis=1)
+            achieved = AB[np.arange(n_rows), pk]
+        else:
+            # K-verify: best ACTUAL bytes among the K cheapest-PREDICTED allowed
+            # cells — the SAME best-of-top-K the deployed gate scores, so the
+            # deriver bounds the K-verify tail (not the K=1 tail it would
+            # otherwise chase past the verify pass).
+            k = min(VERIFY_K, pa.shape[1])
+            topk = np.argpartition(pa, k - 1, axis=1)[:, :k]
+            ab_top = np.take_along_axis(AB, topk, axis=1)
+            pa_top = np.take_along_axis(pa, topk, axis=1)
+            achieved = np.where(np.isfinite(pa_top), ab_top, np.inf).min(axis=1)
+        ov = (achieved - oracle) / oracle * 100.0
         return {
             "mean": float(ov.mean()),
             "mx": float(ov.max()),
