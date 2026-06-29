@@ -35,7 +35,12 @@ exclude = [
 name = "zenanalyze"
 
 [features]
-default = []
+# `experimental` is ON by default (see its note below). Gating useful features
+# OFF silently shrank `FeatureSet::SUPPORTED`, dropped the XYB chroma-loss pair
+# from picker training sets, and crippled 420-vs-444 discrimination. Default-on
+# stops that class of silent-feature-loss disaster from recurring; opt back out
+# with `default-features = false` only to pin an older schema.
+default = ["experimental"]
 # Experimental: extract at FULL sampling budget (pixel_budget = usize::MAX,
 # hf_max_blocks = 4096) instead of DEFAULT_PIXEL_BUDGET = 500_000 stride sampling.
 # Changes feature VALUES (not the schema) — an experimental extraction variant to
@@ -51,17 +56,17 @@ full-budgets = []
 # Making it default later is additive; the reverse would be breaking, so it
 # starts opt-in.
 api = ["dep:zenanalyze-api"]
-# Opt-in to features whose *structural definition* (not just numeric
-# scale) is not yet settled. As of 2026-06-13 this gate is narrow:
-# only `palette_density` (id 12, `#[deprecated]`, being retired) and
+# Features whose *structural definition* (not just numeric scale) is not
+# yet fully settled. **ON BY DEFAULT as of 2026-06-29** — keeping them off
+# silently shrank `FeatureSet::SUPPORTED`, so picker re-extractions dropped
 # the XYB color-loss pair `xyb444_color_loss` / `xyb_bquarter_chroma_loss`
-# (ids 138/139 — 138's definition was rebaked within the last month;
-# they share one compute module). Everything else that used to live
-# here was promoted to the default surface on 2026-06-13 (its
-# definition is pinned; redundancy/usefulness is a per-codec consumer
-# concern, surfaced via docs + the KEEP_FEATURES lint, not this gate).
-# Numeric drift on promoted features stays governed by the crate-level
-# threshold contract.
+# (ids 138/139) — the *direct* chroma-subsampling-cost signal — and the
+# webp/avif pickers couldn't discriminate 420-vs-444 (off-frontier RD tail).
+# Default-on means a useful feature can never be silently extracted-out again.
+# Also gates `palette_density` (id 12, `#[deprecated]`, being retired). The
+# definitions may still be rebaked; numeric drift stays governed by the
+# crate-level threshold contract. `default-features = false` opts out only if
+# you must pin an older schema.
 experimental = []
 # Opt-in to HDR / wide-gamut / depth features (10 features, ids
 # 32–39, 46, 47). Off by default — every default sweep corpus is
