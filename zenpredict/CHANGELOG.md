@@ -13,6 +13,26 @@
 
 ### Added
 
+- **Deploy side of the K=1 picker knob-veto safety bounds (default surface).**
+  A baked picker now enforces, at inference, the same feature-gated
+  per-(categorical-axis-value) vetoes the `train_hybrid` bake gate evaluated —
+  closing the gap where the rules were derived/validated but never applied at
+  deploy. New public items (no feature gate — same shape as the rest of the
+  picker selection kit):
+  - `KnobVeto<'a>` + `VetoOp` (`LessThan` / `GreaterThan`) — one rule = "when
+    `features[feat_idx] {op} threshold`, forbid these cells"; `cells` borrows the
+    metadata blob (zero-copy).
+  - `parse_knob_vetoes(&[u8]) -> Vec<KnobVeto>` — parser for the packed
+    `zenpicker.knob_vetoes` wire blob (`u8 n_vetoes`, then per veto `u16 feat_idx`
+    LE / `u8 op` / `f32 threshold` LE / `u8 n_cells` / `n_cells × u8 cell_id`).
+    `knob_vetoes_from_metadata(&Metadata)` / `Model::knob_vetoes()` read it from a
+    loaded bake (empty when the key is absent — backward-compatible).
+  - `apply_knob_vetoes(features, vetoes, allowed: &mut [bool])` — pre-argmin
+    masking pass composable with `AllowedMask`/`argmin_masked`; sets
+    `allowed[cell]=false` for each fired veto. Replicates the trainer's NaN→0.0
+    gate handling; the never-strand fallback stays the codec's to compose (doc'd).
+  - `KNOB_VETOES_KEY` (`"zenpicker.knob_vetoes"`).
+
 - **Default-surface picker selection kit: top-K query + runtime constraint
   masks (no feature gate).** Centralizes the masked top-`K` ranking and the
   perf/quality constraint masks on zenpredict's default API so per-codec

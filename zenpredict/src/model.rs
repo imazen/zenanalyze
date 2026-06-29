@@ -901,6 +901,21 @@ impl Model {
         Some(u64::from_le_bytes(arr))
     }
 
+    /// The feature-gated knob-veto safety rules embedded in the bake (the
+    /// [`KNOB_VETOES_KEY`](crate::KNOB_VETOES_KEY) metadata), or an empty
+    /// list on a bake that carried no vetoes / predates the feature.
+    ///
+    /// A picker enforces these as a pre-argmin masking pass via
+    /// [`apply_knob_vetoes`](crate::apply_knob_vetoes) so the deployed pick
+    /// honors the same vetoes the bake-time safety gate evaluated. The
+    /// returned [`KnobVeto`](crate::KnobVeto)s borrow the model's bytes.
+    pub fn knob_vetoes(&self) -> Result<alloc::vec::Vec<crate::KnobVeto<'_>>, PredictError> {
+        // `metadata()` borrows `self.bytes` for `&self`'s lifetime, so the
+        // entry value (and the KnobVeto cell slices into it) outlive the
+        // temporary `Metadata` dropped at the end of this call.
+        crate::knob_vetoes_from_metadata(&self.metadata())
+    }
+
     /// Per-output [`OutputSpec`] table.
     pub fn output_specs(&self) -> &[OutputSpec] {
         if self.header.output_specs.is_empty() {

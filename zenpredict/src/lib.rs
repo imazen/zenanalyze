@@ -131,6 +131,7 @@ mod bounds;
 mod error;
 mod feature_transform;
 mod inference;
+mod knob_veto;
 pub mod limits;
 mod metadata;
 mod model;
@@ -163,6 +164,13 @@ pub use bounds::{OutputBound, output_first_out_of_distribution};
 pub use error::PredictError;
 pub use feature_transform::{FeatureTransform, apply_feature_transforms};
 pub use inference::f16_bits_to_f32;
+// Feature-gated knob-veto safety bounds: on the default surface alongside
+// the rest of the picker selection kit (argmin/AllowedMask/mask_at_*),
+// since `apply_knob_vetoes` is the same shape — a pre-argmin masking pass.
+pub use knob_veto::{
+    KNOB_VETOES_KEY, KnobVeto, VetoOp, apply_knob_vetoes, knob_vetoes_from_metadata,
+    parse_knob_vetoes,
+};
 pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,

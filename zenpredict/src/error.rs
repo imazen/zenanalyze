@@ -89,6 +89,10 @@ pub enum PredictError {
     /// or call the expander-aware Predictor entry point that routes
     /// automatically.
     UnexpectedExpanderInScalarPipeline { feature_index: usize },
+    /// A `zenpicker.knob_vetoes` record carried an op byte that wasn't
+    /// `0` (LessThan) or `1` (GreaterThan). Reject rather than silently
+    /// mis-apply a safety bound.
+    UnknownVetoOp { byte: u8 },
 }
 
 impl fmt::Display for PredictError {
@@ -188,6 +192,10 @@ impl fmt::Display for PredictError {
                  expander variant at feature index {feature_index} \
                  (use apply_feature_pipeline_expanding or the auto-routing \
                  Predictor entry point)"
+            ),
+            Self::UnknownVetoOp { byte } => write!(
+                f,
+                "zenpredict: knob_vetoes op byte {byte:#x} not recognized (expected 0=< or 1=>)"
             ),
         }
     }

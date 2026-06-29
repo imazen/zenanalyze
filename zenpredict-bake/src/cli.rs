@@ -222,6 +222,36 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
     let md = model.metadata();
     out.insert("metadata".into(), metadata_to_json(&md));
 
+    // Parse the embedded knob-veto safety rules through the real runtime
+    // API (Model::knob_vetoes -> parse_knob_vetoes), surfacing the typed
+    // rules so the deploy-side blob is human-inspectable. Absent / empty on
+    // a bake that carried no vetoes.
+    match model.knob_vetoes() {
+        Ok(vetoes) if !vetoes.is_empty() => {
+            let rules: Vec<Value> = vetoes
+                .iter()
+                .map(|v| {
+                    let op = match v.op {
+                        zenpredict::VetoOp::LessThan => "<",
+                        zenpredict::VetoOp::GreaterThan => ">",
+                        _ => "?",
+                    };
+                    json!({
+                        "feat_idx": v.feat_idx,
+                        "op": op,
+                        "threshold": v.threshold,
+                        "cells": v.cells,
+                    })
+                })
+                .collect();
+            out.insert("knob_vetoes".into(), json!(rules));
+        }
+        Ok(_) => {}
+        Err(e) => {
+            out.insert("knob_vetoes_error".into(), json!(e.to_string()));
+        }
+    }
+
     let serialized = serde_json::to_string_pretty(&Value::Object(out)).unwrap();
     println!("{serialized}");
     ExitCode::SUCCESS

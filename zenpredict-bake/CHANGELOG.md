@@ -19,6 +19,11 @@
 
 ### Added
 
+- **`zenpredict inspect` surfaces the embedded knob-veto safety rules** — when a
+  bake carries a `zenpicker.knob_vetoes` blob, the inspect JSON now includes a
+  `knob_vetoes` array (`feat_idx`, `op`, `threshold`, `cells`) parsed through the
+  real runtime (`Model::knob_vetoes`), so the deploy-side safety bounds are
+  human-inspectable. Absent on bakes without vetoes.
 - **`zenpredict repack` writes the reuse-key stamps** — new
   `--analyzer-version <ver>` / `--feature-defs-version <u32>` / `--config-hash <u64>`
   flags inject (override semantics) the three `zenanalyze-api` metadata keys into

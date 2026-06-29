@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bake_picker.py` propagates the K=1 picker knob vetoes into the bake (phase 2
+  deploy wiring).** Reads `hybrid_heads_manifest.knob_vetoes` (the feature-gated
+  per-(categorical-axis-value) safety rules `train_hybrid` derives), resolves each
+  rule to deployable form — `feat` name → `feat_cols` index, `axis=value` → the
+  cell ids carrying that value (decomposed from `hybrid_heads_manifest.cells`) —
+  and emits a packed `zenpicker.knob_vetoes` metadata entry into the `.bin` plus
+  the resolved rules into the sibling `.manifest.json`. The runtime
+  (`zenpredict::apply_knob_vetoes`) then enforces exactly the vetoes the bake gate
+  evaluated. Fails loud on wire-width overflow (`>255` vetoes/cells, `>65535`
+  feat_cols). Backward-compatible: no `knob_vetoes` → no metadata entry / manifest
+  field, bake byte-identical to before.
+
 ### Documentation
 
 - **README overhaul across the three published library crates** (`zenanalyze`,

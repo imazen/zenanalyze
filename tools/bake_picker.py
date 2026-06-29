@@ -292,6 +292,125 @@ def encode_output_bounds(model: dict) -> bytes:
     return bytes(out)
 
 
+# Feature-gated knob-veto safety bounds (phase 2 deploy side).
+# `op` wire codes mirror zenpredict::VetoOp (0=LessThan/"<", 1=GreaterThan/">").
+_VETO_OP_CODES = {"<": 0, ">": 1}
+
+
+def resolve_knob_vetoes(model: dict) -> list[dict]:
+    """Resolve the human-readable `hybrid_heads_manifest.knob_vetoes` rules
+    (`{axis, value, feat, op, threshold}`, derived by train_hybrid) into the
+    deployable form the runtime needs:
+
+      - `feat` name  -> index into `feat_cols` (the analyzed-feature order,
+        which occupies the leading input slots — same index space the
+        runtime's `apply_knob_vetoes` uses).
+      - `axis == value` -> the list of picker cell ids carrying that value,
+        decomposed from `hybrid_heads_manifest.cells` exactly as
+        train_hybrid built them (each cell dict carries one entry per
+        CATEGORICAL_AXES axis with its value, plus its `id`).
+
+    Returns `list[{axis, value, feat, feat_idx, op, op_code, threshold,
+    cells}]`. Empty list when no `knob_vetoes` are present — so the caller
+    writes no metadata entry / manifest field (backward-compatible: a bake
+    that never carried vetoes is byte-identical).
+    """
+    hh = model.get("hybrid_heads_manifest") or {}
+    vetoes = hh.get("knob_vetoes")
+    if not isinstance(vetoes, list) or not vetoes:
+        return []
+
+    feat_cols = model.get("feat_cols")
+    if not isinstance(feat_cols, list) or not feat_cols:
+        raise SystemExit(
+            "knob_vetoes present but model has no `feat_cols` to resolve "
+            "feature indices against"
+        )
+    fidx = {c: i for i, c in enumerate(feat_cols)}
+
+    cells = hh.get("cells")
+    if not isinstance(cells, list) or not cells:
+        raise SystemExit(
+            "knob_vetoes present but `hybrid_heads_manifest.cells` is missing "
+            "— cannot resolve axis=value -> cell ids"
+        )
+
+    resolved: list[dict] = []
+    for r in vetoes:
+        axis = r["axis"]
+        value = r["value"]
+        feat = r["feat"]
+        op = r["op"]
+        threshold = float(r["threshold"])
+        if feat not in fidx:
+            raise SystemExit(f"knob_veto feat {feat!r} not found in feat_cols")
+        if op not in _VETO_OP_CODES:
+            raise SystemExit(f"knob_veto op {op!r} not in {sorted(_VETO_OP_CODES)}")
+        # Cell ids carrying `axis == value`. `cell['id']` is the picker cell
+        # index (== position in the stable-sorted cells list); fall back to
+        # position only if a cell dict somehow omits `id`.
+        cell_ids = [
+            int(c.get("id", pos))
+            for pos, c in enumerate(cells)
+            if c.get(axis) == value
+        ]
+        resolved.append({
+            "axis": axis,
+            "value": value,
+            "feat": feat,
+            "feat_idx": fidx[feat],
+            "op": op,
+            "op_code": _VETO_OP_CODES[op],
+            "threshold": threshold,
+            "cells": cell_ids,
+        })
+    return resolved
+
+
+def encode_knob_vetoes(model: dict) -> bytes:
+    """Pack the resolved knob vetoes into the `zenpicker.knob_vetoes` wire
+    blob the runtime parser (`zenpredict::parse_knob_vetoes`) consumes:
+
+      [1] n_vetoes: u8
+      per veto: [2] feat_idx u16 LE, [1] op u8, [4] threshold f32 LE,
+                [1] n_cells u8, [n_cells] cell_id u8 each
+
+    Returns empty bytes when there are no vetoes. Fails loud (rather than
+    silently truncating a safety bound) if any count overflows its wire
+    width — widen the format here AND in zenpredict if a picker ever needs
+    > 255 vetoes/cells or > 65535 feat_cols.
+    """
+    resolved = resolve_knob_vetoes(model)
+    if not resolved:
+        return b""
+    if len(resolved) > 255:
+        raise SystemExit(
+            f"knob_vetoes: {len(resolved)} rules exceeds the u8 wire cap (255)"
+        )
+    out = bytearray()
+    out.append(len(resolved))
+    for r in resolved:
+        feat_idx = r["feat_idx"]
+        if not (0 <= feat_idx <= 0xFFFF):
+            raise SystemExit(f"knob_veto feat_idx {feat_idx} exceeds u16 wire width")
+        cells = r["cells"]
+        if len(cells) > 255:
+            raise SystemExit(
+                f"knob_veto {r['axis']}={r['value']} has {len(cells)} cells, "
+                f"exceeds the u8 wire cap (255)"
+            )
+        for c in cells:
+            if not (0 <= c <= 255):
+                raise SystemExit(
+                    f"knob_veto cell id {c} exceeds the u8 wire cap (255)"
+                )
+        # <H B f = u16 LE, u8, f32 LE (no padding under '<').
+        out += struct.pack("<HBf", feat_idx, r["op_code"], r["threshold"])
+        out.append(len(cells))
+        out += bytes(cells)
+    return bytes(out)
+
+
 def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     """Build the metadata blob entries from the training JSON.
 
@@ -571,6 +690,20 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
                 "type": "bytes",
                 "hex": packed.hex(),
             })
+
+    # knob_vetoes — feature-gated per-(categorical-axis-value) safety
+    # bounds the runtime enforces on the deployed single-encode picker
+    # (zenpicker.* namespace; the rule constrains which picker cells are
+    # reachable). Packed wire blob → zenpredict::parse_knob_vetoes /
+    # Model::knob_vetoes; applied pre-argmin via apply_knob_vetoes. Omitted
+    # entirely when the bake carried no vetoes (backward-compatible).
+    knob_veto_bytes = encode_knob_vetoes(model)
+    if knob_veto_bytes:
+        entries.append({
+            "key": "zenpicker.knob_vetoes",
+            "type": "bytes",
+            "hex": knob_veto_bytes.hex(),
+        })
 
     # reach_safety — packed f32 matrix + u8 zq targets.
     reach = model.get("reach_safety")
@@ -904,6 +1037,14 @@ def emit_legacy_manifest(model: dict, out_path: Path, manifest_path: Path | None
         manifest["configs"] = {str(k): v for k, v in cfg_names.items()}
     if "hybrid_heads_manifest" in model:
         manifest["hybrid_heads"] = model["hybrid_heads_manifest"]
+    # Knob vetoes in deployable form (feat name + resolved feat_idx, axis=value
+    # + resolved cell ids, op + op_code, threshold) — both the human-readable
+    # rule and what the .bin's zenpicker.knob_vetoes blob encodes, so the
+    # manifest is a faithful side-record of the embedded safety bounds. Omitted
+    # when the bake carried no vetoes.
+    resolved_vetoes = resolve_knob_vetoes(model)
+    if resolved_vetoes:
+        manifest["knob_vetoes"] = resolved_vetoes
     for key in ("safety_profile", "training_objective", "reach_safety"):
         if key in model:
             manifest[key] = model[key]
