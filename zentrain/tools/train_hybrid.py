@@ -3877,6 +3877,16 @@ def main():
     # unachievable-zone descriptor below uses the SAME min_train_rows_per_size_zq
     # the DATA_STARVED_SIZE gate later exempts on (declared-zone ≡ exempted-tail).
     thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)
+    # Verify-codec gate (VERIFY_K > 1, user-approved 2026-06-29): a K-verify codec
+    # encodes K candidates and keeps the best, so its worst-of-K tolerance is a
+    # different regime than the K=1 tightening (worst<100 / p99<40). Loosen the
+    # single-row + per-bin p99 ceilings for verify codecs; K=1 codecs keep the
+    # tightened bars. Applied BEFORE the codec's explicit SAFETY_THRESHOLDS so a
+    # codec can still override either way.
+    if VERIFY_K > 1:
+        thresholds["max_single_row_overhead_pct"] = 160.0
+        thresholds["max_per_zq_p99_overhead_pct"] = 42.0
+        thresholds["max_per_size_p99_overhead_pct"] = 42.0
     _codec_thresholds = getattr(
         sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
         "SAFETY_THRESHOLDS",
