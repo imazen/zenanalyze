@@ -136,6 +136,7 @@ pub mod limits;
 mod metadata;
 mod model;
 pub mod output_spec;
+mod picker_safety;
 mod predictor;
 mod unachievable_zone;
 #[cfg(feature = "advanced")]
@@ -181,6 +182,12 @@ pub use unachievable_zone::{
     UNACHIEVABLE_ZONES_KEY, UnachievableZone, UnachievableZones, ZoneFallback,
     parse_unachievable_zones, unachievable_zones_from_metadata,
 };
+// Picker safety pipeline: the canonical composition of the pre-argmin safety
+// overlays (zone resolve → knob vetoes) into one call, so every codec enforces
+// the bake-validated bounds in the same order. The post-encode rescue step
+// lives in `rescue` (advanced); `picker_safety`'s module docs document the
+// full 4-step pipeline tying them together.
+pub use picker_safety::{PreArgminDecision, resolve_pre_argmin};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,

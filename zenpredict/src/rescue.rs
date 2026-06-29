@@ -27,6 +27,14 @@
 //!
 //! The two-shot bound is enforced by the codec — this module does
 //! not loop.
+//!
+//! Rescue is **step 4** of the picker safety pipeline — see
+//! [`crate::picker_safety`] for the full canonical order (unachievable-zone
+//! resolve → knob vetoes → masked argmin → rescue) and how the pre-argmin
+//! overlays compose. Note the two fallback paths are distinct: a zone fallback
+//! (step 1) fires when the target is *physically unreachable* for the size
+//! class (deterministic, pre-encode); [`RescueStrategy::KnownGoodFallback`]
+//! fires when the picker *was consulted and undershot* (post-encode).
 
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
