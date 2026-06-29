@@ -916,6 +916,20 @@ impl Model {
         crate::knob_vetoes_from_metadata(&self.metadata())
     }
 
+    /// The size-discriminated unachievable-zone table embedded in the bake
+    /// (the [`UNACHIEVABLE_ZONES_KEY`](crate::UNACHIEVABLE_ZONES_KEY)
+    /// metadata), or an empty table on a bake that declared none / predates
+    /// the feature.
+    ///
+    /// A picker consults this **before** its argmin via
+    /// [`UnachievableZones::resolve`](crate::UnachievableZones::resolve):
+    /// when `target_zq` exceeds the achievable ceiling for the image's size
+    /// class the codec encodes the declared fallback knobset directly instead
+    /// of attempting an unreachable pick.
+    pub fn unachievable_zones(&self) -> Result<crate::UnachievableZones, PredictError> {
+        crate::unachievable_zones_from_metadata(&self.metadata())
+    }
+
     /// Per-output [`OutputSpec`] table.
     pub fn output_specs(&self) -> &[OutputSpec] {
         if self.header.output_specs.is_empty() {

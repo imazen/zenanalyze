@@ -137,6 +137,7 @@ mod metadata;
 mod model;
 pub mod output_spec;
 mod predictor;
+mod unachievable_zone;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]
@@ -172,6 +173,14 @@ pub use knob_veto::{
     parse_knob_vetoes,
 };
 pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
+// Size-discriminated unachievable-zone fallbacks: same default-surface
+// placement as `knob_veto` — both are pre-argmin picker-selection overlays
+// the codec composes around its argmin (here a `resolve`-then-skip-argmin
+// short-circuit; there a masking pass).
+pub use unachievable_zone::{
+    UNACHIEVABLE_ZONES_KEY, UnachievableZone, UnachievableZones, ZoneFallback,
+    parse_unachievable_zones, unachievable_zones_from_metadata,
+};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
