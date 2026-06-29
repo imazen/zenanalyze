@@ -1768,7 +1768,11 @@ def derive_knob_vetoes(
     feats,
     feat_cols,
     all_mask,
-    cat_overhead=0.50,
+    # Candidate-generation threshold: a (axis,value) is a veto candidate when
+    # its best-cell overhead exceeds this. 0.40 aligns with the tightened
+    # per-zq/size p99<40 gate (was 0.50) so the deriver can see + bound the
+    # 40-100% tail that the gate rejects.
+    cat_overhead=0.40,
     mean_budget_pp=0.40,
 ):
     """Greedily derive feature-gated per-(categorical-axis-value) safety vetoes
@@ -1873,17 +1877,32 @@ def derive_knob_vetoes(
             "n200": int((ov > 200).sum()),
             "n150": int((ov > 150).sum()),
             "n100": int((ov > 100).sum()),
+            # n40 = rows over the tightened per-zq / per-size p99 gate (40%).
+            # The deriver must target THIS band — the gate binds on p99<40 and
+            # worst<100, not the old >200 catastrophe band — or it derives 0
+            # vetoes for a picker whose mean is fine but whose 40-100% tail
+            # fails the gate (the webp case, 2026-06-29).
+            "n40": int((ov > 40).sum()),
         }
 
-    # Weighted tail score: bound catastrophes first (>200), then the broad
-    # tail (>150, >100), then the absolute max. Greedily add the veto that most
-    # reduces it. Do NOT stop at train-pass (n200==0): the catastrophic worst
-    # row MOVES across splits (a qm-only veto cleared train@196% but left
-    # val@333% on a sub/chroma mis-set), so we minimize the WHOLE train tail to
-    # cover every catastrophe mode (sub/bd/qm → mode-completeness) and leave
-    # val/test margin. Terminates when no candidate helps within mean_budget_pp.
+    # Weighted tail score, ALIGNED TO THE TIGHTENED GATE (max_single_row<100 +
+    # per-zq/size p99<40). Bound the worst-row gate first (n200 catastrophes,
+    # then n100 = the hard worst<100 gate), then the p99-driving 40-100% band
+    # (n40), then the absolute max. Greedily add the veto that most reduces it.
+    # Do NOT stop at train-pass: the catastrophic worst row MOVES across splits
+    # (a qm-only veto cleared train@196% but left val@333% on a sub/chroma
+    # mis-set), so minimize the WHOLE train tail to cover every catastrophe
+    # mode and leave val/test margin. Terminates when no candidate helps within
+    # mean_budget_pp. (Pre-2026-06-29 this targeted only >100/150/200 and
+    # derived 0 vetoes for tail-only-failing pickers like webp, whose 40-100%
+    # band is exactly what the p99<40 gate rejects — n40 fixes that.)
     def tail_score(m):
-        return 1000.0 * m["n200"] + 30.0 * m["n150"] + float(m["n100"]) + 0.5 * m["mx"]
+        return (
+            1000.0 * m["n200"]
+            + 200.0 * m["n100"]
+            + 5.0 * m["n40"]
+            + 0.5 * m["mx"]
+        )
 
     base_m = metrics([])
     chosen = []
