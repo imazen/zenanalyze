@@ -1803,8 +1803,14 @@ def derive_knob_vetoes(
         return []
 
     axis_vals = _axis_value_arrays(cells, categorical_axes)
-    fidx = {c: i for i, c in enumerate(feat_cols)}
+    # Augment the veto candidate features with the quality target (zq): the
+    # surviving catastrophic mis-sets are quality-dependent (high-zq) and image-
+    # feature-only stumps cannot separate them. A "__zq__" veto gates on the
+    # target zq (which the deploy knows), e.g. "veto config X at zq>80".
+    veto_feat_cols = list(feat_cols) + ["__zq__"]
+    fidx = {c: i for i, c in enumerate(veto_feat_cols)}
     F = _veto_feature_matrix(meta_tr, feats, feat_cols)
+    F = np.hstack([F, np.array([[float(mr[2])] for mr in meta_tr], dtype=np.float64)])
 
     base = rch_tr & all_mask[None, :]
     AB = np.where(base, np.exp(bl_tr), np.inf)
@@ -1841,7 +1847,7 @@ def derive_knob_vetoes(
             rc = clf.tree_.value[2][0][1] / clf.tree_.value[2][0].sum()
             op = "<" if lc > rc else ">"
             cands.append(
-                {"axis": ax, "value": V, "feat": feat_cols[fi], "op": op, "threshold": thr}
+                {"axis": ax, "value": V, "feat": veto_feat_cols[fi], "op": op, "threshold": thr}
             )
 
     def fire(rule):
@@ -1927,14 +1933,21 @@ def build_veto_mask(vetoes, meta_rows, feats, feat_cols, cells, categorical_axes
     axis_vals = _axis_value_arrays(cells, categorical_axes)
     for i, mr in enumerate(meta_rows):
         fv = feats.get((mr[0], mr[1]))
-        if fv is None:
-            continue  # no features for this row -> no veto
-        fv = np.nan_to_num(np.asarray(fv, dtype=np.float64), nan=0.0)
+        if fv is not None:
+            fv = np.nan_to_num(np.asarray(fv, dtype=np.float64), nan=0.0)
         for r in vetoes:
-            col = fidx.get(r["feat"])
-            if col is None:
-                continue
-            val = fv[col]
+            if r["feat"] == "__zq__":
+                # quality-target veto: gate on the target zq (meta[2]), which
+                # the deploy knows. Covers the quality-dependent catastrophes
+                # that image-feature-only vetoes cannot separate.
+                val = float(mr[2])
+            else:
+                if fv is None:
+                    continue  # no features for this row -> no feature veto
+                col = fidx.get(r["feat"])
+                if col is None:
+                    continue
+                val = fv[col]
             fires = (val < r["threshold"]) if r["op"] == "<" else (val > r["threshold"])
             if fires:
                 veto[i] |= axis_vals[r["axis"]] == r["value"]
@@ -2099,9 +2112,9 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     # exact-match was never the deployed quantity. See CLEAN_PICKER_PROGRAM.md.
     min_argmin_acc=0.10,
     # Held-out mean overhead ceiling.
-    max_mean_overhead_pct=10.0,
+    max_mean_overhead_pct=5.0,
     # No single zq band may have a p99 overhead this bad.
-    max_per_zq_p99_overhead_pct=80.0,
+    max_per_zq_p99_overhead_pct=40.0,
     # No single image-size class may have a p99 overhead this bad.
     # Size invariance is a *safety property*: the picker must be
     # near-optimal at every (width, height), not just on average.
@@ -2109,7 +2122,7 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     # gates catch a tiny-class blowup that the global mean would
     # absorb. See SAFETY_PLANE.md → "Size invariance is a safety
     # property" and the size_invariance_probe.py post-bake gate.
-    max_per_size_p99_overhead_pct=80.0,
+    max_per_size_p99_overhead_pct=40.0,
     # Each (size_class, target_zq) training cell must have at least
     # this many rows. Below this, the teacher fits noise in a
     # corner of the size×quality grid the picker still has to serve
@@ -2120,7 +2133,7 @@ DEFAULT_SAFETY_THRESHOLDS = dict(
     min_train_rows_per_size_zq=50,
     # No single (image, size, zq) row may overshoot by more than
     # this. Catches catastrophic individual failures.
-    max_single_row_overhead_pct=200.0,
+    max_single_row_overhead_pct=100.0,
     # Each cell must have at least this many member configs in the
     # training data; below this the teacher fits noise.
     min_cell_member_configs=3,
