@@ -373,6 +373,27 @@ SCALAR_DISPLAY_RANGES: dict = {
     "lambda": (8.0, 25.0),
 }
 
+# Quality-tolerance reach band for the p50 "hug the RD curve, allow both-axis
+# error" objective. When > 0, a cell counts as reaching target zq if its
+# achieved quality is within REACH_UNDERSHOOT metric points BELOW the target
+# (higher-is-better) — letting the picker trade up to that much quality for a
+# cheaper RD-frontier point. 0.0 = strict quality-safe (p90 / historical
+# default). Set per-run via --reach-undershoot or a codec config's
+# REACH_UNDERSHOOT. Read inside the pareto reach construction.
+#
+# STATUS (measured 2026-06-29): this is the reach-band HALF of the p50 objective.
+# A complete p50 also needs an RD-DISTANCE overhead metric (pick vs the per-image
+# frontier AT THE ACHIEVED quality) so the gate CREDITS byte-savings-via-quality-
+# drift instead of charging it against the now-cheaper band-oracle. Without that
+# metric the band makes the overhead look WORSE (jpeg δ=3: K=1 9.34%→9.98%).
+# AND — even complete — the band only helps ON-frontier quality-overshoot tails;
+# the multi-cell tail (jpeg/webp/avif) is OFF-frontier SUBSAMPLING mis-picks
+# (wrong 420/444 at the same quality), which no RD metric forgives. That tail
+# needs subsampling DISCRIMINATION (chroma features + higher sampling budget) and
+# K-verify, not this band. Kept as a default-off scaffold for the p90/p50 dial +
+# on-frontier cases; see benchmarks/picker_k1_cross_codec_2026-06-29.md.
+REACH_UNDERSHOOT: float = 0.0
+
 # Quality-metric column on the pareto TSV that the picker is trained
 # against. Defaults to "zensim" for back-compat with existing zenjpeg
 # bakes. Codec configs that target butteraugli, ssim2, dssim, etc.
@@ -453,7 +474,7 @@ def load_codec_config(name: str, drop_features=None):
     global PARETO, FEATURES, OUT_LOG, OUT_JSON
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
-    global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN
+    global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN, REACH_UNDERSHOOT
     global FEATURE_TRANSFORMS, FEATURE_TRANSFORM_PARAMS, OUTPUT_SPECS, SPARSE_OVERRIDES
     global ANALYSIS_PROVENANCE
     mod = importlib.import_module(name)
@@ -513,6 +534,11 @@ def load_codec_config(name: str, drop_features=None):
         METRIC_DIRECTION = d
     if hasattr(mod, "TIME_COLUMN"):
         TIME_COLUMN = str(mod.TIME_COLUMN)
+    # Optional p50 RD-hugging quality-tolerance band (--reach-undershoot in main
+    # overrides this). A codec config sets REACH_UNDERSHOOT > 0 for its p50
+    # variant; absent / 0 = the strict p90 quality-safe default.
+    if hasattr(mod, "REACH_UNDERSHOOT"):
+        REACH_UNDERSHOOT = float(mod.REACH_UNDERSHOOT)
     # Optional — zenanalyze-api reuse-key provenance: which zenanalyze version +
     # AnalysisQuery config extracted this codec's features. Recorded into the
     # baked model so it can reuse a shared feature Offer. Undeclared -> no stamps
@@ -1495,10 +1521,23 @@ def build_dataset(
             # Vectorized reach mask across the WHOLE key (sorted by
             # config), then within-budget mask AND'd in. Per-config
             # slices below see the right entries.
+            #
+            # Quality-tolerance reach band (p50 RD-hugging, "allow both-axis
+            # error"): relax the target by REACH_UNDERSHOOT metric points so the
+            # picker MAY undershoot quality by up to that much to land on a
+            # cheaper RD-frontier point — the oracle + the pick are then both
+            # measured over the band, so a near-frontier point at slightly-off
+            # quality is ~0 bytes-overhead instead of a fixed-quality "miss".
+            # REACH_UNDERSHOOT = 0 is the strict quality-safe path (p90 / the
+            # historical default). The band caps the quality error at
+            # REACH_UNDERSHOOT, so the "other axis" drift stays bounded.
+            _zq_reach = (
+                (zq - REACH_UNDERSHOOT) if higher_is_better else (zq + REACH_UNDERSHOOT)
+            )
             if higher_is_better:
-                reach_full = metric_sorted >= zq
+                reach_full = metric_sorted >= _zq_reach
             else:
-                reach_full = metric_sorted <= zq
+                reach_full = metric_sorted <= _zq_reach
             any_unfiltered_reach = bool(reach_full.any())
             if apply_budget and time_sorted is not None:
                 reach_after_budget = reach_full & (time_sorted <= budget_ms)
@@ -2932,6 +2971,17 @@ def main():
         "target_zq are excluded from the runtime mask. Default 0.99.",
     )
     parser.add_argument(
+        "--reach-undershoot",
+        type=float,
+        default=None,
+        help="Quality-tolerance reach band for the p50 'hug the RD curve, "
+        "allow both-axis error' objective: a cell reaches target zq if its "
+        "achieved quality is within this many metric points BELOW target, so "
+        "the picker may trade up to this much quality for a cheaper RD-frontier "
+        "point. 0 = strict quality-safe (p90, the default). Overrides a codec "
+        "config's REACH_UNDERSHOOT when given.",
+    )
+    parser.add_argument(
         "--metric-column",
         default=None,
         help="Override codec config's METRIC_COLUMN. Pareto-TSV column "
@@ -3158,7 +3208,16 @@ def main():
     )
 
     # CLI overrides — take precedence over codec config defaults.
-    global METRIC_COLUMN, METRIC_DIRECTION, PARETO, FEATURES
+    global METRIC_COLUMN, METRIC_DIRECTION, PARETO, FEATURES, REACH_UNDERSHOOT
+    if args.reach_undershoot is not None:
+        REACH_UNDERSHOOT = float(args.reach_undershoot)
+        sys.stderr.write(f"  CLI override: REACH_UNDERSHOOT={REACH_UNDERSHOOT}\n")
+    if REACH_UNDERSHOOT > 0:
+        sys.stderr.write(
+            f"  p50 RD-hugging band active: reach allows up to "
+            f"{REACH_UNDERSHOOT:g} metric-point quality undershoot to hug the "
+            f"RD curve (both-axis error bounded by the band).\n"
+        )
     if args.pareto is not None:
         PARETO = Path(args.pareto)
         sys.stderr.write(f"  CLI override: PARETO={PARETO}\n")
