@@ -411,6 +411,70 @@ def encode_knob_vetoes(model: dict) -> bytes:
     return bytes(out)
 
 
+def encode_unachievable_zones(model: dict) -> bytes:
+    """Pack `hybrid_heads_manifest.unachievable_zones` into the
+    `zenpicker.unachievable_zones` wire blob the runtime parser
+    (`zenpredict::parse_unachievable_zones`) consumes:
+
+      [2] pixels_feat_idx u16 LE   index of feat_pixel_count into feat_cols
+      [1] n_zones u8
+      per zone: [4] pixel_upper f32 LE, [4] ceiling_zq f32 LE,
+                [1] fallback_cell u8, [4] fallback_scalar f32 LE   (13 bytes)
+
+    Returns empty bytes when there are no zones (every grid target reachable
+    for every size). Fails loud (never silently drops a declared fallback) on
+    wire-width overflow or a missing feat_pixel_count — the size discriminant
+    the zones key on. `pixel_upper = inf` (largest class) and
+    `fallback_scalar = NaN` ("use predicted scalar") round-trip through IEEE
+    f32 to the runtime's `f32::INFINITY` / `is_nan()` sentinels.
+    """
+    hh = model.get("hybrid_heads_manifest") or {}
+    zones = hh.get("unachievable_zones")
+    if not zones:
+        return b""
+    feat_cols = model.get("feat_cols")
+    if not feat_cols:
+        raise SystemExit(
+            "unachievable_zones present but model has no `feat_cols` to "
+            "resolve the size discriminant (feat_pixel_count)"
+        )
+    try:
+        pixels_feat_idx = feat_cols.index("feat_pixel_count")
+    except ValueError:
+        raise SystemExit(
+            "unachievable_zones present but `feat_pixel_count` is not in "
+            "feat_cols — the size discriminant is required to key zones"
+        )
+    if not (0 <= pixels_feat_idx <= 0xFFFF):
+        raise SystemExit(
+            f"feat_pixel_count idx {pixels_feat_idx} exceeds u16 wire width"
+        )
+    if len(zones) > 255:
+        raise SystemExit(
+            f"unachievable_zones: {len(zones)} exceeds the u8 wire cap (255)"
+        )
+    # Ascending by pixel_upper — the runtime's first-match scan relies on it.
+    zones_sorted = sorted(zones, key=lambda z: z["pixel_upper"])
+    out = bytearray()
+    out += struct.pack("<HB", pixels_feat_idx, len(zones_sorted))
+    for z in zones_sorted:
+        cell = int(z["fallback_cell"])
+        if not (0 <= cell <= 255):
+            raise SystemExit(
+                f"unachievable_zone fallback_cell {cell} exceeds u8 wire cap (255)"
+            )
+        # <ffBf = pixel_upper f32, ceiling_zq f32, fallback_cell u8,
+        # fallback_scalar f32 (13 bytes, no padding under '<').
+        out += struct.pack(
+            "<ffBf",
+            float(z["pixel_upper"]),
+            float(z["ceiling_zq"]),
+            cell,
+            float(z["fallback_scalar"]),
+        )
+    return bytes(out)
+
+
 def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     """Build the metadata blob entries from the training JSON.
 
@@ -703,6 +767,20 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             "key": "zenpicker.knob_vetoes",
             "type": "bytes",
             "hex": knob_veto_bytes.hex(),
+        })
+
+    # unachievable_zones — size-discriminated physical-reachability zones +
+    # fallback knobsets (zenpicker.* namespace). Packed wire blob →
+    # zenpredict::parse_unachievable_zones / Model::unachievable_zones;
+    # consulted via UnachievableZones::resolve BEFORE the argmin. Omitted
+    # entirely when every grid target is reachable for every size
+    # (backward-compatible).
+    zone_bytes = encode_unachievable_zones(model)
+    if zone_bytes:
+        entries.append({
+            "key": "zenpicker.unachievable_zones",
+            "type": "bytes",
+            "hex": zone_bytes.hex(),
         })
 
     # reach_safety — packed f32 matrix + u8 zq targets.

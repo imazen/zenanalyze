@@ -2236,6 +2236,95 @@ def count_train_rows_by_size_zq(meta_tr, size_classes, zq_targets):
     return out
 
 
+# Canonical pixel-AREA (width×height) thresholds defining the size classes.
+# MUST match scripts/picker/omni_to_pareto.py::size_class (the labeller of
+# the Pareto parquet's `size_class` column) and the runtime size discriminant
+# in zenpredict::UnachievableZones. tiny ≤ 64², small ≤ 256², medium ≤ 1024².
+SIZE_CLASS_PIXEL_UPPER = [
+    ("tiny", 4096.0),
+    ("small", 65536.0),
+    ("medium", 1048576.0),
+    ("large", float("inf")),
+]
+
+
+def compute_unachievable_zones(
+    meta_tr, rch_tr, train_rows_by_size_zq, size_classes, zq_targets,
+    min_rows, scalar_axes, scalar_display_ranges,
+):
+    """Per size class, the declared unachievable-zone + fallback knobset.
+
+    `meta_tr` holds one row per *reachable* (image, size, zq), so the per-size
+    density ceiling — the highest zq with ≥ `min_rows` reachable train images —
+    is the boundary above which the target is physically unreachable for that
+    size. This is the SAME ceiling the zone-aware DATA_STARVED_SIZE gate
+    exempts, so the declared zone ≡ the exempted tail ≡ the runtime fallback
+    region (one ceiling, three uses — the skip is described, not silent).
+
+    Fallback knobset = the cell most reachable at the ceiling zq (the
+    quality-leader for that size) at max scalar (best achievable quality). The
+    runtime (`zenpredict::UnachievableZones::resolve`) maps an image's
+    `feat_pixel_count` → size class and, when `target_zq > ceiling_zq`, encodes
+    this knobset instead of an unreachable argmin pick.
+
+    Returns a list of zone dicts {size_class, pixel_upper, ceiling_zq,
+    fallback_cell, fallback_scalar}, ascending by pixel_upper. Only sizes with
+    a real unreachable tail (`ceiling < max(zq_targets)`) get a zone; sizes
+    reachable across the whole grid, or under-supplied everywhere (the gate
+    flags those), are omitted.
+    """
+    import numpy as _np
+
+    upper = {name: ub for name, ub in SIZE_CLASS_PIXEL_UPPER}
+    canon_order = [name for name, _ in SIZE_CLASS_PIXEL_UPPER]
+    present = [s for s in canon_order if s in size_classes]
+    if not present:
+        return []
+    # The largest present size class catches every larger image at runtime
+    # (the JSON's "clamping larger images to the last" contract).
+    pixel_upper = {
+        s: (float("inf") if i == len(present) - 1 else upper[s])
+        for i, s in enumerate(present)
+    }
+    # One scalar axis → bake its display max (highest effort/quality = best
+    # achievable). Zero or many axes → NaN sentinel ("use predicted scalar").
+    fallback_scalar = float("nan")
+    if len(scalar_axes) == 1:
+        rng = scalar_display_ranges.get(scalar_axes[0])
+        if rng:
+            fallback_scalar = float(rng[1])
+
+    top_zq = max(int(z) for z in zq_targets)
+    zones = []
+    for s in present:
+        by_zq = train_rows_by_size_zq.get(s, {})
+        ok = [int(z) for z, n in by_zq.items() if n >= min_rows]
+        if not ok:
+            continue  # under-supplied at every zq → gate flags it, no zone
+        ceiling = max(ok)
+        if ceiling >= top_zq:
+            continue  # whole grid reachable → no unachievable tail
+        # Fallback cell = the cell reachable in the most train rows at the
+        # ceiling zq for this size (the quality leader at the ceiling).
+        idx = [
+            i for i, m in enumerate(meta_tr)
+            if m[1] == s and int(m[2]) == ceiling
+        ]
+        if idx:
+            reach_counts = _np.asarray(rch_tr)[idx, :].sum(axis=0)
+            fallback_cell = int(_np.argmax(reach_counts))
+        else:
+            fallback_cell = 0
+        zones.append({
+            "size_class": s,
+            "pixel_upper": pixel_upper[s],
+            "ceiling_zq": float(ceiling),
+            "fallback_cell": fallback_cell,
+            "fallback_scalar": fallback_scalar,
+        })
+    return zones
+
+
 def stratify_overheads(per_row):
     """Group per-row overhead entries by (zq, size_class). Returns
     {zq: {size_class: stats_dict}} and a flat per-zq aggregate."""
@@ -2429,17 +2518,56 @@ def safety_check(diag, thresholds, objective: str):
                 f"(picker is not size-invariant — see SAFETY_PLANE.md)"
             )
 
-    # Data-starvation gate per (size_class, target_zq) training
-    # cell. Catches sweep harnesses that silently skip a size
-    # class for a chunk of the corpus, leaving the picker with
-    # too few examples to learn from at that (size, quality)
-    # corner. Codec's harness MUST emit rows for tiny / small /
-    # medium / large per image (FOR_NEW_CODECS.md Step 1.5).
-    starved = []
-    for sz, by_zq in diag.get("train_rows_by_size_zq", {}).items():
+    # Data-starvation gate per (size_class, target_zq) training cell —
+    # ZONE-AWARE. `meta_tr` holds one row per *reachable* (image, size, zq),
+    # so `train_rows_by_size_zq[S][zq]` is the count of size-S images that can
+    # physically reach target zq. High-zq starvation is therefore the
+    # *reachability tail* (fewer images of a size reach higher quality — e.g.
+    # medium photos top out near SSIMULACRA2 ~94, tiny ceilings are bimodal),
+    # NOT a sweep harness gap. A genuine gap instead shows as a size starved at
+    # LOW zq too (the harness skipped that size for a chunk of the corpus).
+    #
+    # So per size: ceiling = the highest zq with >= min_rows reachable images.
+    #   - zq > ceiling  → physically-unreachable tail → EXEMPT (info, not a
+    #     violation). The bake declares these as unachievable zones carrying a
+    #     fallback knobset (zenpicker.unachievable_zones), so the skip is a
+    #     described, deploy-honored boundary — not a silent gap.
+    #   - zq <= ceiling but starved → a hole below the ceiling (non-monotonic
+    #     gap) → FLAG. A size with NO zq >= min_rows (ceiling = None) is
+    #     under-supplied everywhere → FLAG every cell.
+    # Codec harness MUST still emit rows for tiny/small/medium/large per image
+    # (FOR_NEW_CODECS.md Step 1.5) across the *reachable* band.
+    min_rows = thresholds["min_train_rows_per_size_zq"]
+    rows_by_sz = diag.get("train_rows_by_size_zq", {})
+    starved = []        # genuine under-supply (violations)
+    exempt_tail = []    # physically-unreachable high-zq tail (info)
+    for sz, by_zq in rows_by_sz.items():
+        ok_zqs = [int(zq) for zq, n in by_zq.items() if n >= min_rows]
+        ceiling = max(ok_zqs) if ok_zqs else None
         for zq, n in by_zq.items():
-            if n < thresholds["min_train_rows_per_size_zq"]:
+            zq = int(zq)
+            if n >= min_rows:
+                continue
+            if ceiling is not None and zq > ceiling:
+                exempt_tail.append((sz, zq, n))
+            else:
                 starved.append((sz, zq, n))
+    # Record the exemptions in the report (provenance) + log them — the
+    # boundary is visible, never a silent runtime skip.
+    diag["data_starved_exempt_tail"] = sorted(
+        ({"size_class": sz, "zq": zq, "n_reachable": n} for (sz, zq, n) in exempt_tail),
+        key=lambda d: (d["size_class"], d["zq"]),
+    )
+    if exempt_tail:
+        exempt_tail.sort(key=lambda t: (t[0], t[1]))
+        ex = ", ".join(f"{sz}/zq{zq}={n}" for (sz, zq, n) in exempt_tail[:8])
+        more = f" (+{len(exempt_tail) - 8} more)" if len(exempt_tail) > 8 else ""
+        sys.stderr.write(
+            f"  ℹ DATA_STARVED_SIZE exemption: {len(exempt_tail)} (size,zq) cell(s) "
+            f"above the per-size achievable ceiling — physically-unreachable "
+            f"high-zq tail, declared as unachievable zones w/ fallback knobset "
+            f"(not a sweep gap): {ex}{more}\n"
+        )
     if starved:
         # Surface the worst (lowest-n) cells; capping at 6 lines
         # keeps the log readable when a whole size class is missing.
@@ -2450,7 +2578,8 @@ def safety_check(diag, thresholds, objective: str):
         more = f" (+{len(starved) - 6} more)" if len(starved) > 6 else ""
         v.append(
             f"DATA_STARVED_SIZE: {len(starved)} (size_class, zq) cell(s) "
-            f"have train rows < {thresholds['min_train_rows_per_size_zq']}: "
+            f"under-supplied at/below the per-size achievable ceiling "
+            f"(genuine gap, not the unreachable tail) — train rows < {min_rows}: "
             f"{examples}{more}"
         )
 
@@ -2490,10 +2619,29 @@ def safety_check(diag, thresholds, objective: str):
             )
 
     for c in diag["per_cell"]:
-        if c["n_member_configs"] < thresholds["min_cell_member_configs"]:
+        n_cfg = c["n_member_configs"]
+        if n_cfg < thresholds["min_cell_member_configs"]:
+            # A cell with exactly ONE member config is a deliberate fixed
+            # reference anchor (e.g. jxl `vd_lean` = the lone `vd-e7_lean_def`
+            # preset, `vd_libjxl` = `vd-e7_libjxl_def`), NOT a thin scalar
+            # ladder: there is no scalar curve to learn, the scalar head
+            # trivially emits the one config's value. The
+            # >= min_cell_member_configs rule targets cells that SHOULD carry a
+            # swept ladder but came up thin — it does not apply to a single
+            # deterministic point (which the oracle still picks, e.g. lean wins
+            # ~5% of jxl-lossy decisions). Exempt + report; a 2-config cell is
+            # still flagged (genuinely thin).
+            if n_cfg == 1:
+                sys.stderr.write(
+                    f"  ℹ DATA_STARVED_CELL exemption: cell {c['cell']} "
+                    f"({c['label']}) is a single-config reference anchor "
+                    f"(1 member config — fixed knobset, no scalar ladder to "
+                    f"learn); not flagged.\n"
+                )
+                continue
             v.append(
                 f"DATA_STARVED_CELL: cell {c['cell']} ({c['label']}) has "
-                f"{c['n_member_configs']} member configs "
+                f"{n_cfg} member configs "
                 f"< threshold {thresholds['min_cell_member_configs']}"
             )
 
@@ -3593,6 +3741,39 @@ def main():
         meta_tr, SIZE_CLASSES, ZQ_TARGETS
     )
 
+    # Merge codec-specific safety thresholds over the defaults up-front so the
+    # unachievable-zone descriptor below uses the SAME min_train_rows_per_size_zq
+    # the DATA_STARVED_SIZE gate later exempts on (declared-zone ≡ exempted-tail).
+    thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)
+    _codec_thresholds = getattr(
+        sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
+        "SAFETY_THRESHOLDS",
+        None,
+    )
+    if _codec_thresholds:
+        thresholds.update(_codec_thresholds)
+
+    # Declared unachievable zones + fallback knobsets (the deploy-honored
+    # complement to the zone-aware DATA_STARVED_SIZE gate). Same per-size
+    # density ceiling the gate exempts above → declared-zone ≡ exempted-tail ≡
+    # runtime fallback region. Shipped in hybrid_heads_manifest →
+    # zenpicker.unachievable_zones metadata by bake_picker.
+    unachievable_zones = compute_unachievable_zones(
+        meta_tr, rch_tr, train_rows_by_size_zq, SIZE_CLASSES, ZQ_TARGETS,
+        thresholds["min_train_rows_per_size_zq"],
+        SCALAR_AXES, SCALAR_DISPLAY_RANGES,
+    )
+    if unachievable_zones:
+        sys.stderr.write(
+            "  ℹ unachievable zones declared (size_class: ceiling_zq → "
+            "fallback cell@scalar): "
+            + ", ".join(
+                f"{z['size_class']}:>{z['ceiling_zq']:.0f}→c{z['fallback_cell']}"
+                f"@{z['fallback_scalar']:.0f}" for z in unachievable_zones
+            )
+            + "\n"
+        )
+
     # --- Optional time + metric head R² (held-out, per cell)
     time_head_r2 = None
     if has_time_head:
@@ -3643,14 +3824,9 @@ def main():
             "max_target_zq": int(max(ZQ_TARGETS)) if ZQ_TARGETS else 0,
         },
     }
-    thresholds = dict(DEFAULT_SAFETY_THRESHOLDS)
-    codec_thresholds = getattr(
-        sys.modules.get(parse_config_name.__module__, sys.modules[__name__]),
-        "SAFETY_THRESHOLDS",
-        None,
-    )
-    if codec_thresholds:
-        thresholds.update(codec_thresholds)
+    # `thresholds` already merged (defaults + codec overrides) above, before
+    # the unachievable-zone descriptor, so the zone ceiling and the gate
+    # exemption share one min_train_rows_per_size_zq.
     passed, violations = safety_check(diag, thresholds, args.objective)
     safety_report = {
         "passed": passed,
@@ -3817,6 +3993,17 @@ def main():
             # cell whose `axis` == `value`. Derived on TRAIN, validated to bound
             # the WORST_ROW overhead. Empty list = no veto.
             "knob_vetoes": knob_vetoes,
+            # Size-discriminated unachievable zones + fallback knobsets. Per
+            # size class: the achievable zq ceiling (above it the target is
+            # physically unreachable) + the fallback cell+scalar (best-
+            # achievable knobset). bake_picker emits these as the
+            # zenpicker.unachievable_zones metadata; the runtime
+            # (UnachievableZones::resolve) maps feat_pixel_count → size class
+            # and returns the fallback when target_zq exceeds the ceiling,
+            # instead of an unreachable argmin. Deploy-side complement to the
+            # zone-aware DATA_STARVED_SIZE gate. Empty list = every grid target
+            # reachable for every size.
+            "unachievable_zones": unachievable_zones,
             "scalar_sentinels": sentinels_for_manifest,
             # Back-compat alias for runtime code that still reads the
             # old key. New code should use scalar_sentinels["lambda"].
