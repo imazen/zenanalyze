@@ -571,9 +571,11 @@ impl MetaPicker<'static> {
     /// models are cached in a `OnceLock`). Requires `std` for the static cache; `no_std`
     /// callers build their own via [`new`](Self::new) + [`with_router`](Self::with_router).
     ///
-    /// Trained on the 101 qualified source-only zenanalyze features (held-out family-acc
-    /// 75.7% lossy / 88.4% lossless / 98.1% gate; i8 = same as f32). The offer passed to
-    /// `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
+    /// Trained on the 101 qualified source-only zenanalyze features, on the **support-aware
+    /// (unbiased) oracle** — only cells where all lossy codecs have measured support, so no
+    /// cross-codec coverage bias (held-out family-acc 74.9% lossy / 88.4% lossless / 98.1%
+    /// gate; i8 == f32). Honest support thins above ~zq88, so above there defer to the gate
+    /// (lossless). The offer passed to `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
     pub fn default_routers() -> Self {
         use std::sync::OnceLock;
         static LOSSY: OnceLock<Model> = OnceLock::new();
