@@ -139,6 +139,7 @@ pub mod output_spec;
 mod picker_safety;
 mod predictor;
 mod unachievable_zone;
+mod encode_strategy;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]
@@ -188,6 +189,7 @@ pub use unachievable_zone::{
 // lives in `rescue` (advanced); `picker_safety`'s module docs document the
 // full 4-step pipeline tying them together.
 pub use picker_safety::{PreArgminDecision, resolve_pre_argmin};
+pub use encode_strategy::{EncodeBudget, PickerStrategy};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
