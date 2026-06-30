@@ -241,3 +241,23 @@ Resolved 2026-06-19 (P0 CI-integrity pass):
   test (default + `fit-yj`, which builds the MLE bin and runs its test). The
   bench `rand 0.9` deprecations (`gen_range`→`random_range`) are fixed and the
   accumulated clippy debt was cleared so `-D warnings` passes.
+
+## KADIS-700k zensim dataset (built 2026-06-30)
+
+700,000 distorted-image cells — 140k KADIS pristine references × 1 `dist_type_1` × 5 severity
+levels — zensim-scored with a 372-D feature vector. **The `source_features/` sidecar — a
+per-reference snapshot of each *undistorted* image — is produced by THIS crate**
+(`analyze_features_rgb8` with `FeatureSet::SUPPORTED`), one row per source, joinable to the
+cell rows by `source_filename`.
+
+- **Canonical parquet:** `s3://zentrain/kadis-700k/canonical/kadis700k_canonical_2026-06-30.parquet`
+  (700k×380, ~906 MB zstd, 0 nulls; sha256 `b57e4b3f…`). Mirrors: `/mnt/v/datasets/kadis700k/canonical/`,
+  `/mnt/tower/output/kadis700k/`. The canonical holds the 372-D zensim `feat_*`; the zenanalyze
+  source features live in the `source_features/` sidecar (per source, not folded into the canonical).
+- **Columns:** `source_id` (stable split key 0..139999 — split on this, never on row), `source_filename`,
+  `dist_type`, `dist_name`, `severity_level`, `dist_param` (signed for 7/18/25), `score_zensim`, `feat_0..feat_371`.
+- **Sidecars:** `s3://zentrain/kadis-700k/{omni,zensim_features,source_features}/` (350 each).
+- **Full README + schema:** `s3://zentrain/kadis-700k/README.md` (and `~/work/kadis-distort/docs/DATASET.md`).
+- **Credit:** reference images + distortion design © VQA Group, Universität Konstanz (Lin, Hosu,
+  Saupe) — KADID-10k / KADIS-700k, https://database.mmsp-kn.de/kadid-10k-database.html ("freely
+  available to the research community"). Cite KADID-10k (QoMEX 2019) + DeepFL-IQA (arXiv:2001.08113).
