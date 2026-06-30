@@ -270,6 +270,50 @@ pub struct MetaPicker<'b> {
     /// wrong-length vector from a vacuously-satisfied empty request.
     #[cfg(feature = "api")]
     wants: Option<alloc::vec::Vec<zenanalyze_api::NamedFeature<'b>>>,
+    /// The auto-gate (lossy|lossless, 2 outputs) and the lossless family model, set by
+    /// [`with_router`](Self::with_router). `None` for a bare single-model picker — only
+    /// [`pick`](Self::pick) works then; [`route`](Self::route) needs the full set.
+    gate: Option<Predictor<'b>>,
+    lossless: Option<Predictor<'b>>,
+    #[cfg(feature = "api")]
+    gate_wants: Option<alloc::vec::Vec<zenanalyze_api::NamedFeature<'b>>>,
+    #[cfg(feature = "api")]
+    lossless_wants: Option<alloc::vec::Vec<zenanalyze_api::NamedFeature<'b>>>,
+}
+
+/// Parse a model's feature columns into qualified `name@hex8` identities, or `None` if any
+/// column isn't qualified (a pre-`name@hash` bake) — such a model can't reuse a shared offer.
+#[cfg(feature = "api")]
+fn parse_wants(model: &Model) -> Option<alloc::vec::Vec<zenanalyze_api::NamedFeature<'_>>> {
+    let cols: alloc::vec::Vec<&str> = model.feature_columns().collect();
+    let parsed: alloc::vec::Vec<_> = cols
+        .iter()
+        .copied()
+        .filter_map(zenanalyze_api::NamedFeature::parse)
+        .collect();
+    (!cols.is_empty() && parsed.len() == cols.len()).then_some(parsed)
+}
+
+/// Materialize a model's input vector from a shared offer (reuse its feature columns), append
+/// an optional scalar routing input (the target quality), and run the forward pass.
+/// `Ok(None)` when the offer can't satisfy the model's columns — the caller runs its own pass.
+#[cfg(feature = "api")]
+fn score(
+    pred: &mut Predictor<'_>,
+    wants: Option<&[zenanalyze_api::NamedFeature<'_>]>,
+    offer: &zenanalyze_api::Offer<'_>,
+    extra: Option<f32>,
+) -> Result<Option<alloc::vec::Vec<f32>>, MetaPickerError> {
+    let Some(w) = wants else { return Ok(None) };
+    let req = zenanalyze_api::Request::new(zenanalyze_api::Select::Features(w));
+    let Some(mut x) = offer.reuse_for(&req) else {
+        return Ok(None);
+    };
+    if let Some(e) = extra {
+        x.push(e);
+    }
+    let out = pred.predict(&x).map_err(MetaPickerError::Predict)?;
+    Ok(Some(out.to_vec()))
 }
 
 impl<'b> MetaPicker<'b> {
@@ -290,18 +334,32 @@ impl<'b> MetaPicker<'b> {
     pub fn new(model: &'b Model) -> Self {
         Self {
             #[cfg(feature = "api")]
-            wants: {
-                let cols: alloc::vec::Vec<&str> = model.feature_columns().collect();
-                let parsed: alloc::vec::Vec<_> = cols
-                    .iter()
-                    .copied()
-                    .filter_map(zenanalyze_api::NamedFeature::parse)
-                    .collect();
-                // only reusable when every column is a qualified `name@hex8`
-                (!cols.is_empty() && parsed.len() == cols.len()).then_some(parsed)
-            },
+            wants: parse_wants(model),
             predictor: Predictor::new(model),
+            gate: None,
+            lossless: None,
+            #[cfg(feature = "api")]
+            gate_wants: None,
+            #[cfg(feature = "api")]
+            lossless_wants: None,
         }
+    }
+
+    /// Promote a single-model picker into the full quality-aware cross-codec router: this
+    /// picker's own model becomes the **lossy** family router, and `gate` (a 2-output
+    /// lossy|lossless auto-gate) + `lossless` (the lossless family router) are added. After
+    /// this, [`route`](Self::route) is available. Each model is a separate ZNPR bake; the two
+    /// family routers score [`CodecFamily::COUNT`] outputs (validate each with
+    /// [`validate_family_order`](Self::validate_family_order)); the gate scores 2.
+    pub fn with_router(mut self, gate: &'b Model, lossless: &'b Model) -> Self {
+        self.gate = Some(Predictor::new(gate));
+        self.lossless = Some(Predictor::new(lossless));
+        #[cfg(feature = "api")]
+        {
+            self.gate_wants = parse_wants(gate);
+            self.lossless_wants = parse_wants(lossless);
+        }
+        self
     }
 
     /// Build a [`zenanalyze_api::Request`] for this picker's model — its feature columns as
@@ -360,6 +418,103 @@ impl<'b> MetaPicker<'b> {
         Ok(pick.map(|idx| CodecFamily::ALL[idx]))
     }
 
+    /// The full quality-aware cross-codec route — the entry point.
+    ///
+    /// Composes the three router models (set via [`with_router`](Self::with_router)) with the
+    /// content/latency masks into one decision:
+    /// 1. narrow the family set: caller `allowed` ∩ [`content_capability`] (alpha/HDR rules
+    ///    read from `offer`) ∩ [`viable`](AllowedFamilies::viable) (latency under `mode`);
+    /// 2. **auto-gate** — lossy or lossless? An explicit [`QualityTarget::Lossless`] forces
+    ///    lossless; otherwise the gate model decides from the features + target quality;
+    /// 3. score the chosen branch's family router and [`resolve`](RouteDecision::resolve) a
+    ///    masked argmin over the survivors (also intersected with the branch family set —
+    ///    [`LOSSY`](AllowedFamilies::LOSSY) / [`LOSSLESS`](AllowedFamilies::LOSSLESS)).
+    ///
+    /// `offer` is a shared zenanalyze-api [`Offer`](zenanalyze_api::Offer); each model reuses
+    /// its own feature columns from it, and the target quality is appended as the final input
+    /// for the gate + lossy models (the lossless model takes no quality). `per_family_est_ms`
+    /// is the codec's own per-family encode-time estimate (see
+    /// [`viable`](AllowedFamilies::viable)).
+    ///
+    /// `Ok(None)` when no family survives the masks, or the offer can't satisfy a model's
+    /// columns (the caller runs its own analysis pass); `Err` on a model/runtime error or a
+    /// missing router model.
+    #[cfg(feature = "api")]
+    pub fn route(
+        &mut self,
+        offer: &zenanalyze_api::Offer<'_>,
+        target: QualityTarget,
+        allowed: AllowedFamilies,
+        mode: zenpredict::EncodeMode,
+        latency_ms: Option<u32>,
+        per_family_est_ms: &[u32; CodecFamily::COUNT],
+    ) -> Result<Option<RouteDecision>, MetaPickerError> {
+        let allowed = allowed.intersect(content_capability(offer)).viable(
+            mode,
+            latency_ms,
+            per_family_est_ms,
+        );
+        if !allowed.any() {
+            return Ok(None);
+        }
+        // auto-gate: an explicit Lossless target bypasses the model
+        let lossless = if target.is_lossless() {
+            true
+        } else {
+            let g = score(
+                self.gate
+                    .as_mut()
+                    .ok_or(MetaPickerError::RouterIncomplete)?,
+                self.gate_wants.as_deref(),
+                offer,
+                Some(target.score_input()),
+            )?;
+            match g {
+                Some(v) if v.len() >= 2 => v[1] < v[0], // [lossy, lossless], lower = better
+                _ => false,                             // gate unavailable -> default lossy
+            }
+        };
+        let (branch, scored) = if lossless {
+            (
+                AllowedFamilies::LOSSLESS,
+                score(
+                    self.lossless
+                        .as_mut()
+                        .ok_or(MetaPickerError::RouterIncomplete)?,
+                    self.lossless_wants.as_deref(),
+                    offer,
+                    None,
+                )?,
+            )
+        } else {
+            (
+                AllowedFamilies::LOSSY,
+                score(
+                    &mut self.predictor,
+                    self.wants.as_deref(),
+                    offer,
+                    Some(target.score_input()),
+                )?,
+            )
+        };
+        let Some(scored) = scored else {
+            return Ok(None);
+        };
+        if scored.len() != CodecFamily::COUNT {
+            return Err(MetaPickerError::OutputShape {
+                expected: CodecFamily::COUNT,
+                got: scored.len(),
+            });
+        }
+        let mut scores = [f32::INFINITY; CodecFamily::COUNT];
+        scores.copy_from_slice(&scored);
+        Ok(RouteDecision::resolve(
+            lossless,
+            &scores,
+            allowed.intersect(branch),
+        ))
+    }
+
     /// Read the [`FAMILY_ORDER_KEY`] (`zenpicker.family_order`)
     /// metadata key from the bake and confirm it matches
     /// [`ALL_LABELS_CSV`]. Returns `Ok(())` if the order matches,
@@ -391,7 +546,18 @@ impl<'b> MetaPicker<'b> {
 pub enum MetaPickerError {
     Predict(PredictError),
     Metadata(String),
-    FamilyOrderMismatch { expected: String, actual: String },
+    FamilyOrderMismatch {
+        expected: String,
+        actual: String,
+    },
+    /// [`route`](MetaPicker::route) was called without the gate/lossless models — call
+    /// [`with_router`](MetaPicker::with_router) first.
+    RouterIncomplete,
+    /// A family router scored a wrong number of outputs (expected [`CodecFamily::COUNT`]).
+    OutputShape {
+        expected: usize,
+        got: usize,
+    },
 }
 
 #[cfg(feature = "std")]
@@ -404,6 +570,17 @@ impl core::fmt::Display for MetaPickerError {
                 f,
                 "family order mismatch: bake declares {:?}, runtime expects {:?}",
                 actual, expected
+            ),
+            Self::RouterIncomplete => {
+                write!(
+                    f,
+                    "route() needs with_router (gate + lossless models) first"
+                )
+            }
+            Self::OutputShape { expected, got } => write!(
+                f,
+                "router output shape: expected {} family scores, got {}",
+                expected, got
             ),
         }
     }
