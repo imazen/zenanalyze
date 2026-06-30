@@ -192,6 +192,33 @@ impl AllowedFamilies {
     pub fn any(self) -> bool {
         self.flags.iter().any(|f| *f)
     }
+
+    /// Filter to families whose estimated encode cost fits a real-time latency ceiling.
+    /// Real-time [`EncodeMode`]s drop families slower than `latency_ms`; queued modes
+    /// keep every already-allowed family (they can wait). `per_family_est_ms[fam.index()]`
+    /// is the codec's own encode-time estimate for this image — codecs have cost models,
+    /// so the caller never guesses. `latency_ms = None` applies no time gate.
+    ///
+    /// [`EncodeMode`]: zenpredict::EncodeMode
+    pub fn viable(
+        self,
+        mode: zenpredict::EncodeMode,
+        latency_ms: Option<u32>,
+        per_family_est_ms: &[u32; CodecFamily::COUNT],
+    ) -> Self {
+        if !mode.is_realtime() {
+            return self;
+        }
+        let mut out = Self::none();
+        for fam in CodecFamily::ALL {
+            if self.is_allowed(fam)
+                && latency_ms.is_none_or(|c| per_family_est_ms[fam.index()] <= c)
+            {
+                out = out.allow(fam);
+            }
+        }
+        out
+    }
 }
 
 /// Metadata key the bake declares to assert family-order agreement
@@ -398,6 +425,43 @@ mod tests {
         for (i, fam) in CodecFamily::ALL.iter().enumerate() {
             assert_eq!(fam.index(), i);
         }
+    }
+
+    // per-family encode-cost (ms): jpeg/webp/png/gif fast, jxl/avif slow
+    const EST_MS: [u32; CodecFamily::COUNT] = [10, 20, 200, 300, 5, 50];
+
+    #[test]
+    fn viable_realtime_masks_slow_families() {
+        let v = AllowedFamilies::all().viable(
+            zenpredict::EncodeMode::RealtimeFastest,
+            Some(100),
+            &EST_MS,
+        );
+        assert!(v.is_allowed(CodecFamily::Jpeg));
+        assert!(v.is_allowed(CodecFamily::Webp));
+        assert!(v.is_allowed(CodecFamily::Png));
+        assert!(!v.is_allowed(CodecFamily::Jxl)); // 200ms > 100ms
+        assert!(!v.is_allowed(CodecFamily::Avif)); // 300ms > 100ms
+    }
+
+    #[test]
+    fn viable_queued_keeps_all_allowed() {
+        let all = AllowedFamilies::all();
+        assert_eq!(all.viable(zenpredict::EncodeMode::QueuedAggressive, Some(100), &EST_MS), all);
+    }
+
+    #[test]
+    fn viable_no_ceiling_and_respects_prior_allowlist() {
+        let all = AllowedFamilies::all();
+        // no latency gate -> no masking
+        assert_eq!(all.viable(zenpredict::EncodeMode::RealtimeFastest, None, &EST_MS), all);
+        // prior allowlist {jpeg, jxl}, realtime 100ms: jpeg kept (fast), jxl dropped (slow),
+        // webp never allowed
+        let sub = AllowedFamilies::from_allowed([CodecFamily::Jpeg, CodecFamily::Jxl]);
+        let v = sub.viable(zenpredict::EncodeMode::RealtimeFastest, Some(100), &EST_MS);
+        assert!(v.is_allowed(CodecFamily::Jpeg));
+        assert!(!v.is_allowed(CodecFamily::Jxl));
+        assert!(!v.is_allowed(CodecFamily::Webp));
     }
 
     #[test]
