@@ -169,6 +169,7 @@
 #![allow(dead_code)]
 
 mod alpha;
+mod chroma_subsample_loss;
 mod dimensions;
 pub mod feature;
 mod grayscale;
@@ -408,6 +409,10 @@ pub fn analyze_features(
     let run_xyb_bq = features.contains(feature::AnalysisFeature::XybBquarterChromaLoss);
     #[cfg(not(feature = "experimental"))]
     let run_xyb_bq = false;
+    #[cfg(feature = "experimental")]
+    let run_csl = features.contains(feature::AnalysisFeature::ChromaSubsampleDctLoss);
+    #[cfg(not(feature = "experimental"))]
+    let run_csl = false;
 
     // Pick the palette path: full-precision scan if any "exact count"
     // palette feature was requested; otherwise the early-exit scan
@@ -525,6 +530,7 @@ pub fn analyze_features(
                 run_strict_gray,
                 run_xyb444,
                 run_xyb_bq,
+                run_csl,
                 run_linear_light,
                 run_clip,
             )?;
@@ -682,11 +688,12 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
     run_strict_gray: bool,
     run_xyb444: bool,
     run_xyb_bq: bool,
+    run_csl: bool,
     run_linear_light: bool,
     run_clip: bool,
 ) -> Result<(feature::RawAnalysis, feature::ImageGeometry), AnalyzeError> {
     #[cfg(not(feature = "experimental"))]
-    let _ = (run_xyb444, run_xyb_bq);
+    let _ = (run_xyb444, run_xyb_bq, run_csl);
     let width = slice.width();
     let height = slice.rows();
     let geometry = feature::ImageGeometry::new(width, height);
@@ -821,6 +828,10 @@ fn analyze_specialized_raw<const PAL: bool, const T2: bool, const T3: bool, cons
                 raw.xyb_bquarter_chroma_loss =
                     xyb_color_loss::xyb_bquarter_chroma_loss_from_stream(&mut stream);
             }
+            if run_csl {
+                raw.chroma_subsample_dct_loss =
+                    chroma_subsample_loss::chroma_subsample_dct_loss_from_stream(&mut stream);
+            }
         }
         // Layered defense: const-bool gated. Refuses to write a
         // likelihood whose deps weren't computed, regardless of what
@@ -922,6 +933,7 @@ pub fn __analyze_internal(
         true,  // and the strict-grayscale classifier
         true,  // xyb444_color_loss
         true,  // xyb_bquarter_chroma_loss
+        true,  // chroma_subsample_dct_loss
         false, // run_linear_light — oracle / dense extraction stays gamma
         false, // run_clip — gamma path, no clip
     )?;
@@ -950,7 +962,7 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, false,
+        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, true, false,
         false,
     )
 }

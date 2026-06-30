@@ -491,7 +491,7 @@ const JPEGLI_QUANT_Y_D2: [f32; 64] = [
 /// jpegli-default Cb/Cr quant table at d=2.0. Chroma quantization is
 /// flatter than luma — saturates near 64 across the whole table at
 /// q=75 — capturing the human-vision low-chroma sensitivity.
-const JPEGLI_QUANT_C_D2: [f32; 64] = [
+pub(crate) const JPEGLI_QUANT_C_D2: [f32; 64] = [
     18.0, 22.0, 30.0, 56.0, 64.0, 64.0, 64.0, 64.0, 22.0, 26.0, 32.0, 60.0, 64.0, 64.0, 64.0, 64.0,
     30.0, 32.0, 50.0, 64.0, 64.0, 64.0, 64.0, 64.0, 56.0, 60.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
     64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0, 64.0,
@@ -736,7 +736,7 @@ const RASTER_TO_ZIGZAG: [u8; 64] = [
 /// DCT_COEF[7][n]]`, i.e. column `n` of D. With that layout each f32x8
 /// vector loaded from `DCT_COEF_T[n]` directly broadcasts the column-of-D
 /// the row pass needs (lanes-as-output-k).
-const DCT_COEF: [[f32; 8]; 8] = [
+pub(crate) const DCT_COEF: [[f32; 8]; 8] = [
     // k=0: 0.5 * (1/√2) * cos(0) = 1/(2√2) = 0.353553...
     [
         0.353_553_4,

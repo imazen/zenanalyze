@@ -1271,6 +1271,26 @@ features_table! {
     /// `cbrt`, no allocation (see the `xyb_color_loss` module).
     #[cfg(feature = "experimental")]
     XybBquarterChromaLoss = 139 : f32 => xyb_bquarter_chroma_loss,
+
+    /// `f32`. Mean IDCT-roundtrip 4:2:0 chroma-subsampling loss over sampled 8×8
+    /// blocks (Cb and Cr averaged). Per block: forward DCT → quantize/dequantize
+    /// at jpegli chroma distance 2 → inverse DCT, then the RMS energy a 2× box
+    /// subsample+upsample removes from that reconstruction. High ⇒ chroma detail
+    /// survives 4:4:4 quantization but dies under 4:2:0 (favor 4:4:4); low ⇒
+    /// quantization already removed it, so 4:2:0 is free. Computed from the tier
+    /// `RowStream` in [`crate::analyze_features`] (any pixel format).
+    ///
+    /// **Why:** the **favor-4:4:4** discriminant for the YCbCr chroma-subsampling
+    /// decision — the direct codec-spectral-path signal the spatial
+    /// [`Self::XybBquarterChromaLoss`] proxy cannot provide. It captures the
+    /// quality-dependence (coarse quant → smooth recon → cheap subsample) that
+    /// multi-cell pickers (webp/avif) need to discriminate 4:2:0 vs 4:4:4 at equal
+    /// quality (the off-frontier RD tail).
+    ///
+    /// **Cost:** ~Tier-3. A scalar 8×8 FDCT+IDCT per sampled chroma block (no
+    /// allocation beyond the row buffer; see the `chroma_subsample_loss` module).
+    #[cfg(feature = "experimental")]
+    ChromaSubsampleDctLoss = 140 : f32 => chroma_subsample_dct_loss,
 }
 
 /// A scalar feature value — discriminated by the value type, not by
@@ -2615,14 +2635,14 @@ mod tests {
         }
         // Reserved gaps + first unused id past the HVS-feature block
         // (ids 132..137), Xyb444ColorLoss at 138, XybBquarterChromaLoss at
-        // 139. Bump when new ids land beyond 139. Note 138/139 are
-        // experimental-gated, so they return None on default builds and Some
-        // under `experimental` — the cfg-aware loop above covers them; here
-        // we only assert ids that are unused in BOTH builds.
+        // 139, ChromaSubsampleDctLoss at 140. Bump when new ids land beyond
+        // 140. Note 138/139/140 are experimental-gated, so they return None on
+        // default builds and Some under `experimental`; here we only assert ids
+        // that are unused in BOTH builds.
         assert!(AnalysisFeature::from_u16(122).is_none());
         assert!(AnalysisFeature::from_u16(123).is_none());
         assert!(AnalysisFeature::from_u16(124).is_none());
-        assert!(AnalysisFeature::from_u16(140).is_none());
+        assert!(AnalysisFeature::from_u16(141).is_none());
         assert!(AnalysisFeature::from_u16(255).is_none());
     }
 
