@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluated. Fails loud on wire-width overflow (`>255` vetoes/cells, `>65535`
   feat_cols). Backward-compatible: no `knob_vetoes` → no metadata entry / manifest
   field, bake byte-identical to before.
+- **zenpicker `default_route` — the blessed one-call cross-codec route**, masked by available
+  format: `default_route(offer, target, &available, mode, latency, est_ms)` ≡
+  `MetaPicker::default_routers().route(.., AllowedFamilies::from_allowed(available), ..)`. Composes
+  the format mask with the content-capability + latency-viable masks. Plus the public
+  `LOSSY_PAIRWISE_KEY` metadata-key const.
 
 ### Changed
 
@@ -35,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. `family_rule` (the fixed codec-reality prior, now data-confirmed) remains the
   no-features fallback. Trained on corrected data (no re-sweep) — zenmetrics
   `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`.
+- **`MetaPicker::pick` now refuses a pairwise lossy router** (`MetaPickerError::PairwiseRouterNeedsRoute`):
+  its 6 outputs are per-pair margins, not per-family scores, so a raw argmin would silently mis-pick.
+  Use `route` / `default_route` (which round-robin the margins). Family-score models (gate, lossless,
+  per-codec pickers) are unaffected.
 
 ### Documentation
 

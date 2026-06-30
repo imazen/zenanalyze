@@ -225,7 +225,7 @@ impl AllowedFamilies {
     }
 
     /// Intersection — families allowed by BOTH masks. Folds the caller allowlist with
-    /// [`content_capability`](crate::content_capability) (and the branch set) in `route`.
+    /// [`content_capability`] (and the branch set) in `route`.
     pub fn intersect(self, other: Self) -> Self {
         let mut flags = [false; CodecFamily::COUNT];
         let mut i = 0;
@@ -280,6 +280,12 @@ pub const FAMILY_ORDER_KEY: &str = "zenpicker.family_order";
 /// Expected value of [`FAMILY_ORDER_KEY`] for the current
 /// [`CodecFamily::ALL`] layout.
 pub const ALL_LABELS_CSV: &str = "jpeg,webp,jxl,avif,png,gif";
+
+/// Metadata key a **pairwise** lossy router carries (the shipped default lossy router): its value
+/// is the CSV of the 6 codec pairs in output-neuron order. A model with this key emits per-pair
+/// margins, **not** per-family scores — so [`MetaPicker::pick`] (a raw argmin) refuses it; use
+/// [`route`](MetaPicker::route), which applies the round-robin (`route::pairwise_round_robin`).
+pub const LOSSY_PAIRWISE_KEY: &str = "zenpicker.lossy_pairwise";
 
 /// One thin meta-picker.
 ///
@@ -395,7 +401,7 @@ impl<'b> MetaPicker<'b> {
     /// `offer.reuse_for(&picker.feature_request())`: `Some(vec)` feeds straight into
     /// [`pick`](Self::pick), `None` (or `!offer.satisfies(..)`) means run an own `zenanalyze`
     /// pass. The returned `Request` borrows `self`; drop it before the `&mut self`
-    /// [`pick`].
+    /// [`pick`](Self::pick).
     ///
     /// `None` for a model whose columns aren't all qualified (a pre-`name@hash` bake) — it
     /// can't reuse, so the caller runs its own pass. Requires the `api` feature.
@@ -423,11 +429,28 @@ impl<'b> MetaPicker<'b> {
     /// Returns `Ok(None)` when every family is masked out (caller
     /// constraints unsatisfiable) and `Err` only on a runtime error
     /// (shape mismatch, NaN, …).
+    ///
+    /// **For per-family-score models only** (per-codec pickers, the gate, the lossless router).
+    /// Refuses the **pairwise** lossy router ([`LOSSY_PAIRWISE_KEY`]) with
+    /// [`PairwiseRouterNeedsRoute`](MetaPickerError::PairwiseRouterNeedsRoute): that model emits
+    /// per-pair margins, so a raw argmin is meaningless — use [`route`](Self::route), which
+    /// round-robins the margins into a family.
     pub fn pick(
         &mut self,
         features: &[f32],
         allowed: &AllowedFamilies,
     ) -> Result<Option<CodecFamily>, MetaPickerError> {
+        // A pairwise lossy router emits per-pair margins, not per-family scores — a raw argmin
+        // would silently mis-pick. Refuse it; the caller must use route() (which round-robins).
+        if self
+            .predictor
+            .model()
+            .metadata()
+            .get_utf8(LOSSY_PAIRWISE_KEY)
+            .is_ok()
+        {
+            return Err(MetaPickerError::PairwiseRouterNeedsRoute);
+        }
         if !allowed.any() {
             return Ok(None);
         }
@@ -618,6 +641,48 @@ impl MetaPicker<'static> {
     }
 }
 
+/// The **blessed default** cross-codec route. Applies the shipped routers
+/// ([`MetaPicker::default_routers`] — the f32 pairwise lossy router + the i8 gate/lossless MLPs) to
+/// `offer` + `target`, **masked to the formats the caller can emit** (`available`). This is the
+/// one call most consumers want:
+///
+/// ```rust,ignore
+/// let decision = zenpicker::default_route(
+///     &offer, QualityTarget::Zq(82.0),
+///     &[CodecFamily::Jpeg, CodecFamily::Webp, CodecFamily::Avif], // what we support
+///     EncodeMode::QueuedBalanced, None, &[0; CodecFamily::COUNT],  // no latency budget
+/// )?;
+/// ```
+///
+/// Equivalent to `MetaPicker::default_routers().route(offer, target,
+/// AllowedFamilies::from_allowed(available), mode, latency_ms, per_family_est_ms)`. The format mask
+/// composes with the content-capability mask (alpha/HDR) and the latency-`viable` mask inside
+/// [`route`](MetaPicker::route).
+///
+/// For a hot loop, hold one [`MetaPicker::default_routers`] and call [`route`](MetaPicker::route)
+/// repeatedly — this rebuilds the `Predictor` scratch each call (the parsed models are
+/// process-static via `OnceLock`, so that part is free). `Ok(None)` when nothing `available` can
+/// encode the image, or the offer lacks the routers' feature columns — fall back to [`family_rule`]
+/// (the no-features, no-model prior).
+#[cfg(all(feature = "std", feature = "api"))]
+pub fn default_route(
+    offer: &zenanalyze_api::Offer<'_>,
+    target: QualityTarget,
+    available: &[CodecFamily],
+    mode: zenpredict::EncodeMode,
+    latency_ms: Option<u32>,
+    per_family_est_ms: &[u32; CodecFamily::COUNT],
+) -> Result<Option<RouteDecision>, MetaPickerError> {
+    MetaPicker::default_routers().route(
+        offer,
+        target,
+        AllowedFamilies::from_allowed(available.iter().copied()),
+        mode,
+        latency_ms,
+        per_family_est_ms,
+    )
+}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MetaPickerError {
@@ -635,6 +700,10 @@ pub enum MetaPickerError {
         expected: usize,
         got: usize,
     },
+    /// [`pick`](MetaPicker::pick) was called on a **pairwise** lossy router (carries
+    /// [`LOSSY_PAIRWISE_KEY`]): its outputs are per-pair margins, not per-family scores, so a raw
+    /// argmin is meaningless. Use [`route`](MetaPicker::route), which applies the round-robin.
+    PairwiseRouterNeedsRoute,
 }
 
 #[cfg(feature = "std")]
@@ -658,6 +727,10 @@ impl core::fmt::Display for MetaPickerError {
                 f,
                 "router output shape: expected {} family scores, got {}",
                 expected, got
+            ),
+            Self::PairwiseRouterNeedsRoute => write!(
+                f,
+                "pick() called on a pairwise lossy router (per-pair margins); use route()"
             ),
         }
     }
@@ -963,5 +1036,18 @@ mod tests {
                 (got - want).abs()
             );
         }
+    }
+
+    // pick() must REFUSE the pairwise lossy router: its 6 outputs are per-pair margins, not
+    // per-family scores, so a raw argmin would silently mis-pick. The shipped lossy router carries
+    // LOSSY_PAIRWISE_KEY; callers route() it instead (which round-robins the margins).
+    #[test]
+    fn pick_refuses_the_pairwise_lossy_router() {
+        let model = Model::from_bytes(ROUTER_LOSSY).expect("baked lossy router parses");
+        let mut mp = MetaPicker::new(&model);
+        let err = mp
+            .pick(&FIXTURE_INPUT, &AllowedFamilies::LOSSY)
+            .expect_err("pick() on a pairwise router must error, not silently mis-pick");
+        assert!(matches!(err, MetaPickerError::PairwiseRouterNeedsRoute));
     }
 }
