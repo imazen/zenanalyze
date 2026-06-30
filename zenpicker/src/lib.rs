@@ -80,6 +80,28 @@ mod route;
 pub use route::content_capability;
 pub use route::{QualityTarget, RouteDecision};
 
+// ── Shipped default cross-codec routers (baked 2026-06-30, i8 ZNPR) ──────────
+// The ZNPR loader needs 16-aligned bytes; wrap each baked blob in an over-aligned
+// struct (same pattern the per-codec pickers use). `default_routers()` loads them.
+#[cfg(feature = "std")]
+#[repr(C, align(16))]
+struct AlignedModel<const N: usize>([u8; N]);
+#[cfg(feature = "std")]
+const ROUTER_LOSSY: &[u8] = &AlignedModel(*include_bytes!(
+    "../benchmarks/zenpicker_router_lossy_v0.1.bin"
+))
+.0;
+#[cfg(feature = "std")]
+const ROUTER_LOSSLESS: &[u8] = &AlignedModel(*include_bytes!(
+    "../benchmarks/zenpicker_router_lossless_v0.1.bin"
+))
+.0;
+#[cfg(feature = "std")]
+const ROUTER_GATE: &[u8] = &AlignedModel(*include_bytes!(
+    "../benchmarks/zenpicker_router_gate_v0.1.bin"
+))
+.0;
+
 /// Codec families the meta-picker can choose between.
 ///
 /// **Important — order matters.** The discriminants here must match
@@ -541,6 +563,31 @@ impl<'b> MetaPicker<'b> {
     }
 }
 
+#[cfg(feature = "std")]
+impl MetaPicker<'static> {
+    /// The shipped default cross-codec router — the three baked ZNPR models (lossy /
+    /// lossless / auto-gate, i8, 2026-06-30) loaded from `include_bytes!` into process-static
+    /// [`Model`]s, ready for [`route`](Self::route). Cheap to call repeatedly (the parsed
+    /// models are cached in a `OnceLock`). Requires `std` for the static cache; `no_std`
+    /// callers build their own via [`new`](Self::new) + [`with_router`](Self::with_router).
+    ///
+    /// Trained on the 101 qualified source-only zenanalyze features (held-out family-acc
+    /// 75.7% lossy / 88.4% lossless / 98.1% gate; i8 = same as f32). The offer passed to
+    /// `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
+    pub fn default_routers() -> Self {
+        use std::sync::OnceLock;
+        static LOSSY: OnceLock<Model> = OnceLock::new();
+        static LOSSLESS: OnceLock<Model> = OnceLock::new();
+        static GATE: OnceLock<Model> = OnceLock::new();
+        let lossy =
+            LOSSY.get_or_init(|| Model::from_bytes(ROUTER_LOSSY).expect("baked lossy router"));
+        let gate = GATE.get_or_init(|| Model::from_bytes(ROUTER_GATE).expect("baked gate router"));
+        let lossless = LOSSLESS
+            .get_or_init(|| Model::from_bytes(ROUTER_LOSSLESS).expect("baked lossless router"));
+        MetaPicker::new(lossy).with_router(gate, lossless)
+    }
+}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MetaPickerError {
@@ -684,5 +731,59 @@ mod tests {
         // Reflects the rename: the meta-picker IS zenpicker now.
         // Keep this test so a future rename doesn't quietly drift.
         assert_eq!(FAMILY_ORDER_KEY, "zenpicker.family_order");
+    }
+
+    // The shipped default routers load from include_bytes! and route end-to-end. Builds an
+    // offer satisfying the lossy model's 101 qualified columns and checks the gate behaviour.
+    #[cfg(all(feature = "std", feature = "api"))]
+    #[test]
+    fn default_routers_load_and_route() {
+        use alloc::string::{String, ToString};
+        let mut r = MetaPicker::default_routers();
+        let names: Vec<String> = r
+            .predictor()
+            .model()
+            .feature_columns()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            names.len(),
+            101,
+            "lossy router expects 101 qualified feature columns"
+        );
+        let cells: Vec<zenanalyze_api::FeatureResult<'_>> = names
+            .iter()
+            .filter_map(|n| {
+                zenanalyze_api::NamedFeature::parse(n)
+                    .map(|nf| zenanalyze_api::FeatureResult::new(nf, 0.5f32))
+            })
+            .collect();
+        assert_eq!(cells.len(), 101, "every column is a qualified name@hex8");
+        let offer = zenanalyze_api::Offer::new(&cells, zenanalyze_api::Provenance::new("test"));
+        let est = [0u32; CodecFamily::COUNT];
+        let lossy = r
+            .route(
+                &offer,
+                QualityTarget::Zq(85.0),
+                AllowedFamilies::all(),
+                zenpredict::EncodeMode::QueuedBalanced,
+                None,
+                &est,
+            )
+            .unwrap()
+            .expect("satisfied offer routes");
+        assert!(!lossy.lossless(), "zq85 -> lossy branch");
+        let ll = r
+            .route(
+                &offer,
+                QualityTarget::Lossless,
+                AllowedFamilies::all(),
+                zenpredict::EncodeMode::QueuedBalanced,
+                None,
+                &est,
+            )
+            .unwrap()
+            .expect("lossless routes");
+        assert!(ll.lossless(), "explicit Lossless -> lossless branch");
     }
 }
