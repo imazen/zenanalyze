@@ -128,6 +128,8 @@ extern crate alloc;
 
 pub mod argmin;
 mod bounds;
+mod directed_search;
+mod encode_strategy;
 mod error;
 mod feature_transform;
 mod inference;
@@ -138,13 +140,11 @@ mod model;
 pub mod output_spec;
 mod picker_safety;
 mod predictor;
-mod unachievable_zone;
-mod encode_strategy;
-mod directed_search;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]
 mod safety;
+mod unachievable_zone;
 pub mod wire;
 
 // Default-surface picker selection kit: the masked argmin/top-K
@@ -189,9 +189,8 @@ pub use unachievable_zone::{
 // the bake-validated bounds in the same order. The post-encode rescue step
 // lives in `rescue` (advanced); `picker_safety`'s module docs document the
 // full 4-step pipeline tying them together.
-pub use picker_safety::{PreArgminDecision, resolve_pre_argmin};
-pub use encode_strategy::{EncodeBudget, EncodeMode, PickerStrategy};
 pub use directed_search::{QualityTarget, Trial, best_trial, next_trial};
+pub use encode_strategy::{EncodeBudget, EncodeMode, PickerStrategy};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
@@ -199,6 +198,7 @@ pub use model::{
 pub use output_spec::{OutputSpec, OutputTransform, SparseOverride};
 #[cfg(feature = "advanced")]
 pub use output_spec::{OutputValue, apply_spec};
+pub use picker_safety::{PreArgminDecision, resolve_pre_argmin};
 pub use predictor::Predictor;
 #[cfg(feature = "advanced")]
 pub use rescue::{RescueDecision, RescuePolicy, RescueStrategy, should_rescue};

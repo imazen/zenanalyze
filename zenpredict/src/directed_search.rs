@@ -50,7 +50,9 @@ pub fn best_trial(done: &[Trial], target: QualityTarget) -> Option<usize> {
             .min_by_key(|&i| done[i].bytes) // reaching -> fewest bytes
             .unwrap_or_else(|| {
                 // none reach -> the highest achieved quality (best effort)
-                (0..done.len()).max_by(|&a, &b| done[a].achieved_zq.total_cmp(&done[b].achieved_zq)).unwrap()
+                (0..done.len())
+                    .max_by(|&a, &b| done[a].achieved_zq.total_cmp(&done[b].achieved_zq))
+                    .unwrap()
             }),
         QualityTarget::Bytes { max_bytes } => (0..done.len())
             .filter(|&i| done[i].bytes <= max_bytes)
@@ -93,11 +95,18 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
                 .fold(f32::INFINITY, f32::min);
             if reaching_pred.is_finite() {
                 // have a reach -> probe a leaner untried (predicted below it): may also reach, fewer bytes
-                (0..n).filter(|&c| !tried(c) && predicted_zq[c] < reaching_pred).max_by(by_zq(predicted_zq))
+                (0..n)
+                    .filter(|&c| !tried(c) && predicted_zq[c] < reaching_pred)
+                    .max_by(by_zq(predicted_zq))
             } else {
                 // no reach yet -> probe a higher untried, closest above the highest tried
-                let max_tried = done.iter().map(|t| predicted_zq[t.candidate]).fold(f32::NEG_INFINITY, f32::max);
-                (0..n).filter(|&c| !tried(c) && predicted_zq[c] > max_tried).min_by(by_zq(predicted_zq))
+                let max_tried = done
+                    .iter()
+                    .map(|t| predicted_zq[t.candidate])
+                    .fold(f32::NEG_INFINITY, f32::max);
+                (0..n)
+                    .filter(|&c| !tried(c) && predicted_zq[c] > max_tried)
+                    .min_by(by_zq(predicted_zq))
             }
         }
         QualityTarget::Bytes { max_bytes } => {
@@ -108,11 +117,18 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
                     .filter(|t| t.bytes <= max_bytes)
                     .map(|t| predicted_zq[t.candidate])
                     .fold(f32::NEG_INFINITY, f32::max);
-                (0..n).filter(|&c| !tried(c) && predicted_zq[c] > best_fit_pred).min_by(by_zq(predicted_zq))
+                (0..n)
+                    .filter(|&c| !tried(c) && predicted_zq[c] > best_fit_pred)
+                    .min_by(by_zq(predicted_zq))
             } else {
                 // nothing fits -> probe a leaner untried (lower predicted quality -> fewer bytes)
-                let min_tried = done.iter().map(|t| predicted_zq[t.candidate]).fold(f32::INFINITY, f32::min);
-                (0..n).filter(|&c| !tried(c) && predicted_zq[c] < min_tried).max_by(by_zq(predicted_zq))
+                let min_tried = done
+                    .iter()
+                    .map(|t| predicted_zq[t.candidate])
+                    .fold(f32::INFINITY, f32::min);
+                (0..n)
+                    .filter(|&c| !tried(c) && predicted_zq[c] < min_tried)
+                    .max_by(by_zq(predicted_zq))
             }
         }
     }
@@ -122,47 +138,72 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
 mod tests {
     use super::*;
     fn t(candidate: usize, zq: f32, bytes: u64) -> Trial {
-        Trial { candidate, achieved_zq: zq, bytes }
+        Trial {
+            candidate,
+            achieved_zq: zq,
+            bytes,
+        }
     }
 
     #[test]
     fn best_quality_prefers_reaching_min_bytes() {
         let done = [t(0, 72.0, 5000), t(1, 71.0, 4000), t(2, 68.0, 3000)];
         // target 70: trials 0 & 1 reach; fewest bytes among them = trial 1
-        assert_eq!(best_trial(&done, QualityTarget::Quality { target_zq: 70.0 }), Some(1));
+        assert_eq!(
+            best_trial(&done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(1)
+        );
     }
     #[test]
     fn best_quality_none_reach_returns_highest() {
         let done = [t(0, 60.0, 5000), t(1, 65.0, 4000)];
-        assert_eq!(best_trial(&done, QualityTarget::Quality { target_zq: 70.0 }), Some(1));
+        assert_eq!(
+            best_trial(&done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(1)
+        );
     }
     #[test]
     fn best_bytes_prefers_fitting_max_quality() {
         let done = [t(0, 72.0, 5000), t(1, 70.0, 3000), t(2, 71.0, 3500)];
         // budget 4000: trials 1 & 2 fit; max quality = trial 2
-        assert_eq!(best_trial(&done, QualityTarget::Bytes { max_bytes: 4000 }), Some(2));
+        assert_eq!(
+            best_trial(&done, QualityTarget::Bytes { max_bytes: 4000 }),
+            Some(2)
+        );
     }
     #[test]
     fn first_probe_is_leanest_predicted_to_reach() {
         let pred = [75.0, 71.0, 68.0];
-        assert_eq!(next_trial(&pred, &[], QualityTarget::Quality { target_zq: 70.0 }), Some(1));
+        assert_eq!(
+            next_trial(&pred, &[], QualityTarget::Quality { target_zq: 70.0 }),
+            Some(1)
+        );
     }
     #[test]
     fn directs_leaner_after_a_reach() {
         let pred = [75.0, 71.0, 68.0];
         let done = [t(1, 72.0, 4000)]; // reached -> probe leaner untried (pred < 71) = cand 2
-        assert_eq!(next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }), Some(2));
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(2)
+        );
     }
     #[test]
     fn directs_higher_after_undershoot() {
         let pred = [75.0, 71.0, 68.0];
         let done = [t(2, 67.0, 3000)]; // undershot -> probe higher untried, closest above 68 = cand 1
-        assert_eq!(next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }), Some(1));
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(1)
+        );
     }
     #[test]
     fn stops_when_bracketed() {
         let pred = [71.0];
         let done = [t(0, 72.0, 4000)];
-        assert_eq!(next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }), None);
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
+            None
+        );
     }
 }

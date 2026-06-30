@@ -300,10 +300,10 @@ mod tests {
         parse_unachievable_zones(&encode(
             32,
             &[
-                (4096.0, 91.7, 2, 9.0),       // tiny  → cell 2 (vd_zen) effort 9
-                (65536.0, 91.8, 2, 9.0),      // small
-                (1_048_576.0, 93.9, 2, 9.0),  // medium
-                (f32::INFINITY, 95.0, 2, 9.0),// large
+                (4096.0, 91.7, 2, 9.0),        // tiny  → cell 2 (vd_zen) effort 9
+                (65536.0, 91.8, 2, 9.0),       // small
+                (1_048_576.0, 93.9, 2, 9.0),   // medium
+                (f32::INFINITY, 95.0, 2, 9.0), // large
             ],
         ))
         .unwrap()
@@ -332,7 +332,9 @@ mod tests {
         let z = canonical();
         let mut feats = [0.0f32; 50];
         feats[32] = 1_000_000.0; // medium
-        let fb = z.resolve(&feats, 94.0).expect("medium/zq94 is unachievable");
+        let fb = z
+            .resolve(&feats, 94.0)
+            .expect("medium/zq94 is unachievable");
         assert_eq!(fb.cell, 2);
         assert_eq!(fb.scalar, Some(9.0));
     }
@@ -391,16 +393,16 @@ mod tests {
 
     #[test]
     fn feat_idx_past_vector_defers() {
-        let z = parse_unachievable_zones(&encode(99, &[(f32::INFINITY, 90.0, 0, f32::NAN)]))
-            .unwrap();
+        let z =
+            parse_unachievable_zones(&encode(99, &[(f32::INFINITY, 90.0, 0, f32::NAN)])).unwrap();
         // pixels_feat_idx 99 > supplied len → defer, no panic.
         assert!(z.resolve(&[1.0, 2.0], 99.0).is_none());
     }
 
     #[test]
     fn nan_fallback_scalar_means_use_predicted() {
-        let z = parse_unachievable_zones(&encode(0, &[(f32::INFINITY, 50.0, 7, f32::NAN)]))
-            .unwrap();
+        let z =
+            parse_unachievable_zones(&encode(0, &[(f32::INFINITY, 50.0, 7, f32::NAN)])).unwrap();
         let fb = z.resolve(&[1.0], 80.0).unwrap();
         assert_eq!(fb.cell, 7);
         assert_eq!(fb.scalar, None); // NaN sentinel → use predicted

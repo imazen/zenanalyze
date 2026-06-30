@@ -181,11 +181,22 @@ mod tests {
         let zones = zones_one();
         // A veto that WOULD fire (feat[1] > 0.5 forbids cell 0) — must be
         // skipped because the zone fires first.
-        let veto = KnobVeto { feat_idx: 1, op: VetoOp::GreaterThan, threshold: 0.5, cells: &[0] };
+        let veto = KnobVeto {
+            feat_idx: 1,
+            op: VetoOp::GreaterThan,
+            threshold: 0.5,
+            cells: &[0],
+        };
         let features = [500_000.0, 1.0]; // pixels in zone; veto-feature would fire
         let mut allowed = [true, true, true];
         let d = resolve_pre_argmin(&features, 94.0, &zones, &[veto], &mut allowed);
-        assert_eq!(d, PreArgminDecision::ZoneFallback(ZoneFallback { cell: 2, scalar: Some(9.0) }));
+        assert_eq!(
+            d,
+            PreArgminDecision::ZoneFallback(ZoneFallback {
+                cell: 2,
+                scalar: Some(9.0)
+            })
+        );
         // vetoes NOT applied — mask untouched (the zone short-circuits).
         assert_eq!(allowed, [true, true, true]);
     }
@@ -193,7 +204,12 @@ mod tests {
     #[test]
     fn reachable_target_applies_vetoes_then_argmin() {
         let zones = zones_one();
-        let veto = KnobVeto { feat_idx: 1, op: VetoOp::GreaterThan, threshold: 0.5, cells: &[0] };
+        let veto = KnobVeto {
+            feat_idx: 1,
+            op: VetoOp::GreaterThan,
+            threshold: 0.5,
+            cells: &[0],
+        };
         let features = [500_000.0, 1.0]; // in zone class, but target reachable
         let mut allowed = [true, true, true];
         // target 80 <= ceiling 90 -> not a zone -> vetoes apply.
@@ -245,10 +261,14 @@ mod tests {
         let zones = zones_one();
         let features = [500_000.0];
         let mut a1 = [true, true, true];
-        assert_eq!(resolve_pre_argmin(&features, 90.0, &zones, &[], &mut a1),
-                   PreArgminDecision::Argmin);
+        assert_eq!(
+            resolve_pre_argmin(&features, 90.0, &zones, &[], &mut a1),
+            PreArgminDecision::Argmin
+        );
         let mut a2 = [true, true, true];
-        assert!(matches!(resolve_pre_argmin(&features, 90.01, &zones, &[], &mut a2),
-                         PreArgminDecision::ZoneFallback(_)));
+        assert!(matches!(
+            resolve_pre_argmin(&features, 90.01, &zones, &[], &mut a2),
+            PreArgminDecision::ZoneFallback(_)
+        ));
     }
 }

@@ -54,7 +54,10 @@ pub enum EncodeMode {
 impl EncodeMode {
     /// Whether this is a latency-sensitive (real-time) profile.
     pub fn is_realtime(self) -> bool {
-        matches!(self, EncodeMode::RealtimeFastest | EncodeMode::RealtimeBalanced)
+        matches!(
+            self,
+            EncodeMode::RealtimeFastest | EncodeMode::RealtimeBalanced
+        )
     }
 
     /// The default per-codec trial strategy this profile implies. Real-time profiles
@@ -87,15 +90,27 @@ pub struct EncodeBudget {
 impl EncodeBudget {
     /// Bound by a hard pass count only.
     pub const fn passes(n: u16) -> Self {
-        Self { max_passes: Some(n), max_trial_pixels: None, max_ms: None }
+        Self {
+            max_passes: Some(n),
+            max_trial_pixels: None,
+            max_ms: None,
+        }
     }
     /// Bound by a trial-pixel ceiling only (size-adaptive).
     pub const fn trial_pixels(px: u64) -> Self {
-        Self { max_passes: None, max_trial_pixels: Some(px), max_ms: None }
+        Self {
+            max_passes: None,
+            max_trial_pixels: Some(px),
+            max_ms: None,
+        }
     }
     /// Bound by a wall-time ceiling only.
     pub const fn milliseconds(ms: u32) -> Self {
-        Self { max_passes: None, max_trial_pixels: None, max_ms: Some(ms) }
+        Self {
+            max_passes: None,
+            max_trial_pixels: None,
+            max_ms: Some(ms),
+        }
     }
 
     /// How many of the picker's `n_candidates` ranked cells to trial-encode under
@@ -120,15 +135,16 @@ impl EncodeBudget {
                 if let Some(mp) = self.max_passes {
                     p = p.min(mp as usize);
                 }
-                if let Some(px) = self.max_trial_pixels {
-                    if image_pixels > 0 {
-                        p = p.min((px / image_pixels) as usize);
-                    }
+                // `checked_div` folds in the "divisor > 0" guard (returns `None` at 0).
+                if let Some(px) = self.max_trial_pixels
+                    && let Some(per) = px.checked_div(image_pixels)
+                {
+                    p = p.min(per as usize);
                 }
-                if let Some(ms) = self.max_ms {
-                    if est_ms_per_encode > 0 {
-                        p = p.min((ms / est_ms_per_encode) as usize);
-                    }
+                if let Some(ms) = self.max_ms
+                    && let Some(per) = ms.checked_div(est_ms_per_encode)
+                {
+                    p = p.min(per as usize);
                 }
                 p.max(1).min(avail)
             }
@@ -163,8 +179,14 @@ mod tests {
     #[test]
     fn trial_pixels_is_size_adaptive() {
         let (small, large) = (256 * 256, 4096u64 * 4096);
-        assert_eq!(EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, small, 0), 3);
-        assert_eq!(EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, large, 0), 1);
+        assert_eq!(
+            EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, small, 0),
+            3
+        );
+        assert_eq!(
+            EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, large, 0),
+            1
+        );
     }
 
     #[test]
@@ -174,13 +196,20 @@ mod tests {
         // tight ceiling -> one-shot
         assert_eq!(EncodeBudget::milliseconds(50).resolve(Auto, 5, 0, 100), 1);
         // no estimate (0) -> ms axis skipped at resolve; time_exhausted handles runtime
-        assert_eq!(EncodeBudget::milliseconds(50).resolve(MultiShot, 5, 0, 0), 5);
+        assert_eq!(
+            EncodeBudget::milliseconds(50).resolve(MultiShot, 5, 0, 0),
+            5
+        );
     }
 
     #[test]
     fn most_restrictive_axis_binds() {
         // passes allows 5, time allows 2 (codec est 100ms, ceiling 200ms) -> 2
-        let b = EncodeBudget { max_passes: Some(5), max_ms: Some(200), max_trial_pixels: None };
+        let b = EncodeBudget {
+            max_passes: Some(5),
+            max_ms: Some(200),
+            max_trial_pixels: None,
+        };
         assert_eq!(b.resolve(MultiShot, 8, 0, 100), 2);
     }
 
