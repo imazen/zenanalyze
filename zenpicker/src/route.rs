@@ -146,15 +146,22 @@ pub fn content_capability(offer: &zenanalyze_api::Offer) -> AllowedFamilies {
     out
 }
 
-/// Lossy codec preference, best first — a **codec-reality prior**, deliberately NOT fit from the
-/// sweep data. JXL and AVIF are the modern high-efficiency codecs (JXL first: best general RD +
-/// features; **AVIF second** — AV1 intra, especially strong on flat/large content); WebP is the
-/// older but ubiquitous fallback; JPEG is the compatibility floor (never RD-optimal); GIF last
-/// (palette, niche). We anchor on the prior because the cross-codec data can't currently order
-/// AVIF vs WebP: AVIF was swept only to speed 4 (not RD-optimal 0–2), the comparison is
-/// coverage-trapped at low quality where AVIF's lead is thinnest, and the corpus skews small —
-/// so a data-derived order wrongly ranks WebP above AVIF. Fix the data (AVIF speed 0–2 +
-/// quality-targeted sampling) before letting it reorder this.
+/// Lossy codec preference, best first — the **fixed-prior fallback** (what `family_rule` returns
+/// when no zenanalyze features are available; the image-AWARE projection is the intended default —
+/// see below). JXL and AVIF are the modern high-efficiency codecs; WebP is the older ubiquitous
+/// fallback; JPEG is the compatibility floor (never RD-optimal); GIF last (palette, niche).
+///
+/// This order is **confirmed by the corrected data — no re-sweep** (correcting an earlier doc that
+/// claimed the data couldn't order AVIF vs WebP). With a clean RD measure (cheapest encode reaching
+/// the target), AVIF's best swept speed (the data spans **s2–s8**, not just s4; the per-step byte
+/// effect is only ~3%, so s2 is near RD-optimal), PAIRED comparison (only images where both reach
+/// the target), and size-reweighting (the corpus skews small), the order is **AVIF ≈ JXL ≫ WebP >
+/// JPEG** — and strongly content-dependent (large→AVIF 73–85%, tiny→WebP at low-q / JXL at high-q).
+/// The earlier "WebP > AVIF" was a coarse-measure + low-q + small-corpus artifact, not reality.
+/// An image-AWARE *linear projection* of zenanalyze fit on this corrected data routes one-shot at
+/// **3.85%** vs the perfect oracle (any fixed order is 22–30%) — the intended default; this prior
+/// is the no-features fallback. Analysis: zenmetrics
+/// `scripts/picker/{corrected_ranking,linear_projection_order}.py`.
 pub static LOSSY_PREFERENCE: [CodecFamily; 5] = [
     CodecFamily::Jxl,
     CodecFamily::Avif,
@@ -188,9 +195,11 @@ pub const LOSSLESS_QUALITY: f32 = 96.0;
 ///
 /// Works for ANY subset of `allowed` — one format, several, or none — because it just takes the
 /// best available. `None` only when nothing allowed can encode the image (e.g. a lossy target
-/// with only PNG allowed). The preference is a codec-reality prior ([`LOSSY_PREFERENCE`] /
-/// [`LOSSLESS_PREFERENCE`]); content-adaptive reordering is deliberately deferred until the
-/// sweep data can be trusted to do it (see [`LOSSY_PREFERENCE`]).
+/// with only PNG allowed). The preference is the data-confirmed prior ([`LOSSY_PREFERENCE`] /
+/// [`LOSSLESS_PREFERENCE`]). Content-adaptive reordering is now **viable on the corrected data** —
+/// an image-AWARE linear projection of zenanalyze routes one-shot at 3.85% vs the perfect oracle
+/// (vs 22–30% for any fixed order); it's being baked as the lossy router. This `family_rule`
+/// remains the obviously-correct, no-model, no-features **fallback / audit path**.
 #[cfg(feature = "api")]
 pub fn family_rule(
     offer: &zenanalyze_api::Offer<'_>,
