@@ -32,6 +32,28 @@ pub enum PickerStrategy {
     Auto,
 }
 
+/// The application's high-level latency intent. Drives codec routing (realtime prefers
+/// fast codecs — see the zenpicker meta-router) and the per-codec trial
+/// [`PickerStrategy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeMode {
+    /// Latency-sensitive / user-facing: prefer fast codecs, trust the pick (one-shot).
+    Realtime,
+    /// Throughput / offline / queued: all codecs viable, multi-shot trials (or an
+    /// offline metric-K-verify) allowed.
+    Queue,
+}
+
+impl EncodeMode {
+    /// The default per-codec trial strategy this mode implies.
+    pub fn strategy(self) -> PickerStrategy {
+        match self {
+            EncodeMode::Realtime => PickerStrategy::OneShot,
+            EncodeMode::Queue => PickerStrategy::Auto,
+        }
+    }
+}
+
 /// Multi-axis resource ceiling for trial encodes, set by the **application**. Any
 /// subset of axes may be set; the **most restrictive binds**. All-unset = unbounded
 /// (capped only by the candidate count). No per-encode-time estimate lives here — the
@@ -160,5 +182,11 @@ mod tests {
         assert_eq!(EncodeBudget::passes(5).resolve(MultiShot, 0, 0, 0), 1);
         assert_eq!(EncodeBudget::passes(0).resolve(MultiShot, 5, 0, 0), 1);
         assert_eq!(EncodeBudget::default().resolve(MultiShot, 4, 9_999, 9), 4);
+    }
+
+    #[test]
+    fn encode_mode_maps_to_strategy() {
+        assert_eq!(EncodeMode::Realtime.strategy(), OneShot);
+        assert_eq!(EncodeMode::Queue.strategy(), Auto);
     }
 }
