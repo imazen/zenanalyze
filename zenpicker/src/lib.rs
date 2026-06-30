@@ -82,7 +82,9 @@ pub use route::{
 #[cfg(feature = "api")]
 pub use route::{content_capability, family_rule};
 
-// ── Shipped default cross-codec routers (baked 2026-06-30, i8 ZNPR) ──────────
+// ── Shipped default cross-codec routers (baked 2026-06-30, ZNPR) ──────────
+// gate + lossless are i8 family-score MLPs; the lossy router is the f32 6-pairwise-discriminant
+// linear model (102→6 margins) combined by `route::pairwise_round_robin`.
 // The ZNPR loader needs 16-aligned bytes; wrap each baked blob in an over-aligned
 // struct (same pattern the per-codec pickers use). `default_routers()` loads them.
 #[cfg(feature = "std")]
@@ -524,14 +526,32 @@ impl<'b> MetaPicker<'b> {
         let Some(scored) = scored else {
             return Ok(None);
         };
-        if scored.len() != CodecFamily::COUNT {
+        // Both family routers and the lossy pairwise router emit `CodecFamily::COUNT` outputs,
+        // but they mean different things: the lossless router emits per-family scores
+        // (lower = better) directly; the lossy router emits 6 pairwise margins (output `o` is
+        // the oriented margin for `route::LOSSY_PAIRS[o]`). The lossy margins must be combined
+        // by round-robin into per-family scores BEFORE the masked argmin. The gate + lossless
+        // branches are unchanged.
+        let n = if lossless {
+            scored.len()
+        } else {
+            // The lossy router's contract is exactly the 6 pairs in LOSSY_PAIRS.
+            route::LOSSY_PAIRS.len()
+        };
+        if scored.len() != n {
             return Err(MetaPickerError::OutputShape {
-                expected: CodecFamily::COUNT,
+                expected: n,
                 got: scored.len(),
             });
         }
-        let mut scores = [f32::INFINITY; CodecFamily::COUNT];
-        scores.copy_from_slice(&scored);
+        let scores = if lossless {
+            let mut s = [f32::INFINITY; CodecFamily::COUNT];
+            s.copy_from_slice(&scored);
+            s
+        } else {
+            // 6 pairwise margins → per-family round-robin scores (lower = better; png/gif last).
+            route::pairwise_round_robin(&scored)
+        };
         Ok(RouteDecision::resolve(
             lossless,
             &scores,
@@ -567,17 +587,23 @@ impl<'b> MetaPicker<'b> {
 
 #[cfg(feature = "std")]
 impl MetaPicker<'static> {
-    /// The shipped default cross-codec router — the three baked ZNPR models (lossy /
-    /// lossless / auto-gate, i8, 2026-06-30) loaded from `include_bytes!` into process-static
-    /// [`Model`]s, ready for [`route`](Self::route). Cheap to call repeatedly (the parsed
-    /// models are cached in a `OnceLock`). Requires `std` for the static cache; `no_std`
-    /// callers build their own via [`new`](Self::new) + [`with_router`](Self::with_router).
+    /// The shipped default cross-codec router — three baked ZNPR models (lossy / lossless /
+    /// auto-gate, 2026-06-30) loaded from `include_bytes!` into process-static [`Model`]s, ready
+    /// for [`route`](Self::route). Cheap to call repeatedly (the parsed models are cached in a
+    /// `OnceLock`). Requires `std` for the static cache; `no_std` callers build their own via
+    /// [`new`](Self::new) + [`with_router`](Self::with_router).
     ///
-    /// Trained on the 101 qualified source-only zenanalyze features, on the **support-aware
-    /// (unbiased) oracle** — only cells where all lossy codecs have measured support, so no
-    /// cross-codec coverage bias (held-out family-acc 74.9% lossy / 88.4% lossless / 98.1%
-    /// gate; i8 == f32). Honest support thins above ~zq88, so above there defer to the gate
-    /// (lossless). The offer passed to `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
+    /// All three are fit on the 101 qualified source-only zenanalyze features:
+    /// - **lossy** — 6 pairwise linear discriminants over {jpeg, webp, jxl, avif} (each pair's
+    ///   margin = a `LogisticRegression` projection of features + target_zq), combined
+    ///   round-robin (`route::pairwise_round_robin`). f32 ZNPR (612 weights; exact margins).
+    ///   Held-out RD overhead vs the perfect oracle **3.55%** (beats the per-family regression's
+    ///   3.85%). Fit: zenmetrics `scripts/picker/pairwise_discriminants.py`.
+    /// - **lossless / gate** — i8 family-score MLPs on the **support-aware (unbiased) oracle**
+    ///   (only cells where all codecs have measured support; held-out 88.4% lossless / 98.1%
+    ///   gate). Honest support thins above ~zq88, so above there the gate defers to lossless.
+    ///
+    /// The offer passed to `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
     pub fn default_routers() -> Self {
         use std::sync::OnceLock;
         static LOSSY: OnceLock<Model> = OnceLock::new();
@@ -789,5 +815,153 @@ mod tests {
             .unwrap()
             .expect("lossless routes");
         assert!(ll.lossless(), "explicit Lossless -> lossless branch");
+    }
+
+    // ── Gate 1: round-trip the baked lossy router's MODEL MATH ─────────────────────────────
+    //
+    // Loads the shipped lossy router (`ROUTER_LOSSY` — the f32 6-pairwise-discriminant bake)
+    // and runs `Predictor::predict` on a raw 102-input fixture vector, asserting the 6 raw
+    // outputs equal the LogisticRegression margins the Python fit produced. This proves the
+    // scaler (mean/scale), the standardized weights, and the row-major w[i*out+o] layout all
+    // round-tripped through the bake correctly. (Note: predict() returns the RAW margins; the
+    // sigmoid + round-robin live in `route::pairwise_round_robin`, exercised separately.)
+
+    // Gate-1 round-trip fixture: a raw 102-input vector (101 features + target_zq last) and
+    // the 6 expected pairwise margins = LogisticRegression.decision_function(scaler.transform(x)),
+    // in LOSSY_PAIRS order. Generated by /tmp/fit_pairwise_router.py from the same fit that
+    // produced the baked model. The baked model (identity layer over scaler-standardized
+    // inputs) must reproduce these within 1e-3 (f32 weights → ~1e-6 in practice).
+    const FIXTURE_INPUT: [f32; 102] = [
+        1183.1138916015625f32,
+        0.17489799857139587f32,
+        0.17252899706363678f32,
+        0.016346000134944916f32,
+        0.007089999970048666f32,
+        0.6805559992790222f32,
+        0.3078700006008148f32,
+        73.23847961425781f32,
+        0.3379809856414795f32,
+        1.2086269855499268f32,
+        1077.0f32,
+        0.0389540009200573f32,
+        0.04207000136375427f32,
+        0.02806999906897545f32,
+        4.0f32,
+        0.05073000118136406f32,
+        0.032260000705718994f32,
+        6.0f32,
+        0.21217800676822662f32,
+        2.953234910964966f32,
+        19.560184478759766f32,
+        12.18055534362793f32,
+        0.004629999864846468f32,
+        0.0f32,
+        0.0f32,
+        0.0f32,
+        0.0f32,
+        0.02510100044310093f32,
+        2.4985430240631104f32,
+        1.573091983795166f32,
+        0.02196200005710125f32,
+        0.012664999812841415f32,
+        0.17592599987983704f32,
+        0.05421699956059456f32,
+        34.97286605834961f32,
+        0.004629999864846468f32,
+        0.07587400078773499f32,
+        0.018518999218940735f32,
+        0.0f32,
+        27648.0f32,
+        10.22730827331543f32,
+        144.0f32,
+        192.0f32,
+        82944.0f32,
+        0.75f32,
+        0.2876819968223572f32,
+        0.0f32,
+        0.11111100018024445f32,
+        3.0f32,
+        1.6434530019760132f32,
+        4.302288055419922f32,
+        5.084190845489502f32,
+        5.299294948577881f32,
+        5.454172134399414f32,
+        0.02708199992775917f32,
+        0.049056001007556915f32,
+        0.9158750176429749f32,
+        1.0f32,
+        0.021626999601721764f32,
+        0.032552000135183334f32,
+        0.22715100646018982f32,
+        0.9389169812202454f32,
+        1.0f32,
+        9.0f32,
+        66.0f32,
+        191.0f32,
+        255.0f32,
+        0.0f32,
+        0.0f32,
+        0.0f32,
+        0.15873000025749207f32,
+        0.0f32,
+        0.0f32,
+        0.0f32,
+        0.015873000025749207f32,
+        10.22730827331543f32,
+        10.22730827331543f32,
+        10.332669258117676f32,
+        0.0f32,
+        0.0f32,
+        0.0f32,
+        0.7678509950637817f32,
+        1.0314090251922607f32,
+        1.1495100259780884f32,
+        0.01309799961745739f32,
+        0.018476000055670738f32,
+        0.02196200005710125f32,
+        0.0f32,
+        0.0f32,
+        10.304389953613281f32,
+        0.7074009776115417f32,
+        11.0f32,
+        -0.03952400013804436f32,
+        0.03018300049006939f32,
+        1.6522489786148071f32,
+        6.264340877532959f32,
+        1.1378840208053589f32,
+        1.0156769752502441f32,
+        0.6501539945602417f32,
+        1.335929036140442f32,
+        1.0940029621124268f32,
+        48.0f32,
+    ];
+    const FIXTURE_MARGINS: [f32; 6] = [
+        -2.659532070159912f32,
+        -3.438004732131958f32,
+        -1.9667832851409912f32,
+        0.98594069480896f32,
+        0.4540826976299286f32,
+        -0.11689960956573486f32,
+    ];
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn lossy_router_roundtrip_matches_fixture_margins() {
+        let model = Model::from_bytes(ROUTER_LOSSY).expect("baked lossy router parses");
+        assert_eq!(model.n_inputs(), 102, "lossy router n_inputs");
+        assert_eq!(model.n_outputs(), 6, "lossy router n_outputs");
+        let mut pred = Predictor::new(&model);
+        let out = pred.predict(&FIXTURE_INPUT).expect("predict");
+        assert_eq!(out.len(), 6);
+        for (i, (&got, &want)) in out.iter().zip(FIXTURE_MARGINS.iter()).enumerate() {
+            assert!(
+                (got - want).abs() < 1e-3,
+                "pair {} margin: got {}, want {} (|diff|={})",
+                i,
+                got,
+                want,
+                (got - want).abs()
+            );
+        }
     }
 }

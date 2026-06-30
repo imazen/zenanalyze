@@ -31,6 +31,12 @@ zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = fal
 # The frozen, version-unifying feature contract. Optional (gated by `api`), 1.0
 # and zero-dep so it unifies across a multi-version build.
 zenanalyze-api = { version = "0.1.0", path = "../zenanalyze-api", optional = true }
+# `no_std` exp for the lossy-router round-robin sigmoid (`route::pairwise_round_robin`).
+# `core` has no `f32::exp`; `std` builds call `f32::exp` directly (the `cfg(feature = "std")`
+# arm in `route::sigmoid`), `no_std + alloc` builds call `libm::expf`. The same crate (and
+# pinned version) zenpredict already carries transitively, so it adds nothing new to the graph.
+# Tiny, pure-safe-Rust, well-audited.
+libm = { version = "0.2.16", default-features = false }
 
 [dev-dependencies]
 # Bake tiny ZNPR models for the `feature_request` integration test (api feature).

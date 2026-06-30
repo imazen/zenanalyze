@@ -17,6 +17,76 @@
 use crate::{AllowedFamilies, CodecFamily};
 use alloc::vec::Vec;
 
+/// The 6 lossy codec pairs the baked lossy router scores, **in output-neuron order** — the
+/// router's output `o` is the oriented margin for pair `LOSSY_PAIRS[o]` (`> 0` ⇒ the first
+/// family of the pair wins, i.e. reaches the target in fewer bytes). Must match the bake's
+/// `zenpicker.lossy_pairwise` metadata (`jpeg:webp,jpeg:jxl,jpeg:avif,webp:jxl,webp:avif,
+/// jxl:avif`) and the order the discriminants were fit in (zenmetrics
+/// `scripts/picker/pairwise_discriminants.py`). The four lossy families {jpeg, webp, jxl, avif}
+/// each appear in three pairs; PNG/GIF are not lossy-router families.
+// Only consumed by the `api`-gated `route()` (and its tests); unused in a no_std/no-api build.
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+pub(crate) const LOSSY_PAIRS: [(CodecFamily, CodecFamily); 6] = [
+    (CodecFamily::Jpeg, CodecFamily::Webp),
+    (CodecFamily::Jpeg, CodecFamily::Jxl),
+    (CodecFamily::Jpeg, CodecFamily::Avif),
+    (CodecFamily::Webp, CodecFamily::Jxl),
+    (CodecFamily::Webp, CodecFamily::Avif),
+    (CodecFamily::Jxl, CodecFamily::Avif),
+];
+
+/// Logistic sigmoid `1 / (1 + e^-x)`, numerically stable (no overflow for large `|x|`). The
+/// lossy router emits raw per-pair margins; this maps each to `P(first family of the pair wins)`
+/// for the round-robin tally. `std` uses `f32::exp`; `no_std` uses `libm::expf` (the same
+/// dependency zenpredict carries) — never a degenerate constant, so the tally is correct in
+/// both builds.
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    #[cfg(feature = "std")]
+    let exp = |v: f32| v.exp();
+    #[cfg(not(feature = "std"))]
+    let exp = |v: f32| libm::expf(v);
+    if x >= 0.0 {
+        let z = exp(-x);
+        1.0 / (1.0 + z)
+    } else {
+        let z = exp(x);
+        z / (1.0 + z)
+    }
+}
+
+/// Combine the lossy router's 6 pairwise margins into per-family scores via **round-robin**:
+/// each family's score is the sum, over its three pairs, of `P(it wins that pair)`. For pair
+/// `o = (A, B)` with margin `m`, `p = sigmoid(m)` is `P(A wins)`; we add `p` to `A` and `1 - p`
+/// to `B`. A family that beats all others scores ~3.0; one that loses all scores ~0.0.
+///
+/// Returns a `[f32; CodecFamily::COUNT]` in the convention [`RouteDecision::resolve`] expects —
+/// **lower = better** — so the per-family entry is `-score` for the four lossy families
+/// (jpeg/webp/jxl/avif) and `+1e9` for png/gif (never lossy-router families, so they sort last
+/// but are not dropped — the caller's masks decide their fate). With `-score`, the strongest
+/// round-robin family has the smallest (most-negative) value and wins the argmin.
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+pub(crate) fn pairwise_round_robin(margins: &[f32]) -> [f32; CodecFamily::COUNT] {
+    let mut score = [0.0f32; CodecFamily::COUNT];
+    for (o, &(a, b)) in LOSSY_PAIRS.iter().enumerate() {
+        let p = sigmoid(margins[o]); // P(a wins)
+        score[a.index()] += p;
+        score[b.index()] += 1.0 - p;
+    }
+    let mut out = [0.0f32; CodecFamily::COUNT];
+    for fam in CodecFamily::ALL {
+        let i = fam.index();
+        out[i] = match fam {
+            // png/gif aren't lossy-router families: rank last, but don't drop (finite, large).
+            CodecFamily::Png | CodecFamily::Gif => 1e9,
+            // lower = better for resolve(); negate so the highest round-robin score wins argmin.
+            _ => -score[i],
+        };
+    }
+    out
+}
+
 /// The quality a caller targets — the **primary** codec-routing axis (the best family shifts
 /// with it). Either a perceptual score (0..100, higher = closer to source) or fully lossless.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -293,6 +363,113 @@ mod tests {
         assert_eq!(
             d.ranked(),
             &[CodecFamily::Jxl, CodecFamily::Webp, CodecFamily::Png]
+        );
+    }
+
+    // ── Gate 2: pairwise round-robin (the lossy router's margins → family scores) ──────────
+
+    #[test]
+    fn round_robin_all_zero_margins_ties_lossy_families() {
+        // All margins 0 → every pair p = sigmoid(0) = 0.5 → each lossy family scores
+        // 0.5 * 3 pairs = 1.5; out = -1.5 for jpeg/webp/jxl/avif, +1e9 for png/gif.
+        let out = pairwise_round_robin(&[0.0; 6]);
+        for f in [
+            CodecFamily::Jpeg,
+            CodecFamily::Webp,
+            CodecFamily::Jxl,
+            CodecFamily::Avif,
+        ] {
+            assert!(
+                (out[f.index()] - (-1.5)).abs() < 1e-4,
+                "{:?} expected -1.5, got {}",
+                f,
+                out[f.index()]
+            );
+        }
+        assert_eq!(out[CodecFamily::Png.index()], 1e9);
+        assert_eq!(out[CodecFamily::Gif.index()], 1e9);
+        // resolve() over LOSSY: all four tie at -1.5, ties break by family index → jpeg first.
+        let d = RouteDecision::resolve(false, &out, AllowedFamilies::LOSSY).unwrap();
+        assert_eq!(d.family(), CodecFamily::Jpeg);
+        // png/gif never enter the LOSSY branch's ranked list.
+        assert!(!d.ranked().contains(&CodecFamily::Png));
+        assert!(!d.ranked().contains(&CodecFamily::Gif));
+    }
+
+    #[test]
+    fn round_robin_jxl_dominates_all() {
+        // Drive jxl to win every pair it's in (large margins in the right orientation),
+        // and avif to beat jpeg/webp. LOSSY_PAIRS order:
+        //   0 jpeg:webp  1 jpeg:jxl  2 jpeg:avif  3 webp:jxl  4 webp:avif  5 jxl:avif
+        // jxl wins pairs 1 (jpeg:jxl → jpeg loses → margin very negative),
+        //               3 (webp:jxl → webp loses → margin very negative),
+        //               5 (jxl:avif → jxl wins → margin very positive).
+        let m = [
+            0.0,   // jpeg:webp — neutral
+            -20.0, // jpeg:jxl  — jxl wins big
+            -20.0, // jpeg:avif — avif wins big
+            -20.0, // webp:jxl  — jxl wins big
+            -20.0, // webp:avif — avif wins big
+            20.0,  // jxl:avif  — jxl wins big
+        ];
+        let out = pairwise_round_robin(&m);
+        let d = RouteDecision::resolve(false, &out, AllowedFamilies::LOSSY).unwrap();
+        assert_eq!(
+            d.family(),
+            CodecFamily::Jxl,
+            "jxl beats everyone → ranked first"
+        );
+        // jxl wins all 3 → score ≈ 3.0 → out ≈ -3.0 (the smallest / best).
+        assert!(out[CodecFamily::Jxl.index()] < out[CodecFamily::Avif.index()]);
+        assert!(out[CodecFamily::Avif.index()] < out[CodecFamily::Webp.index()]);
+        // png/gif are always last and never selected by the lossy branch.
+        assert!(out[CodecFamily::Png.index()] > 0.0);
+        assert!(out[CodecFamily::Gif.index()] > 0.0);
+        assert_eq!(d.ranked()[0], CodecFamily::Jxl);
+        assert!(!d.ranked().contains(&CodecFamily::Png));
+    }
+
+    #[test]
+    fn round_robin_jpeg_loses_all_ranks_last_among_lossy() {
+        // jpeg loses every pair it's in (0,1,2 oriented so jpeg loses).
+        let m = [
+            -20.0, // jpeg:webp — webp wins
+            -20.0, // jpeg:jxl  — jxl wins
+            -20.0, // jpeg:avif — avif wins
+            0.0,   // webp:jxl  — tie
+            0.0,   // webp:avif — tie
+            0.0,   // jxl:avif  — tie
+        ];
+        let out = pairwise_round_robin(&m);
+        // jpeg ≈ 0 score → out ≈ 0 (worst among lossy, but still < png/gif's 1e9).
+        let jpeg = out[CodecFamily::Jpeg.index()];
+        for f in [CodecFamily::Webp, CodecFamily::Jxl, CodecFamily::Avif] {
+            assert!(
+                out[f.index()] < jpeg,
+                "{:?} ({}) should rank ahead of jpeg ({})",
+                f,
+                out[f.index()],
+                jpeg
+            );
+        }
+        assert!(jpeg < out[CodecFamily::Png.index()]);
+        let d = RouteDecision::resolve(false, &out, AllowedFamilies::LOSSY).unwrap();
+        // jpeg is last among the four lossy survivors.
+        assert_eq!(*d.ranked().last().unwrap(), CodecFamily::Jpeg);
+    }
+
+    #[test]
+    fn round_robin_pairs_match_bake_metadata_order() {
+        // The const order is load-bearing: output neuron o is pair LOSSY_PAIRS[o], and the
+        // bake's zenpicker.lossy_pairwise metadata declares the same. Keep them in lockstep.
+        let csv = LOSSY_PAIRS
+            .iter()
+            .map(|(a, b)| alloc::format!("{}:{}", a.label(), b.label()))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            csv,
+            "jpeg:webp,jpeg:jxl,jpeg:avif,webp:jxl,webp:avif,jxl:avif"
         );
     }
 

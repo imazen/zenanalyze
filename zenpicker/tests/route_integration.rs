@@ -48,10 +48,17 @@ fn gate_bytes() -> Vec<u8> {
     ];
     bake(3, 2, &w, &[0.0, 90.0])
 }
-// lossy family router: in = [a,b,target], 6 outputs (lower=better). jxl(2) lowest, then
-// avif(2.0..) etc. png/gif parked high (not lossy families anyway).
+// lossy PAIRWISE router: in = [a,b,target], 6 outputs = the oriented margins for the 6 pairs
+// route::LOSSY_PAIRS = [jpeg:webp, jpeg:jxl, jpeg:avif, webp:jxl, webp:avif, jxl:avif], in that
+// order. Margin > 0 ⇒ the FIRST family of the pair wins (fewer bytes). `route()` runs these
+// margins through round-robin (sum of per-pair win-probabilities) into per-family scores before
+// the argmin. Weights are zero (margins = biases → feature-independent, predictable). These
+// biases make jxl win all 3 of its pairs (→ score≈3), avif win 2 (→≈2), webp win 1 (→≈1),
+// jpeg lose all (→≈0); round-robin order jxl > avif > webp > jpeg:
+//   pair0 jpeg:webp = -8 → webp;  pair1 jpeg:jxl = -8 → jxl;  pair2 jpeg:avif = -8 → avif;
+//   pair3 webp:jxl  = -8 → jxl;   pair4 webp:avif = -8 → avif; pair5 jxl:avif = +8 → jxl.
 fn lossy_bytes() -> Vec<u8> {
-    bake(3, 6, &[0.0; 18], &[5.0, 4.0, 1.0, 2.0, 9.0, 9.0])
+    bake(3, 6, &[0.0; 18], &[-8.0, -8.0, -8.0, -8.0, -8.0, 8.0])
 }
 // lossless family router: in = [a,b], 6 outputs. among {webp,jxl,png}: jxl(1) < webp(4) < png(6).
 fn lossless_bytes() -> Vec<u8> {
@@ -82,6 +89,8 @@ fn with_router<R>(f: impl FnOnce(&mut MetaPicker) -> R) -> R {
 #[test]
 fn lossy_target_routes_to_best_lossy_family() {
     with_router(|r| {
+        // The pairwise margins (see lossy_bytes) make jxl win all 3 of its pairs → the
+        // round-robin ranks jxl > avif > webp > jpeg.
         let feats = [fr("a@11111111", 1.0), fr("b@22222222", 2.0)];
         let offer = Offer::new(&feats, Provenance::new("t"));
         let d = r
@@ -161,7 +170,8 @@ fn allowlist_narrows_the_lossy_pick() {
     with_router(|r| {
         let feats = [fr("a@11111111", 1.0), fr("b@22222222", 2.0)];
         let offer = Offer::new(&feats, Provenance::new("t"));
-        // deny jxl + avif -> best surviving lossy family is webp
+        // deny jxl + avif -> the round-robin's surviving families are webp (score≈1) and
+        // jpeg (≈0), so webp wins.
         let allowed = AllowedFamilies::all()
             .deny(CodecFamily::Jxl)
             .deny(CodecFamily::Avif);
