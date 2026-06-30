@@ -10,12 +10,15 @@
 //!
 //! Two orthogonal controls:
 //! - [`PickerStrategy`] — the codec's *mode*: trust the pick, force trials, or adapt.
-//! - [`EncodeBudget`] — a *multi-axis resource ceiling*. Any subset of axes (pass
-//!   count, trial pixels, wall-time) may be set; the most restrictive one binds.
+//! - [`EncodeBudget`] — a *multi-axis resource ceiling*. Any subset of axes may be set;
+//!   the most restrictive binds.
 //!
-//! [`EncodeBudget::resolve`] combines them into a candidate count the codec trial-
-//! encodes. This is the cheap, real-time-capable counterpart to a full offline
-//! metric-K-verify (which would encode every cell).
+//! The count axes ([`EncodeBudget::max_passes`], [`EncodeBudget::max_trial_pixels`])
+//! are static — [`EncodeBudget::resolve`] turns them into an upper bound on trial
+//! encodes the codec pre-slices to. The time axis ([`EncodeBudget::max_ms`]) is
+//! enforced at **runtime** by [`EncodeBudget::time_exhausted`]: the encoder is the only
+//! thing that knows the real per-encode cost (it just timed one), so the loop checks
+//! its own elapsed clock rather than asking the caller for a fragile estimate.
 
 /// The codec's trial-encode mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,14 +28,14 @@ pub enum PickerStrategy {
     /// Always trial-encode up to the budget (quality-first).
     MultiShot,
     /// Let the budget decide — size/time-adaptive. The recommended default: with a
-    /// `max_trial_pixels` / `max_ms` axis a large image collapses to one-shot (no trial
-    /// fits), a small one trials up to the budget.
+    /// `max_trial_pixels` axis a large image collapses to one-shot (no trial fits), a
+    /// small one trials up to the budget; `max_ms` then stops the loop on the clock.
     Auto,
 }
 
 /// Multi-axis resource ceiling for trial encodes. Any subset of axes may be set; the
-/// **most restrictive (smallest) binds**. All-unset = unbounded (capped only by the
-/// candidate count). [`Self::est_ms_per_encode`] feeds the [`Self::max_ms`] axis.
+/// **most restrictive binds**. All-unset = unbounded (capped only by the candidate
+/// count). No per-encode-time estimate is required — see [`Self::time_exhausted`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EncodeBudget {
     /// Hard cap on trial encodes. `None` = not bounded by pass count.
@@ -40,38 +43,35 @@ pub struct EncodeBudget {
     /// Pixel ceiling across trial encodes (size-adaptive: a large image fits fewer
     /// passes). `None` = not bounded by pixels.
     pub max_trial_pixels: Option<u64>,
-    /// Wall-time ceiling (ms) for trials. `None` = not bounded by time. Applies only
-    /// when `est_ms_per_encode > 0`.
+    /// Wall-time ceiling (ms) for trials, enforced at runtime by the codec's loop via
+    /// [`Self::time_exhausted`]. `None` = not bounded by time.
     pub max_ms: Option<u32>,
-    /// The codec's estimated ms per trial encode for this image (for `max_ms`).
-    /// `0` = unknown (the `max_ms` axis is then skipped).
-    pub est_ms_per_encode: u32,
 }
 
 impl EncodeBudget {
     /// Bound by a hard pass count only.
     pub const fn passes(n: u16) -> Self {
-        Self { max_passes: Some(n), max_trial_pixels: None, max_ms: None, est_ms_per_encode: 0 }
+        Self { max_passes: Some(n), max_trial_pixels: None, max_ms: None }
     }
     /// Bound by a trial-pixel ceiling only (size-adaptive).
     pub const fn trial_pixels(px: u64) -> Self {
-        Self { max_passes: None, max_trial_pixels: Some(px), max_ms: None, est_ms_per_encode: 0 }
+        Self { max_passes: None, max_trial_pixels: Some(px), max_ms: None }
     }
-    /// Bound by a wall-time ceiling only, with the codec's per-encode estimate.
-    pub const fn milliseconds(budget_ms: u32, est_ms_per_encode: u32) -> Self {
-        Self { max_passes: None, max_trial_pixels: None, max_ms: Some(budget_ms), est_ms_per_encode }
+    /// Bound by a wall-time ceiling only (runtime-enforced).
+    pub const fn milliseconds(ms: u32) -> Self {
+        Self { max_passes: None, max_trial_pixels: None, max_ms: Some(ms) }
     }
 
-    /// How many of the picker's `n_candidates` ranked cells to trial-encode under
-    /// `strategy` for an `image_pixels`-sized image. The min across every set axis,
-    /// floored at 1 (the top pick is always encoded) and capped at `n_candidates`.
-    /// `OneShot` is always 1; `MultiShot` / `Auto` spend the budget.
+    /// Static upper bound on trial encodes from the count + pixel axes (the codec
+    /// pre-slices its candidate list to this many). Floored at 1 (the top pick always
+    /// encodes) and capped at `n_candidates`. `OneShot` is always 1. The time axis is
+    /// NOT applied here — the loop stops early via [`Self::time_exhausted`].
     pub fn resolve(&self, strategy: PickerStrategy, n_candidates: usize, image_pixels: u64) -> usize {
         let avail = n_candidates.max(1);
         match strategy {
             PickerStrategy::OneShot => 1,
             PickerStrategy::MultiShot | PickerStrategy::Auto => {
-                let mut p = avail; // unbounded start; every set axis only tightens it
+                let mut p = avail; // unbounded start; every set static axis tightens it
                 if let Some(mp) = self.max_passes {
                     p = p.min(mp as usize);
                 }
@@ -80,19 +80,17 @@ impl EncodeBudget {
                         p = p.min((px / image_pixels) as usize);
                     }
                 }
-                if let Some(ms) = self.max_ms {
-                    if self.est_ms_per_encode > 0 {
-                        p = p.min((ms / self.est_ms_per_encode) as usize);
-                    }
-                }
                 p.max(1).min(avail)
             }
         }
     }
 
-    /// Whether the codec should run the multi-shot trial loop (`resolve > 1`).
-    pub fn is_multishot(&self, strategy: PickerStrategy, n_candidates: usize, image_pixels: u64) -> bool {
-        self.resolve(strategy, n_candidates, image_pixels) > 1
+    /// Runtime time-stop: `true` once the wall-time budget is spent. The codec calls
+    /// this in its trial loop with the elapsed time since it began encoding this image,
+    /// so the real (measured) per-encode cost governs the cutoff — no estimate needed.
+    /// Always `false` when `max_ms` is unset.
+    pub fn time_exhausted(&self, elapsed_ms: u32) -> bool {
+        self.max_ms.is_some_and(|ms| elapsed_ms >= ms)
     }
 }
 
@@ -117,26 +115,32 @@ mod tests {
     fn trial_pixels_is_size_adaptive() {
         let (small, large) = (256 * 256, 4096u64 * 4096);
         assert_eq!(EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, small), 3);
-        assert_eq!(EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, large), 1); // <1 fits
+        assert_eq!(EncodeBudget::trial_pixels(3 * small).resolve(Auto, 4, large), 1);
     }
 
     #[test]
-    fn most_restrictive_axis_binds() {
-        // passes allows 5, time allows 2 -> time binds at 2
-        let b = EncodeBudget { max_passes: Some(5), max_ms: Some(200), est_ms_per_encode: 100, ..Default::default() };
-        assert_eq!(b.resolve(MultiShot, 8, 0), 2);
-        // passes allows 5, pixels allow 3 (on this image) -> pixels bind at 3
-        let b2 = EncodeBudget { max_passes: Some(5), max_trial_pixels: Some(3 * 65536), ..Default::default() };
-        assert_eq!(b2.resolve(Auto, 8, 65536), 3);
+    fn most_restrictive_static_axis_binds() {
+        // passes allows 5, pixels allow 3 on this image -> pixels bind at 3
+        let b = EncodeBudget { max_passes: Some(5), max_trial_pixels: Some(3 * 65536), max_ms: None };
+        assert_eq!(b.resolve(Auto, 8, 65536), 3);
     }
 
     #[test]
-    fn unset_axes_dont_constrain() {
-        // only the candidate count caps an all-unset budget
+    fn unset_static_axes_dont_constrain() {
         assert_eq!(EncodeBudget::default().resolve(MultiShot, 4, 9_999), 4);
-        // max_ms set but no estimate -> that axis is skipped
-        let b = EncodeBudget { max_ms: Some(10), est_ms_per_encode: 0, ..Default::default() };
-        assert_eq!(b.resolve(MultiShot, 4, 0), 4);
+        // a time-only budget has no static cap -> resolve = all candidates; the loop
+        // trims them on the clock via time_exhausted.
+        assert_eq!(EncodeBudget::milliseconds(200).resolve(MultiShot, 4, 9_999), 4);
+    }
+
+    #[test]
+    fn time_exhausted_uses_real_elapsed() {
+        let b = EncodeBudget::milliseconds(200);
+        assert!(!b.time_exhausted(100));
+        assert!(b.time_exhausted(200));
+        assert!(b.time_exhausted(350));
+        // no time axis -> never exhausted
+        assert!(!EncodeBudget::passes(3).time_exhausted(99_999));
     }
 
     #[test]
