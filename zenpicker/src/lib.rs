@@ -76,9 +76,11 @@ use alloc::string::{String, ToString};
 use zenpredict::{AllowedMask, ArgminOffsets, Model, PredictError, Predictor, ScoreTransform};
 
 mod route;
+pub use route::{
+    LOSSLESS_PREFERENCE, LOSSLESS_QUALITY, LOSSY_PREFERENCE, QualityTarget, RouteDecision,
+};
 #[cfg(feature = "api")]
-pub use route::content_capability;
-pub use route::{QualityTarget, RouteDecision};
+pub use route::{content_capability, family_rule};
 
 // ── Shipped default cross-codec routers (baked 2026-06-30, i8 ZNPR) ──────────
 // The ZNPR loader needs 16-aligned bytes; wrap each baked blob in an over-aligned

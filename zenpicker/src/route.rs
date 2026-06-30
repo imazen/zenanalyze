@@ -146,6 +146,77 @@ pub fn content_capability(offer: &zenanalyze_api::Offer) -> AllowedFamilies {
     out
 }
 
+/// Lossy codec preference, best first — a **codec-reality prior**, deliberately NOT fit from the
+/// sweep data. JXL and AVIF are the modern high-efficiency codecs (JXL first: best general RD +
+/// features; **AVIF second** — AV1 intra, especially strong on flat/large content); WebP is the
+/// older but ubiquitous fallback; JPEG is the compatibility floor (never RD-optimal); GIF last
+/// (palette, niche). We anchor on the prior because the cross-codec data can't currently order
+/// AVIF vs WebP: AVIF was swept only to speed 4 (not RD-optimal 0–2), the comparison is
+/// coverage-trapped at low quality where AVIF's lead is thinnest, and the corpus skews small —
+/// so a data-derived order wrongly ranks WebP above AVIF. Fix the data (AVIF speed 0–2 +
+/// quality-targeted sampling) before letting it reorder this.
+pub static LOSSY_PREFERENCE: [CodecFamily; 5] = [
+    CodecFamily::Jxl,
+    CodecFamily::Avif,
+    CodecFamily::Webp,
+    CodecFamily::Jpeg,
+    CodecFamily::Gif,
+];
+/// Lossless preference, best first — JXL > WebP > PNG > GIF (genuinely ordered: JXL-modular beats
+/// WebP-lossless beats PNG; matches both codec reality and the measured win-rate). AVIF/JPEG omit
+/// (no true-lossless path here).
+pub static LOSSLESS_PREFERENCE: [CodecFamily; 4] = [
+    CodecFamily::Jxl,
+    CodecFamily::Webp,
+    CodecFamily::Png,
+    CodecFamily::Gif,
+];
+/// Target quality at/above which to store losslessly rather than push a lossy encoder to its
+/// limit (the sharp RD crossover, ~zq96). The one numeric threshold in the rule.
+pub const LOSSLESS_QUALITY: f32 = 96.0;
+
+/// Pick a codec family with an **obviously-correct, format-set-robust** rule — no model, no
+/// fitted thresholds beyond the single documented quality crossover. The whole decision is the
+/// two preference lists + the capability rules; verify it by reading:
+///
+/// 1. **lossless?** — yes if the caller asked, or the quality target is near-perfect
+///    (≥ [`LOSSLESS_QUALITY`]); pick the matching preference list.
+/// 2. **viable** = families the caller allowed, that can represent the image (alpha / HDR /
+///    depth — [`content_capability`], format-spec facts), in the list (the list encodes the
+///    lossy/lossless mode).
+/// 3. return the **highest-preference viable** family.
+///
+/// Works for ANY subset of `allowed` — one format, several, or none — because it just takes the
+/// best available. `None` only when nothing allowed can encode the image (e.g. a lossy target
+/// with only PNG allowed). The preference is a codec-reality prior ([`LOSSY_PREFERENCE`] /
+/// [`LOSSLESS_PREFERENCE`]); content-adaptive reordering is deliberately deferred until the
+/// sweep data can be trusted to do it (see [`LOSSY_PREFERENCE`]).
+#[cfg(feature = "api")]
+pub fn family_rule(
+    offer: &zenanalyze_api::Offer<'_>,
+    target: QualityTarget,
+    allowed: AllowedFamilies,
+    mode: zenpredict::EncodeMode,
+    latency_ms: Option<u32>,
+    per_family_est_ms: &[u32; CodecFamily::COUNT],
+) -> Option<CodecFamily> {
+    let lossless = target.is_lossless() || target.score_input() >= LOSSLESS_QUALITY;
+    // viable = allowed ∩ can-represent-the-image (capability) ∩ fits-the-latency-budget.
+    // The budget gate is [`AllowedFamilies::viable`]: real-time modes drop any codec whose own
+    // per-image encode estimate exceeds `latency_ms` (so a tight RealtimeFastest budget falls
+    // through the slow codecs JXL/AVIF to fast WebP/JPEG); queued modes keep every codec.
+    let viable =
+        allowed
+            .intersect(content_capability(offer))
+            .viable(mode, latency_ms, per_family_est_ms);
+    let order: &[CodecFamily] = if lossless {
+        &LOSSLESS_PREFERENCE
+    } else {
+        &LOSSY_PREFERENCE
+    };
+    order.iter().copied().find(|&f| viable.is_allowed(f))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +340,150 @@ mod tests {
             assert!(!cap.is_allowed(CodecFamily::Webp));
             assert!(cap.is_allowed(CodecFamily::Jxl));
             assert!(cap.is_allowed(CodecFamily::Png));
+        }
+
+        // family_rule: the obviously-correct, any-subset prior + budget gate.
+        const NO_BUDGET: [u32; CodecFamily::COUNT] = [0; CodecFamily::COUNT];
+        // queued + no latency cap = no budget gating, so `pick` tests the capability + prior only.
+        fn pick(o: &Offer, t: QualityTarget, a: AllowedFamilies) -> Option<CodecFamily> {
+            family_rule(
+                o,
+                t,
+                a,
+                zenpredict::EncodeMode::QueuedBalanced,
+                None,
+                &NO_BUDGET,
+            )
+        }
+
+        #[test]
+        fn rule_prior_order_and_any_subset() {
+            let cells = [cell("variance@00000000", 0.5f32)]; // plain image, no alpha/HDR
+            let o = offer(&cells);
+            let all = AllowedFamilies::all();
+            assert_eq!(
+                pick(&o, QualityTarget::Zq(80.0), all),
+                Some(CodecFamily::Jxl)
+            );
+            // JXL denied -> AVIF (the corrected prior: AVIF before WebP)
+            assert_eq!(
+                pick(&o, QualityTarget::Zq(80.0), all.deny(CodecFamily::Jxl)),
+                Some(CodecFamily::Avif)
+            );
+            // JXL + AVIF denied -> WebP
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Zq(80.0),
+                    all.deny(CodecFamily::Jxl).deny(CodecFamily::Avif)
+                ),
+                Some(CodecFamily::Webp)
+            );
+            // any subset works, even GIF-only
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::from_allowed([CodecFamily::Gif])
+                ),
+                Some(CodecFamily::Gif)
+            );
+        }
+
+        #[test]
+        fn rule_capability_mode_and_empty() {
+            let alpha = [cell("alpha_present@00000000", true)];
+            let oa = offer(&alpha);
+            // alpha + only JPEG -> None (JPEG can't represent alpha)
+            assert_eq!(
+                pick(
+                    &oa,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::from_allowed([CodecFamily::Jpeg])
+                ),
+                None
+            );
+            assert_eq!(
+                pick(&oa, QualityTarget::Zq(80.0), AllowedFamilies::all()),
+                Some(CodecFamily::Jxl)
+            );
+            let plain = [cell("variance@00000000", 0.5f32)];
+            let op = offer(&plain);
+            // lossy target but only PNG allowed -> None (PNG has no lossy mode in the list)
+            assert_eq!(
+                pick(
+                    &op,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::from_allowed([CodecFamily::Png])
+                ),
+                None
+            );
+            // nothing allowed -> None
+            assert_eq!(
+                pick(&op, QualityTarget::Zq(80.0), AllowedFamilies::none()),
+                None
+            );
+        }
+
+        #[test]
+        fn rule_lossless_and_quality_threshold() {
+            let plain = [cell("variance@00000000", 0.5f32)];
+            let o = offer(&plain);
+            // explicit Lossless, JXL absent -> WebP before PNG
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Lossless,
+                    AllowedFamilies::from_allowed([CodecFamily::Png, CodecFamily::Webp])
+                ),
+                Some(CodecFamily::Webp)
+            );
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Lossless,
+                    AllowedFamilies::from_allowed([CodecFamily::Png])
+                ),
+                Some(CodecFamily::Png)
+            );
+            // near-lossless quality auto-routes to the lossless list -> JXL
+            assert_eq!(
+                pick(&o, QualityTarget::Zq(98.0), AllowedFamilies::all()),
+                Some(CodecFamily::Jxl)
+            );
+        }
+
+        #[test]
+        fn rule_realtime_budget_drops_slow_codecs() {
+            use zenpredict::EncodeMode;
+            let cells = [cell("variance@00000000", 0.5f32)];
+            let o = offer(&cells);
+            // per-family encode estimate (ms) for this image; index order jpeg,webp,jxl,avif,png,gif
+            let est = [10u32, 20, 300, 400, 8, 30]; // jxl/avif slow, webp/jpeg fast
+            // queued ignores latency -> best-RD survivor JXL even though it's slow
+            assert_eq!(
+                family_rule(
+                    &o,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::all(),
+                    EncodeMode::QueuedBalanced,
+                    Some(100),
+                    &est
+                ),
+                Some(CodecFamily::Jxl)
+            );
+            // RealtimeFastest @100ms -> JXL(300)/AVIF(400) too slow -> fall through to WebP
+            assert_eq!(
+                family_rule(
+                    &o,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::all(),
+                    EncodeMode::RealtimeFastest,
+                    Some(100),
+                    &est
+                ),
+                Some(CodecFamily::Webp)
+            );
         }
     }
 }
