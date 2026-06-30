@@ -32,24 +32,39 @@ pub enum PickerStrategy {
     Auto,
 }
 
-/// The application's high-level latency intent. Drives codec routing (realtime prefers
-/// fast codecs — see the zenpicker meta-router) and the per-codec trial
-/// [`PickerStrategy`].
+/// The application's encode profile: a latency × effort point on the
+/// fastest→aggressive spectrum. Drives codec routing (real-time profiles prefer fast
+/// codecs — see the zenpicker meta-router), the per-codec trial [`PickerStrategy`], and
+/// the codec's internal effort tier (`Fastest` / `Balanced` / `Aggressive` — the codec
+/// matches the variant). Only the four sensible combos exist (no `RealtimeAggressive`
+/// — too slow for real-time; no `QueuedFastest` — no reason to queue the fastest path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodeMode {
-    /// Latency-sensitive / user-facing: prefer fast codecs, trust the pick (one-shot).
-    Realtime,
-    /// Throughput / offline / queued: all codecs viable, multi-shot trials (or an
-    /// offline metric-K-verify) allowed.
-    Queue,
+    /// Real-time, minimum latency: fastest codecs + lowest effort, one-shot.
+    RealtimeFastest,
+    /// Real-time, more effort within the latency budget: one-shot, mid effort.
+    RealtimeBalanced,
+    /// Queued / offline, balanced effort: multi-shot trials allowed (size/time-adaptive).
+    QueuedBalanced,
+    /// Queued / offline, maximum quality: full multi-shot + offline metric-K-verify,
+    /// highest effort, all codecs viable.
+    QueuedAggressive,
 }
 
 impl EncodeMode {
-    /// The default per-codec trial strategy this mode implies.
+    /// Whether this is a latency-sensitive (real-time) profile.
+    pub fn is_realtime(self) -> bool {
+        matches!(self, EncodeMode::RealtimeFastest | EncodeMode::RealtimeBalanced)
+    }
+
+    /// The default per-codec trial strategy this profile implies. Real-time profiles
+    /// stay one-shot (trials add latency); queued profiles trial — `Auto` adapts to
+    /// size, `Aggressive` forces the full multi-shot.
     pub fn strategy(self) -> PickerStrategy {
         match self {
-            EncodeMode::Realtime => PickerStrategy::OneShot,
-            EncodeMode::Queue => PickerStrategy::Auto,
+            EncodeMode::RealtimeFastest | EncodeMode::RealtimeBalanced => PickerStrategy::OneShot,
+            EncodeMode::QueuedBalanced => PickerStrategy::Auto,
+            EncodeMode::QueuedAggressive => PickerStrategy::MultiShot,
         }
     }
 }
@@ -186,7 +201,11 @@ mod tests {
 
     #[test]
     fn encode_mode_maps_to_strategy() {
-        assert_eq!(EncodeMode::Realtime.strategy(), OneShot);
-        assert_eq!(EncodeMode::Queue.strategy(), Auto);
+        assert_eq!(EncodeMode::RealtimeFastest.strategy(), OneShot);
+        assert_eq!(EncodeMode::RealtimeBalanced.strategy(), OneShot);
+        assert_eq!(EncodeMode::QueuedBalanced.strategy(), Auto);
+        assert_eq!(EncodeMode::QueuedAggressive.strategy(), MultiShot);
+        assert!(EncodeMode::RealtimeFastest.is_realtime());
+        assert!(!EncodeMode::QueuedAggressive.is_realtime());
     }
 }
