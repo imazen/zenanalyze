@@ -75,6 +75,11 @@ use alloc::string::{String, ToString};
 
 use zenpredict::{AllowedMask, ArgminOffsets, Model, PredictError, Predictor, ScoreTransform};
 
+mod route;
+#[cfg(feature = "api")]
+pub use route::content_capability;
+pub use route::{QualityTarget, RouteDecision};
+
 /// Codec families the meta-picker can choose between.
 ///
 /// **Important — order matters.** The discriminants here must match
@@ -192,6 +197,27 @@ impl AllowedFamilies {
     pub fn any(self) -> bool {
         self.flags.iter().any(|f| *f)
     }
+
+    /// Intersection — families allowed by BOTH masks. Folds the caller allowlist with
+    /// [`content_capability`](crate::content_capability) (and the branch set) in `route`.
+    pub fn intersect(self, other: Self) -> Self {
+        let mut flags = [false; CodecFamily::COUNT];
+        let mut i = 0;
+        while i < CodecFamily::COUNT {
+            flags[i] = self.flags[i] && other.flags[i];
+            i += 1;
+        }
+        Self { flags }
+    }
+
+    /// The families the LOSSY router chooses among (JPEG / WebP / JXL / AVIF).
+    pub const LOSSY: Self = Self {
+        flags: [true, true, true, true, false, false],
+    };
+    /// The families the LOSSLESS router chooses among (WebP / JXL / PNG).
+    pub const LOSSLESS: Self = Self {
+        flags: [false, true, true, false, true, false],
+    };
 
     /// Filter to families whose estimated encode cost fits a real-time latency ceiling.
     /// Real-time [`EncodeMode`]s drop families slower than `latency_ms`; queued modes
@@ -447,14 +473,20 @@ mod tests {
     #[test]
     fn viable_queued_keeps_all_allowed() {
         let all = AllowedFamilies::all();
-        assert_eq!(all.viable(zenpredict::EncodeMode::QueuedAggressive, Some(100), &EST_MS), all);
+        assert_eq!(
+            all.viable(zenpredict::EncodeMode::QueuedAggressive, Some(100), &EST_MS),
+            all
+        );
     }
 
     #[test]
     fn viable_no_ceiling_and_respects_prior_allowlist() {
         let all = AllowedFamilies::all();
         // no latency gate -> no masking
-        assert_eq!(all.viable(zenpredict::EncodeMode::RealtimeFastest, None, &EST_MS), all);
+        assert_eq!(
+            all.viable(zenpredict::EncodeMode::RealtimeFastest, None, &EST_MS),
+            all
+        );
         // prior allowlist {jpeg, jxl}, realtime 100ms: jpeg kept (fast), jxl dropped (slow),
         // webp never allowed
         let sub = AllowedFamilies::from_allowed([CodecFamily::Jpeg, CodecFamily::Jxl]);
