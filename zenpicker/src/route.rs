@@ -228,10 +228,10 @@ pub fn content_capability(offer: &zenanalyze_api::Offer) -> AllowedFamilies {
 /// the target), and size-reweighting (the corpus skews small), the order is **AVIF ≈ JXL ≫ WebP >
 /// JPEG** — and strongly content-dependent (large→AVIF 73–85%, tiny→WebP at low-q / JXL at high-q).
 /// The earlier "WebP > AVIF" was a coarse-measure + low-q + small-corpus artifact, not reality.
-/// An image-AWARE *linear projection* of zenanalyze fit on this corrected data routes one-shot at
-/// **3.85%** vs the perfect oracle (any fixed order is 22–30%) — the intended default; this prior
-/// is the no-features fallback. Analysis: zenmetrics
-/// `scripts/picker/{corrected_ranking,linear_projection_order}.py`.
+/// The **shipped** lossy router is image-AWARE: 6 pairwise linear discriminants of zenanalyze +
+/// round-robin (`MetaPicker::route`), one-shot **3.55%** vs the perfect oracle (any fixed order is
+/// 22–30%). This prior is the no-features fallback. Analysis: zenmetrics
+/// `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`.
 pub static LOSSY_PREFERENCE: [CodecFamily; 5] = [
     CodecFamily::Jxl,
     CodecFamily::Avif,
@@ -266,10 +266,10 @@ pub const LOSSLESS_QUALITY: f32 = 96.0;
 /// Works for ANY subset of `allowed` — one format, several, or none — because it just takes the
 /// best available. `None` only when nothing allowed can encode the image (e.g. a lossy target
 /// with only PNG allowed). The preference is the data-confirmed prior ([`LOSSY_PREFERENCE`] /
-/// [`LOSSLESS_PREFERENCE`]). Content-adaptive reordering is now **viable on the corrected data** —
-/// an image-AWARE linear projection of zenanalyze routes one-shot at 3.85% vs the perfect oracle
-/// (vs 22–30% for any fixed order); it's being baked as the lossy router. This `family_rule`
-/// remains the obviously-correct, no-model, no-features **fallback / audit path**.
+/// [`LOSSLESS_PREFERENCE`]). Content-adaptive reordering **shipped** as the lossy router: 6 pairwise
+/// linear discriminants of zenanalyze + round-robin (`MetaPicker::route`), one-shot 3.55% vs the
+/// perfect oracle (vs 22–30% for any fixed order). This `family_rule` remains the obviously-correct,
+/// no-model, no-features **fallback / audit path**.
 #[cfg(feature = "api")]
 pub fn family_rule(
     offer: &zenanalyze_api::Offer<'_>,

@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feat_cols). Backward-compatible: no `knob_vetoes` → no metadata entry / manifest
   field, bake byte-identical to before.
 
+### Changed
+
+- **zenpicker lossy router is now 6 pairwise linear discriminants + round-robin** (`cef8b94c`),
+  replacing the MLP family-score router. Each of the 6 lossy pairs (jpeg/webp/jxl/avif) gets a
+  linear discriminant of the 101 qualified zenanalyze features + target quality;
+  `route::pairwise_round_robin` combines them (sigmoid → round-robin tally) into per-family scores
+  for `RouteDecision::resolve`. Held-out one-shot RD overhead **3.55%** vs the perfect oracle (beats
+  the prior MLP / per-family regression at 3.85%), interpretable (size-dependence isolated to the
+  jxl-vs-avif pair, the rest pure content), any-subset robust. Baked **f32**, not i8 — i8 quant
+  flips the near-boundary jxl:avif margin (−0.117); the f32 `.bin` is 6827 bytes (vs the old 27 KB
+  i8 MLP). `feat_cols` and offer-materialization are unchanged; the lossless + auto-gate routers are
+  unchanged. `family_rule` (the fixed codec-reality prior, now data-confirmed) remains the
+  no-features fallback. Trained on corrected data (no re-sweep) — zenmetrics
+  `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`.
+
 ### Documentation
 
 - **README overhaul across the three published library crates** (`zenanalyze`,
