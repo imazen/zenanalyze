@@ -242,22 +242,32 @@ Resolved 2026-06-19 (P0 CI-integrity pass):
   bench `rand 0.9` deprecations (`gen_range`→`random_range`) are fixed and the
   accumulated clippy debt was cleared so `-D warnings` passes.
 
-## KADIS-700k zensim dataset (built 2026-06-30)
+## KADIS-700k dataset (zensim 2026-06-30; GPU-metrics 2026-07-01)
 
 700,000 distorted-image cells — 140k KADIS pristine references × 1 `dist_type_1` × 5 severity
-levels — zensim-scored with a 372-D feature vector. **The `source_features/` sidecar — a
+levels, each with a 372-D zensim feature vector. **The `source_features/` sidecar — a
 per-reference snapshot of each *undistorted* image — is produced by THIS crate**
-(`analyze_features_rgb8` with `FeatureSet::SUPPORTED`), one row per source, joinable to the
-cell rows by `source_filename`.
+(`analyze_features_rgb8` with `FeatureSet::SUPPORTED`), one row per source, joinable to the cell
+rows of EITHER canonical by `source_filename`. Two canonical variants (same 700k cells, same
+`source_id` split key):
 
-- **Canonical parquet:** `s3://zentrain/kadis-700k/canonical/kadis700k_canonical_2026-06-30.parquet`
-  (700k×380, ~906 MB zstd, 0 nulls; sha256 `b57e4b3f…`). Mirrors: `/mnt/v/datasets/kadis700k/canonical/`,
-  `/mnt/tower/output/kadis700k/`. The canonical holds the 372-D zensim `feat_*`; the zenanalyze
-  source features live in the `source_features/` sidecar (per source, not folded into the canonical).
-- **Columns:** `source_id` (stable split key 0..139999 — split on this, never on row), `source_filename`,
-  `dist_type`, `dist_name`, `severity_level`, `dist_param` (signed for 7/18/25), `score_zensim`, `feat_0..feat_371`.
-- **Sidecars:** `s3://zentrain/kadis-700k/{omni,zensim_features,source_features}/` (350 each).
-- **Full README + schema:** `s3://zentrain/kadis-700k/README.md` (and `~/work/kadis-distort/docs/DATASET.md`).
+- **★ GPU-metrics canonical (2026-07-01) — current, richest.**
+  `s3://zentrain/kadis-700k-gpu/canonical/kadis700k_canonical_gpu_2026-07-01.parquet`
+  (700k×387, ~936 MB zstd, 0 nulls; sha256 `c9a6fd56…`). **7 perceptual scores** —
+  `score_{zensim,ssim2,butteraugli_max,butteraugli_pnorm3,iwssim,dssim}_gpu` + `score_cvvdp_cpu_imazen_v0_1_0`
+  — plus `distorted_url` (a persisted distorted PNG per cell → rescore-from-links), on top of the
+  372-D `feat_*` + shared keys. Sidecars `s3://zentrain/kadis-700k-gpu/{omni,zensim_features,pairs}/`
+  + `distorted/<chunk>/*.png`. (No `source_features/` sidecar of its own — join the CPU variant's
+  `kadis-700k/source_features/` by `source_filename`.)
+- **zensim-only canonical (2026-06-30) — earlier variant.**
+  `s3://zentrain/kadis-700k/canonical/kadis700k_canonical_2026-06-30.parquet` (700k×380, ~906 MB
+  zstd, 0 nulls; sha256 `b57e4b3f…`). `score_zensim` + `feat_0..feat_371`. Sidecars
+  `s3://zentrain/kadis-700k/{omni,zensim_features,source_features}/` (350 each).
+- **Shared keys (both):** `source_id` (stable split key 0..139999 — split on this, never on row),
+  `source_filename`, `dist_type`, `dist_name`, `severity_level`, `dist_param` (signed for 7/18/25).
+- **Mirrors:** `/mnt/v/datasets/kadis700k/canonical/`, `/mnt/tower/output/kadis700k/canonical/`.
+- **Full README + schema:** `s3://zentrain/kadis-700k-gpu/README.md` + `s3://zentrain/kadis-700k/README.md`
+  (and `~/work/kadis-distort/docs/DATASET.md`).
 - **Credit:** reference images + distortion design © VQA Group, Universität Konstanz (Lin, Hosu,
   Saupe) — KADID-10k / KADIS-700k, https://database.mmsp-kn.de/kadid-10k-database.html ("freely
   available to the research community"). Cite KADID-10k (QoMEX 2019) + DeepFL-IQA (arXiv:2001.08113).
