@@ -1008,13 +1008,17 @@ mod tests {
         1.0940029621124268f32,
         48.0f32,
     ];
+    // Reference margins for the SHIPPED lossy pairwise router on FIXTURE_INPUT. Updated
+    // 2026-07-01 when the router was retrained on the zensim-A (v47-strict-QAT) canonical
+    // (the "ban V0_2 labels" re-bake). The values track whichever weights the .bin carries;
+    // the test's purpose (bin margins round-trip through Predictor) is unchanged.
     const FIXTURE_MARGINS: [f32; 6] = [
-        -2.659532070159912f32,
-        -3.438004732131958f32,
-        -1.9667832851409912f32,
-        0.98594069480896f32,
-        0.4540826976299286f32,
-        -0.11689960956573486f32,
+        -3.30808f32,
+        -3.4065585f32,
+        -3.0315948f32,
+        -0.71639067f32,
+        -0.782362f32,
+        -0.11527448f32,
     ];
 
     #[cfg(feature = "std")]
