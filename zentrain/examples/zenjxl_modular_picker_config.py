@@ -50,9 +50,9 @@ staged at /mnt/v/zen/zensim-training/2026-07-02-jxl-modular/ -- NOT
 committed into the zenjxl crate pending explicit user go-ahead (>30KB
 binary rule).
 
-MISSING (documented, not blocking): the bake has no `output_bounds`
-(train_hybrid.py doesn't compute per-output p01/p99 on held-out data yet),
-so the codec's OOD-on-output safety check is a no-op for this model. Also
+UPDATE 2026-07-03: train_hybrid.py now computes `output_bounds` (p01/p99 per
+output neuron on held-out validation data) -- the re-baked .bin above
+includes it, closing that gap for every future picker too. Still missing:
 no `extra_axes` in the model JSON, so the bake uses anonymous 'aux_*' axis
 names -- whatever codec consumes this .bin must independently know the
 KEEP_FEATURES ordering matches (see _feature_columns() below).
