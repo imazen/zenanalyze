@@ -81,9 +81,39 @@ all. Asked the user how to handle it (accept-and-override / investigate /
 loosen the gate itself); no response within the session, so proceeded on
 best judgment with the lowest-risk, most reversible option: accept and
 override, same treatment already established for LOW_ARGMIN on this
-picker. This is a KNOWN, ACCEPTED, DOCUMENTED gap, not a silent one --
-revisit if the user wants the alternative (investigate why this specific
-image ranks so badly, or loosen the gate itself) instead.
+picker.
+
+ROOT CAUSE (investigated 2026-07-03, user asked "what's special about
+these bad cases"): the worst misses cluster on a HANDFUL of SOURCE images
+across their entire size ladder (o_7053, o_6825, o_7021, o_7001, o_7013,
+o_3311 -- not independent per-size misses), not a random scatter.
+Quantified via Spearman correlation of all 101 features against per-image
+max overhead, then bucket comparison: images with <=256 distinct colors
+(palette_fits_in_256==1, 1047/4497 = 23.3% of the corpus, mostly near-
+grayscale / low-color-complexity content) have 3.4x higher mean overhead
+risk (0.0191 vs 0.0057) and are 2.5x more likely to exceed 10% overhead
+(5.3% vs 2.1%) than the rest of the corpus. is_grayscale shows the same
+direction (3.6x). Mechanism (not directly measured, inferred from the
+RD tables): for low-color-count content, the effort x predictor RD
+landscape is far more jagged -- entropy-coding behavior diverges sharply
+between rct1/wp5/def at different efforts in ways that don't generalize
+smoothly, unlike typical higher-color photographic content where higher
+effort almost always wins predictably. `palette_fits_in_256` IS already
+one of the model's 101 inputs, so this isn't a missing-feature gap; a
+single shared 256-unit MLP just isn't cleanly separating this regime's
+behavior from the majority's.
+
+A verified, TARGETED mitigation exists but is NOT implemented: conditional
+verify-K -- K=4 only when palette_fits_in_256==1 (the flagged 23.3%), K=1
+otherwise -- averages 1.70 encodes/row (vs. flat K=4's 4.0 for everyone)
+and resolves the actual gate-blocking case (o_7053 396.6% -> 59.7% at
+K=4). This requires the CALLER (zenjxl codec integration) to check that
+feature and branch verify-K at inference time -- NOT verified whether
+that capability exists yet; this would be new integration work, not a
+training-side change. Not pursued further this session -- documented
+here so the finding isn't lost regardless of which path is chosen next
+(implement conditional-K, retrain with more capacity for this regime, or
+keep the current flat-K1 + documented-outlier acceptance).
 
 BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding TWO safety
 violations: LOW_ARGMIN (val argmin_acc 7.2% < 10% floor -- train_hybrid.py's
