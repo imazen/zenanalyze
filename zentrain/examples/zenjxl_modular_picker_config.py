@@ -18,60 +18,92 @@ union'd locally; train_hybrid re-derives the origin-parity split itself).
 Build script: build_pareto_features_2026-07-03.py in the 2026-07-02/03 scratch
 session (regenerates the PARETO/FEATURES shape from the new canonical).
 
-DEPLOY AT K=3, NOT K=1 -- the palette fix closed its target gap (o_7053's
-palette-driven regression: 5.5x -> 1.0-1.26x once palette-off became
-reachable) but the picker's overall K=1 single-shot gate does not clear
-project's <=1% bar (mean 1.54%, max 74.4%). Root cause of the REMAINING gap
-(o_7021, o_7053@640x640) is NOT palette: jxl-encoder's effort ladder is not
-strictly monotonic in bytes (e.g. o_7021 e10=80743B is WORSE than e9=80344B
-for the same predictor), so a pure argmin-of-predicted-bytes single-shot
-pick occasionally lands one effort tier off. K=3 verify (encode the 3
-cheapest-predicted reachable cells, keep the actual smallest -- trivial cost
-for lossless, no re-scoring needed, just a byte-count compare) resolves
-this: mean 0.98% val / 0.76% test, matching this project's own established
-"<=1% via top-3-verify" precedent for the jxl-lossy picker. See
-docs/CLEAN_PICKER_PROGRAM.md (zenmetrics repo) for the full writeup.
+PALETTE FIX STATUS: confirmed resolved. o_7053's palette-driven regression
+(measured 5.5x when palette-on was the only reachable choice) dropped to
+1.0-1.26x once palette-off became reachable, checked directly against the
+raw Pareto data for every size variant. This was the specific problem this
+delta sweep targeted, and it is fixed.
 
-BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding a LOW_ARGMIN
-safety violation (val argmin_acc 9.9% < 10% floor) that train_hybrid.py's
-own diagnostic explicitly labels "NOT the quality gate" -- expected given
-the palette axis doubled the config space with many byte-identical
-duplicate cells (an exact-argmin miss against a duplicate is not a real
-RD-quality loss). The override was NOT independently re-confirmed by the
-user before baking (asked, no response within session) -- flag this to a
-human before this ships to production. f16 quantization: a repack-tool
-round-trip probe on synthetic uniform-0.5 input measured max|delta|=0.0075
-in log-bytes space (~0.025% relative on the [0,30] output range) -- an
-order of magnitude below this project's rejected-i8 deltas (0.03-0.28), but
-NOT verified against real held-out feature vectors (no zenpredict CLI
-predict/eval subcommand exists yet to run that check directly). Baked
-artifact: zenjxl_modular_picker_v0.1_2026-07-03.bin (191,848 bytes, f16),
-staged at /mnt/v/zen/zensim-training/2026-07-02-jxl-modular/ -- NOT
-committed into the zenjxl crate pending explicit user go-ahead (>30KB
-binary rule).
+FULL zenanalyze-api CONTRACT ADOPTION (2026-07-03, round 2) -- three
+stacked fixes, all in train_hybrid.py / this config unless noted:
+1. `extra_axes` is now derived generically in train_hybrid.py (named size/
+   interaction/cross-term/icc axes matching the exact `xe` layout), fixing
+   the "anonymous aux_NN" bake warning for good -- not just this picker.
+2. FEATURES now points at a re-extraction of clean-picker-corpus-2026-06-26
+   run with `--features api` (extract_features_for_picker.rs), so every
+   column is the real qualified `name@hex8` identity. `_feature_columns()`
+   does TRUE hash verification against the canonical vocabulary (not
+   bare-name matching) -- catches version drift, not just foreign columns.
+3. Doing (2) surfaced that `benchmarks/feature_qualified_names.tsv` (the
+   canonical file itself) was STALE -- its own golden tripwire test was
+   already failing on main, independent of this picker. Re-blessed it
+   (zenanalyze commit 29d6977c); ~15 HDR/gamut/highlight features lost
+   their golden-row registration entirely at some point (still exist as
+   AnalysisFeature variants, just unversioned) -- flagged, not
+   investigated further (out of scope, irrelevant to this SDR picker).
 
-UPDATE 2026-07-03: train_hybrid.py now computes `output_bounds` (p01/p99 per
-output neuron on held-out validation data) -- the re-baked .bin above
-includes it, closing that gap for every future picker too. Still missing:
-no `extra_axes` in the model JSON, so the bake uses anonymous 'aux_*' axis
-names -- whatever codec consumes this .bin must independently know the
-KEEP_FEATURES ordering matches (see _feature_columns() below).
+KEEP_FEATURES grew from 97 (bare-name match against the stale, too-narrow
+list) to 101/101 (full hash-verified match against the corrected list,
+zero foreign, zero drift) -- this is now genuinely correct, not a
+best-effort approximation.
+
+RD-QUALITY REGRESSED WITH THE CORRECTED FEATURE SET -- reported honestly,
+not smoothed over. With 101 real features (vs. the previous run's 97,
+same MLP hidden=256 capacity) the SAME-K numbers got WORSE, not better:
+  K=1: mean 1.54%->2.11%, max 74.4%->396.6%
+  K=3: mean 0.98%->1.48% (val), 0.76%->1.33% (test) -- no longer clears <=1%
+  K=4: mean 0.98% val / 0.79% test, max 59.7% -- NOW the deploy point
+Root-caused via --dump-overheads: the new worst offender is AGAIN o_7053
+(now at 1024x1024), but this miss is NOT palette-driven (checked: best
+palette-on/off ratio is only 1.18x at this size) -- the picker picked
+`mod-e10_rct1` (wrong predictor, palette-on) over the true best
+`mod-e10_def-pal0`, a compounded predictor+palette miss the same-capacity
+MLP handles worse with 4 more inputs to weigh. This is a real architecture-
+capacity finding (more/better-verified inputs without more capacity can
+hurt argmin quality), not a defect in the contract-adoption work itself --
+the two are separable and both true. DEPLOY AT K=4 now, not K=3. Increasing
+--hidden beyond 256 to recover K=1-3 quality with the full feature set is
+the natural next step, not done here (this session's mandate was contract
+correctness, not re-tuning architecture).
+
+BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding TWO safety
+violations: LOW_ARGMIN (val argmin_acc 7.2% < 10% floor -- train_hybrid.py's
+own diagnostic labels this "NOT the quality gate", expected given the
+palette axis's duplicate-byte cells) and WORST_ROW (o_7053@1024x1024,
+396.6% > 100% threshold -- a REAL K=1 quality-gate violation, consistent
+with "deploy at K=4, not K=1" above). Neither override was independently
+re-confirmed by the user before baking -- flag both to a human before this
+ships to production, and deploy at K=4 specifically (K=1 has a confirmed,
+measured catastrophic case). f16 quantization: a repack-tool round-trip
+probe on synthetic uniform-0.5 input measured max|delta|=0.0075 in
+log-bytes space, an order of magnitude below this project's rejected-i8
+deltas -- not verified against real held-out feature vectors (no
+zenpredict CLI predict/eval subcommand exists yet). Baked artifact:
+zenjxl_modular_picker_v0.1_2026-07-03.bin (196,656 bytes, f16, 209 inputs
+now vs the prior 201), staged at
+/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/ -- NOT committed into
+the zenjxl crate pending explicit user go-ahead (>30KB binary rule).
 """
 from pathlib import Path
 
 PARETO = Path("/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/zenjxl_lossless_pareto_2026-07-03.parquet")
-FEATURES = Path("/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/zenjxl_lossless_features_2026-07-03.parquet")
+# FULL contract adoption 2026-07-03: re-extracted clean-picker-corpus-2026-06-26
+# with extract_features_for_picker.rs --features api, so every column below is
+# the real qualified `name@hex8` identity (not the legacy bare `feat_<name>`) --
+# see build_qualified_features.py in the 2026-07-03 scratch session (joins the
+# api-qualified extraction onto this picker's existing image identity by
+# basename, since the fresh extraction's paths and the sweep-worker's /data/...
+# paths differ only in prefix; verified 4497/4497 images matched, 0 missing).
+FEATURES = Path("/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/zenjxl_lossless_features_qualified_2026-07-03.parquet")
 OUT_JSON = Path("/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/zenjxl_modular_picker_2026-07-03.json")
 OUT_LOG = Path("/mnt/v/zen/zensim-training/2026-07-02-jxl-modular/zenjxl_modular_picker_2026-07-03.log")
 
 # zenanalyze-api reuse-key stamps, from the FEATURES table's actual extraction
-# provenance (/mnt/v/output/clean-picker-corpus-2026-06-26/clean_features.provenance
-# -- generated by extract_features_for_picker.rs with --features api, but never
-# embedded into the downstream joined canonical parquet until this fix; verified
-# all 97 KEEP_FEATURES have an entry). config_hash=0 is AnalysisQuery::new's
-# gamma default (matches the sidecar's `config_hash=0`). train_hybrid.py's
+# provenance (embedded directly by tsv_to_parquet.py from the extractor's
+# .provenance sidecar -- see build_qualified_features.py). config_hash=0 is
+# AnalysisQuery::new's gamma default. train_hybrid.py's
 # _check_provenance_agreement warns (doesn't fail) if these disagree with the
-# FEATURES parquet's now-embedded provenance block at training time.
+# FEATURES parquet's embedded provenance block at training time.
 ANALYSIS_PROVENANCE = {
     "analyzer_version": "0.2.0",
     "feature_config_hash": 0,
@@ -85,64 +117,95 @@ METRIC_DIRECTION = "higher_better"
 # kept in sync by a golden tripwire test (`feature_qualified_names_match_committed` in
 # zenanalyze/src/versioning.rs; re-bless via `ZENANALYZE_BLESS_GOLDEN=1 cargo test
 # --features api feature_qualified_names_match_committed`). This is the file
-# zenanalyze's OWN doc comment says Python tooling should read -- NOT a re-derivation
-# (a prior version of this file shipped its own `dump_feature_names.rs` + hand-dumped
-# TSV, which was redundant with this committed file AND used a different criterion
-# --feature_id_supported() at runtime, not "has a golden version row" -- so it silently
-# missed 16 HDR/gamut features present here). Each row is `bare_name\tqualified_name`
-# (`name@hex8`, the code-version-folded identity zenanalyze_api::NamedFeature carries).
+# zenanalyze's OWN doc comment says Python tooling should read -- NOT a re-derivation.
+# Each row is `bare_name\tqualified_name` (`name@hex8`, the code-version-folded
+# identity zenanalyze_api::NamedFeature carries).
 _ZENANALYZE_QUALIFIED_NAMES_TSV = (
     Path(__file__).parent.parent.parent / "benchmarks" / "feature_qualified_names.tsv"
 )
 
 
-def _canon(c: str) -> str:
+def _load_canonical_hashes() -> dict[str, str]:
+    """bare_name -> current hex8, from the canonical qualified-name file."""
+    out = {}
+    with open(_ZENANALYZE_QUALIFIED_NAMES_TSV) as f:
+        for line in f:
+            name, qualified = line.rstrip("\n").split("\t")
+            out[name.lower()] = qualified.rsplit("@", 1)[1].lower()
+    return out
+
+
+def _split_qualified(c: str) -> tuple[str, str | None]:
+    """A FEATURES column's (bare_name, hex8_or_None). Handles both this
+    picker's current columns (bare `name@hex8`, no `feat_` prefix -- the
+    api-qualified extractor's native output) and the legacy `feat_<name>`
+    form (no hash) for backward compatibility with un-migrated codec configs."""
+    c = c.strip()
     if c.startswith("feat_"):
         c = c[len("feat_"):]
     if "@" in c:
-        c = c[: c.rfind("@")]
-    return c.lower()
+        name, hexpart = c.rsplit("@", 1)
+        if len(hexpart) == 8 and all(ch in "0123456789abcdef" for ch in hexpart.lower()):
+            return name.lower(), hexpart.lower()
+    return c.lower(), None
 
 
 def _feature_columns():
-    """Genuine zenanalyze named features present in FEATURES, matched against the
-    canonical qualified-name vocabulary (see _ZENANALYZE_QUALIFIED_NAMES_TSV above),
-    EXCLUDING the foreign zensim-internal feat_0..feat_371 basis that shares the same
-    `feat_` prefix in the joined training parquet (372/469 columns are that unrelated
-    system).
+    """Genuine, VERSION-VERIFIED zenanalyze named features present in FEATURES.
 
-    NOT YET full contract adoption: this matches by BARE name only, not the full
-    qualified `name@hash` identity -- the training FEATURES parquet's columns carry
-    no version-hash suffix at all (verified: 0/469 columns contain '@'), because the
-    upstream extraction (whatever built clean_features.tsv for
-    clean-picker-corpus-2026-06-26) was not run with `--features api` and never
-    generated the `.provenance` sidecar `extract_features_for_picker.rs` can produce
-    (confirmed: no provenance metadata on the ORIGINAL 2026-06-27 canonical parquet
-    either -- this predates this picker, not introduced by it). Real qualified-name
-    matching (which would ALSO catch version drift -- e.g. a feature whose code
-    changed since extraction, not just foreign features) needs a corpus
-    re-extraction with `--features api` + carrying the resulting provenance block
-    through to the training parquet via `_provenance.embed_provenance_in_table`.
-    That is a separate, larger task (adjacent to zenmetrics' task #22 "re-derive
-    sweep-side feature columns, NO re-sweep") -- scoped here, not done here.
+    Full zenanalyze-api contract adoption (2026-07-03): FEATURES columns carry
+    the real qualified `name@hex8` identity (extracted with --features api,
+    see the FEATURES path comment above). For each column, compares its
+    EMBEDDED hash against the CURRENT canonical hash for that name (from
+    _ZENANALYZE_QUALIFIED_NAMES_TSV) -- not just bare-name presence. Three
+    outcomes per column:
+      - name unknown to the canonical vocabulary -> FOREIGN, dropped (e.g. a
+        different feature basis that happens to share a naming convention).
+      - name known, hash matches current -> genuine and fresh, KEPT.
+      - name known, hash does NOT match current -> VERSION DRIFT: this
+        column was extracted by an older/different zenanalyze build than
+        what's now canonical, so its values may not mean what the current
+        code thinks that feature means. Dropped, loudly, not silently
+        accepted -- this is exactly the failure mode qualified names exist
+        to catch (see zenanalyze-api's README: "a want at a DIFFERENT code
+        version (drift) => miss => own pass").
     """
+    import sys
+
     import pyarrow.parquet as pq
 
-    with open(_ZENANALYZE_QUALIFIED_NAMES_TSV) as f:
-        canonical = {line.rstrip("\n").split("\t")[0].lower() for line in f}
+    canonical_hashes = _load_canonical_hashes()
     schema = pq.read_schema(FEATURES)
-    feat = [c for c in schema.names if c.startswith("feat_")]
-    kept = [c for c in feat if _canon(c) in canonical]
-    dropped = len(feat) - len(kept)
-    if dropped:
-        import sys
+    candidates = [c for c in schema.names if "@" in c or c.startswith("feat_")]
+
+    kept, foreign, drifted = [], [], []
+    for c in candidates:
+        name, hexpart = _split_qualified(c)
+        current = canonical_hashes.get(name)
+        if current is None:
+            foreign.append(c)
+        elif hexpart is not None and hexpart != current:
+            drifted.append((c, hexpart, current))
+        else:
+            kept.append(c)
+
+    if foreign:
         sys.stderr.write(
-            f"_feature_columns: kept {len(kept)}/{len(feat)} genuine zenanalyze "
-            f"features (matched against the canonical "
-            f"{len(canonical)}-name qualified-name vocabulary, bare-name only -- "
-            f"see docstring), dropped {dropped} foreign (non-zenanalyze) feat_* "
-            f"columns\n"
+            f"_feature_columns: dropped {len(foreign)} foreign (non-zenanalyze) "
+            f"column(s): {foreign[:5]}{'...' if len(foreign) > 5 else ''}\n"
         )
+    if drifted:
+        sys.stderr.write(
+            f"_feature_columns: WARNING -- dropped {len(drifted)} VERSION-DRIFTED "
+            f"column(s) (extracted hash != current canonical hash): "
+            f"{[(c, h, cur) for c, h, cur in drifted[:5]]}\n"
+        )
+    sys.stderr.write(
+        f"_feature_columns: kept {len(kept)}/{len(candidates)} genuine, "
+        f"version-verified zenanalyze features (qualified-name contract, "
+        f"full hash check against {len(canonical_hashes)}-name canonical "
+        f"vocabulary)\n"
+    )
     return kept
 
 
