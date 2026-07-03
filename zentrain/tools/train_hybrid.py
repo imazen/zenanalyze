@@ -3690,6 +3690,20 @@ def main():
         final_b[start:end] = final_b[start:end] * sigma + mu
 
     Y_va_pred = _predict_via_coefs(student, Xe_va_s, args.activation)
+    # Per-output (p01, p99) on held-out validation predictions -- consumed by
+    # bake_picker.py's encode_output_bounds() for the codec's OOD-on-output
+    # runtime check. Computed over the RAW model output (every output
+    # neuron: bytes head + any scalar heads), matching `n_outputs` generically
+    # so this covers pickers with scalar axes too, not just jxl-modular's
+    # bytes-only (SCALAR_AXES=[]) shape. Without this, bake_picker.py falls
+    # back to open ±inf sentinels and the OOD check is a silent no-op (found
+    # 2026-07-03 baking the jxl-modular picker).
+    output_bounds_p01 = np.percentile(Y_va_pred, 1, axis=0)
+    output_bounds_p99 = np.percentile(Y_va_pred, 99, axis=0)
+    output_bounds_computed = [
+        {"p01": float(lo), "p99": float(hi)}
+        for lo, hi in zip(output_bounds_p01, output_bounds_p99)
+    ]
     pred_bytes = Y_va_pred[:, :n_cells]
     # Use the same per-block offsets we computed for normalization above —
     # this fixes a latent bug where the original `(i+1)*n_cells` indexing
@@ -4195,6 +4209,7 @@ def main():
         "teacher_metrics": {"argmin": teacher_argmin, "scalars": teacher_scalars},
         "student_metrics": {"argmin": student_argmin, "scalars": student_scalars},
         "safety_report": safety_report,
+        "output_bounds": output_bounds_computed,
     }
     # zenanalyze-api reuse-key stamps from the codec config's ANALYSIS_PROVENANCE
     # (outside-in: which zenanalyze + config extracted the features). bake_picker.py
