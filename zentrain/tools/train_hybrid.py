@@ -4092,10 +4092,39 @@ def main():
         else:
             output_specs_array = [dict(s) for s in per_idx]  # type: ignore[arg-type]
 
+    # Named engineered-axis list, matching the exact `xe` concatenation order
+    # built above (per-row, inside the label-extraction loop): feat_cols come
+    # first (n_inputs - n_aux of them, handled separately as `feat_cols` by
+    # bake_picker.py), then size one-hot (len(SIZE_CLASSES) -- runtime-scoped,
+    # so this must NOT hardcode 4), the 5 log/zq interaction terms, the
+    # zq_norm*feature cross terms (one per feat_cols, same order), and the
+    # icc placeholder. Without this, bake_picker.py's derive_extra_axes()
+    # falls back to anonymous 'aux_NN' names whenever n_inputs doesn't match
+    # its one hardcoded 4-size-class legacy layout -- true for any picker
+    # whose SIZE_CLASSES got scoped to fewer than 4 (found baking the
+    # jxl-modular picker, which trained on a single "large" size class).
+    extra_axes = (
+        [f"size_{s}" for s in SIZE_CLASSES]
+        + ["log_pixels", "log_pixels_sq", "zq_norm", "zq_norm_sq", "zq_norm_x_log_pixels"]
+        + [f"zq_x_{c}" for c in feat_cols]
+        + ["icc_placeholder"]
+    )
+    _n_aux_expected = int(Xe.shape[1]) - len(feat_cols)
+    if len(extra_axes) != _n_aux_expected:
+        sys.stderr.write(
+            f"WARNING: derived extra_axes has {len(extra_axes)} entries but "
+            f"n_inputs - n_feats = {_n_aux_expected} -- the xe concatenation order "
+            f"changed without updating this derivation. NOT emitting extra_axes "
+            f"(bake_picker.py will fall back to anonymous names rather than bake "
+            f"a wrong labeling).\n"
+        )
+        extra_axes = None
+
     out = {
         "n_inputs": int(Xe.shape[1]),
         "n_outputs": output_dim,
         "n_cells": n_cells,
+        "extra_axes": extra_axes,
         "safety_profile": args.objective,
         "config_names": {int(k): v for k, v in CONFIG_NAMES.items()},
         "feat_cols": feat_cols,
