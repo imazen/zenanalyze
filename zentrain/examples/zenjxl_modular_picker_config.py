@@ -103,17 +103,49 @@ one of the model's 101 inputs, so this isn't a missing-feature gap; a
 single shared 256-unit MLP just isn't cleanly separating this regime's
 behavior from the majority's.
 
-A verified, TARGETED mitigation exists but is NOT implemented: conditional
-verify-K -- K=4 only when palette_fits_in_256==1 (the flagged 23.3%), K=1
-otherwise -- averages 1.70 encodes/row (vs. flat K=4's 4.0 for everyone)
-and resolves the actual gate-blocking case (o_7053 396.6% -> 59.7% at
-K=4). This requires the CALLER (zenjxl codec integration) to check that
-feature and branch verify-K at inference time -- NOT verified whether
-that capability exists yet; this would be new integration work, not a
-training-side change. Not pursued further this session -- documented
-here so the finding isn't lost regardless of which path is chosen next
-(implement conditional-K, retrain with more capacity for this regime, or
-keep the current flat-K1 + documented-outlier acceptance).
+SUPERSEDED MITIGATION (kept for history): conditional verify-K (K=4 only
+when palette_fits_in_256==1) averages 1.70 encodes/row and fixes the gate
+(o_7053 396.6% -> 59.7%). A BETTER option was found next -- see below.
+
+RECOMMENDED MITIGATION (2026-07-03, follow-up investigation: "do these
+images compress slower/faster, and is a manual override better than
+trusting the MLP for this category?"): manual override beats verify-K
+decisively, on both counts asked.
+
+Speed: risky (palette_fits_in_256==1) content encodes 18-26% FASTER than
+the rest of the corpus (24,648 vs 33,115 ns/pixel at effort=10) -- the
+extra verify cost for this minority is cheaper per-encode than average,
+not more expensive.
+
+Override: for the flagged 23.3%, encode a SMALL FIXED CANDIDATE SET
+instead of trusting the MLP's single top pick -- {model's own top-1
+guess, `mod-e10_def`, `mod-e10_def-pal0`} deduped (~2.76 distinct encodes
+avg) -- and keep whichever is actually smallest. Verified in two stages:
+1. The two FIXED candidates alone (no model needed), checked against
+   ground-truth Pareto data directly on BOTH val (1047 images) and test
+   (147 images) splits independently: ~99%+ clean on each (val: only
+   1/1047 >20%; test: only 1/147 >20%, same failure mode both times --
+   see next point). Generalizes, not a val-specific fluke.
+2. The one residual failure mode on each split is THE SAME image family
+   (o_7047@1024x1024, oracle wants effort=6 -- the OPPOSITE direction
+   from the majority's "wants max effort" pattern: this regime has (at
+   least) two distinct sub-populations, not one). Adding the model's own
+   top-1 guess as a third candidate closes this: on val, max overhead
+   drops 224.0% -> 17.1%, zero images >20% (was 1/1047), because the
+   model's own prediction (even though not always exactly right) tends
+   to lean toward the correct DIRECTION for this sub-population even
+   when its single-shot argmin misses the exact optimum.
+Net: mean overhead in the flagged bucket 0.49% (median 0.0%), COMPLETELY
+clears WORST_ROW (max 17.1% vs the 100% threshold, all misses under
+20%), at ~1.41 encodes/row averaged over the WHOLE corpus (77% pay 1
+encode, 23.3% pay ~2.76) -- cheaper AND far more effective than the
+K=4-conditional idea above.
+
+STILL NOT IMPLEMENTED -- needs zenjxl codec-side integration (construct
+concrete encode params for `mod-e10_def` / `mod-e10_def-pal0`, run them
+alongside the model's pick, keep smallest, gated on `palette_fits_in_256`
+at inference time). Investigating current zenjxl integration surface to
+scope this as a next step.
 
 BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding TWO safety
 violations: LOW_ARGMIN (val argmin_acc 7.2% < 10% floor -- train_hybrid.py's
