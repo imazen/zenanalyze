@@ -17,6 +17,45 @@ configs' rows are byte-identical, verified 0 mismatches across all 269,820;
 union'd locally; train_hybrid re-derives the origin-parity split itself).
 Build script: build_pareto_features_2026-07-03.py in the 2026-07-02/03 scratch
 session (regenerates the PARETO/FEATURES shape from the new canonical).
+
+DEPLOY AT K=3, NOT K=1 -- the palette fix closed its target gap (o_7053's
+palette-driven regression: 5.5x -> 1.0-1.26x once palette-off became
+reachable) but the picker's overall K=1 single-shot gate does not clear
+project's <=1% bar (mean 1.54%, max 74.4%). Root cause of the REMAINING gap
+(o_7021, o_7053@640x640) is NOT palette: jxl-encoder's effort ladder is not
+strictly monotonic in bytes (e.g. o_7021 e10=80743B is WORSE than e9=80344B
+for the same predictor), so a pure argmin-of-predicted-bytes single-shot
+pick occasionally lands one effort tier off. K=3 verify (encode the 3
+cheapest-predicted reachable cells, keep the actual smallest -- trivial cost
+for lossless, no re-scoring needed, just a byte-count compare) resolves
+this: mean 0.98% val / 0.76% test, matching this project's own established
+"<=1% via top-3-verify" precedent for the jxl-lossy picker. See
+docs/CLEAN_PICKER_PROGRAM.md (zenmetrics repo) for the full writeup.
+
+BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding a LOW_ARGMIN
+safety violation (val argmin_acc 9.9% < 10% floor) that train_hybrid.py's
+own diagnostic explicitly labels "NOT the quality gate" -- expected given
+the palette axis doubled the config space with many byte-identical
+duplicate cells (an exact-argmin miss against a duplicate is not a real
+RD-quality loss). The override was NOT independently re-confirmed by the
+user before baking (asked, no response within session) -- flag this to a
+human before this ships to production. f16 quantization: a repack-tool
+round-trip probe on synthetic uniform-0.5 input measured max|delta|=0.0075
+in log-bytes space (~0.025% relative on the [0,30] output range) -- an
+order of magnitude below this project's rejected-i8 deltas (0.03-0.28), but
+NOT verified against real held-out feature vectors (no zenpredict CLI
+predict/eval subcommand exists yet to run that check directly). Baked
+artifact: zenjxl_modular_picker_v0.1_2026-07-03.bin (191,848 bytes, f16),
+staged at /mnt/v/zen/zensim-training/2026-07-02-jxl-modular/ -- NOT
+committed into the zenjxl crate pending explicit user go-ahead (>30KB
+binary rule).
+
+MISSING (documented, not blocking): the bake has no `output_bounds`
+(train_hybrid.py doesn't compute per-output p01/p99 on held-out data yet),
+so the codec's OOD-on-output safety check is a no-op for this model. Also
+no `extra_axes` in the model JSON, so the bake uses anonymous 'aux_*' axis
+names -- whatever codec consumes this .bin must independently know the
+KEEP_FEATURES ordering matches (see _feature_columns() below).
 """
 from pathlib import Path
 
