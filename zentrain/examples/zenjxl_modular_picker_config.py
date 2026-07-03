@@ -141,11 +141,45 @@ clears WORST_ROW (max 17.1% vs the 100% threshold, all misses under
 encode, 23.3% pay ~2.76) -- cheaper AND far more effective than the
 K=4-conditional idea above.
 
-STILL NOT IMPLEMENTED -- needs zenjxl codec-side integration (construct
-concrete encode params for `mod-e10_def` / `mod-e10_def-pal0`, run them
-alongside the model's pick, keep smallest, gated on `palette_fits_in_256`
-at inference time). Investigating current zenjxl integration surface to
-scope this as a next step.
+STILL NOT IMPLEMENTED -- scoped, not built. Investigated the zenjxl
+integration surface directly (2026-07-03): NO zen codec has ANY runtime
+picker integration today -- zenjxl has zero dependency on
+zenanalyze/zenpredict, no code loads a .bin, extracts features, or calls
+a model at encode time. This is bigger than "wire into an existing path"
+-- it's the first-ever features->model->candidate-encode bridge for any
+zen codec, not specific to this picker.
+
+What already exists and helps, concretely:
+- `zenjxl/src/jpeg_lossy.rs:81-158`'s `JpegRecompressMethod::Auto`
+  (~152-156) already ships the exact "encode 2 candidates, keep smaller"
+  pattern this override needs -- real prior art in the same crate.
+- `zenjxl/src/sweep.rs::variant_from_cell_id` (~1759-1810) already parses
+  "mod-e10_def" / "mod-e10_def-pal0" into real configs, but lives behind
+  `#[cfg(all(feature = "encode", feature = "__expert"))]`
+  (`lib.rs:44-45`, "Private -- do not depend on this in production
+  code"). Not a blocker for just these 2 fixed configs though: plain
+  `LosslessConfig::new().with_effort(10)` [+
+  `.with_modular_palette_colors(Some(0))` for the -pal0 variant] uses
+  only STABLE re-exported API (`lib.rs:80`) -- `__expert` is only needed
+  for `with_internal_params`, not used here.
+- `palette_fits_in_256` is real (`zenanalyze/src/feature.rs:485`, ID 31)
+  but zenjxl doesn't depend on the crate that computes it -- any
+  "if palette_fits_in_256 then verify else single-shot" branch has to
+  live in whichever crate bridges zenanalyze+zenpredict+zenjxl, which
+  doesn't exist yet.
+- The picker .bin (`zenjxl/benchmarks/zenjxl_modular_picker_v0.1_*.bin`)
+  is only ever staged (`git status A`), never committed -- consistent
+  with never having received explicit go-ahead on the >30KB-binary rule.
+
+NOT PROCEEDING to write zenjxl code or commit the .bin without explicit
+user confirmation -- this is a different repository, touched by nobody
+this session, and the global "never touch other repos without
+confirmation" + ">30KB binary" rules both gate it. Asked the user twice
+(scope choice, then implicitly via the .bin-commit option); no response
+either time. Defaulting to the fully-reversible choice: keep this
+scoped and documented, do not modify zenjxl. Revisit when the user can
+confirm which path (build the greenfield bridge now, or continue
+treating this as a documented future item).
 
 BAKE NOTE: baked 2026-07-03 with `--allow-unsafe` overriding TWO safety
 violations: LOW_ARGMIN (val argmin_acc 7.2% < 10% floor -- train_hybrid.py's
