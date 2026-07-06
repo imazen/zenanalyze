@@ -571,18 +571,16 @@ pub fn analyze_features(
         // exactly like any other recovery failure below: silently skipped,
         // leaving the natively-computed (possibly NaN) values as-is.
         && let Some((tiled, tw, th)) = mirror_tile_packed(&src, in_w, in_h, in_bpp, MIN_TILE_DIM)
-    {
-        if let Ok(tiled_slice) =
+        && let Ok(tiled_slice) =
             PixelSlice::new(&tiled, tw, th, tw as usize * in_bpp, source_descriptor)
-            && let Ok(tiled_results) = analyze_features(tiled_slice, query)
-        {
-            for f in features.iter() {
-                if results.get(f).is_none()
-                    && let Some(v) = tiled_results.get_f32(f)
-                    && v.is_finite()
-                {
-                    results.set(f, v);
-                }
+        && let Ok(tiled_results) = analyze_features(tiled_slice, query)
+    {
+        for f in features.iter() {
+            if results.get(f).is_none()
+                && let Some(v) = tiled_results.get_f32(f)
+                && v.is_finite()
+            {
+                results.set(f, v);
             }
         }
     }
@@ -990,8 +988,8 @@ pub(crate) fn analyze_full_raw_for_test(
     // and the depth tier when it's compiled in.
     let run_depth = cfg!(feature = "experimental");
     analyze_specialized_raw::<true, true, true, true>(
-        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, true, false,
-        false,
+        slice, pb, hf, true, true, true, true, true, run_depth, true, true, true, true, true,
+        false, false,
     )
 }
 

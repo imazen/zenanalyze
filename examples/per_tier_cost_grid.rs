@@ -91,9 +91,7 @@ fn load_crops(dir: &PathBuf) -> Vec<Crop> {
             let p = dir.join(side.to_string()).join(format!("c{idx}.png"));
             let img = image::open(&p)
                 .unwrap_or_else(|e| {
-                    panic!(
-                        "missing crop {p:?}: {e}\nrun scripts/make_costgrid_crops.py first"
-                    )
+                    panic!("missing crop {p:?}: {e}\nrun scripts/make_costgrid_crops.py first")
                 })
                 .to_rgb8();
             assert_eq!((img.width(), img.height()), (side, side), "{p:?}");
@@ -108,9 +106,10 @@ fn load_crops(dir: &PathBuf) -> Vec<Crop> {
 }
 
 fn main() {
-    let dir = PathBuf::from(std::env::var("ZENANALYZE_COSTGRID_DIR").unwrap_or_else(|_| {
-        "/mnt/v/output/zenanalyze/costgrid-crops-2026-07-02".to_string()
-    }));
+    let dir = PathBuf::from(
+        std::env::var("ZENANALYZE_COSTGRID_DIR")
+            .unwrap_or_else(|_| "/mnt/v/output/zenanalyze/costgrid-crops-2026-07-02".to_string()),
+    );
     let crops: &'static [Crop] = Box::leak(load_crops(&dir).into_boxed_slice());
     let subs = subsets();
     for (name, s) in &subs {
@@ -200,7 +199,9 @@ fn main() {
         let side: u32 = cmp.group_name.trim_start_matches("sz").parse().unwrap();
         for b in &cmp.benchmarks {
             let subset = b.name.split('/').next().unwrap().to_string();
-            rows.entry((subset, side)).or_default().push(b.summary.median);
+            rows.entry((subset, side))
+                .or_default()
+                .push(b.summary.median);
         }
     }
 
@@ -267,7 +268,11 @@ fn main() {
         fits.insert(name.to_string(), (a, b));
     }
     writeln!(f, "#\n# fit total_ns = alpha + beta*pixels").unwrap();
-    writeln!(f, "# subset\talpha_us\tbeta_ns_per_px\tms_at_1MP\tms_at_4MP\tus_at_64x64").unwrap();
+    writeln!(
+        f,
+        "# subset\talpha_us\tbeta_ns_per_px\tms_at_1MP\tms_at_4MP\tus_at_64x64"
+    )
+    .unwrap();
     for (name, (a, b)) in &fits {
         writeln!(
             f,
@@ -290,7 +295,9 @@ fn main() {
             (a + b * 4096.0) / 1e3
         );
     }
-    let _ = result.save(format!("/mnt/v/output/zenanalyze/per_tier_cost_grid_{date}.json"));
+    let _ = result.save(format!(
+        "/mnt/v/output/zenanalyze/per_tier_cost_grid_{date}.json"
+    ));
 }
 
 /// yyyy-mm-dd without a chrono dep.

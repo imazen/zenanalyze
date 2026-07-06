@@ -98,7 +98,8 @@ fn block_subsample_dct_loss(block: &[[f32; 8]; 8], q: &[f32; 64]) -> f32 {
     for by in 0..4 {
         for bx in 0..4 {
             let (y, x) = (2 * by, 2 * bx);
-            let avg = 0.25 * (recon[y][x] + recon[y][x + 1] + recon[y + 1][x] + recon[y + 1][x + 1]);
+            let avg =
+                0.25 * (recon[y][x] + recon[y][x + 1] + recon[y + 1][x] + recon[y + 1][x + 1]);
             for dy in 0..2 {
                 for dx in 0..2 {
                     let d = recon[y + dy][x + dx] - avg;
@@ -203,7 +204,12 @@ mod tests {
         let r = idct2d(&fdct2d(&x));
         for i in 0..8 {
             for j in 0..8 {
-                assert!((x[i][j] - r[i][j]).abs() < 1e-3, "roundtrip {} vs {}", x[i][j], r[i][j]);
+                assert!(
+                    (x[i][j] - r[i][j]).abs() < 1e-3,
+                    "roundtrip {} vs {}",
+                    x[i][j],
+                    r[i][j]
+                );
             }
         }
     }
@@ -227,7 +233,10 @@ mod tests {
             }
         }
         let l = block_subsample_dct_loss(&b, &q);
-        assert!((l - 40.0).abs() < 0.5, "horizontal-Nyquist loss {l} (expected ~40)");
+        assert!(
+            (l - 40.0).abs() < 0.5,
+            "horizontal-Nyquist loss {l} (expected ~40)"
+        );
     }
 
     #[test]
@@ -240,7 +249,11 @@ mod tests {
             for x in 0..w {
                 let o = (y * w + x) * 3;
                 // alternate strongly-saturated red/blue per pixel → heavy Cb/Cr detail
-                let (r, g, b) = if (x + y) % 2 == 0 { (220, 20, 20) } else { (20, 20, 220) };
+                let (r, g, b) = if (x + y) % 2 == 0 {
+                    (220, 20, 20)
+                } else {
+                    (20, 20, 220)
+                };
                 detail[o] = r;
                 detail[o + 1] = g;
                 detail[o + 2] = b;
@@ -249,7 +262,10 @@ mod tests {
         let lf = chroma_subsample_dct_loss_rgb8(&flat, w, h);
         let ld = chroma_subsample_dct_loss_rgb8(&detail, w, h);
         assert!(lf < 1e-3, "flat image loss {lf}");
-        assert!(ld > 1.0, "detailed image loss {ld} should be well above flat");
+        assert!(
+            ld > 1.0,
+            "detailed image loss {ld} should be well above flat"
+        );
     }
 
     #[test]

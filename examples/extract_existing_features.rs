@@ -93,7 +93,10 @@ fn parse_args() -> Result<Args, String> {
 fn read_variants(path: &Path) -> Result<Vec<(String, String)>, String> {
     let r = BufReader::new(File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?);
     let mut lines = r.lines();
-    let header = lines.next().ok_or("empty tsv")?.map_err(|e| e.to_string())?;
+    let header = lines
+        .next()
+        .ok_or("empty tsv")?
+        .map_err(|e| e.to_string())?;
     let cols: Vec<&str> = header.split('\t').collect();
     let vn_i = cols.iter().position(|c| *c == "variant_name").unwrap_or(0);
     let cc_i = cols.iter().position(|c| *c == "content_class");
@@ -210,7 +213,10 @@ fn main() -> ExitCode {
         tot_ok += ok;
         tot_fail += fail;
     }
-    eprintln!("done: {tot_ok} ok, {tot_fail} failed -> {}", args.out.display());
+    eprintln!(
+        "done: {tot_ok} ok, {tot_fail} failed -> {}",
+        args.out.display()
+    );
     if tot_ok == 0 {
         return ExitCode::from(1);
     }

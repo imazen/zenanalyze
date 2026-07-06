@@ -307,7 +307,10 @@ pub fn family_rule(
     // is still plainly encodable by whatever lossy-capable family IS allowed, so fall back
     // rather than returning None for a request that can obviously be satisfied.
     if lossless {
-        return LOSSY_PREFERENCE.iter().copied().find(|&f| viable.is_allowed(f));
+        return LOSSY_PREFERENCE
+            .iter()
+            .copied()
+            .find(|&f| viable.is_allowed(f));
     }
     None
 }
