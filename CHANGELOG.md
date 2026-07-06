@@ -32,14 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replacing the MLP family-score router. Each of the 6 lossy pairs (jpeg/webp/jxl/avif) gets a
   linear discriminant of the 101 qualified zenanalyze features + target quality;
   `route::pairwise_round_robin` combines them (sigmoid → round-robin tally) into per-family scores
-  for `RouteDecision::resolve`. Held-out one-shot RD overhead **3.55%** vs the perfect oracle (beats
-  the prior MLP / per-family regression at 3.85%), interpretable (size-dependence isolated to the
+  for `RouteDecision::resolve`. Held-out one-shot RD overhead **3.55% mean / 12.41% p90** vs the
+  perfect oracle at the time (V0_2 scoring), interpretable (size-dependence isolated to the
   jxl-vs-avif pair, the rest pure content), any-subset robust. Baked **f32**, not i8 — i8 quant
   flips the near-boundary jxl:avif margin (−0.117); the f32 `.bin` is 6827 bytes (vs the old 27 KB
   i8 MLP). `feat_cols` and offer-materialization are unchanged; the lossless + auto-gate routers are
   unchanged. `family_rule` (the fixed codec-reality prior, now data-confirmed) remains the
   no-features fallback. Trained on corrected data (no re-sweep) — zenmetrics
-  `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`.
+  `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`. **Superseded by the zensim-A
+  retrain below (`7f4d914`) — see that entry for the current numbers.**
+- **zenpicker's 3 cross-codec routers (lossy/lossless/gate) retrained on zensim-A scoring**
+  (`7f4d914`, replacing the V0_2-scored bakes; same paths/architectures/wiring, only weights +
+  the lossy fixture margins change). Held-out on A labels: lossy (6 pairwise discriminants +
+  round-robin, f32) RD overhead **7.16% mean / 22.05% p90** vs the perfect oracle (V0_2 measured
+  3.55% / 12.41% — a real V0_2-vs-A metric shift, not a picker regression); lossless (i8 MLP)
+  **89.73%** family-acc (V0_2 88.4%); gate (i8 MLP) **98.18%** (V0_2 98.1%, i8 == f32). Lossless-ness
+  is read from cell semantics rather than a `score >= 99.999` threshold (A saturates at 97.6893 and
+  never reaches 100 even on byte-identical lossless encodes) — metric-free, 100.00% precision vs
+  V0_2.
 - **`MetaPicker::pick` now refuses a pairwise lossy router** (`MetaPickerError::PairwiseRouterNeedsRoute`):
   its 6 outputs are per-pair margins, not per-family scores, so a raw argmin would silently mis-pick.
   Use `route` / `default_route` (which round-robin the margins). Family-score models (gate, lossless,
@@ -60,6 +70,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.2.x` / ZNPR v3; the `experimental + hdr` surface is described as 116 features
   (was a stale 110, pre the 6 `highlight_*` descriptors). zenpicker `Cargo.toml`
   description corrected v2 → v3.
+- **Feature-count claims corrected again** (README.md / README.crates.md): the
+  default build's `FeatureSet::SUPPORTED` count was documented as 97, which
+  became stale when `cc514652` (2026-06-29) made the `experimental` cargo
+  feature ON by default (that commit itself carried no CHANGELOG entry — added
+  one here) — the actual default is now 101 (97 only with
+  `--no-default-features`). Also corrected the downstream `experimental + hdr`
+  count from a stale 116 to 117 (the `chroma_subsample_dct_loss` feature, id
+  140, landed in `6499cf2` after the 116 count was last measured). All four
+  numbers (97 / 101 / 113 `hdr`-only / 117 `experimental + hdr`) verified live
+  via `FeatureSet::SUPPORTED.len()` under each cargo-feature combination.
 
 ### Fixed
 

@@ -622,20 +622,24 @@ impl<'b> MetaPicker<'b> {
 #[cfg(feature = "std")]
 impl MetaPicker<'static> {
     /// The shipped default cross-codec router — three baked ZNPR models (lossy / lossless /
-    /// auto-gate, 2026-06-30) loaded from `include_bytes!` into process-static [`Model`]s, ready
-    /// for [`route`](Self::route). Cheap to call repeatedly (the parsed models are cached in a
-    /// `OnceLock`). Requires `std` for the static cache; `no_std` callers build their own via
-    /// [`new`](Self::new) + [`with_router`](Self::with_router).
+    /// auto-gate; wired 2026-06-30, retrained on zensim-A scoring 2026-07-01, 7f4d914) loaded
+    /// from `include_bytes!` into process-static [`Model`]s, ready for [`route`](Self::route).
+    /// Cheap to call repeatedly (the parsed models are cached in a `OnceLock`). Requires `std`
+    /// for the static cache; `no_std` callers build their own via [`new`](Self::new) +
+    /// [`with_router`](Self::with_router).
     ///
     /// All three are fit on the 101 qualified source-only zenanalyze features:
     /// - **lossy** — 6 pairwise linear discriminants over {jpeg, webp, jxl, avif} (each pair's
     ///   margin = a `LogisticRegression` projection of features + target_zq), combined
     ///   round-robin (`route::pairwise_round_robin`). f32 ZNPR (612 weights; exact margins).
-    ///   Held-out RD overhead vs the perfect oracle **3.55%** (beats the per-family regression's
-    ///   3.85%). Fit: zenmetrics `scripts/picker/pairwise_discriminants.py`.
+    ///   Held-out RD overhead vs the perfect oracle **7.16% mean / 22.05% p90** (the prior
+    ///   V0_2-scored bake measured 3.55% mean / 12.41% p90 — a real V0_2-vs-A metric shift, not
+    ///   a picker regression; see 7f4d914). Fit: zenmetrics
+    ///   `scripts/picker/pairwise_discriminants.py`.
     /// - **lossless / gate** — i8 family-score MLPs on the **support-aware (unbiased) oracle**
-    ///   (only cells where all codecs have measured support; held-out 88.4% lossless / 98.1%
-    ///   gate). Honest support thins above ~zq88, so above there the gate defers to lossless.
+    ///   (only cells where all codecs have measured support; held-out 89.73% lossless / 98.18%
+    ///   gate on zensim-A, matching/beating the prior V0_2 88.4% / 98.1%). Honest support thins
+    ///   above ~zq88, so above there the gate defers to lossless.
     ///
     /// The offer passed to `route` must satisfy [`feature_request`](Self::feature_request)'s columns.
     pub fn default_routers() -> Self {

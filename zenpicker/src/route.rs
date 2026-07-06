@@ -229,8 +229,11 @@ pub fn content_capability(offer: &zenanalyze_api::Offer) -> AllowedFamilies {
 /// JPEG** — and strongly content-dependent (large→AVIF 73–85%, tiny→WebP at low-q / JXL at high-q).
 /// The earlier "WebP > AVIF" was a coarse-measure + low-q + small-corpus artifact, not reality.
 /// The **shipped** lossy router is image-AWARE: 6 pairwise linear discriminants of zenanalyze +
-/// round-robin (`MetaPicker::route`), one-shot **3.55%** vs the perfect oracle (any fixed order is
-/// 22–30%). This prior is the no-features fallback. Analysis: zenmetrics
+/// round-robin (`MetaPicker::route`), one-shot **7.16% mean (22.05% p90)** vs the perfect oracle
+/// (any fixed order is 22–30%) — the zensim-A retrain (7f4d914); the prior V0_2-scored bake
+/// measured 3.55% mean / 12.41% p90, a metric shift rather than a picker regression (V0_2 vs A
+/// score the same encodes differently — see 7f4d914's commit message). This prior is the
+/// no-features fallback. Analysis: zenmetrics
 /// `scripts/picker/{corrected_ranking,pairwise_discriminants}.py`.
 pub static LOSSY_PREFERENCE: [CodecFamily; 5] = [
     CodecFamily::Jxl,

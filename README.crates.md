@@ -146,8 +146,9 @@ emit). Recipe:
 use zenanalyze::{analyze_features, feature::{AnalysisFeature, AnalysisQuery, FeatureSet}};
 
 // SUPPORTED is the full set THIS BUILD can compute. Always public — it just
-// shrinks if you disable a cargo feature. On the default build it has 97
-// features; with `experimental` 100; with `experimental + hdr` 116.
+// shrinks if you disable a cargo feature. `experimental` is ON by default, so
+// the default build has 101 features (`--no-default-features` drops to 97);
+// add `hdr` for 117 (113 without `experimental`).
 let q = AnalysisQuery::new(FeatureSet::SUPPORTED);
 let results = analyze_features(slice, &q)?;
 
@@ -249,10 +250,11 @@ returns `Some(0.0)` / `Some(1.0)`. For their native types use
 
 ## What it computes
 
-The default surface is 97 features. The table below names the most commonly
-consumed ones with their **real `AnalysisFeature` variant identifiers** (no
-globs — every name is a literal variant). Enumerate the complete set in id order
-with `FeatureSet::SUPPORTED.iter()`.
+The default surface (`experimental` on by default) is 101 features
+(97 with `--no-default-features`; 117 with `hdr` added). The table below names
+the most commonly consumed ones with their **real `AnalysisFeature` variant
+identifiers** (no globs — every name is a literal variant). Enumerate the
+complete set in id order with `FeatureSet::SUPPORTED.iter()`.
 
 | Feature(s) | Type | Description |
 |---|---|---|

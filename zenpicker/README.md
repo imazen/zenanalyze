@@ -39,10 +39,10 @@ order      — best-first among the viable; take the top
 The **order** is the only place judgment lives, and there are two ways to get it:
 
 - **`default_route` (the shipped default)** — runs the baked routers: a **6-pairwise-discriminant
-  linear lossy router** (held-out **3.55%** extra bytes vs the perfect oracle — the *median* pick is
-  the oracle), an auto-gate (lossy vs lossless), and a lossless family router. Image-aware, one-shot,
-  and the lossy router's weights are readable (the size-dependence is isolated to the jxl-vs-avif
-  pair; the rest is pure content).
+  linear lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on
+  the zensim-A retrain, 7f4d914 — the *median* pick is the oracle), an auto-gate (lossy vs
+  lossless), and a lossless family router. Image-aware, one-shot, and the lossy router's weights
+  are readable (the size-dependence is isolated to the jxl-vs-avif pair; the rest is pure content).
 - **`family_rule` (the no-model fallback)** — a fixed codec-reality prior (`JXL > AVIF > WebP > JPEG
   > GIF` lossy; `JXL > WebP > PNG > GIF` lossless), now confirmed by the data. Use it when you have
   no features, or want an obviously-correct, model-free path.
@@ -111,7 +111,7 @@ Adding a `CodecFamily` variant is a breaking change for any baked meta-picker th
 
 ## Status
 
-The shipped routers (`MetaPicker::default_routers`) are baked and wired: an **f32 6-pairwise-discriminant lossy router** (held-out **3.55%** extra bytes vs the perfect oracle — the median pick is the oracle, the loss is a thin tail concentrated on tiny images), plus **i8** auto-gate + lossless family routers, all trained on confound-corrected sweep data (no re-sweep). `default_route` is the one-call entry, masked by available format. Methodology + the per-percentile RD distribution: zenmetrics `docs/HOW_THE_PICKER_DECIDES.md`.
+The shipped routers (`MetaPicker::default_routers`) are baked and wired: an **f32 6-pairwise-discriminant lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on the zensim-A retrain (7f4d914) — the median pick is the oracle, the loss is a thin tail concentrated on tiny images), plus **i8** auto-gate + lossless family routers, all trained on confound-corrected sweep data (no re-sweep). `default_route` is the one-call entry, masked by available format. Methodology + the per-percentile RD distribution: zenmetrics `docs/HOW_THE_PICKER_DECIDES.md`.
 
 ## License
 
