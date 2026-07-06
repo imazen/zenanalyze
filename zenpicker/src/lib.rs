@@ -518,10 +518,20 @@ impl<'b> MetaPicker<'b> {
                 offer,
                 Some(target.score_input()),
             )?;
-            match g {
-                Some(v) if v.len() >= 2 => v[1] < v[0], // [lossy, lossless], lower = better
-                _ => false,                             // gate unavailable -> default lossy
+            // `None` means the gate's columns aren't unqualified / the offer can't satisfy
+            // them — per this fn's contract that's `Ok(None)` (the caller re-extracts), NOT a
+            // silent default to the lossy branch. A wrong output count is a genuine
+            // model/schema error, surfaced the same way the branch routers' shape check is.
+            let Some(v) = g else {
+                return Ok(None);
+            };
+            if v.len() < 2 {
+                return Err(MetaPickerError::OutputShape {
+                    expected: 2,
+                    got: v.len(),
+                });
             }
+            v[1] < v[0] // [lossy, lossless], lower = better
         };
         let (branch, scored) = if lossless {
             (
@@ -556,7 +566,8 @@ impl<'b> MetaPicker<'b> {
         // by round-robin into per-family scores BEFORE the masked argmin. The gate + lossless
         // branches are unchanged.
         let n = if lossless {
-            scored.len()
+            // The lossless (family) router's contract is one score per family.
+            CodecFamily::COUNT
         } else {
             // The lossy router's contract is exactly the 6 pairs in LOSSY_PAIRS.
             route::LOSSY_PAIRS.len()

@@ -64,6 +64,18 @@ fn lossy_bytes() -> Vec<u8> {
 fn lossless_bytes() -> Vec<u8> {
     bake(2, 6, &[0.0; 12], &[9.0, 4.0, 1.0, 9.0, 6.0, 9.0])
 }
+// Regression fixture for the output-shape bug: a lossless router baked with the WRONG number
+// of outputs (3, not `CodecFamily::COUNT` == 6). `route()` must reject this with
+// `MetaPickerError::OutputShape` rather than panicking in `copy_from_slice`.
+fn lossless_bytes_wrong_count() -> Vec<u8> {
+    bake(2, 3, &[0.0; 6], &[9.0, 4.0, 1.0])
+}
+// Regression fixture: a gate baked with the WRONG number of outputs (1, not the documented
+// 2 = [lossy_cost, lossless_cost]). Prior bug: `score()` returning `Some(v)` with `v.len() < 2`
+// fell into the same `_ => false` arm as "gate unavailable" and silently defaulted to lossy.
+fn gate_bytes_wrong_count() -> Vec<u8> {
+    bake(3, 1, &[0.0, 0.0, 0.0], &[0.0])
+}
 
 fn fr(q: &'static str, v: f32) -> FeatureResult<'static> {
     FeatureResult::new(NamedFeature::parse(q).unwrap(), v)
@@ -213,6 +225,111 @@ fn alpha_capability_can_empty_the_set() {
             .unwrap();
         assert!(d.is_none());
     });
+}
+
+#[test]
+fn wrong_lossless_output_count_returns_output_shape_error() {
+    // Prior bug: the lossless-branch shape check compared `scored.len()` against itself
+    // (`n = scored.len()` when `lossless`), which is tautological and can never fail, so a
+    // lossless/gate model baked with `n_outputs != CodecFamily::COUNT` slipped past the check
+    // and panicked in `copy_from_slice` inside `route()`. This must now return
+    // `Err(MetaPickerError::OutputShape { expected: 6, got: 3 })` instead.
+    let (g, ly, ll) = (
+        Aligned(gate_bytes()),
+        Aligned(lossy_bytes()),
+        Aligned(lossless_bytes_wrong_count()),
+    );
+    let gm = Model::from_bytes(&g.0).unwrap();
+    let lym = Model::from_bytes(&ly.0).unwrap();
+    let llm = Model::from_bytes(&ll.0).unwrap();
+    let mut r = MetaPicker::new(&lym).with_router(&gm, &llm);
+    let feats = [fr("a@11111111", 1.0), fr("b@22222222", 2.0)];
+    let offer = Offer::new(&feats, Provenance::new("t"));
+    let err = r
+        .route(
+            &offer,
+            QualityTarget::Lossless, // explicit lossless -> bypasses the gate model
+            AllowedFamilies::all(),
+            EncodeMode::QueuedBalanced,
+            None,
+            &NO_EST,
+        )
+        .unwrap_err();
+    match err {
+        MetaPickerError::OutputShape { expected, got } => {
+            assert_eq!(expected, CodecFamily::COUNT);
+            assert_eq!(got, 3);
+        }
+        other => panic!("expected MetaPickerError::OutputShape, got {other:?}"),
+    }
+}
+
+#[test]
+fn gate_wrong_output_count_returns_output_shape_error() {
+    // Prior bug: a gate model scoring the wrong number of outputs (not 2) fell into the same
+    // `_ => false` arm as "gate unavailable", silently defaulting to the lossy branch instead
+    // of surfacing the schema error.
+    let (g, ly, ll) = (
+        Aligned(gate_bytes_wrong_count()),
+        Aligned(lossy_bytes()),
+        Aligned(lossless_bytes()),
+    );
+    let gm = Model::from_bytes(&g.0).unwrap();
+    let lym = Model::from_bytes(&ly.0).unwrap();
+    let llm = Model::from_bytes(&ll.0).unwrap();
+    let mut r = MetaPicker::new(&lym).with_router(&gm, &llm);
+    let feats = [fr("a@11111111", 1.0), fr("b@22222222", 2.0)];
+    let offer = Offer::new(&feats, Provenance::new("t"));
+    let err = r
+        .route(
+            &offer,
+            QualityTarget::Zq(85.0), // non-lossless target -> exercises the gate model
+            AllowedFamilies::all(),
+            EncodeMode::QueuedBalanced,
+            None,
+            &NO_EST,
+        )
+        .unwrap_err();
+    match err {
+        MetaPickerError::OutputShape { expected, got } => {
+            assert_eq!(expected, 2);
+            assert_eq!(got, 1);
+        }
+        other => panic!("expected MetaPickerError::OutputShape, got {other:?}"),
+    }
+}
+
+#[test]
+fn gate_unsatisfiable_offer_returns_none_not_lossy_default() {
+    // Prior bug: `score()` returning `None` (offer can't satisfy the gate's columns) was
+    // treated the same as a real gate score of `[0.0, 0.0]` (default lossy) instead of
+    // propagating the documented `Ok(None)` ("caller runs its own analysis pass") contract.
+    let (g, ly, ll) = (
+        Aligned(gate_bytes()),
+        Aligned(lossy_bytes()),
+        Aligned(lossless_bytes()),
+    );
+    let gm = Model::from_bytes(&g.0).unwrap();
+    let lym = Model::from_bytes(&ly.0).unwrap();
+    let llm = Model::from_bytes(&ll.0).unwrap();
+    let mut r = MetaPicker::new(&lym).with_router(&gm, &llm);
+    // Omit `b@22222222`, which the gate's own feature columns require -> `reuse_for` fails.
+    let feats = [fr("a@11111111", 1.0)];
+    let offer = Offer::new(&feats, Provenance::new("t"));
+    let d = r
+        .route(
+            &offer,
+            QualityTarget::Zq(85.0),
+            AllowedFamilies::all(),
+            EncodeMode::QueuedBalanced,
+            None,
+            &NO_EST,
+        )
+        .unwrap();
+    assert!(
+        d.is_none(),
+        "unsatisfiable gate offer must be Ok(None), not a silent lossy default"
+    );
 }
 
 #[test]
