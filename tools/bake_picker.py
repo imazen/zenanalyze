@@ -371,6 +371,12 @@ def resolve_knob_vetoes(model: dict) -> list[dict]:
             for pos, c in enumerate(cells)
             if c.get(axis) == value
         ]
+        if not cell_ids:
+            raise SystemExit(
+                f"knob_veto axis={axis!r} value={value!r} resolved to zero cell_ids "
+                "-- axis/value mismatch against hybrid_heads_manifest.cells (a veto "
+                "that vetoes nothing is a silently-lost safety bound, not a no-op)"
+            )
         resolved.append({
             "axis": axis,
             "value": value,
