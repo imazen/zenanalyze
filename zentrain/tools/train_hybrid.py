@@ -1882,6 +1882,20 @@ def derive_knob_vetoes(
     AB = np.where(base, np.exp(bl_tr), np.inf)
     PB = np.where(base, np.exp(np.clip(pred_tr, -30, 30)), np.inf)
     oracle = AB.min(axis=1)  # true per-row oracle (never vetoed)
+    # Rows whose (reach & all_mask) is entirely empty have no candidate cell at all -> oracle
+    # is +inf for them, and downstream (achieved - oracle) / oracle is NaN. NaN silently
+    # poisons every aggregate that touches it (`.mean()`/`.max()` propagate NaN, and
+    # `NaN > threshold` is always False), which previously made every `gain > 1.0` comparison
+    # in the greedy selector below compare False -> zero vetoes derived with no diagnostic.
+    # Exclude these rows from the veto-derivation metrics (there's nothing a veto could do for
+    # a row with no reachable cell in the first place) and surface how many were dropped.
+    valid_row = np.isfinite(oracle)
+    n_invalid_rows = int((~valid_row).sum())
+    if n_invalid_rows:
+        sys.stderr.write(
+            f"  derive_knob_vetoes: {n_invalid_rows}/{n_rows} row(s) have no reach&all_mask "
+            "cell at all (oracle=inf) -- excluded from veto-derivation metrics\n"
+        )
 
     def value_overhead(cols):
         # best reachable cell carrying this axis value vs the true oracle
@@ -1946,9 +1960,16 @@ def derive_knob_vetoes(
             pa_top = np.take_along_axis(pa, topk, axis=1)
             achieved = np.where(np.isfinite(pa_top), ab_top, np.inf).min(axis=1)
         ov = (achieved - oracle) / oracle * 100.0
+        # Exclude the no-reachable-cell rows (see `valid_row` above) before reducing — a single
+        # NaN in `ov` would otherwise poison `.mean()`/`.max()` for the WHOLE tail score.
+        ov = ov[valid_row]
+        assert np.isfinite(ov).all(), (
+            "derive_knob_vetoes: non-finite overhead among valid rows after excluding "
+            "no-reachable-cell rows -- a vetoed row was stranded with no finite achieved cost"
+        )
         return {
-            "mean": float(ov.mean()),
-            "mx": float(ov.max()),
+            "mean": float(ov.mean()) if ov.size else 0.0,
+            "mx": float(ov.max()) if ov.size else 0.0,
             "n200": int((ov > 200).sum()),
             "n150": int((ov > 150).sum()),
             "n100": int((ov > 100).sum()),
@@ -3744,9 +3765,6 @@ def main():
     Y_tr_pred = _predict_via_coefs(student, Xe_tr_s, args.activation)
     pred_bytes_tr = Y_tr_pred[:, :n_cells]
     meta_tr = [meta[i] for i in tr]
-    from collections import Counter as _DBGC
-    sys.stderr.write(f"DEBUG meta_tr size dist: {dict(_DBGC(m[1] for m in meta_tr))}\n")
-    sys.stderr.write(f"DEBUG SIZE_CLASSES at gate: {SIZE_CLASSES}\n")
     student_argmin_tr = evaluate_argmin(pred_bytes_tr, bl_tr, rch_tr, meta_tr, all_mask)
     sys.stderr.write(
         f"  train: mean overhead {student_argmin_tr['mean_pct']:.2f}% "

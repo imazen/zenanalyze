@@ -228,6 +228,7 @@ jobs:
         run: >
           python -m pytest -q test_provenance.py test_predict_lib.py
           test_picker_lib_strict.py test_metapicker_lib.py
+          test_train_hybrid_knob_vetoes.py
           --deselect test_predict_lib.py::test_student_permutation_relu
           --deselect test_predict_lib.py::test_student_permutation_leakyrelu
 
