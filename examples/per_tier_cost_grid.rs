@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use zenanalyze::analyze_features;
 use zenanalyze::feature::{AnalysisFeature as AF, AnalysisQuery, FeatureSet};
@@ -84,7 +84,7 @@ struct Crop {
     bytes: Vec<u8>,
 }
 
-fn load_crops(dir: &PathBuf) -> Vec<Crop> {
+fn load_crops(dir: &Path) -> Vec<Crop> {
     let mut crops = Vec::new();
     for side in SIZES {
         for idx in 0..N_CROPS {
