@@ -111,16 +111,21 @@ fn block_subsample_dct_loss(block: &[[f32; 8]; 8], q: &[f32; 64]) -> f32 {
 }
 
 /// Mean IDCT-roundtrip 4:2:0 chroma-subsampling loss over sampled 8×8 blocks (Cb
-/// and Cr averaged). The favor-4:4:4 signal. `0.0` for sub-8×8 inputs. Walks the
-/// `RowStream` 8 rows at a time; same block-stride sampling as the other Tier-3
-/// block features.
+/// and Cr averaged). The favor-4:4:4 signal. `NaN` for sub-8×8 inputs — no 8×8
+/// block exists to measure, so there is nothing to report; `0.0` would be a
+/// misleading sentinel (indistinguishable from a genuinely computed
+/// zero-loss result) rather than "not computed" (matches the crate-wide NaN
+/// convention: [`crate::feature::RawAnalysis::into_results`] drops NaN
+/// fields from the results, same as any other dropped feature). Walks the
+/// `RowStream` 8 rows at a time; same block-stride sampling as the other
+/// Tier-3 block features.
 pub(crate) fn chroma_subsample_dct_loss_from_stream(stream: &mut RowStream<'_>) -> f32 {
     let w = stream.width() as usize;
     let h = stream.height() as usize;
     let (bw, bh) = (w / 8, h / 8);
     let nblocks = bw * bh;
     if nblocks == 0 {
-        return 0.0;
+        return f32::NAN;
     }
     let bstride = (nblocks / SAMPLE_BLOCKS).max(1);
     let row_bytes = w * 3;
@@ -161,7 +166,10 @@ pub(crate) fn chroma_subsample_dct_loss_from_stream(stream: &mut RowStream<'_>) 
 #[cfg(test)]
 pub(crate) fn chroma_subsample_dct_loss_rgb8(rgb: &[u8], w: usize, h: usize) -> f32 {
     if w < 8 || h < 8 {
-        return 0.0;
+        // Match chroma_subsample_dct_loss_from_stream's contract exactly: NaN
+        // ("not computed"), not 0.0 (a misleading sentinel indistinguishable
+        // from a genuinely computed zero-loss result).
+        return f32::NAN;
     }
     let slice = zenpixels::PixelSlice::new(
         rgb,
@@ -245,7 +253,11 @@ mod tests {
     }
 
     #[test]
-    fn too_small_is_zero() {
-        assert_eq!(chroma_subsample_dct_loss_rgb8(&[0u8; 4 * 4 * 3], 4, 4), 0.0);
+    fn too_small_is_nan_not_a_misleading_zero() {
+        // A sub-8x8 input has no 8x8 block to measure at all — NaN ("not
+        // computed"), not 0.0 (which would be indistinguishable from a
+        // genuinely computed zero-loss result). Was previously (wrongly)
+        // 0.0; this test used to pin that exact misleading-sentinel bug.
+        assert!(chroma_subsample_dct_loss_rgb8(&[0u8; 4 * 4 * 3], 4, 4).is_nan());
     }
 }
