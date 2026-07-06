@@ -264,12 +264,16 @@ pub const LOSSLESS_QUALITY: f32 = 96.0;
 /// 3. return the **highest-preference viable** family.
 ///
 /// Works for ANY subset of `allowed` — one format, several, or none — because it just takes the
-/// best available. `None` only when nothing allowed can encode the image (e.g. a lossy target
-/// with only PNG allowed). The preference is the data-confirmed prior ([`LOSSY_PREFERENCE`] /
-/// [`LOSSLESS_PREFERENCE`]). Content-adaptive reordering **shipped** as the lossy router: 6 pairwise
-/// linear discriminants of zenanalyze + round-robin (`MetaPicker::route`), one-shot 3.55% vs the
-/// perfect oracle (vs 22–30% for any fixed order). This `family_rule` remains the obviously-correct,
-/// no-model, no-features **fallback / audit path**.
+/// best available. If quality forces lossless mode but no lossless-capable family survives
+/// `viable`, this falls back to the **lossy** preference list rather than failing a plainly
+/// encodable request — a lossy-only allowlist (e.g. JPEG-only) can still encode the image, just
+/// not losslessly. `None` only when NOTHING viable can encode the image at all (e.g. a lossy
+/// target with only PNG allowed — PNG has no lossy path here, and there's no further fallback
+/// for a lossy-forced request). The preference is the data-confirmed prior ([`LOSSY_PREFERENCE`]
+/// / [`LOSSLESS_PREFERENCE`]). Content-adaptive reordering **shipped** as the lossy router: 6
+/// pairwise linear discriminants of zenanalyze + round-robin (`MetaPicker::route`), one-shot
+/// 7.16% mean (22.05% p90) vs the perfect oracle (vs 22–30% for any fixed order). This
+/// `family_rule` remains the obviously-correct, no-model, no-features **fallback / audit path**.
 #[cfg(feature = "api")]
 pub fn family_rule(
     offer: &zenanalyze_api::Offer<'_>,
@@ -293,7 +297,16 @@ pub fn family_rule(
     } else {
         &LOSSY_PREFERENCE
     };
-    order.iter().copied().find(|&f| viable.is_allowed(f))
+    if let Some(f) = order.iter().copied().find(|&f| viable.is_allowed(f)) {
+        return Some(f);
+    }
+    // Lossless was requested/forced but nothing lossless-capable survived `viable` — the image
+    // is still plainly encodable by whatever lossy-capable family IS allowed, so fall back
+    // rather than returning None for a request that can obviously be satisfied.
+    if lossless {
+        return LOSSY_PREFERENCE.iter().copied().find(|&f| viable.is_allowed(f));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -636,6 +649,46 @@ mod tests {
             assert_eq!(
                 pick(&o, QualityTarget::Zq(98.0), AllowedFamilies::all()),
                 Some(CodecFamily::Jxl)
+            );
+        }
+
+        #[test]
+        fn rule_lossless_forced_falls_back_to_lossy_when_no_lossless_family_allowed() {
+            // Prior bug: when quality forces lossless (explicit Lossless, or score >=
+            // LOSSLESS_QUALITY) but `allowed` has no family from LOSSLESS_PREFERENCE (jxl/
+            // webp/png/gif), family_rule returned None even though the image is plainly
+            // encodable by whatever lossy-only family IS allowed (e.g. jpeg or avif). It must
+            // now fall back to the lossy preference list instead of failing the request.
+            let plain = [cell("variance@00000000", 0.5f32)];
+            let o = offer(&plain);
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Lossless,
+                    AllowedFamilies::from_allowed([CodecFamily::Jpeg])
+                ),
+                Some(CodecFamily::Jpeg),
+                "lossless-only allowlist is empty but jpeg is plainly encodable"
+            );
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Zq(98.0), // >= LOSSLESS_QUALITY -> auto-routes to lossless
+                    AllowedFamilies::from_allowed([CodecFamily::Avif, CodecFamily::Jpeg])
+                ),
+                Some(CodecFamily::Avif),
+                "near-lossless quality with only lossy-capable families allowed falls back to \
+                 the lossy preference order (avif before jpeg)"
+            );
+            // Still None when truly nothing viable can encode at all (lossy target, PNG-only —
+            // no lossless push here, so no lossy fallback either).
+            assert_eq!(
+                pick(
+                    &o,
+                    QualityTarget::Zq(80.0),
+                    AllowedFamilies::from_allowed([CodecFamily::Png])
+                ),
+                None
             );
         }
 
