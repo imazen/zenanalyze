@@ -162,6 +162,7 @@ mod tests {
     use super::*;
     use crate::knob_veto::VetoOp;
     use crate::unachievable_zone::parse_unachievable_zones;
+    use alloc::vec::Vec;
 
     // tiny/small/medium/large-ish table: feat_pixel_count at idx 0, one zone
     // (pixels <= 1e6 -> ceiling 90, fallback cell 2 @ scalar 9).
