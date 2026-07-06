@@ -86,12 +86,16 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
         };
     }
 
+    // `done` is caller-supplied; a `Trial::candidate` past `predicted_zq`'s bounds (a stale
+    // index, a mismatched candidate list between calls, etc.) must not panic here — `.get()`
+    // treats an out-of-range trial as carrying no predicted-quality signal, simply excluded
+    // from the fold, rather than indexing straight into `predicted_zq`.
     match target {
         QualityTarget::Quality { target_zq } => {
             let reaching_pred = done
                 .iter()
                 .filter(|t| t.achieved_zq >= target_zq)
-                .map(|t| predicted_zq[t.candidate])
+                .filter_map(|t| predicted_zq.get(t.candidate).copied())
                 .fold(f32::INFINITY, f32::min);
             if reaching_pred.is_finite() {
                 // have a reach -> probe a leaner untried (predicted below it): may also reach, fewer bytes
@@ -102,7 +106,7 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
                 // no reach yet -> probe a higher untried, closest above the highest tried
                 let max_tried = done
                     .iter()
-                    .map(|t| predicted_zq[t.candidate])
+                    .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::NEG_INFINITY, f32::max);
                 (0..n)
                     .filter(|&c| !tried(c) && predicted_zq[c] > max_tried)
@@ -115,7 +119,7 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
                 let best_fit_pred = done
                     .iter()
                     .filter(|t| t.bytes <= max_bytes)
-                    .map(|t| predicted_zq[t.candidate])
+                    .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::NEG_INFINITY, f32::max);
                 (0..n)
                     .filter(|&c| !tried(c) && predicted_zq[c] > best_fit_pred)
@@ -124,7 +128,7 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
                 // nothing fits -> probe a leaner untried (lower predicted quality -> fewer bytes)
                 let min_tried = done
                     .iter()
-                    .map(|t| predicted_zq[t.candidate])
+                    .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::INFINITY, f32::min);
                 (0..n)
                     .filter(|&c| !tried(c) && predicted_zq[c] < min_tried)
@@ -204,6 +208,55 @@ mod tests {
         assert_eq!(
             next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
             None
+        );
+    }
+
+    // Prior bug: `done` (caller-supplied) with a `Trial::candidate` past
+    // `predicted_zq`'s bounds indexed straight into `predicted_zq[t.candidate]` and
+    // panicked. An out-of-range trial must instead be treated as carrying no
+    // predicted-quality signal (excluded from the fold), not crash the search.
+    #[test]
+    fn out_of_bounds_candidate_in_reach_fold_does_not_panic() {
+        let pred = [75.0, 71.0, 68.0];
+        // candidate 99 is out of bounds for `pred` (len 3) but reaches the target;
+        // candidate 0 also reaches, so reaching_pred must come from candidate 0 alone.
+        let done = [t(0, 72.0, 4000), t(99, 80.0, 1000)];
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(1) // leaner untried below 75.0 -> candidate 1 (71.0)
+        );
+    }
+
+    #[test]
+    fn out_of_bounds_candidate_in_no_reach_fold_does_not_panic() {
+        let pred = [75.0, 71.0, 68.0];
+        // neither trial reaches target_zq=70; candidate 99 is out of bounds.
+        let done = [t(1, 60.0, 4000), t(99, 50.0, 999)];
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
+            Some(0) // probe higher than the highest valid tried (71.0) -> candidate 0 (75.0)
+        );
+    }
+
+    #[test]
+    fn out_of_bounds_candidate_in_bytes_fit_fold_does_not_panic() {
+        let pred = [75.0, 71.0, 68.0];
+        // candidate 1 fits the byte budget; candidate 99 (out of bounds) also "fits".
+        let done = [t(1, 71.0, 3000), t(99, 999.0, 1)];
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Bytes { max_bytes: 4000 }),
+            Some(0) // probe higher-quality untried above the valid best-fit (71.0) -> candidate 0
+        );
+    }
+
+    #[test]
+    fn out_of_bounds_candidate_in_bytes_no_fit_fold_does_not_panic() {
+        let pred = [75.0, 71.0, 68.0];
+        // neither trial fits the tiny byte budget; candidate 99 is out of bounds.
+        let done = [t(0, 72.0, 9000), t(99, 1.0, 10000)];
+        assert_eq!(
+            next_trial(&pred, &done, QualityTarget::Bytes { max_bytes: 100 }),
+            Some(1) // probe leaner than the lowest valid tried (75.0) -> candidate 1 (71.0)
         );
     }
 }
