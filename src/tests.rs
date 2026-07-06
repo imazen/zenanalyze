@@ -3503,11 +3503,49 @@ mod sample_count_floor {
     /// these exact values for every feature it fills (byte-identical).
     fn run_tiled_ref(w: u32, h: u32, seed: u32) -> crate::feature::AnalysisResults {
         let rgb = synth_rgb(w, h, seed);
-        let (tiled, tw, th) = crate::mirror_tile_packed(&rgb, w, h, 3, 128);
+        let (tiled, tw, th) = crate::mirror_tile_packed(&rgb, w, h, 3, 128)
+            .expect("w/h non-zero and well within MIRROR_TILE_MAX_OUTPUT_BYTES in these tests");
         let stride = (tw as usize) * 3;
         let slice = PixelSlice::new(&tiled, tw, th, stride, PixelDescriptor::RGB8_SRGB).unwrap();
         let q = AnalysisQuery::new(percentile_set());
         crate::analyze_features(slice, &q).unwrap()
+    }
+
+    /// Prior bug: `w == 0` (or `h == 0`) hit `md.div_ceil(0)`, an unconditional
+    /// panic — confirmed directly against the pre-fix function
+    /// (`attempt to divide by zero` at the `nx`/`ny` computation).
+    #[test]
+    fn mirror_tile_packed_zero_dim_returns_none_not_panic() {
+        assert!(crate::mirror_tile_packed(&[], 0, 5, 3, 128).is_none());
+        assert!(crate::mirror_tile_packed(&[], 5, 0, 3, 128).is_none());
+        assert!(crate::mirror_tile_packed(&[], 0, 0, 3, 128).is_none());
+    }
+
+    /// Prior bug: a degenerate thin-but-arbitrarily-long input (here
+    /// width=1, height=5_000_000 — a 15 MB source) keeps its huge axis
+    /// unchanged while multiplying the tiny axis up to `min_dim`x, producing
+    /// an INFALLIBLE `vec![0u8; ...]` of ~1.92 GB (confirmed directly against
+    /// the pre-fix function: it allocated exactly `128 * 5_000_000 * 3` bytes
+    /// with no bound). Must now return `None` (recovery skipped) instead.
+    #[test]
+    fn mirror_tile_packed_bounds_thin_huge_input() {
+        let h: u32 = 5_000_000;
+        let src = vec![128u8; h as usize * 3];
+        assert!(
+            crate::mirror_tile_packed(&src, 1, h, 3, 128).is_none(),
+            "a 1×5,000,000 input must not produce a ~1.92 GB tiled allocation"
+        );
+    }
+
+    /// A genuinely tiny input (both axes well under `min_dim`) must still
+    /// tile normally — the bound must not reject the common case it exists
+    /// to serve.
+    #[test]
+    fn mirror_tile_packed_still_tiles_genuinely_tiny_input() {
+        let (tiled, tw, th) = crate::mirror_tile_packed(&[1, 2, 3], 1, 1, 3, 128)
+            .expect("1x1 -> 128x128 tiling is well within the output bound");
+        assert_eq!((tw, th), (128, 128));
+        assert_eq!(tiled.len(), 128 * 128 * 3);
     }
 
     /// Unit-level invariant: a NaN written into a `RawAnalysis` field

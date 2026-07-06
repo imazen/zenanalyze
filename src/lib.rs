@@ -566,8 +566,12 @@ pub fn analyze_features(
     // external handling.
     if let Some(src) = tiny_src
         && features.iter().any(|f| results.get(f).is_none())
+        // `None` for a degenerate zero-dimension input or a projected output
+        // beyond MIRROR_TILE_MAX_OUTPUT_BYTES (see mirror_tile_packed) — treated
+        // exactly like any other recovery failure below: silently skipped,
+        // leaving the natively-computed (possibly NaN) values as-is.
+        && let Some((tiled, tw, th)) = mirror_tile_packed(&src, in_w, in_h, in_bpp, MIN_TILE_DIM)
     {
-        let (tiled, tw, th) = mirror_tile_packed(&src, in_w, in_h, in_bpp, MIN_TILE_DIM);
         if let Ok(tiled_slice) =
             PixelSlice::new(&tiled, tw, th, tw as usize * in_bpp, source_descriptor)
             && let Ok(tiled_results) = analyze_features(tiled_slice, query)
@@ -600,6 +604,18 @@ pub fn analyze_features(
 /// `/mnt/v/output/picker-feature-size-audit-2026-06-28`).
 const MIN_TILE_DIM: u32 = 128;
 
+/// Hard ceiling on `mirror_tile_packed`'s output allocation. A genuinely tiny
+/// input (both axes small) tops out around `min_dim * min_dim * bpp` (~49 KiB
+/// for RGB8 at `MIN_TILE_DIM`); this budget is orders of magnitude above that
+/// for headroom on legitimate thin-but-moderate images, while still refusing
+/// a degenerate 1-pixel-wide-by-millions-tall (or vice versa) input, whose
+/// already-huge axis passes through unmultiplied but would still multiply the
+/// tiny axis up to `min_dim`x — an INFALLIBLE `vec![0u8; …]` that could
+/// otherwise reach gigabytes from a tiny raw buffer (zenanalyze #49 recovery
+/// pass is a best-effort NaN-feature fill, not a resizer — skipping it on a
+/// pathological shape is a strictly better outcome than an unbounded alloc).
+const MIRROR_TILE_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
 /// Mirror-tile a packed `bpp`-bytes-per-pixel buffer up to `>= min_dim` px in
 /// each axis using alternating horizontal/vertical flips, so the tiling is
 /// seamless — a plain repeat would inject false edges at the seams and inflate
@@ -616,22 +632,34 @@ const MIN_TILE_DIM: u32 = 128;
 ///
 /// Generalising over `bpp` (rather than hard-coding RGB8's 3) keeps the tiling
 /// purely geometric, so a u16 source tiles exactly like its u8 promotion.
-/// Returns `(tiled, tiled_w, tiled_h)` with `tiled_w = w * nx`,
-/// `tiled_h = h * ny`. `src` must be exactly `w * h * bpp` packed bytes.
+/// Returns `Some((tiled, tiled_w, tiled_h))` with `tiled_w = w * nx`,
+/// `tiled_h = h * ny`; `src` must be exactly `w * h * bpp` packed bytes.
+///
+/// Returns `None` — no recovery attempted, same as any other failure on this
+/// best-effort path — for a degenerate `w == 0 || h == 0 || bpp == 0` input
+/// (nothing to mirror; `div_ceil` would panic on a zero denominator) or when
+/// the projected output would exceed [`MIRROR_TILE_MAX_OUTPUT_BYTES`].
 pub(crate) fn mirror_tile_packed(
     src: &[u8],
     w: u32,
     h: u32,
     bpp: usize,
     min_dim: u32,
-) -> (Vec<u8>, u32, u32) {
+) -> Option<(Vec<u8>, u32, u32)> {
     let (w, h, md) = (w as usize, h as usize, min_dim as usize);
+    if w == 0 || h == 0 || bpp == 0 {
+        return None;
+    }
     let nx = if w < md { md.div_ceil(w) } else { 1 };
     let ny = if h < md { md.div_ceil(h) } else { 1 };
     let row = w * bpp;
     let out_row = w * nx * bpp;
     let oh = h * ny;
-    let mut out = vec![0u8; out_row * oh];
+    let total = out_row.checked_mul(oh)?;
+    if total > MIRROR_TILE_MAX_OUTPUT_BYTES {
+        return None;
+    }
+    let mut out = vec![0u8; total];
     for oy in 0..oh {
         let j = oy / h;
         let ly = oy % h;
@@ -652,7 +680,7 @@ pub(crate) fn mirror_tile_packed(
             }
         }
     }
-    (out, (w * nx) as u32, oh as u32)
+    Some((out, (w * nx) as u32, oh as u32))
 }
 
 /// Const-bool-monomorphized analyzer body. Returns the dense
