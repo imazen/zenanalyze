@@ -189,9 +189,9 @@ mod tests {
 
     fn checker() -> [[f32; 8]; 8] {
         let mut b = [[0f32; 8]; 8];
-        for i in 0..8 {
-            for j in 0..8 {
-                b[i][j] = if (i + j) % 2 == 0 { 60.0 } else { -60.0 };
+        for (i, row) in b.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = if (i + j) % 2 == 0 { 60.0 } else { -60.0 };
             }
         }
         b
@@ -227,9 +227,9 @@ mod tests {
         // roundtrip; a 2×2 box average cancels it exactly, so the removed RMS == 40.
         let q = [1.0f32; 64];
         let mut b = [[0f32; 8]; 8];
-        for i in 0..8 {
-            for j in 0..8 {
-                b[i][j] = if j % 2 == 0 { 40.0 } else { -40.0 };
+        for row in &mut b {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = if j % 2 == 0 { 40.0 } else { -40.0 };
             }
         }
         let l = block_subsample_dct_loss(&b, &q);
