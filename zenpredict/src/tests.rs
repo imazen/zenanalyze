@@ -58,6 +58,28 @@ fn argmin_top_k_returns_sorted_indices() {
 
 #[test]
 #[cfg(feature = "advanced")]
+fn argmin_top_k_skips_nan_scores() {
+    // Same documented NaN contract as `argmin_masked`: a NaN-scoring cell must never occupy a
+    // top-K slot, even while the array still has room (count < K) — that's exactly the case
+    // the prior bug missed, since the shift-loop's `top[i - 1].0 > score` never fires to
+    // displace a NaN sitting in an empty slot.
+    let pred = [f32::NAN, 3.0f32, 1.0, f32::NAN, 1.5];
+    let mask = [true; 5];
+    let m = AllowedMask::new(&mask);
+    let top = argmin::argmin_masked_top_k::<3>(&pred, &m, ScoreTransform::Identity, None);
+    assert_eq!(top, [Some(2), Some(4), Some(1)]); // 1.0, 1.5, 3.0 — NaNs never appear
+
+    // All-NaN allowed set: every slot stays None (matches argmin_all_nan_returns_none).
+    let all_nan = [f32::NAN; 4];
+    let mask4 = [true; 4];
+    let m4 = AllowedMask::new(&mask4);
+    let top_all_nan =
+        argmin::argmin_masked_top_k::<3>(&all_nan, &m4, ScoreTransform::Identity, None);
+    assert_eq!(top_all_nan, [None, None, None]);
+}
+
+#[test]
+#[cfg(feature = "advanced")]
 fn pick_with_confidence_reports_gap() {
     let pred = [3.0f32, 1.0, 4.0, 1.5, 9.0];
     let mask = [true; 5];

@@ -239,6 +239,13 @@ pub fn argmin_masked_top_k<const K: usize>(
     let mut count: usize = 0;
 
     let mut consider = |score: f32, idx: usize| {
+        // Same NaN contract as `argmin_masked`: a NaN-scoring cell is silently skipped, never
+        // occupying a top-K slot. Without this, `score.is_nan()` cells (for which every `<`
+        // comparison is false) would slide into an empty slot below simply because the
+        // shift-loop's `top[i - 1].0 > score` never fires to displace it.
+        if score.is_nan() {
+            return;
+        }
         if count < K {
             let mut i = count;
             while i > 0 && top[i - 1].0 > score {
