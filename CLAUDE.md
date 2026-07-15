@@ -110,6 +110,72 @@ minimization) are queued in `zentrain/INVERSION.md`. Read that
 roadmap before adding a new codec; new codecs should plug into the
 inversion target, not the legacy piecemeal pattern.
 
+## NO DUPLICATE IMPLEMENTATIONS — one owner per task (2026-07-15, user directive)
+
+**Every task below has exactly ONE canonical implementation. Re-implementing
+any of them — in Python, in a second Rust site, in a new `vNN_*_train.py`,
+anywhere — is PROHIBITED.** If the owner can't do what you need, **extend the
+owner**. Companion to the identical rule in `~/work/zen/zensim/CLAUDE.md`.
+
+| Task | THE owner | Never |
+|---|---|---|
+| IQA stats (SROCC/PLCC/KROCC/OR/PWRC/Z-RMSE) | **`zenstats`** (`zenmetrics/crates/zenstats`) — Rust: dep on it; Python: `scripts/lib/zen_stats.py` | `scipy.stats.spearmanr`, a hand-rolled `srocc`, any private stat math |
+| Parquet feature/pareto loading (Python) | `zentrain/tools/_picker_lib.py` — `load_pareto_raw` / `load_features_raw` | `pd.read_parquet` / `pq.read_table` in a new tool |
+| Parquet loading (Rust) | `zenpicker-train/src/{parquet_input,pareto_dataset}.rs` | a second reader |
+| Picker training | `zenpicker-train` (Rust) / `zentrain/tools/train_hybrid.py` | a new `vNN_*_picker_train.py` |
+| zensim-metric MLP training | **zensim's** `zensim-validate/src/bin/zensim_mlp_train.rs` | `zentrain/tools/zensim_metric_train.py` (a Python fork of another repo's owner) |
+| Bake bytes / ZNPR | `zenpredict-bake` (`zenpredict bake`/`inspect`/`repack`) | any other emitter |
+| Train/val/test split | `zenmetrics/scripts/picker/origin_split.py` (`split_of()`) | a seeded shuffle — per-rendition shuffling leaks scale |
+
+**Python is not banned — DUPLICATION is.** Python is correct where it IS the
+owner (`_picker_lib`, corpus building, plots). The test is not "what language"
+but "does this task already have an owner".
+
+### Why this rule exists here specifically
+
+This repo shows the failure mode most clearly. **Extraction is not migration:**
+`_picker_lib.load_features_raw` exists and is the declared owner, yet
+`load_features_raw` adoption went from 7-of-25 call sites to ~15-of-35 — the
+lib landed, the forks kept coming, so the ratio barely moved while the absolute
+count grew. Meanwhile `tools/v15_zenjpeg_picker_train.py`,
+`v15_metapicker_train.py`, `v0_2_zenjpeg_picker_train.py`,
+`v14_metapicker_train.py`, `v12_metapicker_train.py`,
+`picker_v06_mlp_prototype.py`, `v10_router_mlp_train.py`,
+`v06_zenjxl_picker_mlp_train.py` are one copy-the-last-one chain, all frozen
+2026-05-26. Each was "just a variant" at the time.
+
+Lines 101-111 below *describe* this duplication ("4 codec-specific binaries, 4
+picker configs duplicating ~150 lines of scaffolding") and queue the fix in
+`zentrain/INVERSION.md`. **Queueing is the bug.** A duplicate found is a
+duplicate removed — same commit if it's dead, next commit if something still
+calls it.
+
+### First deletions (both queued since 2026-05-26, still un-migrated)
+
+The 2026-05-26 IQA consolidation deferred four cross-repo callers. Two are
+here, still on bare `scipy` seven weeks later:
+
+- `zentrain/tools/zensim_metric_train.py:467` — audit item #10. Zero
+  `zen_stats` imports. It is also a **1,078-line Python fork of zensim's Rust
+  `zensim_mlp_train`**, i.e. duplicated across a repo boundary.
+- `zentrain/tools/correlation_cleanup.py:161` — audit item #11.
+
+### The one exception: a gated mirror
+
+A second implementation is legitimate **only** with a measured engineering
+reason AND a test holding it bit-exact against the owner. This repo has the
+model example: `zenpicker-train/src/picker_eval.rs:97`'s
+`pwrc_sa_st_auc_lowmem` (O(n²)→O(1) memory) is gated by
+`pwrc_lowmem_matches_canonical_exactly`. Without that test it is not a mirror,
+it is a fork with a good story.
+
+The enforcement pattern worth copying is zenmetrics' `origin_split`:
+`train_hybrid` **hard-errors** if `origin_split` isn't importable rather than
+falling back to a leaky split. Fail loud; never silently substitute.
+
+Audit of record: `~/work/zen/zensim/benchmarks/duplication_audit_2026-07-15.md`.
+Prior art: `zensim/benchmarks/iqa_stats_consolidation_2026-05-26.md`.
+
 ## Don't
 
 - Don't propose 0.2.x.
