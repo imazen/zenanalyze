@@ -6,6 +6,13 @@
 permitted.** The earlier "0.1.x forever" rule was retired when the
 crate's pre-1.0 surface needed to evolve.
 
+**USER DIRECTIVE 2026-07-19: `zenanalyze-api` is the unchanging contract.**
+The zenanalyze-api crate (0.1.x, published on crates.io) is FROZEN — never
+break its public surface; multi-version unification depends on every
+consumer speaking the same zenanalyze-api (see Cargo.toml notes: publish
+zenanalyze-api before zenanalyze when releasing with `api` enabled).
+zenanalyze itself (0.2.x+) may change freely behind it.
+
 ### Rust library surface (semver-governed)
 
 Standard 0.x semver applies:
@@ -178,9 +185,6 @@ Prior art: `zensim/benchmarks/iqa_stats_consolidation_2026-05-26.md`.
 
 ## Don't
 
-- Don't propose 0.2.x.
-- Don't change a published function signature, even to "improve" it.
-  Add a parallel `try_*` / `with_*` / `_into` variant if needed.
 - Don't add new `expect()` / `unwrap()` to public entries that took
   untrusted input. The fallible parallels exist for a reason.
 - Don't bake content-class assumptions into the analyzer. The job is
@@ -231,7 +235,7 @@ zq=75. The previous v0.5 harness was structurally broken — a picker
 trained for zq=75 was being graded against bands ranging zq~99 to
 zq~40. Fix shipped 2026-05-04.
 
-### Classifier picker prototypes
+### HISTORICAL (2026-05) — Classifier picker prototypes
 
 The MLP-regress-bytes-then-argmin chain is fragile under safety
 masking. A small softmax-classifier MLP over `(image features ⊕
@@ -256,15 +260,15 @@ runtime branch).
 - `docs/jxl-picker-v06-summary-2026-05-04.md` — v0.6 path forward
   + productionization options A/B/C
 
-### Sweep + bug status (2026-05-04+)
+### HISTORICAL (2026-05) — Sweep + bug status (2026-05-04+)
 
 - v05c sweep on R2 `s3://zentrain/sweep-v05c-2026-05-04/` (no butteraugli)
 - v06 sweep on R2 `s3://zentrain/sweep-v06-2026-05-04/` (in flight; CPU
   metrics, expanded JXL knobs via zenmetrics 0.6.0; chunks land at
   `zenjxl/<chunk_id>.tsv` with butteraugli columns)
 - 500 representative images clustered from v05c via k-means on
-  zenanalyze features (script lives at `/tmp/cluster_v06_subset.py`
-  during the session — re-cluster as needed)
+  zenanalyze features (clustering script was under /tmp — wiped, /tmp
+  is banned; re-cluster as needed)
 - Decoder bug filed: `imazen/zenjxl-decoder#15` — effort=9 +
   distance ≤ 0.5 + screen content produces files jxl-oxide accepts
   but zenjxl-decoder rejects (decoder bug, not encoder)
