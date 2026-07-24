@@ -214,6 +214,13 @@ pub enum FeatureTransform {
     /// Two optional params `[knee, soft]` (defaults `1, 1`); each `≤ 0` falls
     /// back to 1. Added 2026-07-24 as the frontier clean-model transform.
     SoftClip,
+    /// `sign(x)·|x|^p` — the odd, smooth, unbounded-monotone power family that
+    /// generalizes `SignedSqrt` (p=½) and `SignedCbrt` (p=⅓). One optional
+    /// param `p` (default ½); `p ≤ 0` falls back to identity (p=1). Concave-
+    /// compressive for `0<p<1` (smaller p = harder heavy-tail compression),
+    /// smooth on `(0,∞)` so the diffmap `s_k` stays clean. Exposed to sweep the
+    /// compression↔corruption↔diffmap frontier from one screen. Added 2026-07-24.
+    SignedPow,
 }
 
 /// Two-pi constant for sinusoidal embedding. Mirrors `core::f32::consts::TAU`
@@ -249,6 +256,26 @@ fn signed_cbrt(x: f32) -> f32 {
     {
         s * libm::cbrtf(libm::fabsf(x))
     }
+}
+
+/// Signed power `sign(x)·|x|^p` — the smooth, odd, strictly-monotone power
+/// family that generalizes `signed_sqrt` (p=½) and `signed_cbrt` (p=⅓). For
+/// `0 < p < 1` it is concave-compressive (the smaller `p`, the harder the
+/// compression of heavy tails); `p=1` is identity. Smooth on `(0,∞)` (a
+/// clean central-difference `s_k` for the diffmap, like `signed_cbrt`), and
+/// UNBOUNDED-monotone so it preserves the corruption negative-tail order.
+/// Exposed parametrically so the compression↔corruption↔diffmap frontier can
+/// be swept via one screen without a new variant per exponent. `p ≤ 0` falls
+/// back to `p = 1` (identity — a garbage-screen guard, since `|x|^0 ≡ 1`
+/// would destroy all information).
+fn signed_pow(x: f32, p: f32) -> f32 {
+    let e = if p > 0.0 { p } else { 1.0 };
+    let sign = if x >= 0.0 { 1.0 } else { -1.0 };
+    #[cfg(feature = "std")]
+    let mag = x.abs().powf(e);
+    #[cfg(not(feature = "std"))]
+    let mag = libm::powf(libm::fabsf(x), e);
+    sign * mag
 }
 
 /// Soft-sign `x / (scale + |x|)` — smooth, strictly monotone, and *saturating*
@@ -500,6 +527,7 @@ impl FeatureTransform {
             Self::WinsorP99 | Self::QuantileBins => x,
             Self::SoftSign => soft_sign(x, 1.0),
             Self::SoftClip => soft_clip(x, 1.0, 1.0),
+            Self::SignedPow => signed_pow(x, 0.5),
             // Scalar `apply` cannot represent an expander variant. The
             // bake-load + runtime paths route through
             // `apply_expanding` / `apply_feature_pipeline_expanding` /
@@ -664,6 +692,7 @@ impl FeatureTransform {
                 params.first().copied().unwrap_or(1.0),
                 params.get(1).copied().unwrap_or(1.0),
             ),
+            Self::SignedPow => signed_pow(x, params.first().copied().unwrap_or(0.5)),
             // Sinusoidal is an expander — see `apply` for the rationale
             // on why this panics instead of returning a degenerate scalar.
             Self::Sinusoidal => panic!(
@@ -803,6 +832,7 @@ impl FeatureTransform {
             "sinusoidal" => Ok(Self::Sinusoidal),
             "soft_sign" => Ok(Self::SoftSign),
             "soft_clip" => Ok(Self::SoftClip),
+            "signed_pow" => Ok(Self::SignedPow),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -828,6 +858,7 @@ impl FeatureTransform {
             Self::Sinusoidal => "sinusoidal",
             Self::SoftSign => "soft_sign",
             Self::SoftClip => "soft_clip",
+            Self::SignedPow => "signed_pow",
         }
     }
 }
@@ -1516,7 +1547,7 @@ mod tests {
     /// Returns every FeatureTransform variant currently in the enum.
     /// Keep this in sync with the enum when adding new variants —
     /// the universal tests below iterate this list.
-    fn all_variants() -> [FeatureTransform; 17] {
+    fn all_variants() -> [FeatureTransform; 18] {
         [
             FeatureTransform::Identity,
             FeatureTransform::Log,
@@ -1535,6 +1566,7 @@ mod tests {
             FeatureTransform::YeoJohnson,
             FeatureTransform::SoftSign,
             FeatureTransform::SoftClip,
+            FeatureTransform::SignedPow,
         ]
     }
 
@@ -1566,6 +1598,9 @@ mod tests {
             // check apply_with_params (the no-param [1,1] path is in
             // all_variants()).
             FeatureTransform::SoftClip => &[2.0_f32, 1.5],
+            // SignedPow takes optional [p]; a non-default exponent checks
+            // apply_with_params (the no-param p=½ path is in all_variants()).
+            FeatureTransform::SignedPow => &[0.25_f32],
             // Sinusoidal is an expander (panics under scalar apply),
             // so it is excluded from `all_variants()` and never reaches
             // these scalar NaN-safety helpers. This arm only keeps the
@@ -1814,6 +1849,46 @@ mod tests {
         // Non-positive knee/soft fall back to 1.
         let g = FeatureTransform::SoftClip.apply_with_params(3.0, &[0.0, -5.0]);
         assert!((g - d2).abs() < 1e-5, "knee≤0/soft≤0 should fall back to 1,1");
+    }
+
+    // -----------------------------------------------------------------
+    // SignedPow (odd smooth power family generalizing sqrt/cbrt)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn signed_pow_token_round_trip_and_flags() {
+        let t = FeatureTransform::from_token("signed_pow").expect("parse");
+        assert_eq!(t, FeatureTransform::SignedPow);
+        assert_eq!(t.as_token(), "signed_pow");
+        assert!(!t.requires_params(), "exponent optional (default ½)");
+        assert!(!t.is_expander());
+        assert_eq!(t.output_arity(&[0.25]), 1);
+    }
+
+    #[test]
+    fn signed_pow_matches_sqrt_cbrt_and_is_odd_monotone_unbounded() {
+        // p=½ (default) reproduces signed_sqrt to f32 tolerance.
+        for &x in &[-9.0_f32, -2.0, 0.0, 2.0, 9.0, 100.0] {
+            let sp = FeatureTransform::SignedPow.apply(x);
+            let ss = FeatureTransform::SignedSqrt.apply(x);
+            assert!((sp - ss).abs() < 1e-5, "p=½ ≠ signed_sqrt at {x}: {sp} vs {ss}");
+        }
+        // p=⅓ reproduces signed_cbrt.
+        for &x in &[-27.0_f32, -1.0, 0.0, 1.0, 8.0, 1000.0] {
+            let sp = FeatureTransform::SignedPow.apply_with_params(x, &[1.0 / 3.0]);
+            let sc = FeatureTransform::SignedCbrt.apply(x);
+            assert!((sp - sc).abs() < 2e-4, "p=⅓ ≠ signed_cbrt at {x}: {sp} vs {sc}");
+        }
+        // Odd, and unbounded-monotone (the corruption-order property) at p=0.25.
+        let f = |x: f32| FeatureTransform::SignedPow.apply_with_params(x, &[0.25]);
+        for &x in &[0.7_f32, 5.0, 500.0] {
+            assert!((f(-x) + f(x)).abs() < 1e-4, "not odd at {x}");
+        }
+        assert!(f(1e8) > f(1e4) && f(1e4) > f(1.0) && f(1.0) > f(0.01));
+        assert_eq!(f(0.0), 0.0);
+        // p ≤ 0 falls back to identity (guards |x|^0 ≡ 1 information loss).
+        let g = FeatureTransform::SignedPow.apply_with_params(3.5, &[0.0]);
+        assert!((g - 3.5).abs() < 1e-6, "p≤0 should fall back to identity");
     }
 
     // -----------------------------------------------------------------
