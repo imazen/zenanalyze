@@ -195,6 +195,14 @@ pub enum FeatureTransform {
     /// needed). Added 2026-05-18 for Gain-MLP-style per-pixel MLPs
     /// (Canham et al. 2025).
     Sinusoidal,
+    /// `x / (scale + |x|)` — smooth, strictly monotone, *saturating* soft-sign.
+    /// Tames heavy-tail/corruption extremes like a winsor clip but with a
+    /// bounded, CONTINUOUS derivative (`scale/(scale+|x|)²`), so a model's
+    /// gradient through it stays clean for the runtime diffmap (winsor's
+    /// clip and `quantile_bins`' step do not). One optional parameter, the
+    /// `scale` (saturation onset); `params = []` uses `scale = 1`.
+    /// Added 2026-07-24 for the smooth-saturating "ideal" zensim model.
+    SoftSign,
 }
 
 /// Two-pi constant for sinusoidal embedding. Mirrors `core::f32::consts::TAU`
@@ -230,6 +238,24 @@ fn signed_cbrt(x: f32) -> f32 {
     {
         s * libm::cbrtf(libm::fabsf(x))
     }
+}
+
+/// Soft-sign `x / (scale + |x|)` — smooth, strictly monotone, and *saturating*
+/// (→ ±1). `scale > 0` sets the saturation onset: for `|x| ≪ scale` it is
+/// ~linear (`x/scale`), for `|x| ≫ scale` it flattens toward ±1. Its
+/// derivative `scale / (scale + |x|)²` is bounded and CONTINUOUS everywhere —
+/// unlike `winsor`'s clip (0-a.e. with a kink) or `quantile_bins`' step — so a
+/// model's central-difference gradient through it stays clean. That is what
+/// lets it tame corruption/heavy-tail extremes (like winsor) WITHOUT breaking
+/// the diffmap `s_k` (like raw): the smooth-saturating middle the ideal
+/// zensim model needs. `scale ≤ 0` falls back to `scale = 1`.
+fn soft_sign(x: f32, scale: f32) -> f32 {
+    let s = if scale > 0.0 { scale } else { 1.0 };
+    #[cfg(feature = "std")]
+    let ax = x.abs();
+    #[cfg(not(feature = "std"))]
+    let ax = libm::fabsf(x);
+    x / (s + ax)
 }
 
 /// Yeo-Johnson power transform. Smooth across the entire real line;
@@ -425,6 +451,7 @@ impl FeatureTransform {
             // invariant other variants follow).
             Self::YeoJohnson => x,
             Self::WinsorP99 | Self::QuantileBins => x,
+            Self::SoftSign => soft_sign(x, 1.0),
             // Scalar `apply` cannot represent an expander variant. The
             // bake-load + runtime paths route through
             // `apply_expanding` / `apply_feature_pipeline_expanding` /
@@ -583,6 +610,7 @@ impl FeatureTransform {
                 };
                 yeo_johnson(x, lambda)
             }
+            Self::SoftSign => soft_sign(x, params.first().copied().unwrap_or(1.0)),
             // Sinusoidal is an expander — see `apply` for the rationale
             // on why this panics instead of returning a degenerate scalar.
             Self::Sinusoidal => panic!(
@@ -720,6 +748,7 @@ impl FeatureTransform {
             "clip_then_log1p_then_winsor" => Ok(Self::ClipThenLog1pThenWinsor),
             "yeo_johnson" => Ok(Self::YeoJohnson),
             "sinusoidal" => Ok(Self::Sinusoidal),
+            "soft_sign" => Ok(Self::SoftSign),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -743,6 +772,7 @@ impl FeatureTransform {
             Self::ClipThenLog1pThenWinsor => "clip_then_log1p_then_winsor",
             Self::YeoJohnson => "yeo_johnson",
             Self::Sinusoidal => "sinusoidal",
+            Self::SoftSign => "soft_sign",
         }
     }
 }
@@ -1431,7 +1461,7 @@ mod tests {
     /// Returns every FeatureTransform variant currently in the enum.
     /// Keep this in sync with the enum when adding new variants —
     /// the universal tests below iterate this list.
-    fn all_variants() -> [FeatureTransform; 15] {
+    fn all_variants() -> [FeatureTransform; 16] {
         [
             FeatureTransform::Identity,
             FeatureTransform::Log,
@@ -1448,6 +1478,7 @@ mod tests {
             FeatureTransform::SignedCbrtThenWinsor,
             FeatureTransform::ClipThenLog1pThenWinsor,
             FeatureTransform::YeoJohnson,
+            FeatureTransform::SoftSign,
         ]
     }
 
@@ -1471,6 +1502,10 @@ mod tests {
             FeatureTransform::SignedCbrtThenWinsor => &[-2.0_f32, 2.0],
             FeatureTransform::ClipThenLog1pThenWinsor => &[0.1_f32, 0.0, 3.0],
             FeatureTransform::YeoJohnson => &[-50.0_f32],
+            // SoftSign takes an optional scale param; the no-param
+            // fallback (scale = 1) is exercised by all_variants(), so a
+            // non-trivial scale here checks apply_with_params too.
+            FeatureTransform::SoftSign => &[2.0_f32],
             // Sinusoidal is an expander (panics under scalar apply),
             // so it is excluded from `all_variants()` and never reaches
             // these scalar NaN-safety helpers. This arm only keeps the
@@ -1600,6 +1635,62 @@ mod tests {
             let parsed = FeatureTransform::from_token(tok).expect("from_token");
             assert_eq!(parsed, t, "round-trip failed for {tok}");
         }
+    }
+
+    // -----------------------------------------------------------------
+    // SoftSign (smooth saturating transform for coherent diffmaps)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn soft_sign_token_round_trip_and_flags() {
+        let t = FeatureTransform::from_token("soft_sign").expect("parse");
+        assert_eq!(t, FeatureTransform::SoftSign);
+        assert_eq!(t.as_token(), "soft_sign");
+        assert!(!t.requires_params(), "scale is optional (default 1)");
+        assert!(!t.is_expander());
+        assert_eq!(t.output_arity(&[]), 1);
+        assert_eq!(t.output_arity(&[2.0]), 1);
+    }
+
+    #[test]
+    fn soft_sign_is_odd_monotone_saturating_and_matches_formula() {
+        let f = |x: f32| FeatureTransform::SoftSign.apply(x);
+        // Reference: x / (1 + |x|).
+        for &x in &[-1000.0_f32, -3.5, -1.0, -0.1, 0.0, 0.1, 1.0, 3.5, 1000.0] {
+            let want = x / (1.0 + x.abs());
+            assert!((f(x) - want).abs() < 1e-6, "soft_sign({x})={} want {want}", f(x));
+        }
+        // Odd: f(-x) = -f(x).
+        for &x in &[0.3_f32, 1.7, 42.0] {
+            assert!((f(-x) + f(x)).abs() < 1e-6);
+        }
+        // Strictly monotone increasing.
+        let mut prev = f(-1e6);
+        for i in -1000..=1000 {
+            let cur = f(i as f32 * 0.05);
+            assert!(cur > prev, "not monotone at {i}");
+            prev = cur;
+        }
+        // Bounded in [-1, 1] — the saturation that tames heavy tails.
+        // (At x≫1/eps the f32 `+1` is lost and it saturates to exactly 1.)
+        assert!(f(1000.0) < 1.0 && f(1000.0) > 0.999);
+        assert!(f(-1000.0) > -1.0 && f(-1000.0) < -0.999);
+        assert!(f(1e9) <= 1.0 && f(-1e9) >= -1.0);
+        assert_eq!(f(0.0), 0.0);
+    }
+
+    #[test]
+    fn soft_sign_scale_param_widens_the_linear_zone() {
+        // Larger scale → gentler saturation: |soft_sign_s(x)| < |soft_sign_1(x)|
+        // for the same x, and the derivative at 0 is 1/scale.
+        let s1 = FeatureTransform::SoftSign.apply_with_params(2.0, &[]);
+        let s4 = FeatureTransform::SoftSign.apply_with_params(2.0, &[4.0]);
+        assert!((s1 - 2.0 / 3.0).abs() < 1e-6); // 2/(1+2)
+        assert!((s4 - 2.0 / 6.0).abs() < 1e-6); // 2/(4+2)
+        assert!(s4.abs() < s1.abs());
+        // Non-positive scale falls back to 1 (guards a garbage screen entry).
+        let s0 = FeatureTransform::SoftSign.apply_with_params(2.0, &[0.0]);
+        assert!((s0 - s1).abs() < 1e-6);
     }
 
     // -----------------------------------------------------------------
