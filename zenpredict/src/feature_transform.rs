@@ -203,6 +203,17 @@ pub enum FeatureTransform {
     /// `scale` (saturation onset); `params = []` uses `scale = 1`.
     /// Added 2026-07-24 for the smooth-saturating "ideal" zensim model.
     SoftSign,
+    /// Smooth soft-clip (Huber-log winsor): IDENTITY for `|x| ≤ knee`, then a
+    /// concave, strictly-monotone, UNBOUNDED log tail — `C¹`-matched at the
+    /// knee (slope 1 on both sides), so no kink/flat/step. Unlike `SoftSign`
+    /// the tail is UNBOUNDED, so it preserves the negative-tail ORDER the
+    /// corruption gate needs (a pathological feature stays > any honest one);
+    /// unlike `WinsorP99` it is smooth (no 0-derivative flat), so the runtime
+    /// diffmap `s_k` stays clean; unlike `SignedCbrt` the honest in-range bulk
+    /// passes through undistorted (identity core → better FR discrimination).
+    /// Two optional params `[knee, soft]` (defaults `1, 1`); each `≤ 0` falls
+    /// back to 1. Added 2026-07-24 as the frontier clean-model transform.
+    SoftClip,
 }
 
 /// Two-pi constant for sinusoidal embedding. Mirrors `core::f32::consts::TAU`
@@ -256,6 +267,42 @@ fn soft_sign(x: f32, scale: f32) -> f32 {
     #[cfg(not(feature = "std"))]
     let ax = libm::fabsf(x);
     x / (s + ax)
+}
+
+/// Soft-clip (smooth "Huber-log winsor"): IDENTITY inside `|x| ≤ knee`, then a
+/// concave, strictly-monotone, UNBOUNDED log tail outside it —
+///   `f(x) = x`                                            for `|x| ≤ knee`
+///   `f(x) = sign(x)·(knee + soft·ln(1 + (|x|−knee)/soft))` for `|x| > knee`
+/// The tail is `C¹`-matched at the knee (both sides have slope 1), so `f` is
+/// smooth everywhere (continuous derivative — no kink, no flat, no step). Two
+/// properties the corruption/diffmap gauntlet needs, that neither `winsor`
+/// (flat tail → 0-derivative → breaks the diffmap `s_k`) nor `soft_sign`
+/// (BOUNDED tail → saturates corruption to the same value as large honest
+/// features → destroys the negative-tail ORDER) provides:
+///   1. **identity core** — honest in-range features pass through undistorted,
+///      so honest FR discrimination is preserved (better than `signed_cbrt`,
+///      which compresses even the bulk);
+///   2. **unbounded monotone tail** — a pathological (corruption) feature stays
+///      strictly larger than any honest one, so `score(corruption) < score(q20)`
+///      holds; the log just shrinks the margin, never the order.
+/// `knee ≤ 0` falls back to `knee = 1`; `soft ≤ 0` falls back to `soft = 1`.
+fn soft_clip(x: f32, knee: f32, soft: f32) -> f32 {
+    let k = if knee > 0.0 { knee } else { 1.0 };
+    let s = if soft > 0.0 { soft } else { 1.0 };
+    let sign = if x >= 0.0 { 1.0 } else { -1.0 };
+    #[cfg(feature = "std")]
+    let ax = x.abs();
+    #[cfg(not(feature = "std"))]
+    let ax = libm::fabsf(x);
+    if ax <= k {
+        x
+    } else {
+        #[cfg(feature = "std")]
+        let tail = s * ((ax - k) / s).ln_1p();
+        #[cfg(not(feature = "std"))]
+        let tail = s * libm::log1pf((ax - k) / s);
+        sign * (k + tail)
+    }
 }
 
 /// Yeo-Johnson power transform. Smooth across the entire real line;
@@ -452,6 +499,7 @@ impl FeatureTransform {
             Self::YeoJohnson => x,
             Self::WinsorP99 | Self::QuantileBins => x,
             Self::SoftSign => soft_sign(x, 1.0),
+            Self::SoftClip => soft_clip(x, 1.0, 1.0),
             // Scalar `apply` cannot represent an expander variant. The
             // bake-load + runtime paths route through
             // `apply_expanding` / `apply_feature_pipeline_expanding` /
@@ -611,6 +659,11 @@ impl FeatureTransform {
                 yeo_johnson(x, lambda)
             }
             Self::SoftSign => soft_sign(x, params.first().copied().unwrap_or(1.0)),
+            Self::SoftClip => soft_clip(
+                x,
+                params.first().copied().unwrap_or(1.0),
+                params.get(1).copied().unwrap_or(1.0),
+            ),
             // Sinusoidal is an expander — see `apply` for the rationale
             // on why this panics instead of returning a degenerate scalar.
             Self::Sinusoidal => panic!(
@@ -749,6 +802,7 @@ impl FeatureTransform {
             "yeo_johnson" => Ok(Self::YeoJohnson),
             "sinusoidal" => Ok(Self::Sinusoidal),
             "soft_sign" => Ok(Self::SoftSign),
+            "soft_clip" => Ok(Self::SoftClip),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -773,6 +827,7 @@ impl FeatureTransform {
             Self::YeoJohnson => "yeo_johnson",
             Self::Sinusoidal => "sinusoidal",
             Self::SoftSign => "soft_sign",
+            Self::SoftClip => "soft_clip",
         }
     }
 }
@@ -1461,7 +1516,7 @@ mod tests {
     /// Returns every FeatureTransform variant currently in the enum.
     /// Keep this in sync with the enum when adding new variants —
     /// the universal tests below iterate this list.
-    fn all_variants() -> [FeatureTransform; 16] {
+    fn all_variants() -> [FeatureTransform; 17] {
         [
             FeatureTransform::Identity,
             FeatureTransform::Log,
@@ -1479,6 +1534,7 @@ mod tests {
             FeatureTransform::ClipThenLog1pThenWinsor,
             FeatureTransform::YeoJohnson,
             FeatureTransform::SoftSign,
+            FeatureTransform::SoftClip,
         ]
     }
 
@@ -1506,6 +1562,10 @@ mod tests {
             // fallback (scale = 1) is exercised by all_variants(), so a
             // non-trivial scale here checks apply_with_params too.
             FeatureTransform::SoftSign => &[2.0_f32],
+            // SoftClip takes optional [knee, soft]; non-trivial values here
+            // check apply_with_params (the no-param [1,1] path is in
+            // all_variants()).
+            FeatureTransform::SoftClip => &[2.0_f32, 1.5],
             // Sinusoidal is an expander (panics under scalar apply),
             // so it is excluded from `all_variants()` and never reaches
             // these scalar NaN-safety helpers. This arm only keeps the
@@ -1691,6 +1751,69 @@ mod tests {
         // Non-positive scale falls back to 1 (guards a garbage screen entry).
         let s0 = FeatureTransform::SoftSign.apply_with_params(2.0, &[0.0]);
         assert!((s0 - s1).abs() < 1e-6);
+    }
+
+    // -----------------------------------------------------------------
+    // SoftClip (smooth Huber-log winsor — identity core + unbounded tail)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn soft_clip_token_round_trip_and_flags() {
+        let t = FeatureTransform::from_token("soft_clip").expect("parse");
+        assert_eq!(t, FeatureTransform::SoftClip);
+        assert_eq!(t.as_token(), "soft_clip");
+        assert!(!t.requires_params(), "knee/soft are optional (default 1,1)");
+        assert!(!t.is_expander());
+        assert_eq!(t.output_arity(&[]), 1);
+        assert_eq!(t.output_arity(&[2.0, 1.5]), 1);
+    }
+
+    #[test]
+    fn soft_clip_is_identity_in_core_odd_monotone_unbounded_and_C1() {
+        // knee=2, soft=1
+        let f = |x: f32| FeatureTransform::SoftClip.apply_with_params(x, &[2.0, 1.0]);
+        // Identity inside the core |x| ≤ 2.
+        for &x in &[-2.0_f32, -1.3, -0.1, 0.0, 0.1, 1.3, 2.0] {
+            assert!((f(x) - x).abs() < 1e-6, "core not identity at {x}: {}", f(x));
+        }
+        // Odd.
+        for &x in &[0.5_f32, 2.0, 5.0, 100.0] {
+            assert!((f(-x) + f(x)).abs() < 1e-5, "not odd at {x}");
+        }
+        // Just past the knee: f(2+δ) = 2 + ln(1+δ). Reference formula.
+        for &a in &[2.5_f32, 4.0, 10.0, 1000.0] {
+            let want = 2.0 + (a - 2.0).ln_1p();
+            assert!((f(a) - want).abs() < 1e-4, "tail wrong at {a}: {} vs {want}", f(a));
+        }
+        // UNBOUNDED (unlike soft_sign): grows without a ceiling — this is what
+        // keeps the corruption-tail ORDER. f(1e6) ≫ f(100) ≫ knee.
+        assert!(f(1e6) > f(100.0) && f(100.0) > f(10.0) && f(10.0) > 2.0);
+        assert!(f(1e6) > 10.0, "log tail still climbs at extreme x");
+        // Strictly monotone across the knee (no flat, no step).
+        let mut prev = f(-1000.0);
+        for i in -2000..=2000 {
+            let cur = f(i as f32 * 0.02);
+            assert!(cur > prev, "not strictly monotone near {}", i as f32 * 0.02);
+            prev = cur;
+        }
+        // C¹ at the knee: numerical slope just inside ≈ just outside ≈ 1.
+        let eps = 1e-3_f32;
+        let din = (f(2.0) - f(2.0 - eps)) / eps;
+        let dout = (f(2.0 + eps) - f(2.0)) / eps;
+        assert!((din - 1.0).abs() < 1e-2 && (dout - 1.0).abs() < 1e-2,
+                "slope discontinuity at knee: in={din} out={dout}");
+    }
+
+    #[test]
+    fn soft_clip_param_fallbacks_guard_garbage_screen_entries() {
+        // No params → knee=1, soft=1: identity up to 1, log tail after.
+        let d = FeatureTransform::SoftClip.apply(0.5);
+        assert!((d - 0.5).abs() < 1e-6);
+        let d2 = FeatureTransform::SoftClip.apply(3.0); // 1 + ln(1+2)
+        assert!((d2 - (1.0 + 2.0_f32.ln_1p())).abs() < 1e-5);
+        // Non-positive knee/soft fall back to 1.
+        let g = FeatureTransform::SoftClip.apply_with_params(3.0, &[0.0, -5.0]);
+        assert!((g - d2).abs() < 1e-5, "knee≤0/soft≤0 should fall back to 1,1");
     }
 
     // -----------------------------------------------------------------
