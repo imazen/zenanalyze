@@ -1753,7 +1753,11 @@ mod tests {
         // Reference: x / (1 + |x|).
         for &x in &[-1000.0_f32, -3.5, -1.0, -0.1, 0.0, 0.1, 1.0, 3.5, 1000.0] {
             let want = x / (1.0 + x.abs());
-            assert!((f(x) - want).abs() < 1e-6, "soft_sign({x})={} want {want}", f(x));
+            assert!(
+                (f(x) - want).abs() < 1e-6,
+                "soft_sign({x})={} want {want}",
+                f(x)
+            );
         }
         // Odd: f(-x) = -f(x).
         for &x in &[0.3_f32, 1.7, 42.0] {
@@ -1809,7 +1813,11 @@ mod tests {
         let f = |x: f32| FeatureTransform::SoftClip.apply_with_params(x, &[2.0, 1.0]);
         // Identity inside the core |x| ≤ 2.
         for &x in &[-2.0_f32, -1.3, -0.1, 0.0, 0.1, 1.3, 2.0] {
-            assert!((f(x) - x).abs() < 1e-6, "core not identity at {x}: {}", f(x));
+            assert!(
+                (f(x) - x).abs() < 1e-6,
+                "core not identity at {x}: {}",
+                f(x)
+            );
         }
         // Odd.
         for &x in &[0.5_f32, 2.0, 5.0, 100.0] {
@@ -1818,7 +1826,11 @@ mod tests {
         // Just past the knee: f(2+δ) = 2 + ln(1+δ). Reference formula.
         for &a in &[2.5_f32, 4.0, 10.0, 1000.0] {
             let want = 2.0 + (a - 2.0).ln_1p();
-            assert!((f(a) - want).abs() < 1e-4, "tail wrong at {a}: {} vs {want}", f(a));
+            assert!(
+                (f(a) - want).abs() < 1e-4,
+                "tail wrong at {a}: {} vs {want}",
+                f(a)
+            );
         }
         // UNBOUNDED (unlike soft_sign): grows without a ceiling — this is what
         // keeps the corruption-tail ORDER. f(1e6) ≫ f(100) ≫ knee.
@@ -1835,8 +1847,10 @@ mod tests {
         let eps = 1e-3_f32;
         let din = (f(2.0) - f(2.0 - eps)) / eps;
         let dout = (f(2.0 + eps) - f(2.0)) / eps;
-        assert!((din - 1.0).abs() < 1e-2 && (dout - 1.0).abs() < 1e-2,
-                "slope discontinuity at knee: in={din} out={dout}");
+        assert!(
+            (din - 1.0).abs() < 1e-2 && (dout - 1.0).abs() < 1e-2,
+            "slope discontinuity at knee: in={din} out={dout}"
+        );
     }
 
     #[test]
@@ -1848,7 +1862,10 @@ mod tests {
         assert!((d2 - (1.0 + 2.0_f32.ln_1p())).abs() < 1e-5);
         // Non-positive knee/soft fall back to 1.
         let g = FeatureTransform::SoftClip.apply_with_params(3.0, &[0.0, -5.0]);
-        assert!((g - d2).abs() < 1e-5, "knee≤0/soft≤0 should fall back to 1,1");
+        assert!(
+            (g - d2).abs() < 1e-5,
+            "knee≤0/soft≤0 should fall back to 1,1"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -1871,13 +1888,19 @@ mod tests {
         for &x in &[-9.0_f32, -2.0, 0.0, 2.0, 9.0, 100.0] {
             let sp = FeatureTransform::SignedPow.apply(x);
             let ss = FeatureTransform::SignedSqrt.apply(x);
-            assert!((sp - ss).abs() < 1e-5, "p=½ ≠ signed_sqrt at {x}: {sp} vs {ss}");
+            assert!(
+                (sp - ss).abs() < 1e-5,
+                "p=½ ≠ signed_sqrt at {x}: {sp} vs {ss}"
+            );
         }
         // p=⅓ reproduces signed_cbrt.
         for &x in &[-27.0_f32, -1.0, 0.0, 1.0, 8.0, 1000.0] {
             let sp = FeatureTransform::SignedPow.apply_with_params(x, &[1.0 / 3.0]);
             let sc = FeatureTransform::SignedCbrt.apply(x);
-            assert!((sp - sc).abs() < 2e-4, "p=⅓ ≠ signed_cbrt at {x}: {sp} vs {sc}");
+            assert!(
+                (sp - sc).abs() < 2e-4,
+                "p=⅓ ≠ signed_cbrt at {x}: {sp} vs {sc}"
+            );
         }
         // Odd, and unbounded-monotone (the corruption-order property) at p=0.25.
         let f = |x: f32| FeatureTransform::SignedPow.apply_with_params(x, &[0.25]);
