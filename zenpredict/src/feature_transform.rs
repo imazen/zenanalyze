@@ -312,6 +312,7 @@ fn soft_sign(x: f32, scale: f32) -> f32 {
 ///   2. **unbounded monotone tail** — a pathological (corruption) feature stays
 ///      strictly larger than any honest one, so `score(corruption) < score(q20)`
 ///      holds; the log just shrinks the margin, never the order.
+///
 /// `knee ≤ 0` falls back to `knee = 1`; `soft ≤ 0` falls back to `soft = 1`.
 fn soft_clip(x: f32, knee: f32, soft: f32) -> f32 {
     let k = if knee > 0.0 { knee } else { 1.0 };
