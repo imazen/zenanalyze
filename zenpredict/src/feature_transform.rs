@@ -1809,7 +1809,7 @@ mod tests {
     }
 
     #[test]
-    fn soft_clip_is_identity_in_core_odd_monotone_unbounded_and_C1() {
+    fn soft_clip_is_identity_in_core_odd_monotone_unbounded_and_c1() {
         // knee=2, soft=1
         let f = |x: f32| FeatureTransform::SoftClip.apply_with_params(x, &[2.0, 1.0]);
         // Identity inside the core |x| ≤ 2.
