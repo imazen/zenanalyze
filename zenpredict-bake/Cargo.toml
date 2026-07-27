@@ -56,10 +56,11 @@ zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = fal
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
-# LZ4 encoder. Always pulled — whole-bake compression is built
-# into bake() unconditionally, gated by BakeRequest.compressed.
-# `lz4_flex::block::compress` is pure-safe-Rust + no_std.
-lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-encode"] }
+# LZ4 encoder + decoder. Always pulled — whole-bake compression is
+# built into bake() unconditionally (gated by BakeRequest.compressed),
+# and the append_metadata_utf8 splice decompresses/recompresses
+# compressed bakes. Pure-safe-Rust + no_std on both paths.
+lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-encode", "safe-decode"] }
 # Optional: parquet/arrow for the `fit_yeo_johnson` MLE binary.
 # Gated behind the `fit-yj` feature.
 parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }

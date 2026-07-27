@@ -19,6 +19,23 @@
 
 ### Added
 
+- **`append_metadata_utf8` — metadata splice with score/byte identity
+  guarantees** (`src/append.rs`, re-exported at crate root). Appends (or
+  replaces in place, if the key exists) one UTF-8 metadata entry on an
+  already-serialized ZNPR v3 bake via a section-level splice: only the metadata
+  blob is re-serialized; every other section (weights / I8 scales / biases /
+  scaler / bounds / output_specs / discrete_sets / sparse_overrides /
+  feature_order / output_order) is copied byte-verbatim — no re-quantization,
+  no HU re-reorder — with subsequent offsets shifted under the composer's own
+  alignment rules. For composer-produced inputs the output is byte-identical
+  to re-baking with the extended metadata list (locked by a 12-case
+  dtype × compression × permutation test matrix). Compressed bakes stay
+  compressed (LZ4 decompress → splice → recompress, `decompressed_payload_len`
+  updated); v1/v2 bakes return a clean `AppendError::UnsupportedVersion`; the
+  output is self-checked through `Model::from_bytes` before returning. Built
+  for zensim's trainer to stamp `zentrain.repro` on finished bakes where
+  `repack`'s dequantize→requantize round-trip (score-neutral, not byte-exact)
+  is not acceptable. `lz4_flex` dep gains the `safe-decode` feature.
 - **`zenpredict inspect` surfaces the embedded knob-veto safety rules** — when a
   bake carries a `zenpicker.knob_vetoes` blob, the inspect JSON now includes a
   `knob_vetoes` array (`feat_idx`, `op`, `threshold`, `cells`) parsed through the

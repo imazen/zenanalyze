@@ -34,6 +34,7 @@
 
 extern crate alloc;
 
+pub mod append;
 #[cfg(feature = "std")]
 pub mod cli;
 pub mod composer;
@@ -42,6 +43,7 @@ pub mod json;
 pub mod optimize;
 pub mod zero_bias;
 
+pub use append::{AppendError, append_metadata_utf8};
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
