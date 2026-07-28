@@ -219,3 +219,7 @@ resolver = "3"
 [[bench]]
 name = "tier_isolation"
 harness = false
+
+[[bench]]
+name = "tier_kernels"
+harness = false

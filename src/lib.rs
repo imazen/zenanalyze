@@ -198,6 +198,28 @@ pub use offer::extract_offer;
 /// Content-hash feature versioning + the golden test set ([`versioning`]).
 pub mod versioning;
 
+/// Per-tier `FeatureSet` groupings, for `benches/tier_kernels.rs`.
+///
+/// NOT public API, NOT semver-covered. `benches/tier_isolation.rs` measures
+/// `analyze_features_rgb8` with the whole `SUPPORTED` set, which cannot show
+/// one tier's kernels being SLOWER than their own scalar fallback — the
+/// faster tiers average it away. That failure mode was found and fixed in
+/// garb, zensim, zentone, zenpng and zenresize during the 2026-07-28 aarch64
+/// sweep. These groupings are `pub(crate)`; re-exporting them here lets a
+/// bench request one tier at a time without widening their visibility.
+#[doc(hidden)]
+pub mod __bench_sets {
+    use crate::feature::FeatureSet;
+
+    pub const TIER1_FULL: FeatureSet = crate::feature::TIER1_FULL_FEATURES;
+    pub const TIER1_EXTRAS: FeatureSet = crate::feature::TIER1_EXTRAS_FEATURES;
+    pub const TIER2: FeatureSet = crate::feature::TIER2_FEATURES;
+    pub const TIER3: FeatureSet = crate::feature::TIER3_FEATURES;
+    pub const PALETTE: FeatureSet = crate::feature::PALETTE_FEATURES;
+    pub const ALPHA: FeatureSet = crate::feature::ALPHA_FEATURES;
+    pub const DEPTH: FeatureSet = crate::feature::DEPTH_FEATURES;
+}
+
 mod simd_math;
 
 use core::fmt;
