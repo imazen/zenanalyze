@@ -1,0 +1,35 @@
+# zenanalyze NEON vs forced-scalar — first tier-isolated measurement (crate had no benches)
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+command: cargo bench --bench tier_isolation
+build:   release, NO -C target-cpu=native
+input:   noise+patches (not a gradient — a gradient gives degenerate DCT/edge
+         statistics and would understate the high-frequency extractors)
+query:   AnalysisQuery::new(FeatureSet::SUPPORTED), default features
+         (`experimental` ON, so pixel_budget is full rather than stride-sampled)
+
+## Result
+
+| size      | NEON   | scalar | speedup |
+|-----------|--------|--------|---------|
+| 512x512   | 5.3ms  | 8.0ms  |  1.51x  |
+| 2048x2048 | 9.0ms  | 12.3ms |  1.37x  |
+
+No regression. The tier-1 extractors in src/tier1.rs are
+`#[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]` and the NEON
+variants are clearly being reached.
+
+## Why the size axis looks odd
+
+2048x2048 is 16x the pixels of 512x512 but only ~1.7x the time. That is the
+sampling budget, not a measurement error: extraction caps the work it does per
+image (hf_max_blocks, and the stride-sampling budget when `experimental` is
+off). Do not read these two rows as a scaling curve — they are two operating
+points of a capped extractor, and the SIMD ratio is the only thing being
+compared across them.
+
+## Note for anyone re-running
+
+Run with default features. With `--no-default-features` the budget drops to
+DEFAULT_PIXEL_BUDGET = 500_000 stride-sampled pixels, at which point both sizes
+do nearly the same amount of work and the size axis flattens entirely.

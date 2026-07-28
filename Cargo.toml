@@ -215,3 +215,7 @@ members = ["zenanalyze-api", "zenpicker", "zenpredict", "zenpredict-bake", "zenp
 # rustdoc. Regenerate via `just api-doc`.
 exclude = ["zenpicker-train", "apidoc"]
 resolver = "3"
+
+[[bench]]
+name = "tier_isolation"
+harness = false
