@@ -1,12 +1,17 @@
-//! `Predictor::predict` throughput on two production shapes.
+//! `Predictor::predict` throughput on three production shapes.
 //!
 //! - **zensim** — V0_18 scorer shape: 228 → 384 → 1, I8 weights with
 //!   per-output f32 scales (concat MLP).
 //! - **zenwebp picker** — production picker shape: 51 inputs → 64
 //!   hidden → 24 outputs, F16 weights. Wired in
 //!   `zenwebp/src/encoder/picker/runtime.rs`.
+//! - **zensim SOTA-944** — the current shipped scorer shape: 944 → 128
+//!   → 1, F32 weights (matches the sota944 campaign bakes, e.g.
+//!   `C_co3a_s1301.bin`). This is the shape `bake_verdict` and every
+//!   zensim compare actually run, and the one the `simd` feature's FMA
+//!   dispatch was measured on (2026-08-04).
 //!
-//! Both shapes bake fresh in-memory, then run `Predictor::predict` in
+//! All three shapes bake fresh in-memory, then run `Predictor::predict` in
 //! a tight loop with deterministic feature vectors. Measures the
 //! actual hot path codecs and zensim run — not a synthetic microbench.
 
@@ -14,6 +19,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+use zenbench::Throughput;
 use zenbench::black_box;
 use zenpredict::{Activation, Model, Predictor, WeightDtype};
 use zenpredict_bake::{BakeLayer, BakeRequest, bake};
@@ -76,6 +82,10 @@ zenbench::main!(|suite| {
         Box::leak(random_inputs(228, 256, 0xc0ffee).into_boxed_slice());
     let webp_inputs: &'static [Vec<f32>] =
         Box::leak(random_inputs(51, 256, 0xdead).into_boxed_slice());
+    let sota944_bytes: &'static [u8] =
+        Box::leak(bake_shape(944, 128, 1, WeightDtype::F32, 0x944f).into_boxed_slice());
+    let sota944_inputs: &'static [Vec<f32>] =
+        Box::leak(random_inputs(944, 256, 0x9440).into_boxed_slice());
 
     // Align via a leaked Box<[u8; N]>-equivalent buffer. The fresh
     // `bake` output's heap allocation is already at least 8-aligned;
@@ -84,6 +94,7 @@ zenbench::main!(|suite| {
     // ensure 16-byte alignment by re-copying into an aligned scratch.
     let zensim_bytes = align_to_16(zensim_bytes);
     let webp_bytes = align_to_16(webp_bytes);
+    let sota944_bytes = align_to_16(sota944_bytes);
 
     suite.group("zensim_v018_228_384_1_i8", |g| {
         g.bench("predict", move |b| {
@@ -93,6 +104,24 @@ zenbench::main!(|suite| {
             b.iter(move || {
                 let out = predictor
                     .predict(&zensim_inputs[i % zensim_inputs.len()])
+                    .unwrap();
+                i = i.wrapping_add(1);
+                black_box(out[0])
+            })
+        });
+    });
+
+    suite.group("zensim_sota944_944_128_1_f32", |g| {
+        // 944×128 + 128×1 = 120 960 multiply-adds per predict — the unit
+        // the FMA dispatch actually operates on.
+        g.throughput(Throughput::Elements(944 * 128 + 128));
+        g.bench("predict", move |b| {
+            let model = Model::from_bytes(sota944_bytes).expect("parse sota944");
+            let mut predictor = Predictor::new(&model);
+            let mut i = 0usize;
+            b.iter(move || {
+                let out = predictor
+                    .predict(&sota944_inputs[i % sota944_inputs.len()])
                     .unwrap();
                 i = i.wrapping_add(1);
                 black_box(out[0])

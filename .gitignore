@@ -37,3 +37,6 @@ benchmarks/joint_finetune*_2026-*/finetune*_picker.json
 # into the static site dir so the quick-load buttons work.
 zenpredict-viz/web/pkg/
 zenpredict-viz/web/bakes/
+
+# zenbench local baselines (per-machine timing state, never shared)
+.zenbench/

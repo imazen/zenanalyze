@@ -29,7 +29,7 @@ features = ["advanced"]
 name = "zenpredict"
 
 [features]
-default = ["std"]
+default = ["std", "simd"]
 # `std::error::Error` trait impls only. All numeric work (including
 # `f32::exp` for `argmin::ScoreTransform::Exp`) runs identically on
 # `no_std + alloc` via the unconditional `libm` dependency — no
@@ -51,8 +51,43 @@ std = []
 # `experimental`, which gates unstable feature numerics rather than
 # extra API.)
 advanced = []
+# Runtime CPU dispatch for the forward-pass SAXPY kernels (archmage
+# `#[autoversion]`). **Codegen only — no source or numeric change.**
+#
+# Baseline x86-64 has no FMA, so `f32::mul_add` in `inference::fma`
+# compiles to an out-of-line *software* `fmaf` call: measured at 41% of
+# `bake_verdict`'s cycles (`fmaf` 24.9% + `compiler_builtins…fmaf_with_fma`
+# 16.5%, `perf record`, 2026-08-04). Recompiling the *unmodified* kernel
+# bodies under `+avx2,+fma` turns each one into a single `vfmadd`
+# instruction.
+#
+# Bit-identical by construction, twice over: (a) `f32::mul_add` and the
+# hardware FMA are both the IEEE-754 `fusedMultiplyAdd` operation — one
+# correctly-rounded result, so software and hardware agree on every input;
+# (b) the SAXPY inner loop writes each lane to its own `dst[k]`, so there
+# is no reduction to reassociate and vectorizing 8 independent FMAs is
+# exact. `mul_add` is NEVER rewritten to `a * b + c` (two roundings) —
+# that would change results.
+#
+# On by default; `default-features = false` drops the archmage dependency
+# and falls back to the plain scalar kernels. Implies `std` because
+# runtime detection needs it. aarch64 already has FMA in its baseline ISA,
+# so it is unaffected either way.
+simd = ["std", "dep:archmage"]
 
 [dependencies]
+# Safe SIMD capability tokens. Used ONLY by the `simd` feature, and only
+# for its `#[autoversion]` attribute, which re-emits the forward kernels
+# under `#[target_feature(enable = "avx2,fma")]` + a runtime dispatcher.
+# No intrinsics are written by hand and no kernel body changes, so
+# `#![forbid(unsafe_code)]` holds and the arithmetic is untouched.
+# 0.9.26 is the floor deliberately, not the latest (0.9.28): it is the
+# version already locked by the biggest consumer (zensim), so adding this
+# dependency forces no archmage bump anywhere and cannot perturb a
+# consumer's own SIMD codegen. `^0.9.26` still lets consumers resolve
+# newer 0.9.x. Both ends are gated — the `simd_parity_tests` bit-identity
+# suite is run against 0.9.26 and 0.9.28 (2026-08-04).
+archmage = { version = "0.9.26", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }

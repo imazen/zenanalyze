@@ -41,7 +41,7 @@ required-features = ["tree-ab"]
 # Runtime + bake-side composer. Path deps to the local siblings —
 # crates.io zenpredict 0.1.0 is v2-only; v3 lives here. (per
 # zensim/CLAUDE.md "zenpredict crate dependency policy".)
-zenpredict = { path = "../zenpredict", default-features = false, features = ["std"] }
+zenpredict = { path = "../zenpredict", default-features = false, features = ["std", "simd"] }
 # The canonical ZNPR v3 serializer. We build a `BakeRequestJson` and
 # run it through `bake_from_json` — the JSON pipeline mandate, no
 # hand-rolled wire format.
@@ -96,6 +96,7 @@ zenpicker = { path = "../zenpicker", default-features = false, features = ["std"
 zenpredict = { path = "../zenpredict", default-features = false, features = [
     "std",
     "advanced",
+    "simd",
 ] }
 
 [lints.rust]

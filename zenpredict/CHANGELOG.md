@@ -13,6 +13,31 @@
 
 ### Added
 
+- **`simd` feature (default-on): runtime FMA dispatch for the forward pass —
+  17-26× on `Predictor::predict`, bit-identical output.** Baseline x86-64 has
+  no FMA, so `f32::mul_add` in the SAXPY kernels compiled to an out-of-line
+  *software* `fmaf` call — measured at **41% of `bake_verdict`'s cycles**
+  (`fmaf` 24.9% + `compiler_builtins…fmaf_with_fma` 16.5%, `perf record`).
+  Worse, a call per element blocked vectorization entirely. The three
+  `saxpy_matmul_{f32,f16,i8}` kernels now carry archmage `#[autoversion(v3)]`,
+  which re-emits **the unmodified bodies** under
+  `#[target_feature(enable = "avx2,fma")]` behind a runtime dispatcher, so each
+  `mul_add` becomes one `vfmadd` and LLVM vectorizes the `[f32; 8]` chunk.
+  Measured on a 7950X (zenbench, `zenpredict-bake --bench predict`): zensim
+  SOTA-944 (944→128→1 f32) **210.9 µs → 8.27 µs (25.5×**, 573M → 14.6G FMA/s);
+  zensim V0_18 (228→384→1 i8) 156.3 → 8.84 µs (17.7×); zenwebp picker
+  (51→64→24 f16) 10.70 → 4.73 µs (2.26×). End-to-end, zensim's 12-corpus
+  `bake_verdict` CPU time fell 30.8 s → 20.8 s and its single-corpus CPU time
+  halved, **bit-identical across all 82 433 numeric fields** of the verdict.
+  Output is unchanged by construction: `f32::mul_add` and hardware FMA are both
+  IEEE-754 `fusedMultiplyAdd` (one correctly-rounded result), and the SAXPY
+  inner loop accumulates each lane into its own `dst[k]`, so widening it
+  reassociates nothing. `simd_parity_tests` gates the dispatcher against the
+  scalar variant bit-for-bit over random, tail-length, and special-value
+  (±0, ±inf, NaN, subnormal, `f32::MAX`) inputs, on archmage 0.9.26 and 0.9.28.
+  `default-features = false` drops the archmage dependency and the dispatch;
+  aarch64 already has FMA in its baseline ISA and is unaffected either way.
+  (2026-08-04)
 - **Deploy side of the K=1 picker knob-veto safety bounds (default surface).**
   A baked picker now enforces, at inference, the same feature-gated
   per-(categorical-axis-value) vetoes the `train_hybrid` bake gate evaluated —

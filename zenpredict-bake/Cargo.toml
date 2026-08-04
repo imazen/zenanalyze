@@ -52,7 +52,7 @@ required-features = ["fit-yj"]
 # The reader side: zenpredict-bake round-trips against the parser
 # in its own tests, and the JSON-bake CLI parses + verifies the bake
 # before writing.
-zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std"] }
+zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "simd"] }
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
@@ -74,7 +74,7 @@ zenbench = "0.1.8"
 # variants). Re-pull zenpredict with `advanced` enabled for tests
 # only; runtime consumers of zenpredict-bake (the JSON-bake CLI)
 # don't need advanced API.
-zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced"] }
+zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced", "simd"] }
 # Full producer->consumer loop test: build a zenanalyze_api::Request from a baked
 # Model's accessors and negotiate an Offer. Dev-only — the baker doesn't depend
 # on the contract.
