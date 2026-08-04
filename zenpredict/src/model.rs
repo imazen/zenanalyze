@@ -1098,6 +1098,36 @@ impl Model {
         }
     }
 
+    /// Number of features the **caller** must supply — i.e. the length
+    /// of the slice passed to [`crate::Predictor::predict_transformed`]
+    /// / [`crate::Predictor::predict_with_specs_transformed`].
+    ///
+    /// This is [`Self::n_inputs`] for every bake without
+    /// `feature_transforms`, and for scalar-only pipelines (arity 1:1).
+    /// It **diverges** from `n_inputs()` whenever the bake declares a
+    /// variable-arity transform:
+    ///
+    /// | bake                          | `caller_input_width` | `n_inputs` |
+    /// |-------------------------------|----------------------|------------|
+    /// | no transforms / scalar-only   | `n`                  | `n`        |
+    /// | [`FeatureTransform::Sinusoidal`] | raw width `n`     | `> n`      |
+    /// | [`FeatureTransform::Drop`] (pruned) | raw width `n`  | `< n`      |
+    ///
+    /// **Use this — not `n_inputs()` — anywhere you are deciding "how
+    /// many features do I hand this model".** `n_inputs()` is the
+    /// post-transform layer-0 / scaler width, which is an internal
+    /// detail once transforms are in play. Feeding `n_inputs()`
+    /// features to a pruned bake fails loud
+    /// ([`crate::PredictError::FeatureLenMismatch`]) rather than
+    /// silently scoring a prefix, but the right call is to size by this
+    /// accessor in the first place.
+    pub fn caller_input_width(&self) -> usize {
+        match self.feature_transforms.as_deref() {
+            Some(ts) => ts.len(),
+            None => self.n_inputs(),
+        }
+    }
+
     pub fn scratch_len(&self) -> usize {
         let max_out = self
             .layer_offsets

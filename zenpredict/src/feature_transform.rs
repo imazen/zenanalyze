@@ -221,6 +221,34 @@ pub enum FeatureTransform {
     /// smooth on `(0,∞)` so the diffmap `s_k` stays clean. Exposed to sweep the
     /// compression↔corruption↔diffmap frontier from one screen. Added 2026-07-24.
     SignedPow,
+    /// **Arity-0 sink** — input `k` is accepted from the caller and
+    /// contributes nothing to the network. The second variable-arity
+    /// variant (alongside [`Self::Sinusoidal`], which expands): where
+    /// Sinusoidal turns one input into `2·N`, `Drop` turns one input
+    /// into **zero**, so the post-transform layer-0 width is
+    /// `raw_width − n_dropped`.
+    ///
+    /// This is what makes **dead-column pruning** expressible without
+    /// changing the caller's feature-vector width: a bake whose layer-0
+    /// weight row for input `k` is exactly zero (or whose transform
+    /// forces `k` to a constant that has been folded into the layer-0
+    /// bias) declares `drop` on line `k` of
+    /// [`crate::keys::FEATURE_TRANSFORMS`], and the stored `W0` row,
+    /// `scaler_mean[k]`, `scaler_scale[k]` and `feature_bounds[k]` all
+    /// go away. Callers keep passing the same raw vector; predictions
+    /// are unchanged by construction.
+    ///
+    /// Takes **no parameters** (the bake-side validator rejects any).
+    /// Like `Sinusoidal` it cannot be applied through the scalar
+    /// [`Self::apply`] / [`Self::apply_with_params`] paths — route
+    /// through [`Self::output_arity`] + [`Self::apply_expanding`], or
+    /// (recommended) [`apply_feature_pipeline_expanding`] /
+    /// [`crate::Predictor::predict_transformed`], which auto-route.
+    ///
+    /// Use [`crate::Model::caller_input_width`] — never
+    /// [`crate::Model::n_inputs`] — to size the vector you feed a bake
+    /// that may contain drops. Added 2026-08-04.
+    Drop,
 }
 
 /// Two-pi constant for sinusoidal embedding. Mirrors `core::f32::consts::TAU`
@@ -541,6 +569,13 @@ impl FeatureTransform {
                 "FeatureTransform::Sinusoidal cannot be applied via scalar `apply` — \
                  use `apply_expanding` / `apply_feature_pipeline_expanding`"
             ),
+            // Drop is arity-0: there is no scalar value to return. Same
+            // fail-loud contract as Sinusoidal — a caller in the scalar
+            // pipeline has already mis-sized its buffers.
+            Self::Drop => panic!(
+                "FeatureTransform::Drop cannot be applied via scalar `apply` — \
+                 use `apply_expanding` / `apply_feature_pipeline_expanding`"
+            ),
         }
     }
 
@@ -700,6 +735,10 @@ impl FeatureTransform {
                 "FeatureTransform::Sinusoidal cannot be applied via scalar `apply_with_params` — \
                  use `apply_expanding` / `apply_feature_pipeline_expanding`"
             ),
+            Self::Drop => panic!(
+                "FeatureTransform::Drop cannot be applied via scalar `apply_with_params` — \
+                 use `apply_expanding` / `apply_feature_pipeline_expanding`"
+            ),
             _ => self.apply(x),
         }
     }
@@ -726,29 +765,36 @@ impl FeatureTransform {
         )
     }
 
-    /// Returns true if this transform is **scalar-to-vector** — i.e. it
-    /// expands one input feature into multiple output features. Today
-    /// only [`Self::Sinusoidal`] is an expander; every other variant
+    /// Returns true if this transform has **variable arity** — i.e. its
+    /// output width is not 1. Two variants qualify:
+    /// [`Self::Sinusoidal`] (one input → `2·N` outputs) and
+    /// [`Self::Drop`] (one input → zero outputs). Every other variant
     /// returns `false`.
     ///
     /// Use this on the bake-load path to decide whether the simple
     /// scalar [`apply_feature_transforms`] pipeline is safe, or
     /// whether the model needs the [`apply_feature_pipeline_expanding`]
     /// path (which sums per-feature arities into the layer width).
+    ///
+    /// Named `is_expander` for the Sinusoidal-only era; kept for API
+    /// stability. Read it as "needs the variable-arity pipeline".
     #[inline]
     pub fn is_expander(self) -> bool {
-        matches!(self, Self::Sinusoidal)
+        matches!(self, Self::Sinusoidal | Self::Drop)
     }
 
     /// How many output values this transform produces from one input
     /// given a `params` slice. Scalar variants always return `1`. The
     /// expander variant [`Self::Sinusoidal`] returns `2 * params.len()`
-    /// — sin and cos at each frequency. Empty params produce arity
-    /// `0` (degenerate; the bake-side validator should reject this).
+    /// — sin and cos at each frequency; empty params produce arity `0`
+    /// (degenerate — the bake-side validator rejects it; declare
+    /// [`Self::Drop`] when arity 0 is what you mean).
+    /// [`Self::Drop`] always returns `0`.
     #[inline]
     pub fn output_arity(self, params: &[f32]) -> usize {
         match self {
             Self::Sinusoidal => 2 * params.len(),
+            Self::Drop => 0,
             _ => 1,
         }
     }
@@ -766,6 +812,12 @@ impl FeatureTransform {
     #[inline]
     pub fn apply_expanding(self, x: f32, params: &[f32], dst: &mut [f32]) -> usize {
         match self {
+            // Arity 0: consume the input, write nothing. `dst` is the
+            // empty sub-slice the pipeline handed us.
+            Self::Drop => {
+                let _ = (x, params);
+                0
+            }
             Self::Sinusoidal => {
                 let n = params.len();
                 debug_assert!(
@@ -834,6 +886,7 @@ impl FeatureTransform {
             "soft_sign" => Ok(Self::SoftSign),
             "soft_clip" => Ok(Self::SoftClip),
             "signed_pow" => Ok(Self::SignedPow),
+            "drop" => Ok(Self::Drop),
             _ => Err(PredictError::UnknownFeatureTransform),
         }
     }
@@ -860,6 +913,7 @@ impl FeatureTransform {
             Self::SoftSign => "soft_sign",
             Self::SoftClip => "soft_clip",
             Self::SignedPow => "signed_pow",
+            Self::Drop => "drop",
         }
     }
 }
@@ -1602,11 +1656,13 @@ mod tests {
             // SignedPow takes optional [p]; a non-default exponent checks
             // apply_with_params (the no-param p=½ path is in all_variants()).
             FeatureTransform::SignedPow => &[0.25_f32],
-            // Sinusoidal is an expander (panics under scalar apply),
-            // so it is excluded from `all_variants()` and never reaches
-            // these scalar NaN-safety helpers. This arm only keeps the
-            // match exhaustive for the non_exhaustive enum.
+            // Sinusoidal and Drop are variable-arity (both panic under
+            // scalar apply), so they are excluded from `all_variants()`
+            // and never reach these scalar NaN-safety helpers. These
+            // arms only keep the match exhaustive for the
+            // non_exhaustive enum.
             FeatureTransform::Sinusoidal => &[1.0_f32, 2.0],
+            FeatureTransform::Drop => &[],
         }
     }
 

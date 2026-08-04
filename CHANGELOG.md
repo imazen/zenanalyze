@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FeatureTransform::Drop` (token `drop`) — the arity-0 sink that makes
+  dead-column pruning expressible.** A bake declaring `drop` on line `k` of
+  `zentrain.feature_transforms` still accepts the caller's full raw feature
+  vector, but stores no `W0` row, no `scaler_mean[k]` / `scaler_scale[k]` and no
+  `feature_bounds[k]` for input `k` — the post-transform layer-0 width is
+  `raw_width − n_dropped`. Second variable-arity variant alongside `Sinusoidal`
+  (which expands); `is_expander()` now means "needs the variable-arity
+  pipeline". No wire-format change: `Drop` is a new token in the existing
+  metadata blob, and the loader's existing `sum(arity) == n_inputs` cross-check
+  validates it. `zensim`'s `bake_dial_refit pack` emits these.
+- **`Model::caller_input_width()`** — the number of features the CALLER must
+  supply to `predict_transformed`, i.e. `feature_transforms().len()` when
+  transforms are present and `n_inputs()` otherwise. Diverges from `n_inputs()`
+  in both directions once variable-arity transforms are in play (`Sinusoidal`
+  ⇒ larger, `Drop` ⇒ smaller). **Size feature vectors by this, not by
+  `n_inputs()`.** Mis-sizing fails loud (`FeatureLenMismatch`) rather than
+  scoring a prefix.
 - **`bake_picker.py` propagates the K=1 picker knob vetoes into the bake (phase 2
   deploy wiring).** Reads `hybrid_heads_manifest.knob_vetoes` (the feature-gated
   per-(categorical-axis-value) safety rules `train_hybrid` derives), resolves each

@@ -1253,6 +1253,18 @@ fn validate_feature_transforms(
 
     // Per-variant arity + domain checks.
     for (i, (&t, p)) in transforms.iter().zip(params.iter()).enumerate() {
+        // Sinusoidal with no frequencies is arity 0 — the same width as
+        // `Drop` but with none of the intent. Reject it so `drop` is the
+        // one, self-describing way to spell "this input contributes
+        // nothing" (the variant docs have called for this since it
+        // landed; `Drop` gives it somewhere to point).
+        if matches!(t, FeatureTransform::Sinusoidal) && p.is_empty() {
+            return Err(BakeError::FeatureTransformParamInvalid {
+                feature_index: i,
+                transform: t.as_token(),
+                reason: "sinusoidal needs >= 1 frequency (use the `drop` transform for arity 0)",
+            });
+        }
         // QuantileBins has variable arity (N edges) — validate
         // separately from the fixed-arity variants.
         if matches!(t, FeatureTransform::QuantileBins) {
@@ -1406,6 +1418,10 @@ fn required_param_arity(t: zenpredict::FeatureTransform) -> Option<usize> {
         | FeatureTransform::WinsorThenSignedCbrt
         | FeatureTransform::SignedCbrtThenWinsor => Some(2),
         FeatureTransform::ClipThenLog1pThenWinsor => Some(3),
+        // Arity-0 sink: no parameters are meaningful, so a non-empty
+        // params row is a caller bug (most likely a mis-aligned
+        // transforms/params pair). Reject at bake time.
+        FeatureTransform::Drop => Some(0),
         _ => None,
     }
 }
