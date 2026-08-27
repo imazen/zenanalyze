@@ -98,16 +98,24 @@ def find_inspect_bin(explicit: Path | None) -> Path:
     return Path("__cargo_run__")
 
 
+def cargo_run_inspect_cmd(repo_root: Path, bin_path: Path) -> list[str]:
+    """`cargo run` fallback for `zenpredict-inspect` when no prebuilt binary
+    is on `$PATH` / under `target/`. The bin target lives in the
+    `zenpredict-bake` package (NOT `zenpredict`) — `test_cargo_invocations.py`
+    pins the (package, bin) pair to the workspace manifests."""
+    return [
+        "cargo", "run", "-q",
+        "--manifest-path", str(repo_root / "Cargo.toml"),
+        "--release", "-p", "zenpredict-bake", "--bin", "zenpredict-inspect",
+        "--", str(bin_path), "--weights",
+    ]
+
+
 def load_model(bin_path: Path, inspect_bin: Path | None) -> dict:
     """Run `zenpredict-inspect <bin_path> --weights` and parse the JSON."""
     inspect = find_inspect_bin(inspect_bin)
     if str(inspect) == "__cargo_run__":
-        cmd = [
-            "cargo", "run", "-q",
-            "--manifest-path", str(REPO_ROOT / "Cargo.toml"),
-            "--release", "-p", "zenpredict", "--bin", "zenpredict-inspect",
-            "--", str(bin_path), "--weights",
-        ]
+        cmd = cargo_run_inspect_cmd(REPO_ROOT, bin_path)
     else:
         cmd = [str(inspect), str(bin_path), "--weights"]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False)

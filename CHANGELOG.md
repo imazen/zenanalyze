@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Python tooling's `cargo` fallbacks named the wrong package for the bake /
+  inspect binaries** (the aside on #85). `tools/test_bake_roundtrip.py`,
+  `tools/bake_picker.py`'s `cargo run` fallback and
+  `zentrain/tools/inspect_picker.py`'s loader all passed
+  `-p zenpredict --bin zenpredict-bake` / `--bin zenpredict-inspect`; those bins
+  live in the `zenpredict-bake` package, so cargo refused with "no bin target
+  named `zenpredict-bake` in `zenpredict` package" and the end-to-end bake
+  round-trip regression never ran. The round-trip now stages its two Rust halves
+  with one build per owning package (`zenpredict-bake` bin + `zenpredict`
+  `load_baked_model` example), and `zentrain/tools/test_cargo_invocations.py`
+  (in the CI `zentrain-pytests` job) pins every such `(package, target)` pair to
+  the workspace `Cargo.toml`s.
+
 ### Added
 
 - **`FeatureTransform::Drop` (token `drop`) — the arity-0 sink that makes

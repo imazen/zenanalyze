@@ -1087,24 +1087,33 @@ def find_bake_bin(explicit: Path | None) -> Path:
     return Path("__cargo_run__")
 
 
+def cargo_run_bake_cmd(repo_root: Path, json_path: Path, out_path: Path) -> list[str]:
+    """`cargo run` fallback for `zenpredict-bake` when no prebuilt binary
+    is on `$PATH` / under `target/`. The bin target lives in the
+    `zenpredict-bake` package (NOT `zenpredict`, which only carries the
+    runtime + examples) — `zentrain/tools/test_cargo_invocations.py` pins
+    the (package, bin) pair to the workspace manifests."""
+    return [
+        "cargo",
+        "run",
+        "-q",
+        "--manifest-path",
+        str(repo_root / "Cargo.toml"),
+        "--release",
+        "-p",
+        "zenpredict-bake",
+        "--bin",
+        "zenpredict-bake",
+        "--",
+        str(json_path),
+        str(out_path),
+    ]
+
+
 def invoke_bake(bake_bin: Path, json_path: Path, out_path: Path) -> None:
     if str(bake_bin) == "__cargo_run__":
         repo_root = Path(__file__).resolve().parent.parent
-        cmd = [
-            "cargo",
-            "run",
-            "-q",
-            "--manifest-path",
-            str(repo_root / "Cargo.toml"),
-            "--release",
-            "-p",
-            "zenpredict",
-            "--bin",
-            "zenpredict-bake",
-            "--",
-            str(json_path),
-            str(out_path),
-        ]
+        cmd = cargo_run_bake_cmd(repo_root, json_path, out_path)
     else:
         cmd = [str(bake_bin), str(json_path), str(out_path)]
     res = subprocess.run(cmd, check=False)

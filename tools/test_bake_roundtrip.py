@@ -71,29 +71,32 @@ def run_one(activation: str, dtype: str) -> None:
             sys.exit(f"round-trip failed for activation={activation} dtype={dtype}")
 
 
+def cargo_build_cmds(repo_root: Path = REPO_ROOT) -> list[list[str]]:
+    """The cargo invocations that stage the round-trip's Rust halves.
+
+    Two builds, one per package: the `zenpredict-bake` binary lives in the
+    `zenpredict-bake` package while the `load_baked_model` example lives in
+    `zenpredict`. A single `-p zenpredict --bin zenpredict-bake` was the
+    pre-#85 form and fails with "no bin target named `zenpredict-bake` in
+    `zenpredict` package" — `test_cargo_invocations.py` pins each
+    (package, target) pair to the workspace manifests.
+    """
+    manifest = str(repo_root / "Cargo.toml")
+    common = ["cargo", "build", "--release", "-q", "--manifest-path", manifest]
+    return [
+        common + ["-p", "zenpredict-bake", "--bin", "zenpredict-bake"],
+        common + ["-p", "zenpredict", "--example", "load_baked_model"],
+    ]
+
+
 def main() -> int:
     if not BAKE.exists() or not ROUNDTRIP.exists():
         sys.exit(f"missing scripts under {REPO_ROOT}/tools/")
     # Build the bake binary and the example up front so the
     # round-trip script doesn't pay cargo cold-build per call.
     print("building zenpredict-bake + load_baked_model example…")
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--release",
-            "-q",
-            "--manifest-path",
-            str(REPO_ROOT / "Cargo.toml"),
-            "-p",
-            "zenpredict",
-            "--bin",
-            "zenpredict-bake",
-            "--example",
-            "load_baked_model",
-        ],
-        check=True,
-    )
+    for cmd in cargo_build_cmds():
+        subprocess.run(cmd, check=True)
     for activation in ("relu", "leakyrelu", "identity"):
         for dtype in ("f32", "f16", "i8"):
             run_one(activation, dtype)
