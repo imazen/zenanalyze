@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docs/dispatch-axes.md` — what `analyze_features` runs for a given
+  request** (#50 Sub-C / Sub-G documentation deliverable). Codifies the 4
+  const-bool axes (`PAL`/`T2`/`T3`/`ALPHA` → 16 arms), every runtime sub-gate
+  of `analyze_specialized_raw` with the `FeatureSet` constant that flips it,
+  the in-arm pass order, the measured 4 MP per-tier costs, and what is
+  deliberately not implemented (implication short-circuits, an analyzer-owned
+  cross-call cache). `zentrain/FOR_NEW_CODECS.md` gains Step 7.5 — build the
+  query from the bake's `feat_cols` via `AnalysisFeature::from_name`, don't
+  analyze when the picker isn't consulted, reuse `AnalysisResults` across
+  verify/rescue re-encodes (Sub-B / Sub-G / Sub-E, all caller-side).
+  `tests/docs_dispatch_axes.rs` parses the specialization site's signature and
+  fails when a knob is added without being documented (or dropped from the
+  doc).
 - **`tools/feature_inventory.py` + `docs/feature-consumption.md` — the
   downstream feature-consumption inventory, generated from the bake artifacts**
   (#41). Reads `feat_cols` from `.manifest.json`s, `zentrain.feature_columns` /

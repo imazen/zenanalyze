@@ -370,6 +370,14 @@ pub fn encode(
 
 The features vector packs zenanalyze outputs in the order declared in the bake manifest. Keep that order in one place — a `const FEATURES_ORDER: &[AnalysisFeature]` shared between `build_feature_vector` and the `MY_SCHEMA_HASH` const.
 
+### Step 7.5 — request only what the bake consumes
+
+`analyze_features` runs exactly the passes the requested `FeatureSet` needs (the gates are documented in [`docs/dispatch-axes.md`](../docs/dispatch-axes.md)), so the request set *is* the analyzer's cost model. Three rules, all codec-side (zenanalyze#50):
+
+1. **Build `PICKER_QUERY` from the bake's `feat_cols`, not from `FeatureSet::SUPPORTED`.** `AnalysisFeature::from_name("feat_variance")` maps a manifest column to the variant, so the request can be derived from the same `FEATURES_ORDER` the schema hash uses — nothing extra gets computed. Requesting `SUPPORTED` for a 50-column bake pays for the palette scan, the DCT walk, alpha and (with `hdr`) depth whether or not the model reads them; at 4 MP those are the 2–6 ms tiers in the table in `dispatch-axes.md`.
+2. **Don't call the analyzer when the picker isn't consulted.** If the request resolves to an explicit config (a fixed quality/effort the user pinned, a lossless mode with no cells to choose between), skip `analyze_features` entirely — there is nothing to gate on. Do this at the call site; the analyzer has no way to know.
+3. **Reuse the `AnalysisResults` across a verify / rescue re-encode.** The features are a pure function of `(pixels, query)`. A codec that re-encodes the same image at a different target (K-verify, safety-profile rescue, a second zq) must pass the *same* `AnalysisResults` (or the derived feature vector) into the second pick instead of analyzing again. Hold it in the encode context for the duration of that request; zenanalyze deliberately does not own a cross-call cache (it would hash every one-shot call's pixels to serve the rare second call).
+
 ---
 
 ## Step 8 — tune capacity + prune the schema
