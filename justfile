@@ -27,6 +27,29 @@ zentrain-pytests:
       --deselect test_predict_lib.py::test_student_permutation_relu \
       --deselect test_predict_lib.py::test_student_permutation_leakyrelu
 
+# Regenerate docs/feature-consumption.md (zenanalyze#41): which analyzer
+# features each downstream bake consumes, read from the bake artifacts. The
+# universe is this build's FeatureSet::SUPPORTED (experimental default-on,
+# plus hdr). Sibling codec checkouts default to the ~/work/zen layout;
+# override with `just feature-inventory zen=/path/to/zen`.
+feature-inventory zen="..":
+    mkdir -p target/inventory
+    cargo build --release -q -p zenpredict-bake --bin zenpredict-inspect
+    cargo run --release -q --example list_features --features hdr > target/inventory/universe.txt
+    python3 tools/feature_inventory.py \
+      --universe target/inventory/universe.txt \
+      --inspect-bin target/release/zenpredict-inspect \
+      --label zenjpeg-a-v3-shipped={{zen}}/zenjpeg/zenjpeg/src/encode/picker_data/feature_order.txt \
+      --label zenavif-rav1e-v0.1.1-shipped={{zen}}/zenavif/src/models/rav1e_picker_v0_1_1.bin \
+      --label zenjpeg-v0.5-modesfull={{zen}}/zenjpeg/benchmarks/zenjpeg_picker_v0.5_modesfull-tiled-evenodd_2026-06-28.manifest.json \
+      --label zenjpeg-lossy-ssim2-v0.1={{zen}}/zenjpeg/benchmarks/zenjpeg_lossy_ssim2_picker_v0.1_K3_cleansplit_2026-06-29.manifest.json \
+      --label zenavif-lossy-zensim-v0.1={{zen}}/zenavif/benchmarks/pickers/zenavif_lossy_mlp_zensim_v0.1_2026-06-28.manifest.json \
+      --label zenjxl-lossy-ssim2-v0.1={{zen}}/zenjxl/benchmarks/zenjxl_lossy_ssim2_picker_v0.1_cleansplit_2026-06-29.manifest.json \
+      --label zenjpeg-v2.1-full=zentrain/testdata/zenjpeg_picker_v2.1_full.manifest.json \
+      --label zenjxl-v0.7b=benchmarks/zenjxl_picker_v0.7b_2026-05-06.manifest.json \
+      --label meta-v0.5-5codec=benchmarks/zenpicker_meta_v0.5_5codec_2026-05-06.manifest.json \
+      --out docs/feature-consumption.md
+
 # The torch-dependent zentrain tests (train_hybrid's PyTorch leakyrelu
 # student). Kept out of the CI job on purpose — torch is a heavy install —
 # so this recipe is the only place they run; a missing torch fails loudly.

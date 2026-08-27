@@ -24,6 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tools/feature_inventory.py` + `docs/feature-consumption.md` — the
+  downstream feature-consumption inventory, generated from the bake artifacts**
+  (#41). Reads `feat_cols` from `.manifest.json`s, `zentrain.feature_columns` /
+  `zenpicker_train.image_feature_names` from `.bin`s (via `zenpredict-inspect`)
+  or their inspect dumps, and `idx<TAB>name` feature-order files; drops the
+  engineered axes; reports the feature × bake matrix, the ≥2-bake intersection
+  (#41's hot-path candidates), per-bake exclusives and — against
+  `examples/list_features` (new: prints this build's `FeatureSet::SUPPORTED` as
+  `feat_*` names) — the features no bake consumes plus the bake columns this
+  build no longer produces. `just feature-inventory` regenerates the doc over
+  the in-repo manifests and the sibling codec checkouts' shipped bakes. First
+  run: 121 features across 9 bakes, 104 shared by ≥2, 9 supported-but-unused
+  (the XYB color-loss pair + `chroma_subsample_dct_loss` + the 6 `highlight_*`
+  HDR features), and the shipped zenavif `rav1e_picker_v0_1_1.bin` (extracted
+  with zenanalyze 0.2.0) consumes 6 columns this build does not produce.
+  Tests: `zentrain/tools/test_feature_inventory.py` (CI light job).
 - **`train_hybrid.py` records which student trainer produced a bake, and the
   torch student can be L2-regularized** (#68). `--activation leakyrelu` (torch:
   Kaiming init, no L2) and `--activation relu` (sklearn `MLPRegressor`: Glorot
