@@ -71,7 +71,8 @@ fn bench_tiers(suite: &mut Suite) {
     // amount of work — which would silently flatten the size axis.
     for &(label, w, h) in &[("512x512", 512usize, 512usize), ("2048x2048", 2048, 2048)] {
         let rgb: &'static [u8] = Box::leak(make_rgb(w, h).into_boxed_slice());
-        let query: &'static AnalysisQuery = Box::leak(Box::new(AnalysisQuery::new(FeatureSet::SUPPORTED)));
+        let query: &'static AnalysisQuery =
+            Box::leak(Box::new(AnalysisQuery::new(FeatureSet::SUPPORTED)));
         suite.compare(format!("analyze/{label}"), |g| {
             g.throughput(Throughput::Bytes((w * h * 3) as u64));
             for (arm, simd) in [(TIER_NAME, true), ("scalar", false)] {
