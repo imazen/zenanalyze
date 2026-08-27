@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`train_hybrid.py` records which student trainer produced a bake, and the
+  torch student can be L2-regularized** (#68). `--activation leakyrelu` (torch:
+  Kaiming init, no L2) and `--activation relu` (sklearn `MLPRegressor`: Glorot
+  init, always `alpha=1e-4`) are two trainers, and #68 measured a 12.4pp
+  argmin_acc gap between them on identical zenwebp v0.2 data. Every bake now
+  carries `safety_report.diagnostics.student_backend` (also top-level
+  `student_backend`) = `{backend, activation, init, l2:{kind, value}}`; new
+  `--weight-decay` (default `0.0`, i.e. unchanged bakes) threads Adam
+  `weight_decay` into the torch student, with `1e-4` as sklearn's nearest
+  analogue for the #68 hypothesis-2 experiment. The `--activation` help and
+  `zentrain/tools/README.md` now state the measured tradeoff instead of framing
+  the flag as a speed knob. The re-measurement on current data with per-head
+  normalization (#67) active is still open — the gap is an n=1 finding.
 - **`FeatureTransform::Drop` (token `drop`) — the arity-0 sink that makes
   dead-column pruning expressible.** A bake declaring `drop` on line `k` of
   `zentrain.feature_transforms` still accepts the caller's full raw feature

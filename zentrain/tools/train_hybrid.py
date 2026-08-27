@@ -85,11 +85,19 @@ def _train_torch_leakyrelu_student(
     hard_example_alpha: float = 1.0,
     hard_example_ema_window: int = 5,
     hard_example_clip: float = 10.0,
+    weight_decay: float = 0.0,
 ):
     """Drop-in for `MLPRegressor.fit` returning an object that exposes
     `.coefs_`, `.intercepts_`, `.predict`, `.loss_`, `.n_iter_`. The
-    network shape, init, loss (MSE), optimizer (Adam), and early-stopping
+    network shape, loss (MSE), optimizer (Adam), and early-stopping
     schedule mirror sklearn's defaults so the comparison stays apples-to-apples.
+
+    What does NOT mirror sklearn (zenanalyze#68): init is PyTorch's
+    Kaiming-uniform (sklearn: Glorot-uniform), and `weight_decay` defaults
+    to 0.0 whereas `MLPRegressor` always applies `alpha=1e-4` L2. Pass
+    `weight_decay` (coupled L2 on Adam's gradient — sklearn's nearest
+    analogue, not a numerically identical penalty) to regularize the torch
+    student; the value is exposed as `.weight_decay_` for the bake record.
 
     Hard-example weighting (when `hard_example_mode != "none"`):
       After each epoch's parameter updates, compute the per-row squared
@@ -138,7 +146,7 @@ def _train_torch_leakyrelu_student(
     layers.append(nn.Linear(prev, n_out))
     net = nn.Sequential(*layers)
 
-    opt = torch.optim.Adam(net.parameters(), lr=lr)
+    opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = nn.MSELoss()
     best_val = float("inf")
     best_state: dict | None = None
@@ -228,6 +236,8 @@ def _train_torch_leakyrelu_student(
             self.intercepts_ = intercepts_
             self.loss_ = best_val
             self.n_iter_ = epoch + 1
+            self.backend_ = "torch"
+            self.weight_decay_ = float(weight_decay)
             self._net = net
 
         def predict(self, X: np.ndarray) -> np.ndarray:
@@ -237,6 +247,39 @@ def _train_torch_leakyrelu_student(
                 return self._net(t).cpu().numpy().astype(np.float32)
 
     return _TorchStudent()
+
+
+# sklearn `MLPRegressor`'s default L2 strength — recorded (never changed) so a
+# bake says which regularization its student actually trained under.
+SKLEARN_MLP_DEFAULT_ALPHA = 1e-4
+
+
+def student_backend_record(activation: str, weight_decay: float) -> dict:
+    """The per-bake student-trainer marker (zenanalyze#68).
+
+    `--activation leakyrelu` and `--activation relu` are two different
+    trainers, not one trainer with a different activation: the torch student
+    (leakyrelu) uses Kaiming-uniform init and — unless `--weight-decay` is
+    passed — NO L2 penalty, while sklearn's `MLPRegressor` (relu) uses
+    Glorot-uniform init and always applies `alpha=1e-4` L2. #68 measured a
+    12.4pp argmin_acc gap between the two on identical zenwebp v0.2 data
+    (n=1, pre-#67 per-head normalization). This record lands in
+    `safety_report.diagnostics.student_backend` and the model JSON so codec
+    teams can tell which trainer produced a bake when behaviour diverges.
+    """
+    if activation == "leakyrelu":
+        return {
+            "backend": "torch",
+            "activation": "leakyrelu",
+            "init": "kaiming_uniform",
+            "l2": {"kind": "adam_weight_decay", "value": float(weight_decay)},
+        }
+    return {
+        "backend": "sklearn",
+        "activation": activation,
+        "init": "glorot_uniform",
+        "l2": {"kind": "mlpregressor_alpha", "value": float(SKLEARN_MLP_DEFAULT_ALPHA)},
+    }
 
 
 def _predict_via_coefs(student, X: np.ndarray, activation: str) -> np.ndarray:
@@ -3125,17 +3168,41 @@ def main():
         "--activation",
         choices=["relu", "leakyrelu"],
         default="leakyrelu",
-        help="Hidden-layer activation. leakyrelu (default) routes to "
-        "a PyTorch student with negative_slope=0.01 (same MLP shape, "
-        "same Adam/lr/batch/early-stopping schedule as the legacy "
-        "sklearn path) and finishes in seconds-to-minutes. relu falls "
-        "through to sklearn `MLPRegressor.fit`, which is "
-        "single-threaded for our matmul size and TYPICALLY 10–20× "
-        "SLOWER. Keep `relu` only when you need bit-identical "
-        "reproduction of a pre-leakyrelu sklearn-trained baseline. "
-        "Both produce a `student.coefs_/intercepts_` surface so "
-        "safety_check, diagnostics, and JSON serialization work the "
-        "same way.",
+        help="Hidden-layer activation — and, in practice, WHICH TRAINER. "
+        "leakyrelu (default) routes to a PyTorch student with "
+        "negative_slope=0.01 (same MLP shape, same Adam/lr/batch/"
+        "early-stopping schedule as the legacy sklearn path) and "
+        "finishes in seconds-to-minutes. relu falls through to sklearn "
+        "`MLPRegressor.fit`, single-threaded for our matmul size and "
+        "TYPICALLY 10–20× SLOWER. The two are NOT a pure speed knob "
+        "(zenanalyze#68): the torch student uses Kaiming init and no L2 "
+        "penalty unless --weight-decay is set, sklearn uses Glorot init "
+        "and always applies alpha=1e-4 L2; on zenwebp v0.2 (n=1, "
+        "pre-#67 per-head normalization) sklearn relu scored "
+        "argmin_acc 43.0%% vs leakyrelu 30.6%% at identical data/seed/"
+        "shape. Until that gap is re-measured and closed, prefer "
+        "leakyrelu for capacity sweeps and ablation passes and confirm "
+        "a production bake against relu (or leakyrelu --weight-decay "
+        "1e-4) before shipping; compare "
+        "`safety_report.diagnostics.argmin.val.argmin_acc` between the "
+        "two — the trainer used is recorded in "
+        "`safety_report.diagnostics.student_backend`. Both produce a "
+        "`student.coefs_/intercepts_` surface so safety_check, "
+        "diagnostics, and JSON serialization work the same way.",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="Adam weight_decay (coupled L2 on the gradient) for the "
+        "PyTorch leakyrelu student. Default 0.0 = the historical "
+        "unregularized torch student. sklearn's `MLPRegressor` always "
+        "applies alpha=1e-4, so 1e-4 is the nearest analogue when "
+        "chasing the #68 relu-vs-leakyrelu argmin_acc gap (not a "
+        "numerically identical penalty — sklearn divides its term by "
+        "the sample size). Ignored under --activation relu; the value "
+        "actually used is recorded in "
+        "`safety_report.diagnostics.student_backend.l2`.",
     )
     parser.add_argument(
         "--hard-example-weighting",
@@ -3650,8 +3717,17 @@ def main():
             "  WARNING: --hard-example-weighting is leakyrelu-only; "
             f"ignored under --activation={args.activation}\n"
         )
+    if args.weight_decay != 0.0 and args.activation != "leakyrelu":
+        sys.stderr.write(
+            "  WARNING: --weight-decay is leakyrelu-only; sklearn relu always "
+            f"applies alpha={SKLEARN_MLP_DEFAULT_ALPHA}; ignored under "
+            f"--activation={args.activation}\n"
+        )
+    student_backend = student_backend_record(args.activation, args.weight_decay)
     if args.activation == "leakyrelu":
-        sys.stderr.write("  using PyTorch backend (LeakyReLU(0.01))\n")
+        sys.stderr.write(
+            f"  using PyTorch backend (LeakyReLU(0.01), weight_decay={args.weight_decay})\n"
+        )
         if args.hard_example_weighting != "none":
             sys.stderr.write(
                 f"  hard-example weighting: mode={args.hard_example_weighting} "
@@ -3673,6 +3749,7 @@ def main():
             hard_example_alpha=args.hard_example_alpha,
             hard_example_ema_window=args.hard_example_ema_window,
             hard_example_clip=args.hard_example_clip,
+            weight_decay=args.weight_decay,
         )
     else:
         student = MLPRegressor(
@@ -3987,6 +4064,10 @@ def main():
         "time_head_r2": time_head_r2,
         "metric_head_r2": metric_head_r2,
         "budget_infeasible_fraction": budget_infeasible_fraction,
+        # Which student trainer produced this bake (torch leakyrelu vs sklearn
+        # relu) and the L2 it trained under — the two are not interchangeable
+        # (zenanalyze#68). See `student_backend_record`.
+        "student_backend": student_backend,
         # Sweep ceilings: did the codec's harness emit
         # `effective_max_zensim` in the Pareto TSV? Drives the
         # UNCAPPED_ZQ_GRID safety gate. See imazen/zenanalyze#51.
@@ -4255,6 +4336,9 @@ def main():
         "reach_safety": reach_safety,
         "teacher_metrics": {"argmin": teacher_argmin, "scalars": teacher_scalars},
         "student_metrics": {"argmin": student_argmin, "scalars": student_scalars},
+        # Duplicated from safety_report.diagnostics so a codec reading only the
+        # top level of the bake JSON still sees which trainer produced it.
+        "student_backend": student_backend,
         "safety_report": safety_report,
         "output_bounds": output_bounds_computed,
     }
