@@ -41,6 +41,9 @@ use crate::simd_math::{fixed_reduce8, rsqrt_stable, rsqrt_stable_scalar};
 //   keeps zenanalyze unsafe-free (`unsafe_code = "forbid"`); the
 //   raw intrinsics live behind garb's safe wrappers.
 mod deinterleave_dispatch {
+    // Only the x86_64 impls below use `#[arcane]`; on other arches the
+    // import is dead and trips `unused_imports` under `-D warnings`.
+    #[cfg(target_arch = "x86_64")]
     use archmage::arcane;
 
     /// Sealed trait — implemented for every token magetypes might hand

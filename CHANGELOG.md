@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI green again on rustc/clippy 1.98.0.** The new
+  `clippy::chunks_exact_to_as_chunks` lint fired at ~65 pixel-loop sites; it
+  is now `allow`ed crate-wide in `Cargo.toml` (as in zenwebp #76 / zenjxl-decoder)
+  because migrating to `as_chunks` is a real bounds-check-elimination candidate
+  that must land as a measured change. Also: `clone()` on the `Copy` `FeatureSet`
+  in `examples/print_features.rs`, an aarch64-only `unused_imports` in
+  `src/tier1.rs`, and two rustfmt drifts (`benches/tier_isolation.rs`,
+  `examples/print_features.rs`). CI run 33056042865 on a6802a33 was the red one.
 - **Python tooling's `cargo` fallbacks named the wrong package for the bake /
   inspect binaries** (the aside on #85). `tools/test_bake_roundtrip.py`,
   `tools/bake_picker.py`'s `cargo run` fallback and

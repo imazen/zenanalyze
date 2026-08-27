@@ -1442,13 +1442,13 @@ fn read_permutation_indices(
             }
         }
         2 => {
-            for chunk in raw.chunks_exact(2) {
-                out.push(u16::from_le_bytes([chunk[0], chunk[1]]) as u32);
+            for chunk in raw.as_chunks::<2>().0 {
+                out.push(u16::from_le_bytes(*chunk) as u32);
             }
         }
         4 => {
-            for chunk in raw.chunks_exact(4) {
-                out.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            for chunk in raw.as_chunks::<4>().0 {
+                out.push(u32::from_le_bytes(*chunk));
             }
         }
         _ => unreachable!(),

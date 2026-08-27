@@ -186,6 +186,13 @@ all = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+# New in clippy 1.98 (2026-08); fires at ~65 `chunks_exact(3|24|…)` pixel loops
+# across tier1/tier3/palette/row_stream/tier_depth + tests. `as_chunks` hands
+# LLVM fixed-size arrays (bounds-check elimination), so the migration is a REAL
+# optimization candidate that must land as its own measured change (cargo asm +
+# zenbench + the golden tripwire), not as a lint-silencing sweep. Same
+# resolution as zenwebp (#76) and zenjxl-decoder.
+chunks_exact_to_as_chunks = "allow"
 
 [profile.release]
 lto = "thin"

@@ -103,6 +103,10 @@
 
 ### Fixed
 
+- clippy 1.98 `chunks_exact_to_as_chunks` at the `advanced`-gated u16/u32
+  little-endian index decode in `model.rs`: now `as_chunks::<N>().0` with
+  `from_le_bytes(*chunk)`. Identical iteration (lengths are pre-validated as
+  exact multiples); this was the `zenpredict (std,advanced)` CI failure.
 - **README: the flagship codec-picker example is now compilable and the
   predict input/output contract is stated.** An insulated external-developer
   test (given only the README) found the picker example uncompilable because

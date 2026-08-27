@@ -33,7 +33,7 @@ fn main() {
     for path in args {
         let img = image::open(&path).expect("decode").to_rgb8();
         let (w, h) = (img.width(), img.height());
-        let a = zenanalyze::try_analyze_features_rgb8(img.as_raw(), w, h, &AnalysisQuery::new(set.clone()))
+        let a = zenanalyze::try_analyze_features_rgb8(img.as_raw(), w, h, &AnalysisQuery::new(set))
             .expect("analyze");
         let vals: Vec<String> = feats
             .iter()

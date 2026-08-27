@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- clippy 1.98 `chunks_exact_to_as_chunks` in `json.rs::decode_hex`: now
+  destructures `as_chunks::<2>().0` pairs. Same output; was the
+  `zenpredict-bake` CI failure under `-D warnings`.
 - The crate is now CI-gated (`.github/workflows/ci.yml` job `zenpredict-bake`):
   fmt + clippy `--all-features --all-targets -D warnings` + test (default +
   `fit-yj`). Previously CI never built or tested it, so the items below had
