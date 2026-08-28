@@ -3547,9 +3547,14 @@ def main():
         )
     _spl = [_origin_split_of(m[0]) for m in meta]
     n_unsplit = sum(1 for s in _spl if s is None)
-    tr = np.array([i for i, s in enumerate(_spl) if s == "train"])
-    va = np.array([i for i, s in enumerate(_spl) if s == "val"])
-    te = np.array([i for i, s in enumerate(_spl) if s == "test"])
+    # dtype pinned: an EMPTY bucket (e.g. a corpus with no 7/9-digit origins, or
+    # train+validate canonical splits fed without test) would otherwise be a
+    # float64 array and `Xe[te]` raises "arrays used as indices must be of
+    # integer (or boolean) type" — seen 2026-08-28 on the canonical zenwebp
+    # train+validate pair.
+    tr = np.array([i for i, s in enumerate(_spl) if s == "train"], dtype=np.int64)
+    va = np.array([i for i, s in enumerate(_spl) if s == "val"], dtype=np.int64)
+    te = np.array([i for i, s in enumerate(_spl) if s == "test"], dtype=np.int64)
     n_origins = len({_origin_stem(m[0]) for m in meta})
     n_rend = len({m[0] for m in meta})
     sys.stderr.write(

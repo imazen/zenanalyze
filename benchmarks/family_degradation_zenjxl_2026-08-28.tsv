@@ -1,0 +1,268 @@
+# family degradation + cost table — codec=zenjxl metric=score_zensim knob=e invert=False reference=e9
+# git=e403063 date=2026-08-28 rows=435330 images=1382 efforts=['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8', 'e9'] (ascending effort) unmatched_cells=0
+# inputs=/Users/lilith/tmp/canonical/zenjxl_lossy/validate.parquet
+# degradation: delta = ln(min bytes reaching target with effort<=cap) - ln(min bytes reaching target with effort<=ref); over images; reach = images with any row at cap reaching the target; cap = knob number (for an inverted knob a cap allows that number and every FASTER one)
+# cost: encode_ms per megapixel per (effort, size_class); fit ln(ms) = a + b*ln(pixels) per effort
+section	codec	size_class	target	cap_effort	n	reach_frac	delta_mean_ln	delta_p50_ln	delta_p90_ln	delta_mean_pct
+degradation	zenjxl	tiny	40	1	128	1.0000	1.49538	1.46501	1.86511	346.103
+degradation	zenjxl	tiny	40	2	128	1.0000	1.49538	1.46501	1.86511	346.103
+degradation	zenjxl	tiny	40	3	128	1.0000	0.22010	0.24755	0.37019	24.621
+degradation	zenjxl	tiny	40	4	128	1.0000	0.21938	0.24755	0.37019	24.531
+degradation	zenjxl	tiny	40	5	128	1.0000	0.14718	0.16544	0.24000	15.856
+degradation	zenjxl	tiny	40	6	128	1.0000	0.13433	0.15418	0.22007	14.378
+degradation	zenjxl	tiny	40	7	128	1.0000	0.06513	0.06828	0.13660	6.730
+degradation	zenjxl	tiny	40	8	128	1.0000	0.03559	0.03905	0.07462	3.623
+degradation	zenjxl	tiny	40	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	50	1	128	1.0000	1.41510	1.40405	1.67953	311.689
+degradation	zenjxl	tiny	50	2	128	1.0000	1.41510	1.40405	1.67953	311.689
+degradation	zenjxl	tiny	50	3	128	1.0000	0.16747	0.16633	0.31716	18.231
+degradation	zenjxl	tiny	50	4	128	1.0000	0.16676	0.16443	0.31613	18.147
+degradation	zenjxl	tiny	50	5	128	1.0000	0.11292	0.11080	0.21827	11.954
+degradation	zenjxl	tiny	50	6	128	1.0000	0.10477	0.09797	0.21432	11.046
+degradation	zenjxl	tiny	50	7	128	1.0000	0.04289	0.00000	0.12920	4.382
+degradation	zenjxl	tiny	50	8	128	1.0000	0.02230	0.00000	0.06615	2.255
+degradation	zenjxl	tiny	50	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	60	1	128	1.0000	1.28581	1.24704	1.61407	261.759
+degradation	zenjxl	tiny	60	2	128	1.0000	1.28581	1.24704	1.61407	261.759
+degradation	zenjxl	tiny	60	3	128	1.0000	0.09800	0.06101	0.26324	10.296
+degradation	zenjxl	tiny	60	4	128	1.0000	0.09709	0.06101	0.26324	10.196
+degradation	zenjxl	tiny	60	5	128	1.0000	0.07615	0.05001	0.20908	7.912
+degradation	zenjxl	tiny	60	6	128	1.0000	0.07177	0.03713	0.20267	7.441
+degradation	zenjxl	tiny	60	7	128	1.0000	0.02080	0.00000	0.09695	2.101
+degradation	zenjxl	tiny	60	8	128	1.0000	0.01061	0.00000	0.05087	1.067
+degradation	zenjxl	tiny	60	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	70	1	128	1.0000	1.11260	1.05845	1.48254	204.227
+degradation	zenjxl	tiny	70	2	128	1.0000	1.11260	1.05845	1.48254	204.227
+degradation	zenjxl	tiny	70	3	128	1.0000	0.06176	0.03423	0.15720	6.371
+degradation	zenjxl	tiny	70	4	128	1.0000	0.06099	0.02634	0.15720	6.289
+degradation	zenjxl	tiny	70	5	128	1.0000	0.04605	0.01815	0.12444	4.713
+degradation	zenjxl	tiny	70	6	128	1.0000	0.04359	0.01689	0.10962	4.456
+degradation	zenjxl	tiny	70	7	128	1.0000	0.00686	0.00000	0.01795	0.688
+degradation	zenjxl	tiny	70	8	128	1.0000	0.00528	0.00000	0.01513	0.529
+degradation	zenjxl	tiny	70	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	75	1	128	1.0000	1.01207	0.97319	1.38774	175.130
+degradation	zenjxl	tiny	75	2	128	1.0000	1.01207	0.97319	1.38774	175.130
+degradation	zenjxl	tiny	75	3	128	1.0000	0.06777	0.03771	0.15917	7.012
+degradation	zenjxl	tiny	75	4	128	1.0000	0.06731	0.03691	0.15917	6.962
+degradation	zenjxl	tiny	75	5	128	1.0000	0.04771	0.02452	0.12406	4.886
+degradation	zenjxl	tiny	75	6	128	1.0000	0.04222	0.02399	0.11014	4.312
+degradation	zenjxl	tiny	75	7	128	1.0000	0.00565	0.00000	0.01993	0.566
+degradation	zenjxl	tiny	75	8	128	1.0000	0.00445	0.00000	0.01416	0.446
+degradation	zenjxl	tiny	75	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	80	1	128	0.9922	0.88722	0.83704	1.23429	142.837
+degradation	zenjxl	tiny	80	2	128	0.9922	0.88722	0.83704	1.23429	142.837
+degradation	zenjxl	tiny	80	3	128	0.9922	0.06692	0.04300	0.17679	6.921
+degradation	zenjxl	tiny	80	4	128	0.9922	0.06618	0.04300	0.16637	6.841
+degradation	zenjxl	tiny	80	5	128	1.0000	0.04815	0.02517	0.12473	4.933
+degradation	zenjxl	tiny	80	6	128	1.0000	0.04518	0.02379	0.11015	4.621
+degradation	zenjxl	tiny	80	7	128	1.0000	0.00707	0.00000	0.02813	0.710
+degradation	zenjxl	tiny	80	8	128	1.0000	0.00458	0.00000	0.01771	0.459
+degradation	zenjxl	tiny	80	9	128	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	85	1	124	0.9677	0.79137	0.73990	1.06760	120.642
+degradation	zenjxl	tiny	85	2	124	0.9677	0.79137	0.73990	1.06760	120.642
+degradation	zenjxl	tiny	85	3	124	0.9677	0.13762	0.13290	0.25476	14.754
+degradation	zenjxl	tiny	85	4	124	0.9677	0.13698	0.13290	0.25338	14.681
+degradation	zenjxl	tiny	85	5	124	0.9919	0.08479	0.07107	0.19368	8.849
+degradation	zenjxl	tiny	85	6	124	0.9919	0.07226	0.04888	0.17852	7.493
+degradation	zenjxl	tiny	85	7	124	1.0000	0.00393	0.00000	0.00000	0.393
+degradation	zenjxl	tiny	85	8	124	1.0000	0.00144	0.00000	0.00000	0.144
+degradation	zenjxl	tiny	85	9	124	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	tiny	90	1	49	0.4490	0.78042	0.74590	1.10481	118.239
+degradation	zenjxl	tiny	90	2	49	0.4490	0.78042	0.74590	1.10481	118.239
+degradation	zenjxl	tiny	90	3	49	0.4490	0.11293	0.11692	0.23212	11.955
+degradation	zenjxl	tiny	90	4	49	0.4490	0.11261	0.11692	0.23212	11.919
+degradation	zenjxl	tiny	90	5	49	0.6122	0.06796	0.03887	0.16011	7.033
+degradation	zenjxl	tiny	90	6	49	0.6327	0.04358	0.02806	0.11127	4.454
+degradation	zenjxl	tiny	90	7	49	1.0000	0.00342	0.00000	0.00000	0.342
+degradation	zenjxl	tiny	90	8	49	1.0000	0.00194	0.00000	0.00000	0.194
+degradation	zenjxl	tiny	90	9	49	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	40	1	512	1.0000	1.05358	1.02768	1.40018	186.790
+degradation	zenjxl	small	40	2	512	1.0000	1.05358	1.02768	1.40018	186.790
+degradation	zenjxl	small	40	3	512	1.0000	0.26394	0.29491	0.43738	30.206
+degradation	zenjxl	small	40	4	512	1.0000	0.26056	0.28972	0.43348	29.766
+degradation	zenjxl	small	40	5	512	1.0000	0.17281	0.19049	0.27139	18.864
+degradation	zenjxl	small	40	6	512	1.0000	0.15435	0.17472	0.26419	16.690
+degradation	zenjxl	small	40	7	512	1.0000	0.07259	0.07334	0.16383	7.529
+degradation	zenjxl	small	40	8	512	1.0000	0.01642	0.01281	0.04035	1.655
+degradation	zenjxl	small	40	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	50	1	512	1.0000	0.96349	0.93470	1.35622	162.083
+degradation	zenjxl	small	50	2	512	1.0000	0.96349	0.93470	1.35622	162.083
+degradation	zenjxl	small	50	3	512	1.0000	0.18628	0.17950	0.37701	20.477
+degradation	zenjxl	small	50	4	512	1.0000	0.18302	0.17773	0.37262	20.084
+degradation	zenjxl	small	50	5	512	1.0000	0.12830	0.11980	0.25440	13.689
+degradation	zenjxl	small	50	6	512	1.0000	0.11647	0.09372	0.25311	12.353
+degradation	zenjxl	small	50	7	512	1.0000	0.04675	0.00000	0.14796	4.786
+degradation	zenjxl	small	50	8	512	1.0000	0.01193	0.00000	0.03639	1.200
+degradation	zenjxl	small	50	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	60	1	512	1.0000	0.83053	0.79365	1.26532	129.453
+degradation	zenjxl	small	60	2	512	1.0000	0.83053	0.79365	1.26532	129.453
+degradation	zenjxl	small	60	3	512	1.0000	0.09917	0.06770	0.25324	10.425
+degradation	zenjxl	small	60	4	512	1.0000	0.09601	0.06599	0.25115	10.077
+degradation	zenjxl	small	60	5	512	1.0000	0.07206	0.05076	0.19600	7.472
+degradation	zenjxl	small	60	6	512	1.0000	0.06464	0.04055	0.18741	6.677
+degradation	zenjxl	small	60	7	512	1.0000	0.01976	0.00000	0.07920	1.996
+degradation	zenjxl	small	60	8	512	1.0000	0.00661	0.00000	0.02655	0.663
+degradation	zenjxl	small	60	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	70	1	512	1.0000	0.68548	0.61519	1.12540	98.472
+degradation	zenjxl	small	70	2	512	1.0000	0.68548	0.61519	1.12540	98.472
+degradation	zenjxl	small	70	3	512	1.0000	0.05195	0.02401	0.14203	5.332
+degradation	zenjxl	small	70	4	512	1.0000	0.04905	0.02034	0.13922	5.027
+degradation	zenjxl	small	70	5	512	1.0000	0.04052	0.01487	0.10385	4.135
+degradation	zenjxl	small	70	6	512	1.0000	0.03840	0.01412	0.09972	3.915
+degradation	zenjxl	small	70	7	512	1.0000	0.00862	0.00000	0.02735	0.866
+degradation	zenjxl	small	70	8	512	1.0000	0.00321	0.00000	0.01436	0.321
+degradation	zenjxl	small	70	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	75	1	512	1.0000	0.60547	0.53226	1.02769	83.212
+degradation	zenjxl	small	75	2	512	1.0000	0.60547	0.53226	1.02769	83.212
+degradation	zenjxl	small	75	3	512	1.0000	0.04681	0.01143	0.13785	4.792
+degradation	zenjxl	small	75	4	512	1.0000	0.04382	0.00716	0.13285	4.479
+degradation	zenjxl	small	75	5	512	1.0000	0.03233	0.00286	0.10051	3.286
+degradation	zenjxl	small	75	6	512	1.0000	0.03074	0.00284	0.09554	3.122
+degradation	zenjxl	small	75	7	512	1.0000	0.00635	0.00000	0.01599	0.637
+degradation	zenjxl	small	75	8	512	1.0000	0.00283	0.00000	0.00860	0.283
+degradation	zenjxl	small	75	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	80	1	512	1.0000	0.53310	0.45860	0.90161	70.421
+degradation	zenjxl	small	80	2	512	1.0000	0.53310	0.45860	0.90161	70.421
+degradation	zenjxl	small	80	3	512	1.0000	0.06266	0.02583	0.16941	6.467
+degradation	zenjxl	small	80	4	512	1.0000	0.06013	0.02183	0.16224	6.197
+degradation	zenjxl	small	80	5	512	1.0000	0.04021	0.01522	0.12669	4.103
+degradation	zenjxl	small	80	6	512	1.0000	0.03618	0.01037	0.11654	3.684
+degradation	zenjxl	small	80	7	512	1.0000	0.00672	0.00000	0.02411	0.674
+degradation	zenjxl	small	80	8	512	1.0000	0.00305	0.00000	0.01229	0.306
+degradation	zenjxl	small	80	9	512	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	85	1	504	0.9960	0.49864	0.43848	0.78558	64.647
+degradation	zenjxl	small	85	2	504	0.9960	0.49864	0.43848	0.78558	64.647
+degradation	zenjxl	small	85	3	504	0.9960	0.12919	0.12449	0.26507	13.790
+degradation	zenjxl	small	85	4	504	0.9960	0.12693	0.12239	0.26147	13.534
+degradation	zenjxl	small	85	5	504	0.9980	0.07151	0.05661	0.16776	7.413
+degradation	zenjxl	small	85	6	504	0.9980	0.06357	0.04243	0.15750	6.564
+degradation	zenjxl	small	85	7	504	1.0000	0.00466	0.00000	0.01396	0.467
+degradation	zenjxl	small	85	8	504	1.0000	0.00223	0.00000	0.00590	0.224
+degradation	zenjxl	small	85	9	504	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	90	1	248	0.5887	0.46126	0.37860	0.79400	58.608
+degradation	zenjxl	small	90	2	248	0.5887	0.46126	0.37860	0.79400	58.608
+degradation	zenjxl	small	90	3	248	0.5887	0.07376	0.02758	0.21296	7.655
+degradation	zenjxl	small	90	4	248	0.5887	0.07282	0.02559	0.21001	7.554
+degradation	zenjxl	small	90	5	248	0.7702	0.04743	0.02699	0.13422	4.858
+degradation	zenjxl	small	90	6	248	0.7782	0.03757	0.00931	0.10998	3.828
+degradation	zenjxl	small	90	7	248	1.0000	0.00309	0.00000	0.00000	0.309
+degradation	zenjxl	small	90	8	248	1.0000	0.00144	0.00000	0.00000	0.144
+degradation	zenjxl	small	90	9	248	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	95	1	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	2	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	3	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	4	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	5	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	6	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	small	95	7	3	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	95	8	3	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	small	95	9	3	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	40	1	742	1.0000	1.00346	0.85637	1.66185	172.771
+degradation	zenjxl	medium	40	2	742	1.0000	1.00346	0.85637	1.66185	172.771
+degradation	zenjxl	medium	40	3	742	1.0000	0.24884	0.27274	0.45453	28.253
+degradation	zenjxl	medium	40	4	742	1.0000	0.24404	0.26906	0.45333	27.640
+degradation	zenjxl	medium	40	5	742	1.0000	0.16155	0.16953	0.29066	17.533
+degradation	zenjxl	medium	40	6	742	1.0000	0.13792	0.13890	0.26519	14.789
+degradation	zenjxl	medium	40	7	742	1.0000	0.05544	0.01243	0.15712	5.700
+degradation	zenjxl	medium	40	8	742	1.0000	0.00821	0.00337	0.02205	0.825
+degradation	zenjxl	medium	40	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	50	1	742	1.0000	0.93204	0.80040	1.64188	153.969
+degradation	zenjxl	medium	50	2	742	1.0000	0.93204	0.80040	1.64188	153.969
+degradation	zenjxl	medium	50	3	742	1.0000	0.18501	0.15988	0.37282	20.323
+degradation	zenjxl	medium	50	4	742	1.0000	0.18021	0.15673	0.37166	19.747
+degradation	zenjxl	medium	50	5	742	1.0000	0.13109	0.12161	0.25756	14.007
+degradation	zenjxl	medium	50	6	742	1.0000	0.11689	0.09970	0.24870	12.399
+degradation	zenjxl	medium	50	7	742	1.0000	0.04016	0.00000	0.13562	4.098
+degradation	zenjxl	medium	50	8	742	1.0000	0.00639	0.00000	0.02003	0.641
+degradation	zenjxl	medium	50	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	60	1	742	1.0000	0.81767	0.65380	1.57909	126.522
+degradation	zenjxl	medium	60	2	742	1.0000	0.81767	0.65380	1.57909	126.522
+degradation	zenjxl	medium	60	3	742	1.0000	0.09765	0.06180	0.24760	10.257
+degradation	zenjxl	medium	60	4	742	1.0000	0.09289	0.05829	0.24524	9.734
+degradation	zenjxl	medium	60	5	742	1.0000	0.07154	0.04248	0.19983	7.416
+degradation	zenjxl	medium	60	6	742	1.0000	0.06538	0.03640	0.17217	6.756
+degradation	zenjxl	medium	60	7	742	1.0000	0.01851	0.00000	0.04693	1.868
+degradation	zenjxl	medium	60	8	742	1.0000	0.00332	0.00000	0.01290	0.332
+degradation	zenjxl	medium	60	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	70	1	742	1.0000	0.70203	0.55074	1.45232	101.785
+degradation	zenjxl	medium	70	2	742	1.0000	0.70203	0.55074	1.45232	101.785
+degradation	zenjxl	medium	70	3	742	1.0000	0.07040	0.04527	0.15141	7.294
+degradation	zenjxl	medium	70	4	742	1.0000	0.06578	0.04068	0.14688	6.799
+degradation	zenjxl	medium	70	5	742	1.0000	0.04892	0.02012	0.12547	5.014
+degradation	zenjxl	medium	70	6	742	1.0000	0.04499	0.01694	0.11530	4.602
+degradation	zenjxl	medium	70	7	742	1.0000	0.00507	0.00000	0.00000	0.508
+degradation	zenjxl	medium	70	8	742	1.0000	0.00181	0.00000	0.00000	0.181
+degradation	zenjxl	medium	70	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	75	1	742	1.0000	0.63271	0.48540	1.33872	88.270
+degradation	zenjxl	medium	75	2	742	1.0000	0.63271	0.48540	1.33872	88.270
+degradation	zenjxl	medium	75	3	742	1.0000	0.06861	0.02810	0.16406	7.102
+degradation	zenjxl	medium	75	4	742	1.0000	0.06415	0.02476	0.15839	6.625
+degradation	zenjxl	medium	75	5	742	1.0000	0.04556	0.01439	0.12120	4.661
+degradation	zenjxl	medium	75	6	742	1.0000	0.04434	0.01375	0.11824	4.534
+degradation	zenjxl	medium	75	7	742	1.0000	0.00443	0.00000	0.00629	0.444
+degradation	zenjxl	medium	75	8	742	1.0000	0.00209	0.00000	0.00360	0.209
+degradation	zenjxl	medium	75	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	80	1	742	1.0000	0.57586	0.44348	1.20765	77.865
+degradation	zenjxl	medium	80	2	742	1.0000	0.57586	0.44348	1.20765	77.865
+degradation	zenjxl	medium	80	3	742	1.0000	0.09403	0.04249	0.25009	9.859
+degradation	zenjxl	medium	80	4	742	1.0000	0.08981	0.03997	0.24445	9.396
+degradation	zenjxl	medium	80	5	742	1.0000	0.05375	0.02187	0.14263	5.522
+degradation	zenjxl	medium	80	6	742	1.0000	0.05051	0.01812	0.13521	5.181
+degradation	zenjxl	medium	80	7	742	1.0000	0.00558	0.00000	0.00373	0.559
+degradation	zenjxl	medium	80	8	742	1.0000	0.00248	0.00000	0.00242	0.249
+degradation	zenjxl	medium	80	9	742	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	85	1	735	0.9837	0.54563	0.43691	1.01400	72.569
+degradation	zenjxl	medium	85	2	735	0.9837	0.54563	0.43691	1.01400	72.569
+degradation	zenjxl	medium	85	3	735	0.9837	0.15312	0.13944	0.31117	16.546
+degradation	zenjxl	medium	85	4	735	0.9837	0.14896	0.13698	0.30824	16.062
+degradation	zenjxl	medium	85	5	735	0.9932	0.08409	0.05519	0.19433	8.772
+degradation	zenjxl	medium	85	6	735	0.9932	0.07781	0.04602	0.18756	8.092
+degradation	zenjxl	medium	85	7	735	1.0000	0.00319	0.00000	0.00000	0.320
+degradation	zenjxl	medium	85	8	735	1.0000	0.00196	0.00000	0.00000	0.196
+degradation	zenjxl	medium	85	9	735	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	90	1	375	0.7040	0.61662	0.50003	1.09775	85.266
+degradation	zenjxl	medium	90	2	375	0.7040	0.61662	0.50003	1.09775	85.266
+degradation	zenjxl	medium	90	3	375	0.7040	0.12044	0.10512	0.26969	12.800
+degradation	zenjxl	medium	90	4	375	0.7040	0.11455	0.10018	0.26164	12.137
+degradation	zenjxl	medium	90	5	375	0.7813	0.07080	0.05399	0.16321	7.337
+degradation	zenjxl	medium	90	6	375	0.7893	0.06799	0.03978	0.15653	7.036
+degradation	zenjxl	medium	90	7	375	1.0000	0.00602	0.00000	0.00693	0.604
+degradation	zenjxl	medium	90	8	375	1.0000	0.00363	0.00000	0.00541	0.364
+degradation	zenjxl	medium	90	9	375	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	95	1	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	2	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	3	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	4	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	5	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	6	3	0.0000	nan	nan	nan	nan
+degradation	zenjxl	medium	95	7	3	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	95	8	3	1.0000	0.00000	0.00000	0.00000	0.000
+degradation	zenjxl	medium	95	9	3	1.0000	0.00000	0.00000	0.00000	0.000
+section	codec	size_class	effort	n	ms_per_mp_p50	ms_per_mp_p90	fit_a	fit_b	fit_rmse_ln
+cost	zenjxl	tiny	1	1152	41219.842	80589.038	-3.9400	1.0318	0.5865
+cost	zenjxl	small	1	4608	26694.028	46772.809	-3.9400	1.0318	0.5865
+cost	zenjxl	medium	1	6678	31636.500	48574.659	-3.9400	1.0318	0.5865
+cost	zenjxl	tiny	2	1152	34222.819	80308.179	-4.0261	1.0364	0.6034
+cost	zenjxl	small	2	4608	26163.497	46411.125	-4.0261	1.0364	0.6034
+cost	zenjxl	medium	2	6678	31285.108	47994.799	-4.0261	1.0364	0.6034
+cost	zenjxl	tiny	3	1152	39496.514	74306.159	-3.5326	0.9962	0.5771
+cost	zenjxl	small	3	4608	28355.787	50979.635	-3.5326	0.9962	0.5771
+cost	zenjxl	medium	3	6678	30442.040	49051.342	-3.5326	0.9962	0.5771
+cost	zenjxl	tiny	4	1152	43805.949	83155.002	-3.5124	0.9935	0.5692
+cost	zenjxl	small	4	4608	26562.235	48920.072	-3.5124	0.9935	0.5692
+cost	zenjxl	medium	4	6678	30037.114	49142.386	-3.5124	0.9935	0.5692
+cost	zenjxl	tiny	5	1152	43169.589	78929.303	-3.3955	0.9777	0.5936
+cost	zenjxl	small	5	4608	26348.293	51340.321	-3.3955	0.9777	0.5936
+cost	zenjxl	medium	5	6678	27935.579	46271.680	-3.3955	0.9777	0.5936
+cost	zenjxl	tiny	6	1152	43585.029	84366.669	-3.4971	0.9921	0.5683
+cost	zenjxl	small	6	4608	27096.410	49056.685	-3.4971	0.9921	0.5683
+cost	zenjxl	medium	6	6678	29769.704	48670.407	-3.4971	0.9921	0.5683
+cost	zenjxl	tiny	7	31104	43414.971	83180.523	-3.4682	0.9899	0.5936
+cost	zenjxl	small	7	124416	27634.529	50360.876	-3.4682	0.9899	0.5936
+cost	zenjxl	medium	7	180306	30132.793	48973.992	-3.4682	0.9899	0.5936
+cost	zenjxl	tiny	8	1152	41206.714	82605.814	-3.5011	0.9701	0.9679
+cost	zenjxl	small	8	4608	26034.383	49204.427	-3.5011	0.9701	0.9679
+cost	zenjxl	medium	8	6678	27149.377	47051.294	-3.5011	0.9701	0.9679
+cost	zenjxl	tiny	9	1152	46594.357	82713.972	-3.2022	0.9709	0.4633
+cost	zenjxl	small	9	4608	28663.761	50983.364	-3.2022	0.9709	0.4633
+cost	zenjxl	medium	9	6678	28543.950	47540.616	-3.2022	0.9709	0.4633
