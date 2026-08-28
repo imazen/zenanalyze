@@ -97,6 +97,17 @@ crops): `examples/per_tier_cost_grid.rs` →
 `benchmarks/feature_cost_grid_2026-07-02.tsv`. That grid is the size sweep
 #50's Sub-A asked for, at tier granularity.
 
+Per-**feature** granularity (solo + leave-one-out, same five sizes, photo AND
+screen crops): `examples/per_feature_cost_grid.rs` →
+`benchmarks/per_feature_cost_grid_2026-08-28.tsv`, joined to the downstream
+consumption inventory in `docs/feature-consumption.md` ("Cost vs use") by
+`tools/feature_inventory.py --cost`. Solo cost is dominated by the pass floor
+(~2 ms for any single Tier-3 feature at 2048², aarch64) — the LOO column is the
+one that tells you what dropping a feature from a request actually saves;
+the fitted intercept of `SUPPORTED` (2.7 ms + 0.98 ns/px on aarch64) is why
+the ≤ 2 ms/call target in #50 cannot be met by request narrowing alone below
+~2 MP.
+
 ## What is NOT implemented (and why)
 
 - **Implication short-circuits (#50 Sub-D)** — e.g. `is_grayscale → skip Tier

@@ -32,12 +32,20 @@ zentrain-pytests:
 # universe is this build's FeatureSet::SUPPORTED (experimental default-on,
 # plus hdr). Sibling codec checkouts default to the ~/work/zen layout;
 # override with `just feature-inventory zen=/path/to/zen`.
-feature-inventory zen="..":
+# Per-feature cost grid (solo / leave-one-out ns per class × side × crop ×
+# feature) on real codec-corpus crops at 64²..4096² — the input for
+# `feature-inventory`'s cost-vs-use section. ~5 min; writes
+# benchmarks/per_feature_cost_grid_<date>.tsv (set PFC_OUT to override).
+per-feature-cost-grid corpus="../codec-corpus":
+    ZENANALYZE_CORPUS_DIR={{corpus}} cargo run --release --features hdr --example per_feature_cost_grid
+
+feature-inventory zen=".." cost="benchmarks/per_feature_cost_grid_2026-08-28.tsv":
     mkdir -p target/inventory
     cargo build --release -q -p zenpredict-bake --bin zenpredict-inspect
-    cargo run --release -q --example list_features --features hdr > target/inventory/universe.txt
+    cargo run --release -q --example list_features --features hdr -- --variants > target/inventory/universe.txt
     python3 tools/feature_inventory.py \
       --universe target/inventory/universe.txt \
+      --cost {{cost}} --cost-class photo --cost-side 2048 \
       --inspect-bin target/release/zenpredict-inspect \
       --label zenjpeg-a-v3-shipped={{zen}}/zenjpeg/zenjpeg/src/encode/picker_data/feature_order.txt \
       --label zenavif-rav1e-v0.1.1-shipped={{zen}}/zenavif/src/models/rav1e_picker_v0_1_1.bin \

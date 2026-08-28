@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-feature cost grid on real content + cost × use cross-reference**
+  (#41 "per-feature cost vs use", #50 Sub-A). `examples/per_feature_cost_grid.rs`
+  measures every `SUPPORTED` feature's solo and leave-one-out wall-clock at
+  64²/256²/1024²/2048²/4096² on codec-corpus photo (CID22, clic2025) and screen
+  (gb82) crops — no synthetic noise — and writes the raw per-crop rows to
+  `benchmarks/per_feature_cost_grid_<date>.tsv` (`just per-feature-cost-grid`).
+  `tools/feature_inventory.py --cost <tsv>` joins it to the consumption
+  inventory: solo/LOO µs columns in the matrix, "Cost vs use" rankings
+  (supported-but-unused, single-consumer, shared hot path) with a
+  `loo = α + β·pixels` fit per feature and a photo/screen split, and — from
+  `list_features -- --variants` — per-family `FeatureSet` preset PROPOSALS
+  (`JPEG_FAMILY`, …) rendered as compilable Rust (not shipped API: adding them is
+  a public-API change awaiting sign-off). Measured on aarch64 (2026-08-28):
+  `SUPPORTED` = 617 µs at 64² and 8.5 ms at 2048² (fit 2.7 ms + 0.98 ns/px —
+  the fixed intercept dominates below ~2 MP); the three never-consumed XYB /
+  chroma-subsample loss features cost 240 + 207 + 71 µs LOO at 2048² (6 % of
+  the baseline) for no reader; `feat_grayscale_score` (8 bakes) is the single
+  most expensive consumed feature at 456 µs LOO. `docs/feature-consumption.md`
+  regenerated with the new sections; 7 new tests in
+  `zentrain/tools/test_feature_inventory.py` (CI `zentrain-pytests`).
+
 ### Fixed
 
 - **CI green again on rustc/clippy 1.98.0.** The new

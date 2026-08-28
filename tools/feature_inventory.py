@@ -27,6 +27,21 @@ candidates #41 asks for), per-bake exclusives and — when `--universe` (one
 name per line, from `cargo run --example list_features`) is given — the
 features no listed bake consumes. `--json` emits the same data as JSON.
 
+`--cost <tsv>` joins the per-feature cost grid written by
+`examples/per_feature_cost_grid.rs` (solo / leave-one-out ns per class × side
+× crop × feature): the matrix gains solo / LOO µs columns at the reference
+cell (`--cost-class`, `--cost-side`), and a "Cost vs use" section ranks
+expensive-but-unused and expensive-single-consumer features and fits
+`loo_ns = α + β·pixels` per feature over the size grid — the #41 "per-feature
+cost vs use" cross-reference and #50 Sub-A cost map.
+
+When the universe file carries variant identifiers
+(`list_features -- --variants`: `id<TAB>feat_name<TAB>Variant`), the report
+also renders per-family `FeatureSet` preset PROPOSALS (`JPEG_FAMILY`, …) as
+compilable Rust — the union of every listed bake of that family. They are
+proposals: adding them to `zenanalyze::feature::FeatureSet` is a public-API
+change that needs sign-off.
+
 Example (repo layout ~/work/zen/*):
 
     python3 tools/feature_inventory.py \\
@@ -199,17 +214,235 @@ def default_label(path: Path) -> str:
     return name
 
 
-def read_universe(path: Path) -> list[str]:
-    out = []
+class Universe:
+    """The features this build produces (`examples/list_features.rs`): names in
+    SUPPORTED order, plus ids and `AnalysisFeature` variant identifiers when the
+    file carries them (`--ids` → `id<TAB>feat_name`, `--variants` →
+    `id<TAB>feat_name<TAB>Variant`)."""
+
+    def __init__(self, names: list[str], ids: dict[str, int], variants: dict[str, str]):
+        self.names = names
+        self.ids = ids
+        self.variants = variants
+
+
+def read_universe_meta(path: Path) -> Universe:
+    names: list[str] = []
+    ids: dict[str, int] = {}
+    variants: dict[str, str] = {}
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         parts = line.split("\t")
-        n = normalise(parts[-1])
-        if n:
-            out.append(n)
-    return list(OrderedDict.fromkeys(out))
+        if len(parts) >= 3:
+            idx, name, variant = parts[0], parts[1], parts[2]
+        elif len(parts) == 2:
+            idx, name, variant = parts[0], parts[1], None
+        else:
+            idx, name, variant = None, parts[0], None
+        n = normalise(name)
+        if not n:
+            continue
+        names.append(n)
+        if idx is not None and idx.strip().isdigit():
+            ids[n] = int(idx)
+        if variant:
+            variants[n] = variant.strip()
+    names = list(OrderedDict.fromkeys(names))
+    return Universe(names, ids, variants)
+
+
+def read_universe(path: Path) -> list[str]:
+    return read_universe_meta(path).names
+
+
+# --------------------------------------------------------------------------
+# Cost grid (examples/per_feature_cost_grid.rs)
+# --------------------------------------------------------------------------
+
+
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    n = len(s)
+    if n == 0:
+        raise ValueError("median of nothing")
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
+def load_cost(path: Path) -> dict:
+    """Parse the raw per-feature cost grid TSV into per-cell medians.
+
+    Returns `{"header": [comment lines], "classes": [...], "sides": [...],
+    "cells": {(class, side): {"pixels": int, "baseline_ns": float,
+    "features": {feat: {"solo_ns": float, "loo_ns": float, "n": int}}}}}` —
+    every ns value is the median over the crops measured for that cell.
+    """
+    header: list[str] = []
+    cols: list[str] | None = None
+    raw: dict[tuple[str, int], dict] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        if line.startswith("#"):
+            header.append(line)
+            continue
+        parts = line.rstrip("\n").split("\t")
+        if cols is None:
+            cols = parts
+            missing = {"class", "side", "pixels", "feature", "baseline_ns", "solo_ns", "loo_ns"} - set(cols)
+            if missing:
+                raise SystemExit(f"{path}: cost grid is missing columns {sorted(missing)}")
+            continue
+        row = dict(zip(cols, parts))
+        key = (row["class"], int(row["side"]))
+        cell = raw.setdefault(key, {"pixels": int(row["pixels"]), "baseline": [], "features": {}})
+        cell["baseline"].append(float(row["baseline_ns"]))
+        f = normalise(row["feature"])
+        fe = cell["features"].setdefault(f, {"solo": [], "loo": []})
+        fe["solo"].append(float(row["solo_ns"]))
+        fe["loo"].append(float(row["loo_ns"]))
+    if cols is None or not raw:
+        raise SystemExit(f"{path}: empty cost grid")
+    cells: dict[tuple[str, int], dict] = {}
+    for key, cell in raw.items():
+        # baseline is repeated per feature row; de-duplicate per crop by taking
+        # the median over all rows (identical within a crop).
+        cells[key] = {
+            "pixels": cell["pixels"],
+            "baseline_ns": _median(cell["baseline"]),
+            "features": {
+                f: {"solo_ns": _median(v["solo"]), "loo_ns": _median(v["loo"]), "n": len(v["solo"])}
+                for f, v in cell["features"].items()
+            },
+        }
+    classes = list(OrderedDict.fromkeys(c for c, _ in cells))
+    sides = sorted({s for _, s in cells})
+    return {"header": header, "classes": classes, "sides": sides, "cells": cells}
+
+
+def _fit_alpha_beta(points: list[tuple[float, float]]) -> tuple[float, float] | None:
+    """Least-squares `y = alpha + beta * x`; None with < 2 distinct x."""
+    if len({x for x, _ in points}) < 2:
+        return None
+    n = float(len(points))
+    sx = sum(x for x, _ in points)
+    sy = sum(y for _, y in points)
+    sxx = sum(x * x for x, _ in points)
+    sxy = sum(x * y for x, y in points)
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        return None
+    beta = (n * sxy - sx * sy) / denom
+    alpha = (sy - beta * sx) / n
+    return alpha, beta
+
+
+def cost_summary(cost: dict, ref_class: str | None, ref_side: int | None) -> dict:
+    """Per-feature cost at the reference cell plus the size fit for that class.
+
+    `ref_class` defaults to the first class in the grid, `ref_side` to the
+    largest side measured. Per feature: `solo_us` / `loo_us` at the reference
+    cell, `loo_alpha_us` / `loo_beta_ns_per_px` from the α + β·pixels fit of
+    LOO over every side of the reference class, and `loo_us_by_class` at the
+    reference side for every class (content sensitivity).
+    """
+    classes = cost["classes"]
+    sides = cost["sides"]
+    ref_class = ref_class or classes[0]
+    ref_side = ref_side or max(sides)
+    if (ref_class, ref_side) not in cost["cells"]:
+        raise SystemExit(
+            f"cost grid has no cell ({ref_class}, {ref_side}); classes={classes} sides={sides}"
+        )
+    ref = cost["cells"][(ref_class, ref_side)]
+    per_feature: dict[str, dict] = {}
+    for f, v in ref["features"].items():
+        pts = [
+            (float(cost["cells"][(ref_class, s)]["pixels"]), cost["cells"][(ref_class, s)]["features"][f]["loo_ns"])
+            for s in sides
+            if (ref_class, s) in cost["cells"] and f in cost["cells"][(ref_class, s)]["features"]
+        ]
+        fit = _fit_alpha_beta(pts)
+        by_class = {
+            c: cost["cells"][(c, ref_side)]["features"][f]["loo_ns"] / 1e3
+            for c in classes
+            if (c, ref_side) in cost["cells"] and f in cost["cells"][(c, ref_side)]["features"]
+        }
+        per_feature[f] = {
+            "solo_us": v["solo_ns"] / 1e3,
+            "loo_us": v["loo_ns"] / 1e3,
+            "loo_alpha_us": fit[0] / 1e3 if fit else None,
+            "loo_beta_ns_per_px": fit[1] if fit else None,
+            "loo_us_by_class": by_class,
+        }
+    baseline_by_side = {
+        s: cost["cells"][(ref_class, s)]["baseline_ns"] / 1e3 for s in sides if (ref_class, s) in cost["cells"]
+    }
+    base_fit = _fit_alpha_beta(
+        [(float(cost["cells"][(ref_class, s)]["pixels"]), cost["cells"][(ref_class, s)]["baseline_ns"]) for s in sides if (ref_class, s) in cost["cells"]]
+    )
+    return {
+        "ref_class": ref_class,
+        "ref_side": ref_side,
+        "classes": classes,
+        "sides": sides,
+        "baseline_us": ref["baseline_ns"] / 1e3,
+        "baseline_us_by_side": baseline_by_side,
+        "baseline_alpha_us": base_fit[0] / 1e3 if base_fit else None,
+        "baseline_beta_ns_per_px": base_fit[1] if base_fit else None,
+        "header": cost["header"],
+        "per_feature": per_feature,
+    }
+
+
+# --------------------------------------------------------------------------
+# Family presets (proposed FeatureSet constants)
+# --------------------------------------------------------------------------
+
+_FAMILY = re.compile(r"^(zen)?(jpeg|webp|avif|jxl|png|gif|meta)\b", re.IGNORECASE)
+
+
+def family_of(label: str) -> str:
+    """`zenjpeg-v0.5-modesfull` → `jpeg`, `meta-v0.5-5codec` → `meta`; else the
+    label's first dash-separated token."""
+    m = _FAMILY.match(label)
+    if m:
+        return m.group(2).lower()
+    return label.split("-")[0].lower()
+
+
+def family_presets(sources: list[dict], consumption: dict[str, list[str]], universe: Universe | None) -> dict:
+    """Per family: the union of features every listed (named) bake of that
+    family consumes, restricted to analyzer-produced features when a universe
+    is given, in universe (SUPPORTED) order. `rust` is the compilable
+    `FeatureSet` constant text when the universe carries variant identifiers."""
+    named = [s for s in sources if not s["positional"]]
+    families: dict[str, list[str]] = OrderedDict()
+    for s in named:
+        families.setdefault(family_of(s["label"]), []).append(s["label"])
+    order = {n: i for i, n in enumerate(universe.names)} if universe else {}
+    out: dict[str, dict] = OrderedDict()
+    for fam, labels in families.items():
+        feats = {f for f, cons in consumption.items() if any(lab in cons for lab in labels)}
+        dropped = sorted(f for f in feats if universe and f not in order)
+        if universe:
+            feats = {f for f in feats if f in order}
+        ordered = sorted(feats, key=lambda f: (order.get(f, 1 << 30), f))
+        rust = None
+        if universe and universe.variants and all(f in universe.variants for f in ordered):
+            const = f"{fam.upper()}_FAMILY"
+            lines = [
+                f"/// Union of the features every listed {fam} bake consumes "
+                f"({len(ordered)} features across {len(labels)} bakes: {', '.join(labels)}).",
+                "/// Generated by `tools/feature_inventory.py` — a PROPOSAL, not shipped API.",
+                f"pub const {const}: Self = Self::new()",
+            ]
+            lines += [f"    .with(AnalysisFeature::{universe.variants[f]})" for f in ordered]
+            lines[-1] += ";"
+            rust = "\n".join(lines)
+        out[fam] = {"bakes": labels, "features": ordered, "not_in_universe": dropped, "rust": rust}
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -217,7 +450,20 @@ def read_universe(path: Path) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def aggregate(sources: list[Source], universe: list[str] | None) -> dict:
+def aggregate(
+    sources: list[Source],
+    universe: list[str] | Universe | None,
+    cost: dict | None = None,
+    ref_class: str | None = None,
+    ref_side: int | None = None,
+) -> dict:
+    """`universe` may be the plain name list (`read_universe`) or a `Universe`
+    (`read_universe_meta`, needed for the Rust preset rendering). `cost` is a
+    `load_cost` grid; when given, the aggregate carries `cost` (per-feature
+    solo/LOO at the reference cell + size fit) and the three cost × use
+    rankings (`expensive_unused`, `expensive_single`, `hot_path`)."""
+    umeta = universe if isinstance(universe, Universe) else None
+    unames = universe.names if isinstance(universe, Universe) else universe
     named = [s for s in sources if not s.positional]
     counts: dict[str, int] = {}
     consumers: dict[str, list[str]] = {}
@@ -232,20 +478,40 @@ def aggregate(sources: list[Source], universe: list[str] | None) -> dict:
     }
     unknown_to_universe: list[str] = []
     never_consumed: list[str] = []
-    if universe is not None:
-        uset = set(universe)
+    if unames is not None:
+        uset = set(unames)
         unknown_to_universe = [f for f in ordered if f not in uset]
-        never_consumed = [f for f in universe if f not in counts]
-    return {
-        "sources": [s.as_dict() for s in sources],
+        never_consumed = [f for f in unames if f not in counts]
+    consumption = {f: consumers[f] for f in ordered}
+    src_dicts = [s.as_dict() for s in sources]
+    agg = {
+        "sources": src_dicts,
         "n_named_sources": len(named),
-        "consumption": {f: consumers[f] for f in ordered},
+        "consumption": consumption,
         "shared": shared,
         "exclusive": exclusive,
-        "universe_size": len(universe) if universe is not None else None,
+        "universe_size": len(unames) if unames is not None else None,
         "never_consumed": never_consumed,
         "unknown_to_universe": unknown_to_universe,
+        "presets": family_presets(src_dicts, consumption, umeta),
     }
+    if cost is not None:
+        summary = cost_summary(cost, ref_class, ref_side)
+        pf = summary["per_feature"]
+        loo = lambda f: pf[f]["loo_us"]  # noqa: E731
+        measured = [f for f in pf]
+        agg["cost"] = summary
+        agg["expensive_unused"] = sorted(
+            (f for f in measured if counts.get(f, 0) == 0), key=lambda f: (-loo(f), f)
+        )
+        agg["expensive_single"] = sorted(
+            (f for f in measured if counts.get(f, 0) == 1), key=lambda f: (-loo(f), f)
+        )
+        agg["hot_path"] = sorted(
+            (f for f in measured if counts.get(f, 0) >= 2), key=lambda f: (-loo(f), f)
+        )
+        agg["consumed_not_measured"] = [f for f in ordered if f not in pf]
+    return agg
 
 
 # --------------------------------------------------------------------------
@@ -293,15 +559,34 @@ def render_markdown(agg: dict, argv: list[str], generated: str) -> str:
         )
     L.append("")
     labels = [s["label"] for s in agg["sources"] if not s["positional"]]
+    cost = agg.get("cost")
+    pf = cost["per_feature"] if cost else {}
+
+    def _us(f: str, key: str) -> str:
+        v = pf.get(f)
+        return "" if v is None else f"{v[key]:.0f}"
+
     L.append(f"## Consumption matrix ({len(agg['consumption'])} features × {len(labels)} bakes)")
     L.append("")
-    L.append("Sorted by number of consuming bakes, then name.")
+    if cost:
+        L.append(
+            f"Sorted by number of consuming bakes, then name. `solo` / `LOO` = µs at the "
+            f"reference cell ({cost['ref_class']} {cost['ref_side']}², baseline "
+            f"`SUPPORTED` = {cost['baseline_us']:.0f} µs) from the cost grid; see *Cost vs use*."
+        )
+        cost_head = " solo µs | LOO µs |"
+        cost_sep = "---:|---:|"
+    else:
+        L.append("Sorted by number of consuming bakes, then name.")
+        cost_head = ""
+        cost_sep = ""
     L.append("")
-    L.append("| feature | n | " + " | ".join(labels) + " |")
-    L.append("|---|---:|" + "|".join(":-:" for _ in labels) + "|")
+    L.append("| feature | n |" + cost_head + " " + " | ".join(labels) + " |")
+    L.append("|---|---:|" + cost_sep + "|".join(":-:" for _ in labels) + "|")
     for f, cons in agg["consumption"].items():
         marks = " | ".join("✓" if lab in cons else "" for lab in labels)
-        L.append(f"| `{f}` | {len(cons)} | {marks} |")
+        c = f" {_us(f, 'solo_us')} | {_us(f, 'loo_us')} |" if cost else ""
+        L.append(f"| `{f}` | {len(cons)} |{c} {marks} |")
     L.append("")
     L.append(f"## Shared by ≥ 2 bakes ({len(agg['shared'])})")
     L.append("")
@@ -340,7 +625,133 @@ def render_markdown(agg: dict, argv: list[str], generated: str) -> str:
             for f in agg["unknown_to_universe"]:
                 L.append(f"- `{f}` — {', '.join(agg['consumption'][f])}")
             L.append("")
+    if cost:
+        L += _render_cost(agg)
+    L += _render_presets(agg)
     return "\n".join(L)
+
+
+def _fmt_opt(v: float | None, spec: str) -> str:
+    return "—" if v is None else format(v, spec)
+
+
+def _render_cost(agg: dict) -> list[str]:
+    cost = agg["cost"]
+    pf = cost["per_feature"]
+    cons = agg["consumption"]
+    L: list[str] = []
+    L.append("## Cost vs use")
+    L.append("")
+    L.append(
+        "Per-feature wall-clock from `examples/per_feature_cost_grid.rs` (real photo / screen "
+        "crops, sweep-discipline sizes; medians over crops) joined to the consumption counts "
+        "above — the #41 cross-reference and the #50 Sub-A cost map. **LOO** (leave-one-out) is "
+        "what the feature adds when everything else is already computed; **solo** is what it "
+        "costs alone, dependencies included. LOO ≤ 0 means the feature shares a pass (noise-level)."
+    )
+    L.append("")
+    for line in cost["header"]:
+        L.append(f"    {line}")
+    L.append("")
+    L.append(
+        f"Reference cell: **{cost['ref_class']} {cost['ref_side']}²**, baseline `SUPPORTED` = "
+        f"**{cost['baseline_us']:.0f} µs**. Baseline by side ({cost['ref_class']}): "
+        + ", ".join(f"{s}² = {v:.0f} µs" for s, v in cost["baseline_us_by_side"].items())
+        + f". Fit baseline = {_fmt_opt(cost['baseline_alpha_us'], '.0f')} µs + "
+        f"{_fmt_opt(cost['baseline_beta_ns_per_px'], '.4f')} ns/px."
+    )
+    L.append("")
+    classes = cost["classes"]
+
+    def table(feats: list[str], title: str, blurb: str, limit: int | None = None) -> None:
+        L.append(f"### {title} ({len(feats)})")
+        L.append("")
+        L.append(blurb)
+        L.append("")
+        if not feats:
+            L.append("— none —")
+            L.append("")
+            return
+        cls_head = "".join(f" LOO µs {c} |" for c in classes)
+        L.append(f"| feature | n | solo µs | LOO µs |{cls_head} LOO fit α µs | LOO fit β ns/px | consumers |")
+        L.append("|---|---:|---:|---:|" + "---:|" * len(classes) + "---:|---:|---|")
+        for f in feats[:limit] if limit else feats:
+            v = pf[f]
+            by = "".join(f" {_fmt_opt(v['loo_us_by_class'].get(c), '.0f')} |" for c in classes)
+            L.append(
+                f"| `{f}` | {len(cons.get(f, []))} | {v['solo_us']:.0f} | {v['loo_us']:.0f} |{by} "
+                f"{_fmt_opt(v['loo_alpha_us'], '.1f')} | {_fmt_opt(v['loo_beta_ns_per_px'], '.4f')} | "
+                f"{', '.join(cons.get(f, [])) or '—'} |"
+            )
+        L.append("")
+
+    table(
+        agg["expensive_unused"],
+        "Supported but consumed by no listed bake — ranked by LOO",
+        "Optimization fodder per #41: every µs here is paid by a `SUPPORTED` request and read by "
+        "nobody. Candidates for opt-in / `experimental` gating or a cheaper implementation.",
+    )
+    table(
+        agg["expensive_single"],
+        "Consumed by exactly one bake — ranked by LOO",
+        "Codec-specific cost: only that bake's request should pay for it (request narrowing, "
+        "#50 Sub-B).",
+    )
+    table(
+        agg["hot_path"],
+        "Shared by ≥ 2 bakes — ranked by LOO",
+        "The hot path: these are what every picker asks for, so they are where a SIMD / "
+        "pass-sharing win pays off across codecs.",
+    )
+    if agg["consumed_not_measured"]:
+        L.append("### Consumed but not in the cost grid")
+        L.append("")
+        L.append(
+            "Bake columns the grid's build did not produce (caller-supplied `feat_*` inputs or "
+            "features gated off / retired):"
+        )
+        L.append("")
+        L.append(", ".join(f"`{f}`" for f in agg["consumed_not_measured"]))
+        L.append("")
+    return L
+
+
+def _render_presets(agg: dict) -> list[str]:
+    presets = agg.get("presets") or {}
+    if not presets:
+        return []
+    L: list[str] = []
+    L.append("## Family presets (proposed `FeatureSet` constants)")
+    L.append("")
+    L.append(
+        "Per codec family, the union of every listed bake's features (analyzer-produced only, in "
+        "`SUPPORTED` order) — the `JPEG_FAMILY` / `WEBP_FAMILY` / … presets #41 asks for, "
+        "derived from the artifacts instead of hand-written. **Proposals only:** adding them to "
+        "`zenanalyze::feature::FeatureSet` (next to `ZENJPEG_PICKER_V1_1`) is a public-API "
+        "addition that needs sign-off, and a preset pins a *union* — a codec that requests it "
+        "pays for every bake's features, so narrow to the shipped bake's `feat_cols` when only "
+        "one bake is live."
+    )
+    L.append("")
+    for fam, p in presets.items():
+        nb = len(p["bakes"])
+        L.append(f"### {fam} — {len(p['features'])} features across {nb} bake{'s' if nb != 1 else ''}")
+        L.append("")
+        L.append("Bakes: " + ", ".join(p["bakes"]))
+        L.append("")
+        if p["not_in_universe"]:
+            L.append(
+                "Dropped (not produced by this build): " + ", ".join(f"`{f}`" for f in p["not_in_universe"])
+            )
+            L.append("")
+        if p["rust"]:
+            L.append("```rust")
+            L.append(p["rust"])
+            L.append("```")
+        else:
+            L.append(", ".join(f"`{f}`" for f in p["features"]) or "—")
+        L.append("")
+    return L
 
 
 # --------------------------------------------------------------------------
@@ -357,6 +768,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--out", type=Path, help="write markdown here instead of stdout")
     p.add_argument("--json", action="store_true", help="emit JSON instead of markdown")
     p.add_argument("--generated", default=None, help="override the generated-at stamp (for reproducible output)")
+    p.add_argument("--cost", type=Path, help="per-feature cost grid TSV (examples/per_feature_cost_grid.rs)")
+    p.add_argument("--cost-class", default=None, help="reference content class for the cost columns (default: first in the grid)")
+    p.add_argument("--cost-side", type=int, default=None, help="reference side in px for the cost columns (default: largest in the grid)")
     return p.parse_args(argv)
 
 
@@ -375,8 +789,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("no sources given")
     inspect_cmd = find_inspect_bin(args.inspect_bin) if any(p.suffix == ".bin" for _, p in labelled) else None
     sources = [load_source(name, path, inspect_cmd) for name, path in labelled]
-    universe = read_universe(args.universe) if args.universe else None
-    agg = aggregate(sources, universe)
+    universe = read_universe_meta(args.universe) if args.universe else None
+    cost = load_cost(args.cost) if args.cost else None
+    agg = aggregate(sources, universe, cost, args.cost_class, args.cost_side)
     if args.json:
         text = json.dumps(agg, indent=1)
     else:
