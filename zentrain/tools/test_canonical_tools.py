@@ -70,6 +70,25 @@ def test_canonical_to_pareto_rederives_size_class_and_dedupes_features(tmp_path)
     assert float(rd[1]["feat_variance"]) == 7.0
 
 
+def test_canonical_to_pareto_emits_per_image_size_ceilings(tmp_path):
+    # Image A at one size: two cells reach 70 / 72 → ceiling 72 on BOTH rows;
+    # image B alone → its own row's value. ssim2 = zensim - 10 in _row.
+    rows = [
+        _row("/data/o_1000.png.scale64x48.png", 64, 48, "vp8-m4_def", 50, 1000, 2.0, 70.0, 1.5),
+        _row("/data/o_1000.png.scale64x48.png", 64, 48, "vp8-m6_def", 100, 900, 4.0, 72.0, 1.5),
+        _row("/data/o_1001.png.scale500x300.png", 500, 300, "vp8-m4_def", 50, 5000, 20.0, 60.0, 7.0),
+    ]
+    src = _canonical(tmp_path, "train.parquet", rows)
+    pareto = tmp_path / "d" / "pareto.parquet"
+    assert c2p.main(["--canonical", str(src), "--pareto-out", str(pareto), "--features-out", str(tmp_path / "d" / "f.tsv")]) == 0
+    t = pq.read_table(pareto)
+    assert t["effective_max_zensim"].to_pylist() == [72.0, 72.0, 60.0]
+    assert t["effective_max_ssim2"].to_pylist() == [62.0, 62.0, 50.0]
+    # NaN-only keys stay NaN instead of -inf.
+    out = c2p.per_key_max(["a", "a", "b"], ["tiny", "tiny", "tiny"], np.array([np.nan, np.nan, 3.0]))
+    assert math.isnan(out[0]) and math.isnan(out[1]) and out[2] == 3.0
+
+
 def test_canonical_to_pareto_refuses_features_that_vary_within_an_image(tmp_path):
     rows = [
         _row("/data/o_1000.png.scale64x48.png", 64, 48, "vp8-m4_def", 50, 1000, 2.0, 70.0, 1.5),

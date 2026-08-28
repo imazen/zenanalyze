@@ -354,6 +354,45 @@ A complete runnable reference for the zenjpeg shape lives at [`examples/hybrid_h
 
 ---
 
+### Step 6.5 — the unreachable-target contract (`UnreachableAction`)
+
+Every perceptual metric has a per-image ceiling (zenanalyze#51; measured on
+the canonical zenwebp data: 97 % of (image, size) pairs cannot reach zensim
+94, median ceiling ≈ 90 — `benchmarks/zensim_ceiling_zenwebp_canonical_2026-08-28.md`).
+A caller asking for `target = 96` on such an image must get a typed answer,
+never a silent under-shoot. The codec's target-quality API therefore takes:
+
+```rust
+#[non_exhaustive]
+pub enum UnreachableAction {
+    /// Return `Err(UnreachableTargetZensim { requested, achievable })` and encode nothing.
+    Error,
+    /// Encode at the highest reachable quality and report `achieved < requested`
+    /// in the encode metrics (`targets_met = false`).
+    ReturnClosest,
+    /// Escalate to the codec's lossless / near-lossless path.
+    Lossless,
+}
+```
+
+How the codec knows the ceiling BEFORE encoding, in preference order:
+
+1. A feature-based ceiling predictor — a ZNPR bake produced by
+   `zentrain/tools/fit_zensim_ceiling.py` from the Pareto's
+   `effective_max_<metric>` column (no new analyzer feature needed). Use
+   `effective_target = min(user_target, predicted_ceiling − margin)`; the
+   tool reports the over-prediction rate per margin so `margin` is a measured
+   number, not a guess (zenwebp canonical, HistGB teacher, val: 6.4 % of
+   images over-predicted by > 2 points, 0.9 % by > 5).
+2. The bake's `zenpicker.unachievable_zones` (per size_class ceilings from
+   the reach statistics — coarser, but always present).
+3. Verify-and-rescue after the first encode (SAFETY_PLANE.md) — the fallback
+   when neither predictor is loaded; it costs one extra encode.
+
+`UnreachableTargetZensim` is a first-class error, see SAFETY_PLANE.md.
+The default should be `ReturnClosest` for image proxies (never fail a
+request over a ceiling) and `Error` for calibration / offline tooling.
+
 ## Step 7 — wire it into encode
 
 Wherever your codec resolves "user wants quality target X" into a concrete config, route through `pick_config`:

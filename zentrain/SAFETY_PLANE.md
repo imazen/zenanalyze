@@ -158,6 +158,39 @@ pub fn reach_gate_mask(reach_rates: &[f32], threshold: f32, out: &mut [bool]);
 
 The bake-time tripwire ("predicted-bytes confidence quantile per cell" used by the cheap pre-filter) is bake-side metadata: pack a `[f32; n_cells]` of the bottom-decile threshold into the `.bin`'s post-header extension area (the format already advertises `header_size` for forward compat). Picker exposes it via a passthrough getter — *not yet implemented*; `reach_safety` covers the SLA-mode gate today.
 
+## Unreachable targets — `UnreachableTargetZensim` (zenanalyze#51)
+
+The rescue protocol above assumes the target is physically reachable. It is
+not always: the metric saturates per image and size (canonical zenwebp:
+median achievable zensim ≈ 90, 97 % of (image, size) pairs below 94 —
+`benchmarks/zensim_ceiling_zenwebp_canonical_2026-08-28.md`). A two-shot
+rescue on an unreachable target burns the second encode and still ships
+`targets_met = false`. So unreachability is its own, typed outcome:
+
+```rust
+pub struct UnreachableTargetZensim {
+    pub requested: f32,
+    /// Best estimate of the ceiling: the predictor's value minus its margin,
+    /// or the achieved quality after pass 0 when no predictor is loaded.
+    pub achievable: f32,
+    pub source: CeilingSource, // Predictor | UnachievableZones | Measured
+}
+```
+
+- **Before pass 0** (predictor loaded, FOR_NEW_CODECS Step 6.5): if
+  `requested > predicted_ceiling − margin`, apply the caller's
+  `UnreachableAction` immediately — `Error` returns this struct, `ReturnClosest`
+  retargets to `achievable` and continues the normal pick, `Lossless`
+  escalates. No encode is spent on an impossible target.
+- **After pass 0** (no predictor): an under-shoot whose achieved quality is
+  within `rescue_threshold_pp` of the bake's `unachievable_zones` ceiling for
+  the size class is classified `Measured`-unreachable and does NOT trigger
+  the rescue pass; `UnreachableAction` applies to the pass-0 output.
+- The training side keeps the invariant honest: `train_hybrid` skips
+  `target_zq > effective_max_<metric>` rows (so the picker never learns to
+  "reach" the impossible) and fails `UNCAPPED_ZQ_GRID` when the sweep omits
+  the column above zq 85.
+
 ## Adversarial-corpus regression test
 
 **Where it lives:** `zenanalyze/zenpicker/testdata/adversarial/` (the picker is the thing that fails, so the corpus belongs near the picker). Codec borrows it at test time via dev-dependency on a small fixture-loader crate.

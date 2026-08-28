@@ -904,7 +904,8 @@ def load_pareto(path):
 
         table = pq.read_table(path)
         fieldnames = list(table.column_names)
-        has_ceiling_column = "effective_max_zensim" in fieldnames
+        ceiling_col = ceiling_column_for(METRIC_COLUMN, fieldnames)
+        has_ceiling_column = ceiling_col is not None
         has_time_column = TIME_COLUMN in fieldnames
         if METRIC_COLUMN not in fieldnames:
             raise ValueError(
@@ -932,7 +933,7 @@ def load_pareto(path):
             if has_time_column else None
         )
         ceil_np = (
-            table["effective_max_zensim"].to_numpy().astype(np.float64)
+            table[ceiling_col].to_numpy().astype(np.float64)
             if has_ceiling_column else None
         )
 
@@ -953,7 +954,8 @@ def load_pareto(path):
         # columns + python lists for strings; we then mirror the
         # Parquet path's downstream steps.
         fieldnames, cols = _read_table_columns(Path(path))
-        has_ceiling_column = "effective_max_zensim" in fieldnames
+        ceiling_col = ceiling_column_for(METRIC_COLUMN, fieldnames)
+        has_ceiling_column = ceiling_col is not None
         has_time_column = TIME_COLUMN in fieldnames
         if METRIC_COLUMN not in fieldnames:
             raise ValueError(
@@ -971,7 +973,7 @@ def load_pareto(path):
             if has_time_column else None
         )
         ceil_np = (
-            np.asarray(cols["effective_max_zensim"], dtype=np.float64)
+            np.asarray(cols[ceiling_col], dtype=np.float64)
             if has_ceiling_column else None
         )
         valid = (
@@ -1486,6 +1488,20 @@ def compute_time_baselines(pareto):
 # Platform calibration uses `median_cell_ms_per_mp` (measured on the
 # training-time CPU over validation rows) — ratio-based, so it is unit-
 # agnostic.
+
+def ceiling_column_for(metric_column: str, fieldnames) -> str | None:
+    """The per-(image, size_class) achievable-ceiling column for the metric
+    the picker trains against (imazen/zenanalyze#51): `effective_max_<metric>`
+    — `effective_max_zensim` for zensim, `effective_max_ssim2` for ssim2, …
+    A `zensim` ceiling is NOT reused for another metric (different units:
+    comparing an ssim2 target against a zensim ceiling would skip the wrong
+    rows), so a non-zensim picker whose sweep only carries
+    `effective_max_zensim` trains uncapped and the UNCAPPED_ZQ_GRID gate
+    says which column to add. Returns None when no usable column exists.
+    """
+    want = f"effective_max_{metric_column}"
+    return want if want in fieldnames else None
+
 
 OBJECTIVES = ("size_optimal", "zensim_strict", "rd_time", "time_budgeted")
 TIME_AWARE_OBJECTIVES = ("rd_time", "time_budgeted")
@@ -3051,12 +3067,12 @@ def safety_check(diag, thresholds, objective: str):
             v.append(
                 f"UNCAPPED_ZQ_GRID: ZQ_TARGETS includes zq={max_target_zq} > "
                 f"{require_ceiling_above_zq} but Pareto TSV has no "
-                f"`effective_max_zensim` column. Trainer can't tell physically-"
+                f"`effective_max_{METRIC_COLUMN}` column. Trainer can't tell physically-"
                 f"unreachable cells apart from sweep gaps; DATA_STARVED_SIZE "
                 f"warnings cannot be diagnosed honestly. Either lower "
                 f"max(ZQ_TARGETS) below {require_ceiling_above_zq + 1} or have "
-                f"the codec sweep harness emit `effective_max_zensim` per "
-                f"(image, size_class). See imazen/zenanalyze#51."
+                f"the codec sweep harness emit `effective_max_{METRIC_COLUMN}` per "
+                f"(image, size_class) — canonical_to_pareto.py does. See imazen/zenanalyze#51."
             )
 
     if diag["worst_case"]:

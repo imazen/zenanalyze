@@ -10,7 +10,9 @@ row per (image × codec × q × knob-tuple) with the zenanalyze features joined 
 by NAME (`feat_variance`, …) next to zensim's positional `feat_0..feat_371`.
 `train_hybrid.py` wants two files instead: a Pareto table keyed by
 `(image_path, size_class, width, height)` with `config_id` / `config_name` /
-`bytes` / `<metric>` / `encode_ms` columns, and a features table with one row
+`bytes` / `<metric>` / `encode_ms` columns plus the per-(image, size_class)
+`effective_max_zensim` / `effective_max_ssim2` ceilings (zenanalyze#51), and a
+features table with one row
 per `(image_path, size_class)`. The 2026-07-03 zenjxl-modular bake did this
 conversion in a scratch script that was never committed (see
 `zentrain/examples/zenjxl_modular_picker_config.py`); this is that step, in
@@ -88,12 +90,29 @@ def load_canonical(paths: list[Path], config_col: str) -> pa.Table:
     return pa.concat_tables(tables)
 
 
+def per_key_max(paths: list[str], sizes: list[str], values: np.ndarray) -> np.ndarray:
+    """`effective_max_<metric>` (imazen/zenanalyze#51): for every row, the
+    max of `values` over all rows sharing its `(image_path, size_class)` —
+    the ceiling the metric physically reaches for that image at that size,
+    a free byproduct of the sweep. NaN where no row of the key is finite."""
+    keys = np.array([f"{p}\t{s}" for p, s in zip(paths, sizes)], dtype=object)
+    _uniq, inv = np.unique(keys, return_inverse=True)
+    v = np.asarray(values, dtype=np.float64)
+    mx = np.full(int(inv.max()) + 1 if len(inv) else 0, -np.inf)
+    np.maximum.at(mx, inv, np.where(np.isfinite(v), v, -np.inf))
+    out = mx[inv]
+    return np.where(np.isfinite(out), out, np.nan)
+
+
 def build_pareto(t: pa.Table) -> pa.Table:
     width = t["width"].to_numpy().astype(np.int64)
     height = t["height"].to_numpy().astype(np.int64)
     sizes = [size_class(int(w), int(h)) for w, h in zip(width, height)]
     cells = t["cell"].to_pylist()
     ids = {c: stable_config_id(c) for c in set(cells)}
+    paths = t["image_path"].to_pylist()
+    zensim = pc.cast(t["score_zensim"], pa.float64()).to_numpy(zero_copy_only=False)
+    ssim2 = pc.cast(t["score_ssim2"], pa.float64()).to_numpy(zero_copy_only=False)
     return pa.table({
         "image_path": t["image_path"],
         "size_class": pa.array(sizes),
@@ -107,6 +126,11 @@ def build_pareto(t: pa.Table) -> pa.Table:
         "encode_ms": pc.cast(t["encode_ms"], pa.float64()),
         "decode_ms": pc.cast(t["decode_ms"], pa.float64()),
         "q": pc.cast(t["q"], pa.float64()),
+        # Per-(image, size_class) achievable ceilings, one per metric the
+        # picker can train against (train_hybrid reads
+        # `effective_max_<METRIC_COLUMN>`; UNCAPPED_ZQ_GRID otherwise).
+        "effective_max_zensim": pa.array(per_key_max(paths, sizes, zensim)),
+        "effective_max_ssim2": pa.array(per_key_max(paths, sizes, ssim2)),
     })
 
 

@@ -546,7 +546,7 @@ selects at session start); see [`SAFETY_PLANE.md`](SAFETY_PLANE.md).
 | [#47](https://github.com/imazen/zenanalyze/issues/47) | expand budget-research corpus | open |
 | [#48](https://github.com/imazen/zenanalyze/issues/48) | `patch_fraction_fast` doesn't saturate vs budget | open |
 | [#49](https://github.com/imazen/zenanalyze/issues/49) | per-feature min-sample floor | landed (`9745949`) |
-| [#51](https://github.com/imazen/zenanalyze/issues/51) | per-(image, size) zensim ceiling | open — PR #52 in flight |
+| [#51](https://github.com/imazen/zenanalyze/issues/51) | per-(image, size) zensim ceiling | trainer + `canonical_to_pareto` emission + `fit_zensim_ceiling.py` + runtime contract docs landed 2026-08-28; per-codec `UnreachableAction` + a shipped ceiling bake are codec-repo work |
 | [#52](https://github.com/imazen/zenanalyze/pull/52) | ceiling-aware ZQ filter + UNCAPPED_ZQ_GRID gate | open |
 | [#53](https://github.com/imazen/zenanalyze/issues/53) | dynamic dispatch tree | partial — PR #54 ships stages 0+1.5 |
 | [#54](https://github.com/imazen/zenanalyze/pull/54) | `analyze_with_dispatch_plan` stages 0+1.5 | open |

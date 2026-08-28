@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-(image, size_class) metric ceilings end to end** (#51).
+  `canonical_to_pareto.py` emits `effective_max_zensim` / `effective_max_ssim2`
+  (max over every `(cell, q)` row of the key — a free byproduct of the sweep);
+  `train_hybrid.load_pareto` reads `effective_max_<METRIC_COLUMN>` via the new
+  `ceiling_column_for` (an ssim2 picker never borrows the zensim ceiling —
+  different units) and `UNCAPPED_ZQ_GRID` names the column it wants.
+  Measured on the canonical zenwebp data
+  (`benchmarks/zensim_ceiling_zenwebp_canonical_2026-08-28.md`): 97 % of 4,497
+  (image, size) pairs cannot reach zensim 94, median ceiling ≈ 90, and 21 % of
+  the default ZQ grid's decision cells are physically unreachable — now skipped
+  up front instead of reported as DATA_STARVED noise. New
+  `zentrain/tools/fit_zensim_ceiling.py` (work item 3, the
+  `PredictedZensimCeiling` idea as a BAKE instead of a new analyzer feature):
+  features → ceiling HistGB teacher + optional MLP student in `bake_picker.py`'s
+  JSON shape, reporting R² / MAE / p90 and the over-prediction rate per safety
+  margin; zenwebp canonical (`benchmarks/zensim_ceiling_fit_zenwebp_2026-08-28.md`):
+  teacher val R² 0.891, MAE 0.91, 6.4 % over by > 2 points, 0.9 % by > 5 — the
+  64×64 student distils poorly (val R² 0.63) and is not shippable as-is. Runtime
+  contract documented: FOR_NEW_CODECS Step 6.5 (`UnreachableAction { Error,
+  ReturnClosest, Lossless }` + ceiling sources) and SAFETY_PLANE
+  (`UnreachableTargetZensim`). Tests: `zentrain/tools/test_train_hybrid_ceilings.py`
+  (5, CI) + a ceiling-emission test in `test_canonical_tools.py`.
 - **zenpredict-viz: bit-exact forward pass, real parity tests, CI, Pages
   workflow, P2 polish** (#79). `forward_with_taps` now mirrors
   `zenpredict::inference` operation for operation (`f32::mul_add` SAXPY in the
