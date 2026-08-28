@@ -35,6 +35,7 @@ zenpixels = { version = "0.2.14", default-features = false }
 | _(default)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | **97** | Numeric drift bounded by the threshold contract; signatures semver-governed |
 | `experimental` | Two still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss`, `XybBquarterChromaLoss`) plus the deprecated `PaletteDensity`. | +3 → 100 | Metric definition or scale may still change; opt in only if you re-validate per patch |
 | `hdr` | Source-direct HDR / wide-gamut / bit-depth signals + the clip-and-separate `highlight_*` descriptors — 16 features, the depth tier (ids 32–39, 46, 47, 212–217). | +16 → **116** | Off by default (SDR hot path skips the tier); definitions may change per patch |
+| `api` | The **producer side** of the `zenanalyze-api` feature contract: `extract_offer` (one pass → a self-describing `OwnedOffer`) and `Analyzer` (this build as a `zenanalyze_api::FeatureProvider`). Enable it in the host/orchestrator that chooses the analyzer version. | — | Adds the `zenanalyze-api` dep; see [the sole-contract rule](#the-feature-contract--zenanalyze-api-is-the-sole-intermediary) |
 
 > **As of the 0.2.x line, `experimental` is narrow.** ~58 features that used to
 > sit behind it (the `AqMap*`, `NoiseFloor*`, `QuantSurvival*`,
@@ -590,6 +591,36 @@ reductions but catch any genuine architecture divergence.
 > coverage tools count each variant separately, so the raw percentage on
 > these files looks ≈30 % on x86_64. Real coverage of executable code paths
 > (counted on the dispatched variant only) is ≥95 % across every module.
+
+## The feature contract — `zenanalyze-api` is the sole intermediary
+
+A product links **many `zenanalyze` versions at once**: each codec pins the version its model
+was trained against, because re-defining a feature silently changes what its numbers mean.
+Cargo links those versions side by side happily — but their types are then distinct, so
+nothing typed in terms of `zenanalyze::feature::AnalysisResults` can cross between two codecs.
+
+**[`zenanalyze-api`](zenanalyze-api/) is the one crate everything agrees on**, and the rule is:
+
+> A codec crate's **library code** depends on `zenanalyze-api` and nothing else from the
+> zenanalyze family. It receives values as an `Offer`, or extracts them through a
+> `&dyn FeatureProvider` the host injects. It never names `zenanalyze::…`.
+
+Direct `zenanalyze` belongs to exactly two roles: the **host/orchestrator** that picks the
+version and runs the pass, and **dev tooling** (`dev/`, `examples/`, `benches/`, sweep and
+training extractors) that isn't in the product graph.
+
+One rule bites silently and is worth repeating here: **depend on the contract by crates.io
+version, never by git rev.** A registry dep and a git dep are different Cargo sources, and two
+git deps at different revs are too — either way you get two `Offer` types that don't
+interconvert. Unreleased changes go in a single workspace-root `[patch.crates-io]`.
+
+This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](src/offer.rs)):
+`extract_offer` bundles one pass as an `OwnedOffer`, and `Analyzer` is this build as a
+`FeatureProvider`.
+
+Full rules, roles, and an audit recipe: **[`docs/sole-contract.md`](docs/sole-contract.md)**.
+Mechanics, negotiation semantics, and compiled examples:
+**[`zenanalyze-api/README.md`](zenanalyze-api/README.md)**.
 
 ## Companion crates in this repo
 

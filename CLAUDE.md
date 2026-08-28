@@ -11,7 +11,46 @@ The zenanalyze-api crate (0.1.x, published on crates.io) is FROZEN — never
 break its public surface; multi-version unification depends on every
 consumer speaking the same zenanalyze-api (see Cargo.toml notes: publish
 zenanalyze-api before zenanalyze when releasing with `api` enabled).
-zenanalyze itself (0.2.x+) may change freely behind it.
+zenanalyze itself (0.2.x+) may change freely behind it. Additive growth of
+zenanalyze-api (new `pub` items, new variants on its `#[non_exhaustive]`
+enums) is allowed and is how the contract becomes sufficient; *breaking* it
+is not.
+
+**USER DIRECTIVE 2026-08-28: `zenanalyze-api` is the SOLE contract AND
+intermediary — "so different zenanalyze versions can compile together."**
+
+> A codec crate's **library code** depends on `zenanalyze-api` and nothing
+> else from the zenanalyze family. It receives values as a
+> `zenanalyze_api::Offer`, or extracts them through a
+> `&dyn zenanalyze_api::FeatureProvider` the host injects. It never names
+> `zenanalyze::…`.
+
+Direct `zenanalyze` is legitimate in two roles only: the **host /
+orchestrator** that chooses the version and runs the pass, and **dev
+tooling** (`dev/` binaries, `examples/`, `benches/`, sweep and training
+extractors) that isn't linked into the product graph.
+
+Three things to get right, in the order they bite:
+
+1. **Depend on the contract by crates.io version, never by git rev.** A
+   registry dep and a git dep are different Cargo sources, and two git deps
+   at *different revs* are different sources too — either way you get two
+   `Offer` types that don't interconvert ("expected `Offer`, found
+   `Offer`"). Unreleased contract changes go in **one** workspace-root
+   `[patch.crates-io]`, which rewrites the registry entry everywhere and
+   keeps unification.
+2. **`Select::Features` for models, `Select::Names` for heuristics.** A
+   compiled model's coefficients were fit against one code version per
+   column, so a drift MUST miss — that's `Features`. Threshold heuristics,
+   classifiers, diagnostics and bulk export use `Names` (bare name, any
+   version), which is what lets them name features without naming a
+   zenanalyze version.
+3. **If a consumer can't migrate, extend the contract — additively — rather
+   than reporting it blocked.** That is what `Select::Names`,
+   `FeatureProvider`, `OwnedCatalog` and `ProviderError` exist for.
+
+Full rules + audit recipe: `docs/sole-contract.md`. Mechanics and compiled
+examples: `zenanalyze-api/README.md`.
 
 ### Rust library surface (semver-governed)
 

@@ -694,12 +694,43 @@ unlocks the documented 2-bake +0.0100 combined gain.
 
 The contract between training and runtime is **ZNPR v3** + the **`schema_hash`
 u64** + the **`feat_cols` list**. The contract between zenanalyze and
-downstream is the **stable `AnalysisFeature` u16 discriminants** + the **0.1.x
-threshold contract** (numeric drift permitted in patches; signatures frozen).
+downstream is **`zenanalyze-api`** — see §0 below.
 
-`zenanalyze` ships under 0.1.x **forever** per `zenanalyze/CLAUDE.md` —
-"There will never be a 0.2.x." Every change must fit within the additive
-contract.
+**Corrected 2026-08-28:** this section previously said `zenanalyze` ships under
+0.1.x "forever" and that "there will never be a 0.2.x". That was retired on
+2026-05-17 (see `CLAUDE.md`, "API stability — 0.2.x policy"); the crate is on
+**0.2.x** and standard 0.x semver applies. The thing that is frozen is
+`zenanalyze-api`, not `zenanalyze`.
+
+---
+
+## 0. `zenanalyze-api` is the sole contract and intermediary
+
+**Owner directive, 2026-08-28:** *"Zenanalyze-api should be the sole contract and
+intermediary so different zenanalyze versions can compile together."*
+
+> A codec crate's **library code** depends on `zenanalyze-api` and nothing else
+> from the zenanalyze family. It receives values as a `zenanalyze_api::Offer`, or
+> extracts them through a `&dyn zenanalyze_api::FeatureProvider` the host injects.
+> It never names `zenanalyze::…`.
+
+Direct `zenanalyze` is legitimate in two roles only: the **host/orchestrator**
+that chooses the version and runs the pass, and **dev tooling** (`dev/`,
+`examples/`, `benches/`, sweep/training extractors) that isn't linked into the
+product graph.
+
+Why: a product links many `zenanalyze` versions at once, each codec pinning the
+version its model was trained against. Those versions' types are distinct, so
+nothing typed in `zenanalyze::feature::*` can cross between two codecs.
+
+The rule that bites silently: **depend on the contract by crates.io version,
+never by git rev.** A registry dep and a git dep are different Cargo sources, and
+two git deps at different revs are too — either way you get two `Offer` types
+that don't interconvert, and the error surfaces far from the cause. Unreleased
+contract changes go in a single workspace-root `[patch.crates-io]`.
+
+Full rules + audit recipe: **`docs/sole-contract.md`**. Mechanics and compiled
+examples: **`zenanalyze-api/README.md`**.
 
 ---
 
@@ -712,13 +743,37 @@ tier-pass implementations (Tier 1/2/3, Palette, Alpha, depth);
 public `analyze_features` / `analyze_features_rgb8` /
 `try_analyze_features_rgb8` entry points.
 
+Also owns (behind the `api` cargo feature) the **producer side** of the
+contract in `src/offer.rs`: `extract_offer` (one pass → a self-describing
+`zenanalyze_api::OwnedOffer`) and `Analyzer` (this build as a
+`zenanalyze_api::FeatureProvider`).
+
 Does **not** own: picker training (zentrain), runtime (zenpredict), or
 meta-picker selection (zenpicker). Feature *semantics* are the contract;
 how a downstream consumer turns features into encoder configs is its
-problem.
+problem. Does **not** appear in any codec's library dependency graph — see
+§0.
 
-API freeze: 0.1.x only. Numeric drift on features permitted; signatures
-frozen.
+Versioning: **0.2.x**, standard 0.x semver (breaking → minor, additive →
+patch); numeric drift on feature values permitted within a minor per the
+threshold contract.
+
+### `zenanalyze-api` (the contract crate, sibling under zenanalyze/)
+Owns: the version-unifying transport types — `NamedFeature` (qualified
+`name@hex8` identity), `Value` / `FeatureResult`, `Offer` / `OwnedOffer`,
+`Provenance`, `Request` / `Select`, `Catalog` / `OwnedCatalog`,
+`FeatureProvider` / `ProviderError`, `FormatError`, the `schema_hash` blend
+gate, and the `zenanalyze-features/1` text form.
+
+Does **not** own: feature definitions, extraction, or any numeric behaviour —
+and takes **no dependencies**, because anything it pulled in would become
+another axis that can force a version split. It is the one crate every layer
+depends on at a single version; that is the whole point.
+
+Versioning: iterating at **0.1.x**, freezing at **1.0**, and never `2.0` (from
+1.0 on, Cargo unifies every 1.x — a 2.0, or staying on 0.x, would split the
+ecosystem). Evolves additively: private fields + `#[non_exhaustive]` on the
+enums and `Provenance` make that possible.
 
 ### `zenpredict` (the runtime crate, sibling under zenanalyze/)
 Owns: ZNPR v3 binary format (parser, header, LayerEntry, Section,

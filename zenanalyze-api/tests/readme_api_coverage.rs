@@ -15,13 +15,19 @@ fn lead_ident(s: &str) -> String {
 }
 
 /// Public-API identifiers in a source file: `pub fn` / `pub const fn` names,
-/// `pub struct` / `pub enum` / `pub mod` names, `pub` field names, and the bare
-/// variant names inside a `pub enum` body. Deliberately simple line parsing — the
-/// contract crate is tiny and frozen, so this stays trivially auditable.
+/// `pub struct` / `pub enum` / `pub mod` / `pub trait` names, `pub` field names,
+/// the bare variant names inside a `pub enum` body, and the **method names inside a
+/// `pub trait` body** (trait items carry no `pub`, so they need their own pass — a
+/// new required method is public surface and must be documented). Deliberately
+/// simple line parsing — the contract crate is tiny, so this stays trivially
+/// auditable.
 fn public_idents(src: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut enum_depth: Option<i32> = None; // brace depth of the current `pub enum` body
-    let mut pending_enum = false; // saw `pub enum X` header, awaiting its `{`
+    // Brace depth of the current `pub enum` / `pub trait` body, and whether we saw the
+    // header and are awaiting its `{`.
+    let mut body_depth: Option<i32> = None;
+    let mut pending_body: Option<Kind> = None;
+    let mut body_kind = Kind::Enum;
     let mut depth: i32 = 0;
     for raw in src.lines() {
         let line = raw.trim();
@@ -36,12 +42,15 @@ fn public_idents(src: &str) -> Vec<String> {
             } else if let Some(r) = rest.strip_prefix("struct ") {
                 Some(lead_ident(r))
             } else if let Some(r) = rest.strip_prefix("enum ") {
-                pending_enum = true;
+                pending_body = Some(Kind::Enum);
+                Some(lead_ident(r))
+            } else if let Some(r) = rest.strip_prefix("trait ") {
+                pending_body = Some(Kind::Trait);
                 Some(lead_ident(r))
             } else if let Some(r) = rest.strip_prefix("mod ") {
                 Some(lead_ident(r))
-            } else if rest.starts_with("use ") || rest.starts_with("trait ") {
-                None // no re-exports / traits today; surface them in the README if added
+            } else if rest.starts_with("use ") {
+                None // no re-exports today; surface them in the README if added
             } else {
                 Some(lead_ident(rest)) // `pub <field>: Type,`
             };
@@ -50,28 +59,49 @@ fn public_idents(src: &str) -> Vec<String> {
             {
                 out.push(id);
             }
-        } else if let Some(ed) = enum_depth
-            && depth >= ed
+        } else if let Some(bd) = body_depth
+            && depth >= bd
             && !doc_or_attr
         {
-            let id = lead_ident(line);
-            if id.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-                out.push(id); // a variant
+            match body_kind {
+                Kind::Enum => {
+                    let id = lead_ident(line);
+                    if id.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                        out.push(id); // a variant
+                    }
+                }
+                Kind::Trait => {
+                    // A trait method's declaration line, e.g. `fn catalog(&self) -> …;`.
+                    if let Some(r) = line.strip_prefix("fn ") {
+                        out.push(lead_ident(r));
+                    }
+                }
             }
         }
 
         let opens = line.matches('{').count() as i32;
         let closes = line.matches('}').count() as i32;
-        if pending_enum && opens > 0 {
-            enum_depth = Some(depth + 1);
-            pending_enum = false;
+        if let Some(kind) = pending_body
+            && opens > 0
+        {
+            body_depth = Some(depth + 1);
+            body_kind = kind;
+            pending_body = None;
         }
         depth += opens - closes;
-        if enum_depth.is_some_and(|ed| depth < ed) {
-            enum_depth = None;
+        if body_depth.is_some_and(|bd| depth < bd) {
+            body_depth = None;
         }
     }
     out
+}
+
+/// Which kind of `pub` item body the parser is inside — the two whose members are public
+/// surface without carrying `pub` themselves.
+#[derive(Clone, Copy)]
+enum Kind {
+    Enum,
+    Trait,
 }
 
 /// Whole-word membership: `ident` occurs in `haystack` flanked by non-identifier

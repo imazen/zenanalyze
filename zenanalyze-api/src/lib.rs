@@ -406,8 +406,24 @@ impl<'a> Provenance<'a> {
 pub enum Select<'a> {
     /// Everything the provider build can produce (resolved provider-side).
     All,
-    /// An explicit list of qualified identities — the model's columns.
+    /// An explicit list of qualified identities — the model's columns. **Version-pinned:**
+    /// a code drift in any wanted feature is a miss, so a compiled model never silently
+    /// eats a re-defined feature. This is the variant a picker/model MUST use.
     Features(&'a [NamedFeature<'a>]),
+    /// Bare feature **names**, matched at *whatever* version the provider/offer carries —
+    /// deliberately version-agnostic.
+    ///
+    /// For consumers whose use of a value is robust to a code-version drift: threshold
+    /// heuristics and content classifiers, diagnostics, and bulk column export. It lets such
+    /// a consumer name features **without** naming a `zenanalyze` version — the reason it
+    /// exists, since [`Features`](Self::Features) would otherwise force a consumer to
+    /// hard-code version hashes it cannot know across builds.
+    ///
+    /// **Never feed a compiled model from `Names`.** A model's coefficients were fit against
+    /// one code version of each column; matching by bare name would silently substitute a
+    /// re-defined feature and corrupt the prediction with no error. Use
+    /// [`Features`](Self::Features) there — that is exactly the miss `Names` gives up.
+    Names(&'a [&'a str]),
 }
 
 /// A consumer's ask — its [`Select`]. Build with [`Request::new`]; private field (read via
@@ -563,25 +579,150 @@ impl<'a> Catalog<'a> {
             .collect()
     }
     /// The distinct feature names one pass over `requests` should extract — the "unionize"
-    /// step. Resolves [`Select::All`] against this catalog; explicit [`Select::Features`]
-    /// use their own names. First-seen order, deduplicated.
+    /// step. Resolves [`Select::All`] against this catalog; explicit [`Select::Features`] /
+    /// [`Select::Names`] use their own names. First-seen order, deduplicated.
     #[must_use]
     pub fn union(&self, requests: &[Request<'a>]) -> Vec<&'a str> {
-        let mut out: Vec<&'a str> = Vec::new();
-        for r in requests {
-            let names: &[NamedFeature<'a>] = match r.select {
-                Select::All => self.available,
-                Select::Features(w) => w,
-            };
-            for nf in names {
-                let name = nf.name();
-                if !out.contains(&name) {
-                    out.push(name);
-                }
-            }
-        }
-        out
+        union_impl(self.available, requests)
     }
+}
+
+// ───────────────────────────── OwnedCatalog ────────────────────────────────
+
+/// The owned twin of [`Catalog`] — owns its qualified names, so a provider whose vocabulary
+/// is only known at runtime (qualified names built by
+/// [`NamedFeature::qualified_for`](NamedFeature::qualified_for)) can still publish one.
+/// [`FeatureProvider::catalog`] returns this. Same queries as `Catalog`; lend borrowed
+/// identities with [`available`](Self::available).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnedCatalog {
+    // `Box<str>` for the same reason as `OwnedFeatureResult`: write-once, so a `String`'s
+    // spare-capacity word is dead weight.
+    available: Vec<Box<str>>,
+}
+
+impl OwnedCatalog {
+    /// Collect a build's qualified `"name@hex8"` identities.
+    #[must_use]
+    pub fn new(qualified_names: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        Self {
+            available: qualified_names
+                .into_iter()
+                .map(|q| q.as_ref().into())
+                .collect(),
+        }
+    }
+    /// The identities this build can extract, lent as borrowed [`NamedFeature`]s (the
+    /// owned→borrowed bridge; zero-alloc).
+    pub fn available(&self) -> impl Iterator<Item = NamedFeature<'_>> + '_ {
+        self.available
+            .iter()
+            .map(|q| NamedFeature::from_qualified(q))
+    }
+    /// How many identities the build offers.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.available.len()
+    }
+    /// Whether the build offers nothing (a provider that cannot extract).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.available.is_empty()
+    }
+    /// Whether the build can produce `want` at exactly its version — exactly [`Catalog::offers`].
+    #[must_use]
+    pub fn offers(&self, want: &NamedFeature<'_>) -> bool {
+        self.available.iter().any(|a| &**a == want.qualified)
+    }
+    /// Whether the build has a feature by `name` (possibly at a different version).
+    #[must_use]
+    pub fn has_name(&self, name: &str) -> bool {
+        self.available().any(|a| a.name() == name)
+    }
+    /// The wanted names this build can't produce at the wanted version — exactly
+    /// [`Catalog::unmet`].
+    #[must_use]
+    pub fn unmet<'w>(&self, wants: &'w [NamedFeature<'_>]) -> Vec<&'w str> {
+        wants
+            .iter()
+            .filter(|w| !self.offers(w))
+            .map(|w| w.name())
+            .collect()
+    }
+    /// The distinct names one pass over `requests` should extract — exactly [`Catalog::union`],
+    /// resolving [`Select::All`] against this catalog.
+    #[must_use]
+    pub fn union<'s>(&'s self, requests: &[Request<'s>]) -> Vec<&'s str> {
+        let available: Vec<NamedFeature<'s>> = self.available().collect();
+        union_impl(&available, requests)
+    }
+}
+
+// ──────────────────────── FeatureProvider / ProviderError ──────────────────
+
+/// Why a [`FeatureProvider`] could not produce an offer. `#[non_exhaustive]`. Implements
+/// `core::error::Error`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProviderError {
+    /// The pixel buffer's length doesn't match `width * height * channels`, or a dimension
+    /// was zero / out of range.
+    BadInput,
+    /// The provider build cannot produce something the [`Request`] asked for — check
+    /// [`OwnedCatalog::unmet`] for which.
+    Unavailable,
+    /// An allocation failed.
+    OutOfMemory,
+}
+
+impl fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::BadInput => "pixel buffer length or dimensions are invalid",
+            Self::Unavailable => "this provider build cannot produce a requested feature",
+            Self::OutOfMemory => "allocation failed",
+        })
+    }
+}
+
+impl core::error::Error for ProviderError {}
+
+/// **The intermediary**: extraction reached through the contract instead of through a
+/// `zenanalyze` type.
+///
+/// A codec that needs feature values but has no [`Offer`] to reuse would otherwise have to
+/// depend on a concrete `zenanalyze` — and that is precisely the version pin that stops two
+/// codecs from linking together. Taking a `&dyn FeatureProvider` instead keeps the codec's
+/// only zenanalyze-family dependency this crate: the **host** picks the `zenanalyze` version,
+/// implements this trait over it (`zenanalyze`'s own impl is behind its `api` feature), and
+/// injects it. Two codecs built against different `zenanalyze` versions can then coexist,
+/// each speaking the one contract.
+///
+/// Object-safe by construction — `&dyn FeatureProvider` is the intended form.
+///
+/// Implementors: honor the [`Request`] exactly. [`Select::Features`] wants those identities at
+/// **that** code version, [`Select::Names`] at any version, [`Select::All`] is everything in
+/// [`catalog`](Self::catalog). Returning an offer that silently drops a want is a contract
+/// violation — either produce it or return [`ProviderError::Unavailable`] (a consumer's
+/// [`satisfies`](Offer::satisfies) check is a reuse decision, not a correctness backstop).
+pub trait FeatureProvider {
+    /// The provider's `zenanalyze` version string — informational, and what it stamps on
+    /// [`Provenance::analyzer_version`].
+    fn analyzer_version(&self) -> &str;
+
+    /// What this provider build can produce. Cold path; building it may allocate.
+    fn catalog(&self) -> OwnedCatalog;
+
+    /// Extract `request` from a tightly-packed 8-bit **sRGB** RGB buffer —
+    /// `rgb.len() == width * height * 3`, no row padding — and bundle it as an
+    /// [`OwnedOffer`] stamped with this provider's [`Provenance`].
+    fn extract_rgb8(
+        &self,
+        rgb: &[u8],
+        width: u32,
+        height: u32,
+        request: &Request<'_>,
+    ) -> Result<OwnedOffer, ProviderError>;
 }
 
 // ──────────────────────────── OwnedOffer / parse ───────────────────────────
@@ -744,6 +885,9 @@ fn satisfies_impl(features: &[FeatureResult<'_>], req: &Request<'_>) -> bool {
         Select::Features(wants) => wants
             .iter()
             .all(|w| features.iter().any(|f| f.feature.qualified == w.qualified)),
+        Select::Names(wants) => wants
+            .iter()
+            .all(|w| features.iter().any(|f| f.feature.name() == *w)),
     }
 }
 
@@ -759,7 +903,47 @@ fn reuse_impl(features: &[FeatureResult<'_>], req: &Request<'_>) -> Option<Vec<f
                     .map(|f| f.float())
             })
             .collect(),
+        Select::Names(wants) => wants
+            .iter()
+            .map(|w| {
+                features
+                    .iter()
+                    .find(|f| f.feature.name() == *w)
+                    .map(|f| f.float())
+            })
+            .collect(),
     }
+}
+
+/// The distinct bare names `requests` asks for, resolving [`Select::All`] against
+/// `available`. Shared by [`Catalog::union`] and [`OwnedCatalog::union`].
+fn union_impl<'s>(available: &[NamedFeature<'s>], requests: &[Request<'s>]) -> Vec<&'s str> {
+    let mut out: Vec<&'s str> = Vec::new();
+    let mut push = |name: &'s str| {
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    };
+    for r in requests {
+        match r.select {
+            Select::All => {
+                for nf in available {
+                    push(nf.name());
+                }
+            }
+            Select::Features(w) => {
+                for nf in w {
+                    push(nf.name());
+                }
+            }
+            Select::Names(w) => {
+                for name in w {
+                    push(name);
+                }
+            }
+        }
+    }
+    out
 }
 
 // ───────────────────────────── internal helpers ────────────────────────────

@@ -15,10 +15,13 @@
 //! analysis result into it, folding `zenanalyze::feature_version_hash` into each
 //! qualified name via [`NamedFeature::fold_hash`](zenanalyze_api::NamedFeature::fold_hash).
 
-use crate::feature::{AnalysisQuery, FeatureValue};
-use crate::versioning::feature_version_hash;
+use crate::feature::{AnalysisFeature, AnalysisQuery, FeatureSet, FeatureValue};
+use crate::versioning::{feature_qualified_names, feature_version_hash, rgb8_srgb_descriptor_hash};
 use crate::{analyze_features_rgb8, analyzer_version, feature_name};
-use zenanalyze_api::{NamedFeature, OwnedFeatureResult, OwnedOffer, Provenance, Value};
+use zenanalyze_api::{
+    FeatureProvider, NamedFeature, OwnedCatalog, OwnedFeatureResult, OwnedOffer, Provenance,
+    ProviderError, Request, Select, Value,
+};
 
 /// Project zenanalyze's native [`FeatureValue`] onto the contract's [`Value`], preserving the
 /// exact type. Exhaustive in-crate — adding a `FeatureValue` variant forces a decision here on
@@ -73,12 +76,119 @@ pub fn extract_offer(
     OwnedOffer::new(cells, provenance)
 }
 
+/// This build's [`zenanalyze_api::FeatureProvider`] — the contract's extraction
+/// **intermediary**, wired to THIS `zenanalyze` version.
+///
+/// A codec that holds only `&dyn FeatureProvider` can run its own analysis pass without
+/// naming a single `zenanalyze` type, so its one zenanalyze-family dependency stays
+/// `zenanalyze-api`. The host picks the version by choosing which `Analyzer` it constructs;
+/// two codecs built against different `zenanalyze` versions coexist because neither one's
+/// signatures mention either version.
+///
+/// ```no_run
+/// # #[cfg(feature = "api")] {
+/// use zenanalyze::Analyzer;
+/// use zenanalyze_api::{FeatureProvider, Request, Select};
+///
+/// let provider: &dyn FeatureProvider = &Analyzer::new();
+/// let wants = ["variance", "edge_density"];
+/// let offer = provider
+///     .extract_rgb8(&[0u8; 8 * 8 * 3], 8, 8, &Request::new(Select::Names(&wants)))
+///     .unwrap();
+/// assert!(offer.get("variance").is_some());
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Analyzer;
+
+impl Analyzer {
+    /// The provider for this build. Stateless — the vocabulary is a build constant.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+/// Resolve one bare feature name to a feature this build can actually extract.
+/// [`ProviderError::Unavailable`] rather than a silent drop: the contract requires a
+/// provider to produce every want or say it can't.
+fn supported_feature(name: &str) -> Result<AnalysisFeature, ProviderError> {
+    let f = AnalysisFeature::from_name(name).ok_or(ProviderError::Unavailable)?;
+    if FeatureSet::SUPPORTED.contains(f) {
+        Ok(f)
+    } else {
+        Err(ProviderError::Unavailable)
+    }
+}
+
+impl FeatureProvider for Analyzer {
+    fn analyzer_version(&self) -> &str {
+        analyzer_version()
+    }
+
+    fn catalog(&self) -> OwnedCatalog {
+        OwnedCatalog::new(feature_qualified_names().into_iter().map(|(_, q)| q))
+    }
+
+    fn extract_rgb8(
+        &self,
+        rgb: &[u8],
+        width: u32,
+        height: u32,
+        request: &Request<'_>,
+    ) -> Result<OwnedOffer, ProviderError> {
+        // Resolve the ask to a FeatureSet BEFORE touching pixels — an unmeetable want is
+        // `Unavailable`, never a pass whose offer quietly lacks a column.
+        let set = match request.select() {
+            Select::All => FeatureSet::SUPPORTED,
+            Select::Features(wants) => {
+                let mut set = FeatureSet::new();
+                for want in wants {
+                    let f = supported_feature(want.name())?;
+                    // A version-pinned want must match THIS build's code version exactly.
+                    let full = feature_version_hash(f).ok_or(ProviderError::Unavailable)?;
+                    if NamedFeature::fold_hash(full) != want.version_hash() {
+                        return Err(ProviderError::Unavailable);
+                    }
+                    set = set.with(f);
+                }
+                set
+            }
+            Select::Names(names) => {
+                let mut set = FeatureSet::new();
+                for name in names {
+                    set = set.with(supported_feature(name)?);
+                }
+                set
+            }
+            // `Select` is `#[non_exhaustive]`: a selector added to the contract after this
+            // build can't be honored, and guessing would violate "produce it or say so".
+            _ => return Err(ProviderError::Unavailable),
+        };
+
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|px| px.checked_mul(3))
+            .ok_or(ProviderError::BadInput)?;
+        if width == 0 || height == 0 || rgb.len() != expected {
+            return Err(ProviderError::BadInput);
+        }
+
+        let query = AnalysisQuery::new(set);
+        Ok(extract_offer(
+            rgb,
+            width,
+            height,
+            &query,
+            rgb8_srgb_descriptor_hash(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::feature::{AnalysisFeature, FeatureSet};
-    use crate::versioning::rgb8_srgb_descriptor_hash;
-    use zenanalyze_api::{NamedFeature, Offer, OwnedFeatureResult, Request, Select, Value};
+    use zenanalyze_api::{Offer, Value};
 
     fn img(w: u32, h: u32) -> Vec<u8> {
         (0..w * h * 3).map(|i| (i % 251) as u8).collect()
@@ -132,6 +242,74 @@ mod tests {
                 .reuse_for(&Request::new(Select::Features(&missing)))
                 .is_none()
         );
+    }
+
+    /// The `FeatureProvider` intermediary: a consumer holding only `&dyn FeatureProvider`
+    /// extracts and negotiates without naming a `zenanalyze` type.
+    #[test]
+    fn analyzer_serves_the_dyn_provider_contract() {
+        let (w, h) = (32u32, 32u32);
+        let provider: &dyn FeatureProvider = &Analyzer::new();
+        assert_eq!(provider.analyzer_version(), analyzer_version());
+
+        let catalog = provider.catalog();
+        assert!(!catalog.is_empty(), "this build must offer some features");
+        assert!(catalog.has_name("variance"));
+
+        // Version-agnostic ask (a threshold heuristic) — resolves and reuses.
+        let names = ["variance", "edge_density"];
+        let by_name = Request::new(Select::Names(&names));
+        let offer = provider
+            .extract_rgb8(&img(w, h), w, h, &by_name)
+            .expect("supported names extract");
+        assert_eq!(offer.provenance().analyzer_version(), analyzer_version());
+        assert_eq!(offer.reuse_for(&by_name).map(|v| v.len()), Some(2));
+
+        // Version-pinned ask built from THIS build's catalog — reuses too.
+        let pinned: Vec<_> = catalog
+            .available()
+            .filter(|n| n.name() == "variance")
+            .collect();
+        assert_eq!(pinned.len(), 1);
+        let pinned_req = Request::new(Select::Features(&pinned));
+        let pinned_offer = provider
+            .extract_rgb8(&img(w, h), w, h, &pinned_req)
+            .expect("our own catalog entry must be extractable");
+        assert!(pinned_offer.satisfies(&pinned_req));
+    }
+
+    /// An unmeetable ask is `Unavailable` and a malformed buffer is `BadInput` — never an
+    /// offer that quietly lacks a requested column.
+    #[test]
+    fn analyzer_reports_unavailable_and_bad_input() {
+        let (w, h) = (16u32, 16u32);
+        let provider = Analyzer::new();
+
+        let unknown = ["definitely_not_a_feature"];
+        assert_eq!(
+            provider
+                .extract_rgb8(&img(w, h), w, h, &Request::new(Select::Names(&unknown)))
+                .unwrap_err(),
+            ProviderError::Unavailable
+        );
+
+        // Right name, wrong code version ⇒ a pinned want this build cannot honor.
+        let drift = [NamedFeature::parse("variance@ffffffff").unwrap()];
+        assert_eq!(
+            provider
+                .extract_rgb8(&img(w, h), w, h, &Request::new(Select::Features(&drift)))
+                .unwrap_err(),
+            ProviderError::Unavailable
+        );
+
+        let names = ["variance"];
+        let req = Request::new(Select::Names(&names));
+        for (buf, bw, bh) in [(img(w, h), w, h + 1), (img(w, h), 0, h)] {
+            assert_eq!(
+                provider.extract_rgb8(&buf, bw, bh, &req).unwrap_err(),
+                ProviderError::BadInput
+            );
+        }
     }
 
     /// The native value survives into the offer (a `u32`/`bool` feature isn't flattened to

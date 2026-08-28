@@ -11,8 +11,14 @@ version and it *unifies* across the whole build.
 
 The flow it serves: an orchestrator collects each codec's `Request`, **unionizes** them,
 runs **one** analysis pass, and hands every codec the resulting `Offer`; each codec checks
-`offer.satisfies(&its_request)` and reuses, or runs its own pass.
+`offer.satisfies(&its_request)` and reuses, or runs its own pass — the latter through a
+`FeatureProvider` the host injects, so *even the fallback* stays version-free.
 `no_std + alloc`, **no dependencies**, `forbid(unsafe_code)`.
+
+**The rule this crate exists to enforce:** a codec crate's library code names
+`zenanalyze-api` and nothing else from the zenanalyze family. See
+[Compatibility rules](#compatibility-rules) — including the dependency-source rule, which
+is the one that silently bites.
 
 ## Quick start
 
@@ -89,6 +95,73 @@ match offer.get(want.name()) {
     Some(_) => { /* present, but a code-version drift */ }
 }
 ```
+
+### Version-pinned (`Features`) vs version-agnostic (`Names`)
+
+`Select::Features` matches the **whole qualified name**, so a code drift in any column is a
+miss. That is what a compiled model needs: its coefficients were fit against one code
+version of each column, and silently eating a re-defined feature would corrupt the
+prediction with no error.
+
+`Select::Names` matches the **bare name at whatever version is on offer**. It exists for the
+consumers a drift doesn't invalidate — threshold heuristics and content classifiers,
+diagnostics, bulk column export — and, crucially, it lets those consumers name features
+*without naming a `zenanalyze` version*. Pinning would force them to hard-code hashes they
+can't know across builds, which is exactly the pressure that pushes a crate back onto a
+direct `zenanalyze` dependency.
+
+```rust
+use zenanalyze_api::{NamedFeature, FeatureResult, Offer, Provenance, Request, Select};
+
+let feats = [FeatureResult::new(NamedFeature::parse("variance@11111111").unwrap(), 0.5)];
+let offer = Offer::new(&feats, Provenance::new("0.2.7"));
+
+// Pinned to a version the offer doesn't carry ⇒ miss (a model must re-run).
+let pinned = [NamedFeature::parse("variance@ffffffff").unwrap()];
+assert!(!offer.satisfies(&Request::new(Select::Features(&pinned))));
+
+// By bare name ⇒ reuses across the drift (a threshold heuristic is fine with that).
+let names = ["variance"];
+assert_eq!(offer.reuse_for(&Request::new(Select::Names(&names))), Some(vec![0.5]));
+```
+
+**Never feed a compiled model from `Names`** — that miss is the safety property you'd be
+giving up.
+
+## The intermediary — `FeatureProvider`
+
+A codec with no `Offer` to reuse still has to get values from somewhere, and reaching for
+`zenanalyze::analyze_features_rgb8` at that moment is what re-introduces the version pin the
+rest of this crate removes. `FeatureProvider` is the escape: extraction expressed as a
+contract trait, so the **host** picks the `zenanalyze` version, implements the trait over it,
+and injects `&dyn FeatureProvider`. (`zenanalyze` ships its own impl behind its `api`
+feature.) The codec's only zenanalyze-family dependency stays this crate.
+
+```rust
+use zenanalyze_api::{FeatureProvider, Request, Select};
+
+/// A codec's picker: no `zenanalyze` type anywhere in the signature or the body.
+fn pick(offer: Option<&zenanalyze_api::Offer<'_>>,
+        provider: Option<&dyn FeatureProvider>,
+        rgb: &[u8], w: u32, h: u32) -> Option<Vec<f32>> {
+    const WANTED: [&str; 2] = ["variance", "edge_density"];
+    let req = Request::new(Select::Names(&WANTED));
+    if let Some(values) = offer.and_then(|o| o.reuse_for(&req)) {
+        return Some(values);          // the shared pass covered us
+    }
+    let owned = provider?.extract_rgb8(rgb, w, h, &req).ok()?;  // our own pass, version-free
+    owned.reuse_for(&req)
+}
+```
+
+`catalog()` reports what a provider build can produce as an `OwnedCatalog` — the owned twin
+of `Catalog`, for a provider whose qualified names are only known at runtime. Extraction
+failures are a `ProviderError`: `BadInput` (buffer length / dimensions), `Unavailable` (this
+build can't produce a wanted identity — `OwnedCatalog::unmet` says which), `OutOfMemory`.
+
+An implementor must honor the `Request` exactly. Returning an offer that silently drops a
+want is a contract violation: `satisfies` is a *reuse* decision on the consumer side, not a
+correctness backstop.
 
 ## Native values, canonical f32
 
@@ -226,13 +299,33 @@ miss), `satisfies(request) -> bool`, `reuse_for(request) -> Option<Vec<f32>>`, `
 
 ### `enum Select<'a>` `#[non_exhaustive]` / `struct Request<'a>`
 
-`Select` is `All` or `Features(&[NamedFeature])`. `Request::new(select)`, `select() -> Select`.
+`Select` is `All`, `Features(&[NamedFeature])` (version-pinned — for models), or
+`Names(&[&str])` (version-agnostic by bare name — for threshold heuristics, diagnostics,
+export). `Request::new(select)`, `select() -> Select`.
 
 ### `struct Catalog<'a>`
 
 What a build can produce: `Catalog::new(available)`, `available() -> &[NamedFeature]`,
 `offers(want) -> bool`, `has_name(name) -> bool`, `unmet(wants) -> Vec<&str>`, and
 `union(requests) -> Vec<&str>` (the "unionize" step, resolving `Select::All`).
+
+### `struct OwnedCatalog`
+
+The owned twin of `Catalog`, for a provider whose vocabulary is built at runtime.
+`OwnedCatalog::new(qualified_names)`, `available() -> impl Iterator<Item = NamedFeature>`
+(the owned→borrowed bridge), `len()`, `is_empty()`, plus the same `offers` / `has_name` /
+`unmet` / `union` queries.
+
+### `trait FeatureProvider`
+
+The extraction intermediary — object-safe, used as `&dyn FeatureProvider`.
+`analyzer_version() -> &str`, `catalog() -> OwnedCatalog`, and
+`extract_rgb8(rgb, width, height, request) -> Result<OwnedOffer, ProviderError>` over a
+tightly-packed 8-bit sRGB buffer (`rgb.len() == width * height * 3`).
+
+### `enum ProviderError` `#[non_exhaustive]`
+
+`BadInput` / `Unavailable` / `OutOfMemory`; implements `core::error::Error`.
 
 ### `struct OwnedOffer`
 
@@ -244,6 +337,70 @@ the SAME surface over owned cells: `provenance()`, `features() -> &[OwnedFeature
 ### `enum FormatError` `#[non_exhaustive]`
 
 `UnknownFormat` / `MissingHeader` / `BadLine`; implements `core::error::Error`.
+
+## Compatibility rules
+
+These are what make "many `zenanalyze` versions in one build" actually work. All four are
+load-bearing; breaking any one of them re-splits the ecosystem.
+
+### 1. One dependency source — a version from crates.io, never a git rev
+
+Cargo unifies two dependencies only when they resolve to the **same source**. A registry
+dependency and a git dependency on the same crate are two different packages, and two git
+dependencies pinned to *different revs* are also two different packages. Either way you get
+two `zenanalyze_api::Offer` types that don't interconvert, and the error surfaces far from
+the cause ("expected `Offer`, found `Offer`").
+
+So every consumer declares:
+
+```toml
+zenanalyze-api = "0.1.0"     # a crates.io version — the ONLY correct form
+```
+
+Never `{ git = "…", rev = "…" }` in a consumer manifest. When you need an unreleased change,
+override it in **one** place — a `[patch.crates-io]` at the workspace root — which rewrites
+the registry entry everywhere and *keeps* unification:
+
+```toml
+[patch.crates-io]
+zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
+```
+
+Drop the patch once the version is published.
+
+### 2. Sole contract — a codec's library code names only this crate
+
+Production/library code in a codec crate depends on `zenanalyze-api` and nothing else from
+the zenanalyze family. It receives an `Offer` or a `&dyn FeatureProvider`; it never names
+`zenanalyze::…`.
+
+A direct `zenanalyze` dependency is legitimate in exactly two roles:
+
+- the **host/orchestrator** that chooses the version, runs the pass, and hands out the
+  `Offer` (or implements `FeatureProvider`);
+- **dev tooling** — `dev/` binaries, `examples/`, `benches/`, training/sweep extractors.
+  These are not linked into the product graph, so their pin can't collide with anyone's.
+
+The failure this prevents is concrete: a codec that named `zenanalyze` types directly while
+pinning an older published version stopped compiling the moment a feature was renamed
+upstream — the crate could not be built with its analyzer enabled at all.
+
+### 3. No zenanalyze types cross this boundary
+
+This crate carries transport only — names, values, a reuse key. It must never re-export or
+mirror a `zenanalyze` type, and it must never grow a dependency: anything it pulls in becomes
+another axis that can force a version split.
+
+### 4. The feature-vector layout is versioned by the identity, not by position
+
+There is no global "feature vector layout" to keep in sync. A column is identified by its
+qualified `name@hex8`, and a value vector is built in **request order** by `reuse_for`, so a
+consumer's layout is defined by its own `Request`. Two consequences:
+
+- A feature whose *code* changes gets a new qualified name, so a model pinned with
+  `Select::Features` misses rather than silently reading drifted values.
+- Across *stored* offers (different images/configs), `schema_hash` is the blend gate —
+  equal hash ⇒ identical columns under identical conditions ⇒ safe to stack.
 
 ## Version policy — iterating at `0.1.x`, freezing at `1.0` (then never `2.0`)
 

@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`zenanalyze-api` is the sole contract and intermediary** (owner directive
+  2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a
+  `zenanalyze_api::FeatureProvider` — so a codec can run its own analysis pass
+  through the contract instead of naming a `zenanalyze` type, and a host can
+  pick the version by choosing which `Analyzer` it injects. Exported as
+  `zenanalyze::Analyzer` behind the `api` feature. The contract crate grew the
+  surface this needs (`FeatureProvider`, `ProviderError`, `OwnedCatalog`,
+  `Select::Names`) — see `zenanalyze-api/CHANGELOG.md`.
+- CI now clippies `zenanalyze-api --all-targets -D warnings` and runs
+  `cargo test --features api,hdr --doc`, so the contract crate's lints and the
+  `Analyzer` doctest can't rot.
+
+### Documentation
+
+- `docs/sole-contract.md` — the rule of record: which crates may depend on
+  `zenanalyze` directly (host/orchestrator + dev tooling only), why version skew
+  breaks otherwise, the four compatibility rules, `Features`-vs-`Names`
+  guidance, and an audit recipe. Summarised in `README.md`, `everything.md` §0,
+  and `CLAUDE.md`.
+- **Correction:** `everything.md` claimed `zenanalyze` ships under 0.1.x
+  "forever" and that "there will never be a 0.2.x". That was retired on
+  2026-05-17 and the crate is on 0.2.x; the frozen thing is `zenanalyze-api`.
+  Fixed in place.
+
 - **Per-(image, size_class) metric ceilings end to end** (#51).
   `canonical_to_pareto.py` emits `effective_max_zensim` / `effective_max_ssim2`
   (max over every `(cell, q)` row of the key — a free byproduct of the sweep);

@@ -72,6 +72,8 @@ jobs:
         run: |
           cargo clippy --features "api,hdr" --all-targets -- -D warnings
           cargo test --features "api,hdr" --lib
+          cargo test --features "api,hdr" --doc
+          cargo clippy -p zenanalyze-api --all-targets -- -D warnings
           cargo test -p zenanalyze-api
       - name: Build zenpicker
         run: cargo build -p zenpicker

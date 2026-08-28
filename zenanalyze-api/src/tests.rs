@@ -329,3 +329,182 @@ fn format_error_is_an_error() {
     let e: &dyn core::error::Error = &FormatError::BadLine;
     assert_eq!(alloc::format!("{e}"), "a malformed line");
 }
+
+// ─────────────────── Select::Names — version-agnostic matching ────────────────────
+
+/// `Names` matches by bare name at whatever version the offer carries — the point of the
+/// variant. The same want as a version-pinned `Features` MISSES on a code drift.
+#[test]
+fn names_select_matches_across_a_code_drift_where_features_misses() {
+    let feats = [
+        FeatureResult::new(nf("variance@11111111"), 0.5f32),
+        FeatureResult::new(nf("edge_density@22222222"), 12.0f32),
+    ];
+    let offer = Offer::new(&feats, Provenance::new("0.2.7"));
+
+    // Wanted at a DIFFERENT code version than the offer carries.
+    let pinned = [nf("variance@ffffffff"), nf("edge_density@eeeeeeee")];
+    let pinned_req = Request::new(Select::Features(&pinned));
+    assert!(
+        !offer.satisfies(&pinned_req),
+        "a drift must miss when pinned"
+    );
+    assert!(offer.reuse_for(&pinned_req).is_none());
+
+    // The same two features by bare name reuse regardless of version.
+    let by_name = ["variance", "edge_density"];
+    let name_req = Request::new(Select::Names(&by_name));
+    assert!(offer.satisfies(&name_req));
+    assert_eq!(offer.reuse_for(&name_req), Some(alloc::vec![0.5, 12.0]));
+
+    // Order follows the request, and an absent name is still a miss (never a silent zero).
+    let reordered = ["edge_density", "variance"];
+    assert_eq!(
+        offer.reuse_for(&Request::new(Select::Names(&reordered))),
+        Some(alloc::vec![12.0, 0.5])
+    );
+    let absent = ["variance", "noise_floor_y"];
+    assert!(
+        offer
+            .reuse_for(&Request::new(Select::Names(&absent)))
+            .is_none()
+    );
+}
+
+/// The owned twin negotiates `Names` identically, and `Catalog::union` resolves it.
+#[test]
+fn names_select_works_on_owned_offers_and_in_union() {
+    let owned = OwnedOffer::new(
+        alloc::vec![
+            OwnedFeatureResult::new("variance@11111111", 0.5f32),
+            OwnedFeatureResult::new("pixel_count@33333333", 4096u32),
+        ],
+        Provenance::new("0.2.7"),
+    );
+    let wants = ["pixel_count"];
+    let req = Request::new(Select::Names(&wants));
+    assert!(owned.satisfies(&req));
+    assert_eq!(owned.reuse_for(&req), Some(alloc::vec![4096.0]));
+
+    let available = [nf("variance@11111111"), nf("pixel_count@33333333")];
+    let cat = Catalog::new(&available);
+    let pinned = [nf("variance@11111111")];
+    assert_eq!(
+        cat.union(&[
+            Request::new(Select::Names(&wants)),
+            Request::new(Select::Features(&pinned)),
+        ]),
+        alloc::vec!["pixel_count", "variance"]
+    );
+}
+
+// ───────────────────────────── OwnedCatalog ────────────────────────────────
+
+/// The owned catalog answers exactly the borrowed one's queries over runtime-built names.
+#[test]
+fn owned_catalog_matches_borrowed_catalog() {
+    let qualified = ["variance@11111111", "edge_density@22222222"];
+    let owned = OwnedCatalog::new(qualified);
+    let borrowed_names = [nf("variance@11111111"), nf("edge_density@22222222")];
+    let borrowed = Catalog::new(&borrowed_names);
+
+    assert_eq!(owned.len(), 2);
+    assert!(!owned.is_empty());
+    assert!(OwnedCatalog::new(core::iter::empty::<&str>()).is_empty());
+    assert_eq!(
+        owned.available().map(|n| n.name()).collect::<Vec<_>>(),
+        alloc::vec!["variance", "edge_density"]
+    );
+
+    for want in [nf("variance@11111111"), nf("variance@ffffffff")] {
+        assert_eq!(owned.offers(&want), borrowed.offers(&want));
+    }
+    assert!(owned.has_name("variance"));
+    assert!(!owned.has_name("peak_luminance_nits"));
+
+    let wants = [nf("variance@ffffffff"), nf("edge_density@22222222")];
+    assert_eq!(owned.unmet(&wants), borrowed.unmet(&wants));
+
+    let reqs = [Request::new(Select::All)];
+    assert_eq!(owned.union(&reqs), borrowed.union(&reqs));
+}
+
+// ──────────────────────────── FeatureProvider ──────────────────────────────
+
+/// A stand-in provider — the shape a `zenanalyze` version's impl takes: it owns the
+/// vocabulary (qualified names carrying ITS code versions) and answers through the contract.
+struct FakeProvider;
+
+impl FeatureProvider for FakeProvider {
+    fn analyzer_version(&self) -> &str {
+        "0.2.7"
+    }
+    fn catalog(&self) -> OwnedCatalog {
+        OwnedCatalog::new(["variance@11111111", "edge_density@22222222"])
+    }
+    fn extract_rgb8(
+        &self,
+        rgb: &[u8],
+        width: u32,
+        height: u32,
+        request: &Request<'_>,
+    ) -> Result<OwnedOffer, ProviderError> {
+        if rgb.len() != (width as usize) * (height as usize) * 3 {
+            return Err(ProviderError::BadInput);
+        }
+        let catalog = self.catalog();
+        if let Select::Features(wants) = request.select()
+            && !catalog.unmet(wants).is_empty()
+        {
+            return Err(ProviderError::Unavailable);
+        }
+        Ok(OwnedOffer::new(
+            alloc::vec![
+                OwnedFeatureResult::new("variance@11111111", 0.5f32),
+                OwnedFeatureResult::new("edge_density@22222222", 12.0f32),
+            ],
+            Provenance::new(self.analyzer_version()),
+        ))
+    }
+}
+
+/// A consumer holding only `&dyn FeatureProvider` extracts and negotiates without ever
+/// naming a `zenanalyze` type — the whole point of the intermediary.
+#[test]
+fn dyn_provider_extracts_and_negotiates() {
+    let provider: &dyn FeatureProvider = &FakeProvider;
+    assert_eq!(provider.analyzer_version(), "0.2.7");
+    assert_eq!(provider.catalog().len(), 2);
+
+    let wants = ["variance"];
+    let req = Request::new(Select::Names(&wants));
+    let offer = provider
+        .extract_rgb8(&[0u8; 4 * 4 * 3], 4, 4, &req)
+        .expect("a well-formed buffer extracts");
+    assert_eq!(offer.provenance().analyzer_version(), "0.2.7");
+    assert_eq!(offer.reuse_for(&req), Some(alloc::vec![0.5]));
+
+    // A short buffer is BadInput; an identity this build can't produce is Unavailable.
+    assert_eq!(
+        provider.extract_rgb8(&[0u8; 3], 4, 4, &req).unwrap_err(),
+        ProviderError::BadInput
+    );
+    let impossible = [nf("variance@ffffffff")];
+    assert_eq!(
+        provider
+            .extract_rgb8(
+                &[0u8; 4 * 4 * 3],
+                4,
+                4,
+                &Request::new(Select::Features(&impossible))
+            )
+            .unwrap_err(),
+        ProviderError::Unavailable
+    );
+}
+
+#[test]
+fn provider_error_is_an_error() {
+    let e: &dyn core::error::Error = &ProviderError::OutOfMemory;
+    assert_eq!(alloc::format!("{e}"), "allocation failed");
+}

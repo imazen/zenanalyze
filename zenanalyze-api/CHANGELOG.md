@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Added
+- `Select::Names(&[&str])` — version-**agnostic** selection by bare feature name, next to the
+  version-pinned `Select::Features`. Threshold heuristics, content classifiers, diagnostics
+  and bulk export can now name features without naming a `zenanalyze` version — the pressure
+  that previously pushed such consumers onto a direct `zenanalyze` dependency. Models must
+  keep using `Features`: the code-drift miss is the safety property `Names` gives up.
+- `FeatureProvider` — the extraction **intermediary**, object-safe (`&dyn FeatureProvider`):
+  `analyzer_version()`, `catalog() -> OwnedCatalog`,
+  `extract_rgb8(rgb, w, h, request) -> Result<OwnedOffer, ProviderError>`. A codec with no
+  `Offer` to reuse can now run its own pass without naming a `zenanalyze` type; the host picks
+  the version and injects the impl (`zenanalyze` ships one behind its `api` feature).
+- `ProviderError` (`BadInput` / `Unavailable` / `OutOfMemory`, `#[non_exhaustive]`,
+  `core::error::Error`).
+- `OwnedCatalog` — the owned twin of `Catalog`, for a provider whose qualified names are only
+  known at runtime: `new`, `available()` (lends borrowed `NamedFeature`s), `len`, `is_empty`,
+  and the same `offers` / `has_name` / `unmet` / `union` queries.
+
+### Documentation
+- README gained a **Compatibility rules** section — the four rules that make a multi-version
+  build work: one dependency source (a crates.io *version*, never a git rev; override with a
+  single workspace-root `[patch.crates-io]`), sole contract (a codec's library code names only
+  this crate; direct `zenanalyze` belongs to the host and to dev tooling), no zenanalyze types
+  across the boundary, and identity-versioned feature layout.
+- The README coverage tripwire now parses `pub trait` bodies, so a new trait method is
+  required to be documented like any other public item.
+
 ## [0.1.0] - 2026-06-23
 
 First release — the version-unifying feature contract for the zenanalyze picker tree.
