@@ -19,9 +19,20 @@ dataset (`~/tmp/canonical/zenwebp_lossy/{train,validate,test}.parquet` →
   point: the ceiling is content-dependent at every size here, not only tiny.)
 - Against the default `ZQ_TARGETS` grid (0..70 step 5, 70..100 step 2 — 27
   targets), **28,269 of 134,910 (image, size, zq) decision cells (21.0 %) are
-  physically unreachable**. With the ceiling column present the trainer skips
-  them up front (`build_dataset`, `ceilings=`); without it they were the
-  `DATA_STARVED_SIZE` / `UNCAPPED_ZQ_GRID` noise every canonical bake reported.
+  physically unreachable**. Those rows never trained (a target above the
+  ceiling is, by construction, one no config reaches, so `build_dataset`
+  dropped them as "nothing reached"); what the column changes is the
+  DIAGNOSIS. Verified by re-training the #56 rd_time bake on the regenerated
+  Pareto: identical 91,413 decision rows and val mean overhead 4.609 % both
+  ways, but `UNCAPPED_ZQ_GRID` no longer fires (`sweep_ceilings.n_with_ceiling
+  = 4497`) and `DATA_STARVED_SIZE` can tell a sweep gap from the ceiling tail.
+- The 30 `DATA_STARVED_SIZE` cells that remain are every `tiny/zq*` cell:
+  `train_hybrid` drops 636 / 4,497 keys with residual NaN in KEEP features
+  (tiny images skip the percentile features, zenanalyze#49; the canonical
+  features TSV has no tiled re-extraction to fill them), which removes all 414
+  tiny renditions from this bench. That is a features-pipeline gap, not a
+  ceiling problem — worth fixing before any tiny-size conclusion is drawn
+  from the canonical bench.
 - `effective_max_ssim2` median: tiny 52.2, small 86.2, medium 87.7 — the ssim2
   ceiling collapses on tiny images far harder than zensim's, which is why a
   picker trained against ssim2 must read `effective_max_ssim2`, never the

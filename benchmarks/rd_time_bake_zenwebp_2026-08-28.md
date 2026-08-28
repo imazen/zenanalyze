@@ -67,3 +67,13 @@ categorical `mode` axis, no scalar heads, no codec runtime schema); it is not a
 shipping zenwebp picker. The point here is the time head's accuracy and the
 bake-side contract (`hybrid_heads_layout` kinds, `median_cell_ms_per_mp`,
 `encode_ms_p99`), which transfer unchanged to any codec config.
+
+## Addendum — ceiling-aware Pareto (same day)
+
+Re-trained with the regenerated Pareto carrying `effective_max_zensim`
+(`--out-suffix _rd_time_ceil_seed_cafe`): identical decision rows (91,413),
+identical bytes head (val mean overhead 4.609 %), identical time head
+(R² median 0.993, |Δms|/ms p50 6.6 % / p99 38.9 %); `UNCAPPED_ZQ_GRID` no
+longer fires. See `zensim_ceiling_zenwebp_canonical_2026-08-28.md` for why
+the rows do not change and for the tiny-image NaN drop (636 / 4,497 keys)
+that keeps every `tiny/zq*` cell DATA_STARVED on this bench.

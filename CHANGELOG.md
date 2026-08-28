@@ -18,8 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Measured on the canonical zenwebp data
   (`benchmarks/zensim_ceiling_zenwebp_canonical_2026-08-28.md`): 97 % of 4,497
   (image, size) pairs cannot reach zensim 94, median ceiling ≈ 90, and 21 % of
-  the default ZQ grid's decision cells are physically unreachable — now skipped
-  up front instead of reported as DATA_STARVED noise. New
+  the default ZQ grid's decision cells are physically unreachable — those rows
+  never trained (nothing reaches them), but the trainer now knows why:
+  re-training the rd_time bake on the regenerated Pareto gives an identical
+  bake with `UNCAPPED_ZQ_GRID` gone. The 30 remaining DATA_STARVED_SIZE cells are
+  all `tiny`: 636 / 4,497 keys are dropped for residual NaN features (#49
+  percentile skips, no tiled fill in the canonical features TSV). New
   `zentrain/tools/fit_zensim_ceiling.py` (work item 3, the
   `PredictedZensimCeiling` idea as a BAKE instead of a new analyzer feature):
   features → ceiling HistGB teacher + optional MLP student in `bake_picker.py`'s
