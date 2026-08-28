@@ -30,8 +30,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regenerated with the new sections; 7 new tests in
   `zentrain/tools/test_feature_inventory.py` (CI `zentrain-pytests`).
 
+- **Canonical dataset → `train_hybrid` shape, in tree** (#68, #85 groundwork).
+  `zentrain/tools/canonical_to_pareto.py` turns the canonical 2026-06-27 per-codec
+  parquets into the PARETO parquet + FEATURES TSV `train_hybrid.py` consumes
+  (`config_name` = `cell`, `size_class` re-derived from `width × height` — the
+  canonical column is `large` on every row — named `feat_*` only, one features row
+  per image, verified constant). The 2026-07-03 zenjxl-modular bake did this in
+  a scratch script that was never committed. `examples/canonical_picker_config.py`
+  is the matching categorical-cell config, one module for every codec
+  (`ZENCANONICAL_CODEC`, `ZENCANONICAL_DIR`).
+- **Per-family effort-cap degradation + cost tables** (#85, the "per-family
+  degradation" half). `zentrain/tools/fit_family_degradation.py` measures, from a
+  canonical dataset, `δ(cap) = ln bytes_at(cap) − ln bytes_at(reference effort)`
+  per image × quality target (aggregated per size class, with reach) and
+  `encode_ms / MP` + `ln ms = a + b·ln px` per effort; knob semantics per codec
+  (webp `m` / jxl `e` ascending, rav1e `s` inverted). Committed:
+  `benchmarks/family_degradation_{zenwebp,zenjxl,zenavif}_2026-08-28.{tsv,md}` —
+  capping WebP at m4 costs +4–8 % bytes, JXL at e5 +5–14 %, AVIF at s6 +12–17 %
+  (target 50–85). `docs/meta-picker-degradation-2026-08-28.md` records why the
+  offsets cannot yet be threaded into `RouteDecision::resolve` (the shipped lossy
+  router emits logistic-regression logits, not a bytes-space score) and the two
+  trainer-contract options that need a decision. Found en route: the zenjxl
+  canonical's `encode_ms` is ~10 s per 0.33 MP image and flat across e1…e9 — not
+  encoder wall time; its cost table is unusable until re-timed. zenjpeg has no
+  effort axis in `modes_full` (no table).
+- **#68 re-measured with per-head normalization on, n=3 seeds, canonical data**
+  (`benchmarks/train_hybrid_backend_gap_zenwebp_2026-08-28.md`, zenwebp
+  30-cell canonical config, hidden 128×3, seeds CAFE/BEEF/FACE): val argmin_acc
+  sklearn `relu` 11.2 ± 1.2 %, torch `leakyrelu` 9.1 ± 0.6 %, `leakyrelu
+  --weight-decay 1e-4` 12.3 ± 1.0 %; mean overhead 4.82 / 4.71 / 4.58 %. The
+  original 12.4 pp gap (n=1, pre-#67) does not reproduce — the residual 2 pp
+  argmin_acc gap is closed (and inverted) by weight decay, and the torch
+  student is never worse on mean overhead. Confirmed on a second codec
+  (`benchmarks/train_hybrid_backend_gap_zenjpeg_2026-08-28.md`, 54-cell zenjpeg
+  canonical, n=1): relu 24.6 % / leakyrelu 21.7 % / +wd 25.2 % argmin_acc at
+  mean overhead 12.04 / 12.71 / 12.37 %. **`--weight-decay` now defaults to
+  `1e-4` for the torch student** (`DEFAULT_TORCH_WEIGHT_DECAY`,
+  `resolve_weight_decay`; pass `0.0` to reproduce an earlier unregularized
+  bake; sklearn relu is unchanged). `--activation` / `--weight-decay` help and
+  `zentrain/tools/README.md` now state the measured numbers.
+- `zentrain/tools/leakyrelu_seeds_runner.py` rewritten as a general multi-arm
+  runner (`--arms relu,leakyrelu,leakyrelu+wd=1e-4`, `--reuse`, report path); the
+  old one hard-coded zenjpeg paths under `/home/lilith` and a train_hybrid location
+  that no longer exists, so it could not run. 6 tests in
+  `zentrain/tools/test_canonical_tools.py` (CI `zentrain-pytests`).
+
 ### Fixed
 
+- **`train_hybrid.py` crashed on a corpus with an empty test bucket.** The origin
+  even/odd split built `tr` / `va` / `te` with `np.array([...])`, so an empty
+  bucket (no 7/9-digit origins — e.g. the canonical train + validate parquets
+  without test) was a float64 array and `Xe[te]` raised "arrays used as indices
+  must be of integer (or boolean) type". dtype pinned to `int64`.
 - **CI green again on rustc/clippy 1.98.0.** The new
   `clippy::chunks_exact_to_as_chunks` lint fired at ~65 pixel-loop sites; it
   is now `allow`ed crate-wide in `Cargo.toml` (as in zenwebp #76 / zenjxl-decoder)

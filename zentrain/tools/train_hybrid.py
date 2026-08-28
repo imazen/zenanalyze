@@ -254,18 +254,40 @@ def _train_torch_leakyrelu_student(
 SKLEARN_MLP_DEFAULT_ALPHA = 1e-4
 
 
+# Default Adam weight_decay for the torch (leakyrelu) student — the nearest
+# analogue of sklearn MLPRegressor's always-on alpha=1e-4. Flipped from 0.0 on
+# 2026-08-28 after the #68 re-run: on the canonical zenwebp (n=3) and zenjpeg
+# (n=1) datasets, weight_decay=1e-4 matched or beat sklearn relu on val
+# argmin_acc (12.3±1.0 vs 11.2±1.2 %, 25.2 vs 24.6 %) where the unregularized
+# torch student trailed by 2–3 pp (9.1±0.6 %, 21.7 %) —
+# benchmarks/train_hybrid_backend_gap_{zenwebp,zenjpeg}_2026-08-28.md.
+DEFAULT_TORCH_WEIGHT_DECAY = 1e-4
+
+
+def resolve_weight_decay(activation: str, requested: float | None) -> float:
+    """The weight_decay a run trains under. `None` (flag not passed) →
+    `DEFAULT_TORCH_WEIGHT_DECAY` for the torch student, 0.0 for sklearn (which
+    ignores it and applies its own alpha). An explicit value is honoured as
+    given (including 0.0 to reproduce a pre-2026-08-28 unregularized bake)."""
+    if requested is not None:
+        return float(requested)
+    return DEFAULT_TORCH_WEIGHT_DECAY if activation == "leakyrelu" else 0.0
+
+
 def student_backend_record(activation: str, weight_decay: float) -> dict:
     """The per-bake student-trainer marker (zenanalyze#68).
 
     `--activation leakyrelu` and `--activation relu` are two different
     trainers, not one trainer with a different activation: the torch student
-    (leakyrelu) uses Kaiming-uniform init and — unless `--weight-decay` is
-    passed — NO L2 penalty, while sklearn's `MLPRegressor` (relu) uses
-    Glorot-uniform init and always applies `alpha=1e-4` L2. #68 measured a
-    12.4pp argmin_acc gap between the two on identical zenwebp v0.2 data
-    (n=1, pre-#67 per-head normalization). This record lands in
-    `safety_report.diagnostics.student_backend` and the model JSON so codec
-    teams can tell which trainer produced a bake when behaviour diverges.
+    (leakyrelu) uses Kaiming-uniform init and Adam weight_decay
+    (`DEFAULT_TORCH_WEIGHT_DECAY` unless `--weight-decay` is passed), while
+    sklearn's `MLPRegressor` (relu) uses Glorot-uniform init and always
+    applies `alpha=1e-4` L2. #68 originally measured a 12.4pp argmin_acc gap
+    between the two on zenwebp v0.2 data (n=1, pre-#67 per-head
+    normalization); the 2026-08-28 re-run found 2–3 pp, closed by weight
+    decay. This record lands in `safety_report.diagnostics.student_backend`
+    and the model JSON so codec teams can tell which trainer produced a bake
+    when behaviour diverges.
     """
     if activation == "leakyrelu":
         return {
@@ -3177,15 +3199,21 @@ def main():
         "TYPICALLY 10–20× SLOWER. The two are NOT a pure speed knob "
         "(zenanalyze#68): the torch student uses Kaiming init and no L2 "
         "penalty unless --weight-decay is set, sklearn uses Glorot init "
-        "and always applies alpha=1e-4 L2; on zenwebp v0.2 (n=1, "
-        "pre-#67 per-head normalization) sklearn relu scored "
-        "argmin_acc 43.0%% vs leakyrelu 30.6%% at identical data/seed/"
-        "shape. Until that gap is re-measured and closed, prefer "
-        "leakyrelu for capacity sweeps and ablation passes and confirm "
-        "a production bake against relu (or leakyrelu --weight-decay "
-        "1e-4) before shipping; compare "
-        "`safety_report.diagnostics.argmin.val.argmin_acc` between the "
-        "two — the trainer used is recorded in "
+        "and always applies alpha=1e-4 L2. The original #68 report "
+        "(zenwebp v0.2, n=1, pre-#67 per-head normalization) had "
+        "sklearn relu at argmin_acc 43.0%% vs leakyrelu 30.6%%; the "
+        "2026-08-28 re-run on the canonical zenwebp dataset (n=3 seeds, "
+        "per-head normalization on, benchmarks/"
+        "train_hybrid_backend_gap_zenwebp_2026-08-28.md) measures "
+        "relu 11.2±1.2%% / leakyrelu 9.1±0.6%% / leakyrelu "
+        "--weight-decay 1e-4 12.3±1.0%% argmin_acc, with mean overhead "
+        "4.82 / 4.71 / 4.58%% (zenjpeg canonical, n=1: 24.6 / 21.7 / "
+        "25.2%% argmin_acc, 12.04 / 12.71 / 12.37%% mean) — the 12pp gap "
+        "does not reproduce, and weight decay (now the torch default) "
+        "closes what remains. Compare "
+        "`safety_report.diagnostics.argmin.val.argmin_acc` between "
+        "trainers on YOUR data before a production bake — the trainer "
+        "used is recorded in "
         "`safety_report.diagnostics.student_backend`. Both produce a "
         "`student.coefs_/intercepts_` surface so safety_check, "
         "diagnostics, and JSON serialization work the same way.",
@@ -3193,16 +3221,17 @@ def main():
     parser.add_argument(
         "--weight-decay",
         type=float,
-        default=0.0,
+        default=None,
         help="Adam weight_decay (coupled L2 on the gradient) for the "
-        "PyTorch leakyrelu student. Default 0.0 = the historical "
-        "unregularized torch student. sklearn's `MLPRegressor` always "
-        "applies alpha=1e-4, so 1e-4 is the nearest analogue when "
-        "chasing the #68 relu-vs-leakyrelu argmin_acc gap (not a "
-        "numerically identical penalty — sklearn divides its term by "
-        "the sample size). Ignored under --activation relu; the value "
-        "actually used is recorded in "
-        "`safety_report.diagnostics.student_backend.l2`.",
+        f"PyTorch leakyrelu student. Default {DEFAULT_TORCH_WEIGHT_DECAY} "
+        "(since 2026-08-28 — the #68 re-run on canonical zenwebp n=3 and "
+        "zenjpeg n=1 had it match or beat sklearn relu on argmin_acc where "
+        "the unregularized student trailed by 2–3 pp); pass 0.0 to "
+        "reproduce an earlier unregularized bake. sklearn's `MLPRegressor` "
+        "always applies alpha=1e-4, so 1e-4 is its nearest analogue (not a "
+        "numerically identical penalty — sklearn divides its term by the "
+        "sample size). Ignored under --activation relu; the value actually "
+        "used is recorded in `safety_report.diagnostics.student_backend.l2`.",
     )
     parser.add_argument(
         "--hard-example-weighting",
@@ -3722,12 +3751,13 @@ def main():
             "  WARNING: --hard-example-weighting is leakyrelu-only; "
             f"ignored under --activation={args.activation}\n"
         )
-    if args.weight_decay != 0.0 and args.activation != "leakyrelu":
+    if args.weight_decay is not None and args.weight_decay != 0.0 and args.activation != "leakyrelu":
         sys.stderr.write(
             "  WARNING: --weight-decay is leakyrelu-only; sklearn relu always "
             f"applies alpha={SKLEARN_MLP_DEFAULT_ALPHA}; ignored under "
             f"--activation={args.activation}\n"
         )
+    args.weight_decay = resolve_weight_decay(args.activation, args.weight_decay)
     student_backend = student_backend_record(args.activation, args.weight_decay)
     if args.activation == "leakyrelu":
         sys.stderr.write(
