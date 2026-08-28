@@ -65,3 +65,26 @@ feature-inventory zen=".." cost="benchmarks/per_feature_cost_grid_2026-08-28.tsv
 zentrain-pytests-torch:
     cd zentrain/tools && uv run --no-project --with pytest --with numpy --with scikit-learn --with torch \
       python -m pytest -q test_train_hybrid_torch_backend.py
+
+# zenpredict-viz (zenanalyze#79): the CI gate — clippy, the synthetic-bake
+# parity tests (bit-exact vs zenpredict), the onnx-export converter test,
+# wasm32 build. `shipped_bakes_parity` is skipped here on purpose; run it
+# with `just viz-test-shipped` against real bakes.
+viz-test:
+    cargo fmt -p zenpredict-viz -- --check
+    cargo clippy -p zenpredict-viz --all-targets --features onnx-export,feature-catalog -- -D warnings
+    cargo test -p zenpredict-viz --features onnx-export -- --skip shipped_bakes_parity
+    cargo build -p zenpredict-viz --target wasm32-unknown-unknown
+
+# Parity on REAL bakes: `bakes` is a `:`-separated list of .bin files and/or
+# directories (default: the sibling zensim checkout's shipped weights).
+viz-test-shipped bakes="../zensim/zensim/weights":
+    ZENPREDICT_VIZ_BAKES={{bakes}} cargo test -p zenpredict-viz --test forward_parity shipped_bakes_parity -- --nocapture
+
+# Build the static site (wasm-pack + bake copy + feature catalog) into
+# zenpredict-viz/web and serve it. Same steps the Pages workflow runs.
+viz-build:
+    cd zenpredict-viz && ./build.sh release
+
+viz-serve port="3142": viz-build
+    python3 -m http.server -d zenpredict-viz/web {{port}}

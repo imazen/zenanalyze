@@ -155,6 +155,32 @@ jobs:
       - name: Test (fit-yj — MLE bin + golden-section test)
         run: cargo test -p zenpredict-bake --features fit-yj
 
+  zenpredict-viz:
+    # The interactive ZNPR v3 bake visualizer (zenanalyze#79): the WASM
+    # bridge crate is a workspace member but was never in CI. Native
+    # clippy + the parity tests (bit-exact against zenpredict on bakes
+    # composed in-test), the onnx-export converter test, and a wasm32
+    # build so wasm-pack can't silently rot. `shipped_bakes_parity` needs
+    # real bakes via ZENPREDICT_VIZ_BAKES (a sibling checkout) and is
+    # skipped HERE, explicitly — the test itself fails loud when unset.
+    name: zenpredict-viz (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt -p zenpredict-viz -- --check
+      - name: Clippy
+        run: cargo clippy -p zenpredict-viz --all-targets --features onnx-export,feature-catalog -- -D warnings
+      - name: Test (parity vs zenpredict, synthetic bakes)
+        run: cargo test -p zenpredict-viz --features onnx-export -- --skip shipped_bakes_parity
+      - name: Build (wasm32)
+        run: cargo build -p zenpredict-viz --target wasm32-unknown-unknown
+
   cross:
     name: Cross (${{ matrix.target }})
     runs-on: ubuntu-latest

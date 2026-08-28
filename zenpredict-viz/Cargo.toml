@@ -28,7 +28,9 @@ path = "src/bin/build_sample_pack.rs"
 required-features = ["sample-pack"]
 
 [dependencies]
-zenpredict = { path = "../zenpredict" }
+# `advanced` for the per-output spec pipeline (`output_spec::apply_spec`,
+# `OutputValue`) the forward-pass waterfall mirrors.
+zenpredict = { path = "../zenpredict", features = ["advanced"] }
 wasm-bindgen = "0.2.103"
 serde = { version = "1.0.219", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
@@ -66,6 +68,11 @@ sample-pack = ["dep:serde_json", "dep:parquet", "dep:arrow"]
 [dependencies.console_error_panic_hook]
 version = "0.1.7"
 optional = true
+
+[dev-dependencies]
+# Synthetic ZNPR v3 bakes for the parity tests — built in-test from
+# the composer, so the tests never depend on a sibling checkout.
+zenpredict-bake = { path = "../zenpredict-bake" }
 
 [lints.rust]
 unsafe_code = "forbid"

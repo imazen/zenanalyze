@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **zenpredict-viz: bit-exact forward pass, real parity tests, CI, Pages
+  workflow, P2 polish** (#79). `forward_with_taps` now mirrors
+  `zenpredict::inference` operation for operation (`f32::mul_add` SAXPY in the
+  runtime's order, zero-input skip, i8 epilogue) and adds the bake-declared
+  `feature_transforms` stage (mirrors `predict_transformed`) and the
+  `output_specs` stage (mirrors `predict_with_specs`); `parse_bake` reports
+  `feature_names` (from `zentrain.feature_columns`), `caller_input_width` and
+  stage presence. `tests/forward_parity.rs` was silently passing everywhere
+  (it looked for four zensim bakes at a `/home/lilith` path that no longer
+  exist and `continue`d): it now composes bakes in-test via `zenpredict-bake`
+  (3 dtypes × 3 activations, ± transforms, ± specs) and asserts `to_bits()`
+  equality; `shipped_bakes_parity` reads `ZENPREDICT_VIZ_BAKES` and fails
+  loud when unset (skipped explicitly in CI / `just viz-test`; `just
+  viz-test-shipped` runs it — 7/7 shipped zensim weights + the rd_time
+  picker bit-identical). `tests/onnx_parity.rs` (was: assert-finite on a
+  missing bake) drives `znpr2onnx` on synthetic bakes, checks the graph
+  shape and evaluates it against `Predictor::predict`; the converter's
+  dropped-stage notice now includes `output_specs`. New CI job
+  `zenpredict-viz` (fmt, clippy `-D warnings` with `onnx-export,feature-catalog`
+  — the crate was never in CI and had 3 latent lints —, tests, wasm32 build);
+  `.github/workflows/pages.yml` publishes `web/` on manual dispatch only.
+  Web: feature names prefer the bake's own columns over the zensim layout,
+  `#panel=…&bake=…` permalink, CSV upload for the forward panel, PNG export
+  of the active panel's canvases, forward waterfall shows the transform /
+  spec stages, quick-load list built from `web/bakes/index.json` (written by
+  `build.sh` from whatever `*.bin` the zensim weights dir has — the four
+  hard-coded names were stale). README rewritten; `STATUS_2026-05-25.md`
+  folded into it.
 - **`train_hybrid.py --objective rd_time` / `time_budgeted` + time-head bake
   contract** (#56, #43). `rd_time` is size_optimal with a REQUIRED per-cell
   `time_log` head (fails fast, exit 2, when the Pareto has no time column) and a

@@ -14,12 +14,27 @@ import {
 export function renderForward(taps, root, summary) {
   root.innerHTML = '';
   const stages = [];
+  if (taps.transformed) {
+    stages.push({ name: 'feature_transforms (bake-declared, before standardize)', kind: 'input', vals: taps.transformed });
+  }
   stages.push({ name: 'standardized', kind: 'input', vals: taps.standardized });
   for (const layer of taps.layer_stages) {
     stages.push({ name: `L${layer.idx} · pre-activation`, vals: layer.pre_activation });
     stages.push({ name: `L${layer.idx} · post-activation`, vals: layer.post_activation });
   }
   stages.push({ name: 'output (raw MLP)', kind: 'output', vals: taps.output });
+  if (taps.specs_applied) {
+    // Per-output specs (transform / clamp / discrete snap / sentinel) —
+    // what `Predictor::predict_with_specs` hands the codec. `null` =
+    // "use the codec default" (sentinel hit), rendered as NaN here.
+    const vals = taps.specs_applied.map(v => (v == null ? NaN : v));
+    const nDefault = taps.specs_applied.filter(v => v == null).length;
+    stages.push({
+      name: `output_specs applied${nDefault ? ` (${nDefault} → codec default)` : ''}`,
+      kind: 'calibrated',
+      vals,
+    });
+  }
 
   // Apply post-MLP calibration stages when present + when the raw output
   // is a single scalar. The per-sample-α head is NOT applied here — it

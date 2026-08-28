@@ -310,7 +310,12 @@ fn build_onnx_model(model: &Model, name: &str) -> Result<ModelProto, String> {
     let mut doc_parts = vec![format!(
         "Generated from ZNPR v3 bake by znpr2onnx. n_inputs={n_inputs}, n_outputs={n_outputs}, n_layers={n_layers}.",
     )];
-    let extra = collect_calibration_warnings(model);
+    let mut extra = collect_calibration_warnings(model);
+    if model.has_output_specs() {
+        // Per-output specs (clamp / sigmoid / snap / sentinel) are applied
+        // by `Predictor::predict_with_specs`, not by the MLP graph.
+        extra.push("output_specs");
+    }
     if !extra.is_empty() {
         doc_parts.push(format!(
             "Post-MLP calibration stages NOT included: {}.",

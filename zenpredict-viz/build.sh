@@ -30,15 +30,30 @@ else
   ARGS+=(--dev)
 fi
 
-# Copy shipped bakes into web/bakes/ so the quick-load buttons work.
-# These are read-only; we never write to the zensim weights dir.
+# Copy shipped bakes into web/bakes/ so the quick-load buttons work, and
+# write web/bakes/index.json (the UI builds its buttons from it, so the
+# list never goes stale). Every top-level .bin in the sibling zensim
+# weights dir is copied; override the source with ZENPREDICT_VIZ_BAKES
+# (a directory). Read-only on the source; missing dir ⇒ empty index.
 mkdir -p web/bakes
-ZENSIM_WEIGHTS="${SCRIPT_DIR}/../../zensim/zensim/weights"
-for f in v_tuner_v11_2026-05-24.bin v_tuner_v9_2026-05-20.bin v0_18_zerobiased_lz4_2026-05-13.bin v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin; do
-  if [ -f "$ZENSIM_WEIGHTS/$f" ]; then
-    cp -u "$ZENSIM_WEIGHTS/$f" "web/bakes/"
-  fi
-done
+BAKES_SRC="${ZENPREDICT_VIZ_BAKES:-${SCRIPT_DIR}/../../zensim/zensim/weights}"
+rm -f web/bakes/*.bin
+index="["
+sep=""
+if [ -d "$BAKES_SRC" ]; then
+  for f in "$BAKES_SRC"/*.bin; do
+    [ -f "$f" ] || continue
+    cp "$f" web/bakes/
+    base="$(basename "$f")"
+    size="$(wc -c < "$f" | tr -d ' ')"
+    index="${index}${sep}{\"file\":\"${base}\",\"bytes\":${size}}"
+    sep=","
+  done
+  echo "→ copied $(ls web/bakes/*.bin 2>/dev/null | wc -l | tr -d ' ') bake(s) from $BAKES_SRC"
+else
+  echo "  ! no bakes dir at $BAKES_SRC — quick-load list will be empty"
+fi
+echo "${index}]" > web/bakes/index.json
 
 echo "→ wasm-pack build ${ARGS[*]}"
 wasm-pack build "${ARGS[@]}"

@@ -158,10 +158,11 @@ button.action:hover { filter: brightness(1.1); }
     </div>
     <h2>shipped bakes</h2>
     <div class="quick-bakes" id="quick-bakes">
-      <button data-url="bakes/v_tuner_v11_2026-05-24.bin">v_tuner_v11 (54 KB i8, v0.3 ship)</button>
-      <button data-url="bakes/v_tuner_v9_2026-05-20.bin">v_tuner_v9 (261 KB f32)</button>
-      <button data-url="bakes/v0_18_zerobiased_lz4_2026-05-13.bin">v0_18 (18 KB i8 lz4)</button>
-      <button data-url="bakes/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin">v22-mix (42 KB)</button>
+      <div class="empty">loading bakes/index.json…</div>
+    </div>
+    <h2>export</h2>
+    <div class="file-row">
+      <button class="action" id="export-png" title="save every canvas heatmap in the active panel as PNG">active panel → PNG</button>
     </div>
     <h2>bake summary</h2>
     <div class="summary-list" id="summary-sidebar">
@@ -203,7 +204,7 @@ button.action:hover { filter: brightness(1.1); }
 
   <section class="panel" data-panel="forward">
     <h2>live forward pass</h2>
-    <div class="hint">paste a feature vector (e.g. 372 floats, comma- or whitespace-separated), pick a real sample from a canonical training corpus, or click "synthetic" for a sine-wave probe. waterfall shows each stage's output magnitude AND the post-MLP calibration stages applied in pipeline order.</div>
+    <div class="hint">paste a feature vector (comma- or whitespace-separated, caller width), upload a CSV row, pick a real sample from a canonical training corpus, or click "synthetic" for a sine-wave probe. waterfall shows every stage in pipeline order: bake-declared feature_transforms → standardize → per-layer pre/post activation → raw output → output_specs → the zensim calibration stages. the MLP stages are bit-identical to the zenpredict runtime.</div>
     <div class="controls" style="flex-wrap: wrap; gap: 8px; align-items: center;">
       <label for="sample-select" style="font-size:11px; color:var(--fg-dim);">load sample:</label>
       <select id="sample-select" style="background:var(--panel-2); color:var(--fg); border:1px solid var(--line); padding:4px 6px; font-family:var(--mono); font-size:11px; min-width: 260px;">
@@ -211,6 +212,7 @@ button.action:hover { filter: brightness(1.1); }
       </select>
       <span id="sample-expected" style="font-family:var(--mono); font-size:11px; color:var(--fg-dim);"></span>
       <button class="action" id="synth-features">synthetic input</button>
+      <label for="feature-csv" class="action" style="cursor:pointer;">upload CSV<input type="file" id="feature-csv" accept=".csv,.tsv,.txt" style="display:none;"></label>
       <button class="action" id="run-forward">forward</button>
     </div>
     <div id="sample-note" style="font-family:var(--mono); font-size:11px; color:var(--warn); margin: 6px 0; display:none;"></div>

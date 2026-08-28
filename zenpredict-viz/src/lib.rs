@@ -24,7 +24,11 @@
 
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
-use zenpredict::{Activation, LayerView, Model, WeightStorage, f16_bits_to_f32};
+use zenpredict::output_spec::apply_spec;
+use zenpredict::{
+    Activation, FeatureTransform, LEAKY_RELU_ALPHA, LayerView, Model, WeightStorage,
+    apply_feature_transforms, f16_bits_to_f32,
+};
 
 #[wasm_bindgen(start)]
 pub fn init() {
@@ -44,6 +48,16 @@ pub struct BakeSummary {
     pub layers: Vec<LayerSummary>,
     pub metadata_keys: Vec<MetadataKey>,
     pub l0_importance: Vec<f32>,
+    /// Feature names from `zentrain.feature_columns` when the bake carries
+    /// them (picker bakes do); empty otherwise. Index-aligned with the
+    /// caller's feature vector, so the UI prefers these over the zensim
+    /// n_inputs-based layout and the `f<idx>` fallback.
+    pub feature_names: Vec<String>,
+    /// Number of features the CALLER passes: `n_inputs` unless the bake's
+    /// `feature_transforms` change the width (Drop / expanders).
+    pub caller_input_width: usize,
+    pub has_feature_transforms: bool,
+    pub has_output_specs: bool,
 }
 
 #[derive(Serialize)]
@@ -74,10 +88,14 @@ pub struct MetadataKey {
 
 #[wasm_bindgen]
 pub fn parse_bake(bytes: &[u8]) -> Result<JsValue, JsError> {
-    let bake_bytes = bytes.len();
-    let model = Model::from_bytes(bytes).map_err(|e| JsError::new(&format!("{e}")))?;
-    let summary = build_summary(&model, bake_bytes);
+    let summary = parse_bake_native(bytes).map_err(|e| JsError::new(&e))?;
     serde_wasm_bindgen::to_value(&summary).map_err(|e| JsError::new(&format!("{e}")))
+}
+
+/// Native entry point used by tests + native callers.
+pub fn parse_bake_native(bytes: &[u8]) -> Result<BakeSummary, String> {
+    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    Ok(build_summary(&model, bytes.len()))
 }
 
 fn build_summary(model: &Model, bake_bytes: usize) -> BakeSummary {
@@ -139,6 +157,8 @@ fn build_summary(model: &Model, bake_bytes: usize) -> BakeSummary {
         })
         .collect();
 
+    let feature_names: Vec<String> = model.feature_columns().map(str::to_string).collect();
+
     BakeSummary {
         n_inputs,
         n_outputs,
@@ -150,6 +170,10 @@ fn build_summary(model: &Model, bake_bytes: usize) -> BakeSummary {
         layers,
         metadata_keys,
         l0_importance,
+        feature_names,
+        caller_input_width: model.caller_input_width(),
+        has_feature_transforms: model.has_nontrivial_feature_transforms(),
+        has_output_specs: model.has_output_specs(),
     }
 }
 
@@ -182,37 +206,29 @@ fn weight_stats(layer: &LayerView<'_>) -> (f32, f32, f32) {
 }
 
 fn accumulate_l0_importance(layer: &LayerView<'_>, scaler_scale: &[f32], out: &mut [f32]) {
-    let in_dim = layer.in_dim;
     let out_dim = layer.out_dim;
-    let mut sum_abs = vec![0.0_f64; in_dim];
-    match &layer.weights {
-        WeightStorage::F32(w) => {
-            for i in 0..in_dim {
-                let base = i * out_dim;
-                for o in 0..out_dim {
-                    sum_abs[i] += (w[base + o] as f64).abs();
-                }
-            }
+    // Σ_h |W0[i, h]| per input row, in f64 so the order of summation
+    // cannot move the heatmap.
+    let row_abs_sum = |row_idx: usize| -> f64 {
+        let base = row_idx * out_dim;
+        match &layer.weights {
+            WeightStorage::F32(w) => w[base..base + out_dim]
+                .iter()
+                .map(|&v| (v as f64).abs())
+                .sum(),
+            WeightStorage::F16(w) => w[base..base + out_dim]
+                .iter()
+                .map(|&h| (f16_bits_to_f32(h) as f64).abs())
+                .sum(),
+            WeightStorage::I8 { weights, scales } => weights[base..base + out_dim]
+                .iter()
+                .zip(scales.iter())
+                .map(|(&q, &s)| (q as f64 * s as f64).abs())
+                .sum(),
         }
-        WeightStorage::F16(w) => {
-            for i in 0..in_dim {
-                let base = i * out_dim;
-                for o in 0..out_dim {
-                    sum_abs[i] += (f16_bits_to_f32(w[base + o]) as f64).abs();
-                }
-            }
-        }
-        WeightStorage::I8 { weights, scales } => {
-            for i in 0..in_dim {
-                let base = i * out_dim;
-                for o in 0..out_dim {
-                    sum_abs[i] += (weights[base + o] as f64 * scales[o] as f64).abs();
-                }
-            }
-        }
-    }
-    for i in 0..in_dim {
-        out[i] = (sum_abs[i] * scaler_scale[i] as f64) as f32;
+    };
+    for (i, (dst, &scale)) in out.iter_mut().zip(scaler_scale).enumerate() {
+        *dst = (row_abs_sum(i) * scale as f64) as f32;
     }
 }
 
@@ -290,15 +306,33 @@ const NIBBLE: &[u8; 16] = b"0123456789abcdef";
 
 /// Per-stage forward-pass result for the live waterfall.
 ///
-/// Stages are recorded in apply order: standardized → layer 0 pre/post
-/// → layer 1 pre/post → ... → final raw output. Zensim-specific
-/// post-MLP stages (tanh pin, spline, per-codec) are not applied here
-/// — the JS side handles them with the parsed metadata payloads.
+/// Stages are recorded in apply order: [optional feature_transforms] →
+/// standardized → layer 0 pre/post → layer 1 pre/post → ... → final
+/// raw output → [optional output_specs]. Zensim-specific post-MLP
+/// stages (tanh pin, spline, per-codec) are not applied here — the JS
+/// side handles them with the parsed metadata payloads.
+///
+/// The MLP math mirrors `zenpredict::inference` operation for
+/// operation (same standardize, the same `f32::mul_add` SAXPY in the
+/// same input-major order with the same zero-input skip, the same i8
+/// `bias + scale · acc` epilogue, the same activations), so `output`
+/// is bit-identical to `Predictor::predict` / `predict_transformed` —
+/// `tests/forward_parity.rs` asserts equality of the bit patterns.
 #[derive(Serialize)]
 pub struct ForwardTaps {
+    /// The caller's features after the bake's `feature_transforms`
+    /// (`None` when the bake has none — the standardize stage then
+    /// reads the caller's vector directly).
+    pub transformed: Option<Vec<f32>>,
     pub standardized: Vec<f32>,
     pub layer_stages: Vec<LayerStage>,
+    /// Raw MLP output — what `Predictor::predict` returns.
     pub output: Vec<f32>,
+    /// `output` after the bake's per-output specs (transform, clamp,
+    /// discrete snap, sentinel) — what `Predictor::predict_with_specs`
+    /// returns; `None` per entry where the runtime reports "use the
+    /// codec default". `None` overall when the bake has no specs.
+    pub specs_applied: Option<Vec<Option<f32>>>,
 }
 
 #[derive(Serialize)]
@@ -320,24 +354,82 @@ pub fn forward_with_taps(bytes: &[u8], features: Vec<f32>) -> Result<JsValue, Js
 
 /// Native entry point used by tests + native callers. Returns the
 /// `ForwardTaps` struct directly instead of going through JsValue.
+///
+/// `features` is the CALLER-width vector (`Model::caller_input_width`),
+/// exactly what a codec hands to `Predictor::predict_transformed`.
 pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<ForwardTaps, String> {
     let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
     let n_inputs = model.n_inputs();
-    if features.len() != n_inputs {
+    let caller_width = model.caller_input_width();
+    if features.len() != caller_width {
         return Err(format!(
-            "feature length mismatch: expected {n_inputs}, got {}",
+            "feature length mismatch: expected {caller_width}, got {}",
             features.len()
         ));
     }
 
-    // Stage 1: standardize.
+    // Stage 0 (optional): feature transforms, mirroring
+    // `Predictor::predict_transformed` — scalar transforms per feature,
+    // or the expanding pipeline when an expander variant is present.
+    let transformed: Option<Vec<f32>> = match model.feature_transforms() {
+        None => None,
+        Some(transforms) => {
+            if transforms.len() != features.len() {
+                return Err(format!(
+                    "feature_transforms length {} != caller width {}",
+                    transforms.len(),
+                    features.len()
+                ));
+            }
+            let params = model.feature_transform_params();
+            if model.has_expander_feature_transforms() {
+                let params = params.ok_or_else(|| {
+                    "bake has an expander feature transform but no feature_transform_params"
+                        .to_string()
+                })?;
+                let mut dst = vec![0.0_f32; model.expanded_input_dim()];
+                let mut offset = 0usize;
+                for (i, t) in transforms.iter().enumerate() {
+                    let p: &[f32] = &params[i];
+                    let arity = t.output_arity(p);
+                    let written =
+                        t.apply_expanding(features[i], p, &mut dst[offset..offset + arity]);
+                    debug_assert_eq!(written, arity);
+                    offset += arity;
+                }
+                Some(dst)
+            } else {
+                let mut dst = vec![0.0_f32; features.len()];
+                match params {
+                    Some(params) => {
+                        for i in 0..features.len() {
+                            dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
+                        }
+                    }
+                    None => apply_feature_transforms(transforms, features, &mut dst)
+                        .map_err(|e| format!("{e}"))?,
+                }
+                Some(dst)
+            }
+        }
+    };
+    let mlp_input: &[f32] = transformed.as_deref().unwrap_or(features);
+    if mlp_input.len() != n_inputs {
+        return Err(format!(
+            "transformed width {} != model n_inputs {n_inputs}",
+            mlp_input.len()
+        ));
+    }
+
+    // Stage 1: standardize — `(x - mean) / scale`, zero scale ⇒ 1.0
+    // (sklearn's `_handle_zeros_in_scale`), as in `inference::forward`.
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
     let mut current: Vec<f32> = (0..n_inputs)
         .map(|i| {
             let s = scale[i];
             let safe_s = if s == 0.0 { 1.0 } else { s };
-            (features[i] - mean[i]) / safe_s
+            (mlp_input[i] - mean[i]) / safe_s
         })
         .collect();
     let standardized = current.clone();
@@ -347,67 +439,16 @@ pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<Forwar
     for (idx, layer) in model.layers().enumerate() {
         let out_dim = layer.out_dim;
         let in_dim = layer.in_dim;
-        assert_eq!(current.len(), in_dim);
-
-        // Pre-activation: bias + sum_i src[i] * w[i, o].
-        let mut pre = vec![0.0_f32; out_dim];
-        pre.copy_from_slice(layer.biases);
-        match &layer.weights {
-            WeightStorage::F32(w) => {
-                for i in 0..in_dim {
-                    let xi = current[i];
-                    for o in 0..out_dim {
-                        pre[o] += xi * w[i * out_dim + o];
-                    }
-                }
-            }
-            WeightStorage::F16(w) => {
-                for i in 0..in_dim {
-                    let xi = current[i];
-                    for o in 0..out_dim {
-                        pre[o] += xi * f16_bits_to_f32(w[i * out_dim + o]);
-                    }
-                }
-            }
-            WeightStorage::I8 { weights, scales } => {
-                let mut accum = vec![0.0_f32; out_dim];
-                for i in 0..in_dim {
-                    let xi = current[i];
-                    for o in 0..out_dim {
-                        accum[o] += xi * weights[i * out_dim + o] as f32;
-                    }
-                }
-                for o in 0..out_dim {
-                    pre[o] += accum[o] * scales[o];
-                }
-            }
+        if current.len() != in_dim {
+            return Err(format!(
+                "layer {idx}: input width {} != in_dim {in_dim}",
+                current.len()
+            ));
         }
-
+        let pre = layer_pre_activation(&layer, &current, in_dim, out_dim);
         let pre_activation = pre.clone();
         let mut post = pre;
-        match layer.activation {
-            Activation::Identity => {}
-            Activation::Relu => {
-                for v in post.iter_mut() {
-                    if *v < 0.0 {
-                        *v = 0.0;
-                    }
-                }
-            }
-            Activation::LeakyRelu => {
-                for v in post.iter_mut() {
-                    if *v < 0.0 {
-                        *v *= 0.01;
-                    }
-                }
-            }
-            // An activation this viz build doesn't know about: pass the
-            // pre-activation values through unchanged. `activation_name`
-            // renders "unknown" for the same variant, so post == pre
-            // signals "not applied" rather than silently faking a curve.
-            _ => {}
-        }
-
+        apply_activation(&mut post, layer.activation);
         layer_stages.push(LayerStage {
             idx,
             pre_activation,
@@ -416,23 +457,151 @@ pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<Forwar
         current = post;
     }
 
+    // Stage n+1 (optional): per-output specs — `Predictor::predict_with_specs`.
+    let specs_applied = if model.has_output_specs() {
+        let pool = model.discrete_sets();
+        Some(
+            model
+                .output_specs()
+                .iter()
+                .zip(current.iter())
+                .map(|(spec, &raw)| apply_spec(spec, raw, pool).value())
+                .collect(),
+        )
+    } else {
+        None
+    };
+
     Ok(ForwardTaps {
+        transformed,
         standardized,
         layer_stages,
         output: current,
+        specs_applied,
     })
+}
+
+/// `bias + Σ_i src[i] · W[i, :]`, accumulated exactly like
+/// `zenpredict::inference::layer_forward`: input-major SAXPY with a
+/// correctly-rounded `mul_add` per lane and the `src[i] == 0` skip
+/// (which matters for ±inf / NaN weights), and for i8 the raw
+/// accumulation followed by `bias + scale · acc`.
+fn layer_pre_activation(
+    layer: &LayerView<'_>,
+    src: &[f32],
+    in_dim: usize,
+    out_dim: usize,
+) -> Vec<f32> {
+    match &layer.weights {
+        WeightStorage::F32(w) => {
+            let mut dst = layer.biases.to_vec();
+            for i in 0..in_dim {
+                let s = src[i];
+                if s == 0.0 {
+                    continue;
+                }
+                let row = &w[i * out_dim..(i + 1) * out_dim];
+                for o in 0..out_dim {
+                    dst[o] = s.mul_add(row[o], dst[o]);
+                }
+            }
+            dst
+        }
+        WeightStorage::F16(w) => {
+            let mut dst = layer.biases.to_vec();
+            for i in 0..in_dim {
+                let s = src[i];
+                if s == 0.0 {
+                    continue;
+                }
+                let row = &w[i * out_dim..(i + 1) * out_dim];
+                for o in 0..out_dim {
+                    dst[o] = s.mul_add(f16_bits_to_f32(row[o]), dst[o]);
+                }
+            }
+            dst
+        }
+        WeightStorage::I8 { weights, scales } => {
+            let mut acc = vec![0.0_f32; out_dim];
+            for i in 0..in_dim {
+                let s = src[i];
+                if s == 0.0 {
+                    continue;
+                }
+                let row = &weights[i * out_dim..(i + 1) * out_dim];
+                for o in 0..out_dim {
+                    acc[o] = s.mul_add(row[o] as f32, acc[o]);
+                }
+            }
+            (0..out_dim)
+                .map(|o| layer.biases[o] + scales[o] * acc[o])
+                .collect()
+        }
+    }
+}
+
+/// Same branch structure as `zenpredict::inference::apply_activation`.
+/// An activation this viz build doesn't know about passes the
+/// pre-activation values through unchanged; `activation_name` renders
+/// "unknown" for the same variant, so post == pre signals "not
+/// applied" rather than silently faking a curve.
+fn apply_activation(buf: &mut [f32], act: Activation) {
+    match act {
+        Activation::Identity => {}
+        Activation::Relu => {
+            for v in buf.iter_mut() {
+                if *v < 0.0 {
+                    *v = 0.0;
+                }
+            }
+        }
+        Activation::LeakyRelu => {
+            for v in buf.iter_mut() {
+                if *v < 0.0 {
+                    *v *= LEAKY_RELU_ALPHA;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Feature-transform tokens as the bake declares them (one per caller
+/// feature, `zentrain.feature_transforms`), for the scaler panel's
+/// "transforms" toggle. Empty when the bake has none.
+#[wasm_bindgen]
+pub fn feature_transform_tokens(bytes: &[u8]) -> Result<Vec<String>, JsError> {
+    feature_transform_tokens_native(bytes).map_err(|e| JsError::new(&e))
+}
+
+/// Native entry point used by tests + native callers.
+pub fn feature_transform_tokens_native(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    Ok(model
+        .feature_transforms()
+        .map(|ts| {
+            ts.iter()
+                .map(|t: &FeatureTransform| t.as_token().to_string())
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 /// Return a single layer's dequantized weight matrix (in_dim × out_dim,
 /// row-major as `[i * out_dim + o]`). For the "weights" panel.
 #[wasm_bindgen]
 pub fn layer_weights(bytes: &[u8], layer_idx: usize) -> Result<Vec<f32>, JsError> {
-    let model = Model::from_bytes(bytes).map_err(|e| JsError::new(&format!("{e}")))?;
+    layer_weights_native(bytes, layer_idx).map_err(|e| JsError::new(&e))
+}
+
+/// Native entry point used by tests + native callers.
+pub fn layer_weights_native(bytes: &[u8], layer_idx: usize) -> Result<Vec<f32>, String> {
+    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
     if layer_idx >= model.n_layers() {
-        return Err(JsError::new(&format!(
+        return Err(format!(
             "layer index {layer_idx} out of range (n_layers={})",
             model.n_layers()
-        )));
+        ));
     }
     let layer = model.layer(layer_idx);
     let n = layer.in_dim * layer.out_dim;

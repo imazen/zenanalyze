@@ -1,0 +1,57 @@
+name: zenpredict-viz Pages
+
+# Publishes zenpredict-viz/web (the static ZNPR v3 bake visualizer,
+# zenanalyze#79) to GitHub Pages. MANUAL ONLY — nothing publishes on push.
+# One-time setup by a repo admin: Settings → Pages → Source = "GitHub
+# Actions". Then run this workflow from the Actions tab.
+#
+# The site is self-contained: wasm-pack output + the committed
+# feature_catalog.json / sample_pack.json. No shipped bakes are copied
+# here (they live in the sibling zensim checkout, absent on CI) — the
+# quick-load list is empty and users load a .bin from disk or via the
+# `#bake=<relative-url>` permalink.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build site
+        working-directory: zenpredict-viz
+        # ZENPREDICT_VIZ_BAKES points at an empty dir: no sibling checkout on CI.
+        run: |
+          mkdir -p /tmp/no-bakes
+          ZENPREDICT_VIZ_BAKES=/tmp/no-bakes ./build.sh release
+          test -f web/pkg/zenpredict_viz_bg.wasm
+          test -f web/bakes/index.json
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: zenpredict-viz/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

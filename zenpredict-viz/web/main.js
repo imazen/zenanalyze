@@ -9,7 +9,7 @@ import { renderWeights } from './panels/weights.js';
 import { renderCalibration } from './panels/calibration.js';
 import { renderCompare } from './panels/compare.js';
 import { renderAttribution } from './panels/attribution.js';
-import { loadFeatureCatalog } from './feature_layout.js';
+import { loadFeatureCatalog, setBakeFeatureNames } from './feature_layout.js';
 
 const KNOWN_STAGES = [
   'zentrain.feature_transforms',
@@ -20,6 +20,9 @@ const KNOWN_STAGES = [
   'zentrain.per_codec_calibration',
   'zentrain.hybrid_heads_layout',
 ];
+
+// n_inputs values with a known zensim semantic layout (feature_layout.js).
+const SIZES_KNOWN = new Set([228, 300, 372]);
 
 const state = {
   bakeBytes: null,
@@ -38,6 +41,113 @@ async function bootstrap() {
   loadFeatureCatalog();
   loadSamplePack();
   wireUI();
+  await loadQuickBakeIndex();
+  applyPermalink();
+}
+
+// Permalink state (zenanalyze#79 P2): `#panel=<name>&bake=<url>`.
+// The panel is restored on load; `bake` is fetched like a quick-bake
+// button (same-origin relative URLs only — no cross-site fetches).
+function readPermalink() {
+  const h = (location.hash || '').replace(/^#/, '');
+  const out = {};
+  for (const kv of h.split('&')) {
+    const [k, v] = kv.split('=');
+    if (k) out[decodeURIComponent(k)] = v == null ? '' : decodeURIComponent(v);
+  }
+  return out;
+}
+
+function writePermalink(patch) {
+  const cur = readPermalink();
+  Object.assign(cur, patch);
+  const enc = Object.entries(cur)
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  history.replaceState(null, '', enc ? `#${enc}` : location.pathname + location.search);
+}
+
+async function applyPermalink() {
+  const pl = readPermalink();
+  if (pl.panel && document.querySelector(`section.panel[data-panel="${pl.panel}"]`)) {
+    switchPanel(pl.panel, /* fromPermalink */ true);
+  }
+  if (pl.bake && /^[\w./-]+$/.test(pl.bake) && !pl.bake.startsWith('/')) {
+    await loadBakeFromUrl(pl.bake, pl.bake.split('/').pop());
+  }
+}
+
+// The quick-bake list is data, not markup: build.sh writes
+// web/bakes/index.json for whatever .bin files it copied, so the
+// buttons never point at bakes that no longer exist.
+async function loadQuickBakeIndex() {
+  const host = document.getElementById('quick-bakes');
+  if (!host) return;
+  try {
+    const resp = await fetch('./bakes/index.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const index = await resp.json();
+    host.innerHTML = '';
+    if (!Array.isArray(index) || index.length === 0) {
+      host.innerHTML = '<div class="empty">no bakes copied — see build.sh</div>';
+      return;
+    }
+    for (const entry of index) {
+      const btn = document.createElement('button');
+      btn.dataset.url = `bakes/${entry.file}`;
+      const kb = entry.bytes != null ? ` (${(entry.bytes / 1024).toFixed(0)} KB)` : '';
+      btn.textContent = `${entry.file.replace(/\.bin$/, '')}${kb}`;
+      host.appendChild(btn);
+    }
+  } catch (err) {
+    host.innerHTML = '<div class="empty">bakes/index.json missing — run ./build.sh, or load a .bin above</div>';
+  }
+}
+
+async function loadBakeFromUrl(url, name) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    await loadBake(bytes, name);
+    writePermalink({ bake: url });
+  } catch (err) {
+    alert(`failed to load ${url}: ${err.message}\n\nrun ./build.sh to copy shipped bakes into web/bakes/, or load a .bin from disk.`);
+  }
+}
+
+// Forward-panel CSV upload (zenanalyze#79 P2): one feature vector per
+// row; the first row whose every cell parses as a number is used (a
+// header row is skipped). Fills the textarea — `forward` then runs it.
+async function onFeatureCsv(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const rows = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const row = rows.find(l => l.split(/[\s,;]+/).filter(Boolean).every(t => Number.isFinite(parseFloat(t))));
+  if (!row) { alert(`${file.name}: no all-numeric row found`); return; }
+  document.getElementById('feature-input').value = row.split(/[\s,;]+/).filter(Boolean).join(', ');
+  state.lastExpectedScore = null;
+  state.lastSampleLabel = file.name;
+}
+
+// PNG export (zenanalyze#79 P2): every <canvas> in the active panel is
+// saved via toDataURL — the heatmaps (scaler, importance, weights,
+// compare) are canvas-drawn, so this covers the panels people screenshot.
+function exportActivePanelPng() {
+  const active = document.querySelector('section.panel.active');
+  const canvases = active ? Array.from(active.querySelectorAll('canvas')) : [];
+  if (canvases.length === 0) { alert('no canvas in the active panel to export'); return; }
+  const bake = (document.getElementById('bake-name').textContent || 'bake').split(' ')[0].replace(/[^\w.-]/g, '_');
+  canvases.forEach((c, i) => {
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png');
+    a.download = `${bake}_${active.dataset.panel}${canvases.length > 1 ? `_${i}` : ''}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
 }
 
 // Fetch the sample_pack sidecar. The file is committed to the repo so
@@ -151,20 +261,15 @@ function wireUI() {
 
   document.getElementById('quick-bakes').addEventListener('click', async (e) => {
     if (e.target.tagName !== 'BUTTON') return;
-    const url = e.target.dataset.url;
-    const name = e.target.textContent;
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const bytes = new Uint8Array(await resp.arrayBuffer());
-      await loadBake(bytes, name);
-    } catch (err) {
-      alert(`failed to load ${url}: ${err.message}\n\nto use shipped bakes, copy them to web/bakes/ in this directory.`);
-    }
+    await loadBakeFromUrl(e.target.dataset.url, e.target.textContent);
   });
 
   document.getElementById('synth-features').addEventListener('click', synthFeatures);
   document.getElementById('run-forward').addEventListener('click', runForward);
+  const csv = document.getElementById('feature-csv');
+  if (csv) csv.addEventListener('change', onFeatureCsv);
+  const png = document.getElementById('export-png');
+  if (png) png.addEventListener('click', exportActivePanelPng);
   const sel = document.getElementById('sample-select');
   if (sel) sel.addEventListener('change', onSampleSelectChange);
 }
@@ -179,6 +284,9 @@ async function loadBake(bytes, name) {
     return;
   }
   document.getElementById('bake-name').textContent = `${name} · ${bytes.length} bytes`;
+  // Bake-carried feature names (picker bakes) win over the zensim
+  // n_inputs layout; an empty list restores the fallback.
+  setBakeFeatureNames(state.summary.feature_names || []);
   renderSidebar();
   refreshSampleDropdown();
   refreshActivePanel();
@@ -193,8 +301,9 @@ function renderSidebar() {
   }
   list.innerHTML = '';
   const rows = [
-    ['inputs', s.n_inputs],
+    ['inputs', s.caller_input_width !== s.n_inputs ? `${s.caller_input_width} → ${s.n_inputs} (transforms)` : s.n_inputs],
     ['outputs', s.n_outputs],
+    ['feature names', s.feature_names && s.feature_names.length ? 'from bake' : (SIZES_KNOWN.has(s.n_inputs) ? 'zensim layout' : 'f<idx>')],
     ['layers', s.n_layers],
     ['schema_hash', `0x${s.schema_hash.toString(16).padStart(16, '0')}`],
     ['bake bytes', s.bake_bytes.toLocaleString()],
@@ -215,13 +324,14 @@ function renderSidebar() {
   }
 }
 
-function switchPanel(name) {
+function switchPanel(name, fromPermalink = false) {
   document.querySelectorAll('nav button').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.panel === name);
   });
   document.querySelectorAll('section.panel').forEach(p => {
     p.classList.toggle('active', p.dataset.panel === name);
   });
+  if (!fromPermalink) writePermalink({ panel: name });
   refreshActivePanel();
 }
 
@@ -266,18 +376,24 @@ function refreshActivePanel() {
 
 function synthFeatures() {
   if (!state.summary) { alert('load a bake first'); return; }
-  const n = state.summary.n_inputs;
+  // The caller-width vector (transforms may change the MLP width).
+  // Bakes with log-family feature transforms need a positive probe.
+  const n = state.summary.caller_input_width;
+  const positive = !!state.summary.has_feature_transforms;
   const vals = [];
-  for (let i = 0; i < n; i++) vals.push((Math.sin(0.1 * i) * 5.0).toFixed(4));
+  for (let i = 0; i < n; i++) {
+    vals.push((positive ? (Math.sin(0.1 * i) + 1.5) * 2.0 : Math.sin(0.1 * i) * 5.0).toFixed(4));
+  }
   document.getElementById('feature-input').value = vals.join(', ');
+  state.lastExpectedScore = null;
 }
 
 async function runForward() {
   if (!state.summary) { alert('load a bake first'); return; }
   const raw = document.getElementById('feature-input').value.trim();
   const tokens = raw.split(/[\s,]+/).filter(Boolean);
-  if (tokens.length !== state.summary.n_inputs) {
-    alert(`expected ${state.summary.n_inputs} features, got ${tokens.length}`);
+  if (tokens.length !== state.summary.caller_input_width) {
+    alert(`expected ${state.summary.caller_input_width} features, got ${tokens.length}`);
     return;
   }
   const features = new Float32Array(tokens.length);

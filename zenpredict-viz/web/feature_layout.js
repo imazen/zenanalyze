@@ -58,6 +58,21 @@ const SIZES = {
   372: { layout: [N_BASIC, N_PEAKS, N_MASKED, N_IW],                 names: [BASIC, PEAKS, MASKED, IWPOOL] },
 };
 
+// Feature names carried BY THE BAKE (`zentrain.feature_columns` — every
+// picker bake has them). Set by main.js on load; takes precedence over
+// the zensim n_inputs-based layout and the catalog, because it is the
+// only source that is index-aligned with THIS bake by construction
+// (zenanalyze#79 P2 "schema-aware feature naming"). A 372-input picker
+// bake over zenanalyze features would otherwise be mislabelled with the
+// zensim 372-feature layout.
+let BAKE_NAMES = null;
+
+export function setBakeFeatureNames(names) {
+  BAKE_NAMES = Array.isArray(names) && names.length ? names : null;
+}
+
+export function bakeFeatureNames() { return BAKE_NAMES; }
+
 // Loaded asynchronously from web/feature_catalog.json (Track B).
 let CATALOG = null;
 let CATALOG_LOAD_PROMISE = null;
@@ -92,6 +107,10 @@ export function catalogEntry(idx, n_features) {
 // block tag. Prefers the catalog entry when available, falls back to
 // the static layout.
 export function featureLabel(idx, n_features) {
+  if (BAKE_NAMES && BAKE_NAMES.length === n_features && BAKE_NAMES[idx] != null) {
+    const name = BAKE_NAMES[idx];
+    return { label: name, block: 'bake', feature: name, source_ref: 'zentrain.feature_columns' };
+  }
   const cat = catalogEntry(idx, n_features);
   if (cat) {
     return {
