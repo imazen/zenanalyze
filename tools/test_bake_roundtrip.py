@@ -51,12 +51,46 @@ def synth_model(activation: str, n_in: int = 5, n_hidden: int = 8, n_out: int = 
     }
 
 
-def run_one(activation: str, dtype: str) -> None:
-    print(f"--- activation={activation} dtype={dtype}")
+def synth_rd_time_model(activation: str, n_cells: int = 2) -> dict:
+    """An `--objective rd_time` (zenanalyze#56) shaped model: output
+    layout `[bytes_log × n_cells, time_log × n_cells]` plus the
+    time-head diagnostics `bake_picker.py` turns into
+    `zentrain.hybrid_heads_layout` (head kinds [0, 2]),
+    `zentrain.median_cell_ms_per_mp` and `zentrain.encode_ms_p99`.
+    The forward pass is what the round-trip checks; the metadata is
+    what must not break the Rust baker (a None in `encode_ms_p99`
+    becomes the -1.0 sentinel, never NaN)."""
+    m = synth_model(activation, n_out=2 * n_cells)
+    m.update({
+        "safety_profile": "rd_time",
+        "hybrid_heads_manifest": {
+            "n_cells": n_cells,
+            "categorical_axes": ["mode"],
+            "scalar_axes": [],
+            "output_layout": {"bytes_log": [0, n_cells], "time_log": [n_cells, 2 * n_cells]},
+        },
+        "training_objective": {
+            "name": "rd_time", "has_time_head": True, "time_column": "encode_ms",
+            "time_loss_weight": 0.5, "median_cell_ms_per_mp": 136.2,
+        },
+        "safety_report": {
+            "passed": True, "violations": [],
+            "diagnostics": {
+                "median_cell_ms_per_mp": 136.2,
+                "encode_ms_p99": {"50": [12.0, 30.5], "80": [15.0, None]},
+            },
+        },
+    })
+    return m
+
+
+def run_one(activation: str, dtype: str, shape: str = "plain") -> None:
+    print(f"--- activation={activation} dtype={dtype} shape={shape}")
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         model_json = td / "model.json"
-        model_json.write_text(json.dumps(synth_model(activation)))
+        model = synth_model(activation) if shape == "plain" else synth_rd_time_model(activation)
+        model_json.write_text(json.dumps(model))
         rc = subprocess.call(
             [
                 sys.executable,
@@ -68,7 +102,7 @@ def run_one(activation: str, dtype: str) -> None:
             ]
         )
         if rc != 0:
-            sys.exit(f"round-trip failed for activation={activation} dtype={dtype}")
+            sys.exit(f"round-trip failed for activation={activation} dtype={dtype} shape={shape}")
 
 
 def cargo_build_cmds(repo_root: Path = REPO_ROOT) -> list[list[str]]:
@@ -99,7 +133,8 @@ def main() -> int:
         subprocess.run(cmd, check=True)
     for activation in ("relu", "leakyrelu", "identity"):
         for dtype in ("f32", "f16", "i8"):
-            run_one(activation, dtype)
+            for shape in ("plain", "rd_time"):
+                run_one(activation, dtype, shape)
     print("\nALL ROUND-TRIPS PASSED")
     return 0
 

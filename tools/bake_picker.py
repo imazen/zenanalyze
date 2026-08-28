@@ -498,6 +498,92 @@ def encode_unachievable_zones(model: dict) -> bytes:
     return bytes(out)
 
 
+# `zentrain.profile` byte per training objective. Rust's
+# `zenpredict::SafetyProfile::profile()` decodes 0/1 and returns None for
+# the newer codes (documented forward-compat) — extending that enum is a
+# public-API change tracked separately.
+PROFILE_BYTES = {"size_optimal": 0, "zensim_strict": 1, "rd_time": 2, "time_budgeted": 3}
+
+# `zentrain.hybrid_heads_layout` head kinds, in `output_layout` order.
+HEAD_KIND_BYTES = 0
+HEAD_KIND_SCALAR = 1
+HEAD_KIND_TIME = 2
+HEAD_KIND_METRIC = 3
+
+# `zentrain.encode_ms_p99` sentinel for a (zq, cell) no training row reached.
+ENCODE_MS_P99_UNREACHED = -1.0
+
+
+def hybrid_head_kinds(hh: dict) -> bytes:
+    """`head_kinds` for `zentrain.hybrid_heads_layout`, one byte per
+    n_cells-wide output block in `output_layout` order: 0 = bytes_log,
+    1 = scalar axis, 2 = time_log (#56 / #43), 3 = metric_log. Falls back
+    to the pre-#56 inference (bytes + one scalar per axis) when the
+    manifest carries no `output_layout` — older JSONs never had time or
+    metric heads, so that inference is exact for them.
+    """
+    layout = hh.get("output_layout")
+    if isinstance(layout, dict) and layout:
+        kinds: list[int] = []
+        for name, span in sorted(layout.items(), key=lambda kv: int(kv[1][0])):
+            if name == "bytes_log":
+                kinds.append(HEAD_KIND_BYTES)
+            elif name == "time_log":
+                kinds.append(HEAD_KIND_TIME)
+            elif name == "metric_log":
+                kinds.append(HEAD_KIND_METRIC)
+            else:
+                kinds.append(HEAD_KIND_SCALAR)
+        return bytes(kinds)
+    n_categorical = len(hh.get("categorical_axes") or [])
+    n_scalar_axes = len(hh.get("scalar_axes") or [])
+    return bytes([HEAD_KIND_BYTES] + [HEAD_KIND_SCALAR] * n_scalar_axes) if n_categorical >= 1 else b""
+
+
+def encode_time_head_metadata(model: dict) -> list[dict]:
+    """The #56 time-head keys, read from `safety_report.diagnostics`
+    (trainer ≥ 2026-08-28) or the top-level `training_objective`:
+
+      zentrain.median_cell_ms_per_mp     numeric f32×1
+      zentrain.encode_ms_p99_zq_targets  numeric u8 array (ascending zq)
+      zentrain.encode_ms_p99             numeric f32×(n_zq*n_cells), zq-major;
+                                         -1.0 where the cell never reached (JSON
+                                         has no NaN; ms is never negative)
+
+    Omitted entirely for bakes without a time head.
+    """
+    entries: list[dict] = []
+    diag = (model.get("safety_report") or {}).get("diagnostics") or {}
+    obj = model.get("training_objective") or {}
+    med = diag.get("median_cell_ms_per_mp")
+    if med is None:
+        med = obj.get("median_cell_ms_per_mp")
+    if med is not None:
+        entries.append({
+            "key": "zentrain.median_cell_ms_per_mp",
+            "type": "numeric",
+            "f32": [float(med)],
+        })
+    p99 = diag.get("encode_ms_p99")
+    if isinstance(p99, dict) and p99:
+        zqs = sorted(int(z) for z in p99.keys())
+        flat: list[float] = []
+        for z in zqs:
+            row = p99[str(z)]
+            flat.extend(ENCODE_MS_P99_UNREACHED if v is None else float(v) for v in row)
+        entries.append({
+            "key": "zentrain.encode_ms_p99_zq_targets",
+            "type": "numeric",
+            "hex": bytes(min(255, z) for z in zqs).hex(),
+        })
+        entries.append({
+            "key": "zentrain.encode_ms_p99",
+            "type": "numeric",
+            "f32": flat,
+        })
+    return entries
+
+
 def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     """Build the metadata blob entries from the training JSON.
 
@@ -506,7 +592,9 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
 
       zentrain.schema_version_tag   utf8
       zentrain.bake_name            utf8
-      zentrain.profile              numeric u8     (size_optimal=0, zensim_strict=1)
+      zentrain.profile              numeric u8     (PROFILE_BYTES: size_optimal=0,
+                                                    zensim_strict=1, rd_time=2,
+                                                    time_budgeted=3)
       zentrain.calibration_metrics  numeric f32×3  (mean_overhead, p99_shortfall, argmin_acc)
       zentrain.provenance           utf8
       zentrain.safety_report        utf8 JSON
@@ -514,6 +602,8 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
       zentrain.reach_zq_targets     numeric u8 array
       zentrain.feature_columns      utf8 (newline-separated)
       zentrain.hybrid_heads_layout  bytes (custom packed: see below)
+      zentrain.median_cell_ms_per_mp, zentrain.encode_ms_p99(_zq_targets)
+                                    time-head keys (#56), see encode_time_head_metadata
 
     Codec-private keys (`<codec>.*`) pass through unchanged.
     """
@@ -538,7 +628,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     # profile — 0/1 byte. Encoded as 1-byte hex.
     profile = model.get("safety_profile")
     if profile is not None:
-        prof_byte = {"size_optimal": 0, "zensim_strict": 1}.get(profile)
+        prof_byte = PROFILE_BYTES.get(profile)
         if prof_byte is not None:
             entries.append({
                 "key": "zentrain.profile",
@@ -576,7 +666,7 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     sr = model.get("safety_report") or {}
     metrics = model.get("calibration_metrics") or {}
     profile_str = model.get("safety_profile", "size_optimal")
-    profile_byte = {"size_optimal": 0, "zensim_strict": 1}.get(profile_str, 0)
+    profile_byte = PROFILE_BYTES.get(profile_str, 0)
     rescue_default = float(model.get("rescue_threshold_default", 3.0))
     rescue_strict = float(model.get("rescue_threshold_strict", 1.0))
     flags = 0x0001 if sr.get("strict_certified", False) else 0
@@ -763,13 +853,12 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
     hh = model.get("hybrid_heads_manifest")
     if isinstance(hh, dict):
         n_cells = int(hh.get("n_cells", 0))
-        # head_kinds: 0=bytes, 1=scalar. Take from output_layout if
-        # present, else infer from categorical/scalar axis lists.
-        n_categorical = len(hh.get("categorical_axes") or [])
-        n_scalar_axes = len(hh.get("scalar_axes") or [])
-        n_heads = max(1, n_categorical) + n_scalar_axes  # bytes head + scalar heads
-        # Conservative encoding: one bytes head followed by N scalar heads.
-        head_kinds = bytes([0] + [1] * n_scalar_axes) if n_categorical >= 1 else b""
+        # head_kinds: 0=bytes, 1=scalar, 2=time_log, 3=metric_log, in
+        # output_layout order (see hybrid_head_kinds). Before 2026-08-28
+        # this only ever emitted bytes + scalars, so a bake with a time
+        # head declared one block too few — a consumer walking the blob
+        # would have read the time block as the first scalar axis.
+        head_kinds = hybrid_head_kinds(hh)
         if head_kinds:
             packed = struct.pack("<II", n_cells, len(head_kinds)) + head_kinds
             entries.append({
@@ -777,6 +866,10 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
                 "type": "bytes",
                 "hex": packed.hex(),
             })
+
+    # Time-head keys (#56): median ms/MP calibration anchor + per-(zq, cell)
+    # p99 encode_ms. Present only when the trainer emitted a time head.
+    entries.extend(encode_time_head_metadata(model))
 
     # knob_vetoes — feature-gated per-(categorical-axis-value) safety
     # bounds the runtime enforces on the deployed single-encode picker

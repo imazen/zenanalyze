@@ -397,7 +397,7 @@ Set these unless you have a measured reason to deviate.
 |---|---|---|
 | `--activation` | **`leakyrelu`** | sklearn's `MLPRegressor` with ReLU is single-threaded and 5–15× slower than LeakyReLU on our typical (74-input × 128 × 3 × 14k-row) workload. PR #57 surfaces this. |
 | `--objective` | `size_optimal` | mean log-bytes loss. `zensim_strict` for SLA-bound traffic; `rd_time` for compute-bound traffic. |
-| `--time-loss-weight` | `0.5` (when `--objective rd_time`) | balances time-head signal against bytes-head dominance. |
+| `--time-loss-weight` | `0.5` (when `--objective rd_time` / `time_budgeted`) | α in `bytes_loss + α · time_loss`; 0 removes the time block from the student fit. Measured: α=0.5 keeps the bytes head on the same RD as size_optimal (4.61 % vs 4.58 % mean overhead, zenwebp canonical) with time-head val R² 0.993. |
 | `--reach-threshold` | `0.99` | strict default for `zensim_strict`. Codec consumers can re-threshold at request time via `threshold_mask`. |
 | Hidden-layer sizing | `--hidden 192,192,192` for ≥30 features; `--hidden 128,128` for fewer | Capacity sweep (#zenanalyze internal) shows depth helps more than width past ~50 cross-termed inputs. |
 
@@ -551,7 +551,8 @@ selects at session start); see [`SAFETY_PLANE.md`](SAFETY_PLANE.md).
 | [#53](https://github.com/imazen/zenanalyze/issues/53) | dynamic dispatch tree | partial — PR #54 ships stages 0+1.5 |
 | [#54](https://github.com/imazen/zenanalyze/pull/54) | `analyze_with_dispatch_plan` stages 0+1.5 | open |
 | [#55](https://github.com/imazen/zenanalyze/issues/55) | scorer-composed argmin | landed (`76bc5a8`) |
-| [#56](https://github.com/imazen/zenanalyze/issues/56) | `--objective rd_time` + time head | open |
+| [#56](https://github.com/imazen/zenanalyze/issues/56) | `--objective rd_time` + time head | landed 2026-08-28 (`benchmarks/rd_time_bake_zenwebp_2026-08-28.md`) |
+| [#43](https://github.com/imazen/zenanalyze/issues/43) | `--objective time_budgeted` (budget-filtered labels, BUDGET_INFEASIBLE / TIME_HEAD_R2) | landed 2026-08-28 |
 | [#57](https://github.com/imazen/zenanalyze/pull/57) | bake_picker finite-bound sentinels + leakyrelu doc | open |
 
 This table is the live map of what's in flight. Update when an

@@ -200,7 +200,9 @@ total. With `--activation relu` it can stretch to ~10 minutes wall.
 | Flag | When |
 |---|---|
 | `--activation leakyrelu` | **Default.** Fast PyTorch student. Pass `--activation relu` only for sklearn-baseline reproduction (10–20× slower). |
-| `--objective {size_optimal, zensim_strict}` | size_optimal (default) trains mean log-bytes; zensim_strict trains pinball-q99 + per-zq reach gate. Ship both side-by-side |
+| `--objective {size_optimal, zensim_strict, rd_time, time_budgeted}` | size_optimal (default) trains mean log-bytes; zensim_strict trains pinball-q99 + per-zq reach gate. Ship both side-by-side. `rd_time` (#56) additionally REQUIRES the Pareto's `encode_ms` column and trains the per-cell `time_log` head under `--time-loss-weight`; `time_budgeted` (#43) is rd_time plus the `--time-budget-multiplier` label filter (required > 0) |
+| `--time-loss-weight 0.5` | α in the student's `bytes_loss + α · time_loss` (rd_time / time_budgeted default 0.5; 0 drops the time block from the fit) |
+| `--time-budget-multiplier 1.5` | within-cell labels restricted to configs with `encode_ms ≤ median_ms[size_class] × multiplier`; `BUDGET_INFEASIBLE` fires when > 5 % of (image, size) pairs have no in-budget cell. The bake records `time_baselines_ms` so the codec applies the same budget as a runtime mask from the time head |
 | `--bytes-quantile 0.99` | quantile for zensim_strict bytes head |
 | `--reach-threshold 0.99` | per-cell reach-rate floor for zensim_strict gate |
 | `--hidden 192,192,192` | student MLP hidden widths. Default `128,128`; bump when n_inputs grows past ~50 (see Step 8) |

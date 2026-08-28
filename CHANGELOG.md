@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`train_hybrid.py --objective rd_time` / `time_budgeted` + time-head bake
+  contract** (#56, #43). `rd_time` is size_optimal with a REQUIRED per-cell
+  `time_log` head (fails fast, exit 2, when the Pareto has no time column) and a
+  `--time-loss-weight` α (default 0.5 under the time-aware objectives; the time
+  block's soft targets are scaled by √α for the student fit and the inverse is
+  absorbed into the final layer, so the shipped head stays `log(encode_ms)`; 0
+  drops the block from the fit and re-inserts the teacher's per-cell mean).
+  `time_budgeted` is rd_time plus the existing `--time-budget-multiplier`
+  label filter, now REQUIRED > 0. TIME_HEAD_R2 / METRIC_HEAD_R2 are gated on the
+  shipped STUDENT's held-out per-cell R² (was the teacher's) via the new
+  `time_gate_violations` helper; new diagnostics `time_head_teacher_r2`,
+  `time_head_rel_err` (p50/p90/p99 of |Δms|/ms, the #56 acceptance numbers),
+  `encode_ms_p99` (per target_zq × cell, train corpus) and
+  `median_cell_ms_per_mp` (val, training-time CPU; also in
+  `training_objective`). `tools/bake_picker.py` emits
+  `zentrain.median_cell_ms_per_mp`, `zentrain.encode_ms_p99` (+
+  `_zq_targets`, −1.0 where a cell never reached) and `zentrain.profile` 2/3 for
+  the new objectives, and **fixes `zentrain.hybrid_heads_layout`**: `head_kinds`
+  now follows `output_layout` (0 bytes, 1 scalar, 2 time, 3 metric) — every bake
+  with a time head previously declared one block too few. First real bake on the
+  canonical zenwebp data, `benchmarks/rd_time_bake_zenwebp_2026-08-28.md`:
+  student time head val R² median 0.993, |Δms|/ms p50 6.6 % / p99 38.9 %
+  (n = 841,943) against the #56 bar of 25 % / 50 %. Tests:
+  `zentrain/tools/test_train_hybrid_time_heads.py` (20, CI `zentrain-pytests`;
+  includes the #43 synthetic budget smoke test through `build_dataset`) and
+  `tools/test_bake_roundtrip.py` now runs an rd_time-shaped model across the
+  3 activations × 3 dtypes (18/18 pass).
+
 - **Per-feature cost grid on real content + cost × use cross-reference**
   (#41 "per-feature cost vs use", #50 Sub-A). `examples/per_feature_cost_grid.rs`
   measures every `SUPPORTED` feature's solo and leave-one-out wall-clock at

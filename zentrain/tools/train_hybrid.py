@@ -1458,6 +1458,276 @@ def compute_time_baselines(pareto):
     return baselines
 
 
+# ---------- Time-aware objectives (imazen/zenanalyze#56, #43) ----------
+#
+# `rd_time` (#56) and `time_budgeted` (#43) are the two objectives that make
+# the per-cell `time_log` head a contract instead of a by-product:
+#
+#   rd_time        bytes head as size_optimal; the time head is trained with
+#                  `--time-loss-weight` (default DEFAULT_RD_TIME_LOSS_WEIGHT)
+#                  and MUST exist — a Pareto without the time column is an
+#                  error, not a silent bytes-only bake. Codecs consume the
+#                  head through an exchange rate (`score = bytes + μ·ms`,
+#                  zenpredict argmin_masked_with_scorer, #55).
+#   time_budgeted  rd_time plus the label-extraction budget filter
+#                  (`--time-budget-multiplier` > 0 REQUIRED): within-cell
+#                  labels are the cheapest config INSIDE the budget, the
+#                  BUDGET_INFEASIBLE gate counts (image, size) pairs no cell
+#                  can serve, and the codec re-applies the same budget as a
+#                  runtime mask from the time head.
+#
+# Both keep TIME_HEAD_R2 on the STUDENT's held-out per-cell R² (what ships),
+# and add `time_head_rel_err` (p50/p90/p99 of |ms_pred − ms| / ms over
+# reached validation cells) so a bake can be checked against the #56
+# acceptance bar (≤ 25 % at p50, ≤ 50 % at p99 on the training-time CPU).
+# The time head stays `log(encode_ms)` (not per-megapixel): `log_pixels` is
+# an input feature, so the student learns the per-MP cost either way, and
+# every shipped bake since 2026-05 already carries the head in that unit.
+# Platform calibration uses `median_cell_ms_per_mp` (measured on the
+# training-time CPU over validation rows) — ratio-based, so it is unit-
+# agnostic.
+
+OBJECTIVES = ("size_optimal", "zensim_strict", "rd_time", "time_budgeted")
+TIME_AWARE_OBJECTIVES = ("rd_time", "time_budgeted")
+# `bytes_loss + α · time_loss` (#56): the time block's soft targets are scaled
+# by sqrt(α) before the student fit (MSE on the scaled block == α × MSE on
+# the natural block) and the inverse is absorbed into the final layer after
+# the fit, exactly like the per-head normalisation of the scalar blocks.
+DEFAULT_RD_TIME_LOSS_WEIGHT = 0.5
+
+
+def validate_objective_requirements(
+    objective: str,
+    *,
+    has_time_column: bool,
+    time_budget_multiplier: float,
+    time_column: str = "encode_ms",
+) -> None:
+    """Fail fast on the data/flag preconditions of the time-aware
+    objectives. Raises `ValueError` with the operator-facing message
+    (main() turns it into exit code 2).
+
+    - `rd_time` / `time_budgeted`: the Pareto MUST carry `time_column`
+      (otherwise there is no time head to train and the bake would be a
+      mislabelled size_optimal).
+    - `time_budgeted`: `--time-budget-multiplier` MUST be > 0 (the
+      objective IS the budget filter).
+    """
+    if objective not in OBJECTIVES:
+        raise ValueError(f"unknown objective {objective!r}; choose from {OBJECTIVES}")
+    if objective in TIME_AWARE_OBJECTIVES and not has_time_column:
+        raise ValueError(
+            f"--objective {objective} needs the {time_column!r} column in the "
+            f"Pareto sweep (the per-cell time head is the point of this "
+            f"objective) — the sweep has no such column. Re-run the sweep "
+            f"with encode timing, set TIME_COLUMN in the codec config, or "
+            f"train --objective size_optimal instead."
+        )
+    if objective == "time_budgeted" and not time_budget_multiplier > 0:
+        raise ValueError(
+            "--objective time_budgeted needs --time-budget-multiplier > 0 "
+            "(labels are the cheapest config INSIDE baseline_ms[size_class] × "
+            "multiplier; without a multiplier there is no budget to honour)."
+        )
+
+
+def resolve_time_loss_weight(objective: str, flag: float | None) -> float | None:
+    """`--time-loss-weight` resolution. `None` means "no re-weighting":
+    the time block trains under the same unit MSE as every other head
+    (pre-#56 behaviour, what every size_optimal / zensim_strict bake
+    did). Explicit values win (0.0 included); the time-aware objectives
+    default to DEFAULT_RD_TIME_LOSS_WEIGHT.
+    """
+    if flag is not None:
+        w = float(flag)
+        if not math.isfinite(w) or w < 0.0:
+            raise ValueError(f"--time-loss-weight must be a finite value >= 0, got {flag!r}")
+        return w
+    if objective in TIME_AWARE_OBJECTIVES:
+        return DEFAULT_RD_TIME_LOSS_WEIGHT
+    return None
+
+
+def scale_time_block_for_fit(
+    soft_tr: np.ndarray, start: int, end: int, weight: float | None
+):
+    """Apply `--time-loss-weight` to the student's soft targets.
+
+    Returns `(soft_fit, absorb)` where `soft_fit` is what the student is
+    trained on and `absorb` describes how to undo it after the fit via
+    `absorb_time_block`:
+
+    - `weight is None` or `1.0`: nothing to do (`absorb = None`).
+    - `weight > 0`: the block is multiplied by `sqrt(weight)` — MSE on the
+      scaled block equals `weight ×` MSE on the natural block, i.e. the
+      #56 `bytes_loss + α · time_loss` combined loss — and
+      `absorb = ("scale", start, end, 1/sqrt(weight))`.
+    - `weight == 0`: the block is REMOVED from the fit (the time head
+      then contributes nothing to the shared layers, so the bytes head
+      trains exactly as it would without a time head) and
+      `absorb = ("drop", start, end, None)`: `absorb_time_block`
+      re-inserts constant columns (teacher train-mean per cell) so the
+      output layout is unchanged.
+    """
+    if weight is None or weight == 1.0:
+        return soft_tr, None
+    if weight == 0.0:
+        soft_fit = np.concatenate([soft_tr[:, :start], soft_tr[:, end:]], axis=1)
+        return soft_fit, ("drop", start, end, None)
+    s = math.sqrt(weight)
+    soft_fit = soft_tr.copy()
+    soft_fit[:, start:end] = soft_fit[:, start:end] * s
+    return soft_fit, ("scale", start, end, 1.0 / s)
+
+
+def absorb_time_block(student, absorb, time_means: np.ndarray | None = None) -> None:
+    """Undo `scale_time_block_for_fit` on the trained student's final
+    layer IN PLACE (`student.coefs_[-1]`, `student.intercepts_[-1]`),
+    so the shipped weights emit natural-unit `log(encode_ms)`.
+
+    - `("scale", start, end, inv)`: multiply the block's final-layer
+      weights and biases by `inv` (= 1/sqrt(weight)).
+    - `("drop", start, end, _)`: re-insert `end - start` output columns
+      with zero weights and bias = `time_means[c]` (teacher train-mean of
+      `log(encode_ms)` per cell; 0.0 where the teacher had no data), so
+      `output_layout` still describes the network.
+    """
+    if absorb is None:
+        return
+    kind, start, end, inv = absorb
+    W = np.asarray(student.coefs_[-1], dtype=np.float64)
+    b = np.asarray(student.intercepts_[-1], dtype=np.float64)
+    if kind == "scale":
+        W[:, start:end] *= inv
+        b[start:end] *= inv
+    elif kind == "drop":
+        n = end - start
+        fill_w = np.zeros((W.shape[0], n), dtype=W.dtype)
+        if time_means is None:
+            fill_b = np.zeros(n, dtype=b.dtype)
+        else:
+            tm = np.asarray(time_means, dtype=np.float64)
+            if tm.shape != (n,):
+                raise ValueError(f"time_means shape {tm.shape} != ({n},)")
+            fill_b = np.where(np.isnan(tm), 0.0, tm)
+        W = np.concatenate([W[:, :start], fill_w, W[:, start:]], axis=1)
+        b = np.concatenate([b[:start], fill_b, b[start:]])
+    else:
+        raise ValueError(f"unknown absorb kind {kind!r}")
+    student.coefs_[-1] = W
+    student.intercepts_[-1] = b
+
+
+def compute_encode_ms_p99(time_log, meta, n_cells: int) -> dict:
+    """Per-(target_zq, cell) p99 of encode_ms over the given rows
+    (`time_log` is `log(encode_ms)`, NaN where the cell did not reach).
+    Returns `{str(zq): [p99_ms | None per cell]}` in ascending zq —
+    `safety_report.diagnostics.encode_ms_p99` (#56), baked as
+    `zentrain.encode_ms_p99` so a codec can `threshold_mask` cells
+    against a hard time budget without trusting the point prediction.
+    """
+    out: dict = {}
+    if time_log is None or len(meta) == 0:
+        return out
+    zqs = np.asarray([int(m[2]) for m in meta])
+    for zq in sorted(set(zqs.tolist())):
+        block = time_log[zqs == zq]
+        row: list = []
+        for c in range(n_cells):
+            col = block[:, c]
+            ok = np.isfinite(col)
+            row.append(float(np.exp(np.percentile(col[ok], 99))) if ok.any() else None)
+        out[str(zq)] = row
+    return out
+
+
+def compute_median_ms_per_mp(time_log, meta, pixels_by_key: dict) -> float | None:
+    """Median `encode_ms / megapixels` over every reached (row, cell)
+    entry — `zentrain.median_cell_ms_per_mp` (#56 platform calibration).
+    The codec measures the same quantity on its deploy CPU at startup and
+    scales the time head's predictions by the ratio. `pixels_by_key`
+    maps `(image, size_class) -> width × height`. None when there is no
+    reached entry with a known pixel count.
+    """
+    if time_log is None or len(meta) == 0:
+        return None
+    vals: list[np.ndarray] = []
+    for i, (image, size, _zq) in enumerate(meta):
+        px = pixels_by_key.get((image, size))
+        if not px or px <= 0:
+            continue
+        row = time_log[i]
+        ok = np.isfinite(row)
+        if ok.any():
+            vals.append(np.exp(row[ok]) / (px / 1e6))
+    if not vals:
+        return None
+    return float(np.median(np.concatenate(vals)))
+
+
+def time_head_relative_error(pred_log, actual_log, reach) -> dict | None:
+    """|ms_pred − ms| / ms over reached (row, cell) entries, as
+    `{"p50", "p90", "p99", "max", "n"}` — the #56 acceptance bar reads
+    p50 ≤ 0.25 and p99 ≤ 0.50 on the training-time CPU. None when no
+    entry is reached.
+    """
+    if pred_log is None or actual_log is None:
+        return None
+    ok = np.asarray(reach, dtype=bool) & np.isfinite(actual_log) & np.isfinite(pred_log)
+    if not ok.any():
+        return None
+    ms_actual = np.exp(actual_log[ok].astype(np.float64))
+    ms_pred = np.exp(pred_log[ok].astype(np.float64))
+    rel = np.abs(ms_pred - ms_actual) / np.maximum(ms_actual, 1e-9)
+    return {
+        "p50": float(np.percentile(rel, 50)),
+        "p90": float(np.percentile(rel, 90)),
+        "p99": float(np.percentile(rel, 99)),
+        "max": float(rel.max()),
+        "n": int(rel.size),
+    }
+
+
+def time_gate_violations(diag: dict, thresholds: dict) -> list[str]:
+    """The three time/metric-head safety gates (#43 / #56):
+    TIME_HEAD_R2 and METRIC_HEAD_R2 (held-out per-cell median R² of the
+    shipped student below the floor — only checked when the head exists
+    and the floor is > 0) and BUDGET_INFEASIBLE (fraction of (image,
+    size) pairs with no in-budget cell at any zq above the ceiling).
+    Split out of `safety_check` so the gates are unit-testable without
+    a full diagnostics dict.
+    """
+    v: list[str] = []
+    thr_time_r2 = thresholds.get("min_time_head_r2", 0.0)
+    if diag.get("time_head_r2") is not None and thr_time_r2 > 0:
+        med = diag["time_head_r2"]["median"]
+        if not math.isnan(med) and med < thr_time_r2:
+            v.append(
+                f"TIME_HEAD_R2: median per-cell R² {med:.3f} "
+                f"< threshold {thr_time_r2:.3f} — time predictions "
+                f"too noisy for inference-time budget filtering"
+            )
+    thr_metric_r2 = thresholds.get("min_metric_head_r2", 0.0)
+    if diag.get("metric_head_r2") is not None and thr_metric_r2 > 0:
+        med = diag["metric_head_r2"]["median"]
+        if not math.isnan(med) and med < thr_metric_r2:
+            v.append(
+                f"METRIC_HEAD_R2: median per-cell R² {med:.3f} "
+                f"< threshold {thr_metric_r2:.3f} — metric predictions "
+                f"too noisy to enforce quality constraints"
+            )
+    # Budget feasibility — only meaningful when budget filter is on.
+    thr_budget = thresholds.get("max_budget_infeasible_fraction", 1.0)
+    frac = diag.get("budget_infeasible_fraction", 0.0)
+    if frac > thr_budget:
+        v.append(
+            f"BUDGET_INFEASIBLE: {frac:.1%} of (image, size) pairs have "
+            f"no in-budget cell at any zq target "
+            f"> threshold {thr_budget:.1%} — budget too tight for corpus"
+        )
+    return v
+
+
 def build_dataset(
     pareto,
     feats,
@@ -2858,34 +3128,9 @@ def safety_check(diag, thresholds, objective: str):
                     "zensim_strict picker can't reach the top of the zq grid"
                 )
 
-    # Time / metric head R² gates — only checked when the head exists.
-    thr_time_r2 = thresholds.get("min_time_head_r2", 0.0)
-    if diag.get("time_head_r2") is not None and thr_time_r2 > 0:
-        med = diag["time_head_r2"]["median"]
-        if not math.isnan(med) and med < thr_time_r2:
-            v.append(
-                f"TIME_HEAD_R2: median per-cell R² {med:.3f} "
-                f"< threshold {thr_time_r2:.3f} — time predictions "
-                f"too noisy for inference-time budget filtering"
-            )
-    thr_metric_r2 = thresholds.get("min_metric_head_r2", 0.0)
-    if diag.get("metric_head_r2") is not None and thr_metric_r2 > 0:
-        med = diag["metric_head_r2"]["median"]
-        if not math.isnan(med) and med < thr_metric_r2:
-            v.append(
-                f"METRIC_HEAD_R2: median per-cell R² {med:.3f} "
-                f"< threshold {thr_metric_r2:.3f} — metric predictions "
-                f"too noisy to enforce quality constraints"
-            )
-    # Budget feasibility — only meaningful when budget filter is on.
-    thr_budget = thresholds.get("max_budget_infeasible_fraction", 1.0)
-    frac = diag.get("budget_infeasible_fraction", 0.0)
-    if frac > thr_budget:
-        v.append(
-            f"BUDGET_INFEASIBLE: {frac:.1%} of (image, size) pairs have "
-            f"no in-budget cell at any zq target "
-            f"> threshold {thr_budget:.1%} — budget too tight for corpus"
-        )
+    # Time / metric head R² gates (student, held-out) + budget feasibility
+    # — see `time_gate_violations` (#43 / #56).
+    v.extend(time_gate_violations(diag, thresholds))
 
     return (len(v) == 0, v)
 
@@ -3067,14 +3312,36 @@ def main():
     )
     parser.add_argument(
         "--objective",
-        choices=["size_optimal", "zensim_strict"],
+        choices=list(OBJECTIVES),
         default="size_optimal",
         help="Safety profile. `size_optimal` (default) trains the bytes head "
         "with mean log-bytes regression — minimum mean cost subject to reach. "
         "`zensim_strict` trains with quantile regression at --bytes-quantile "
         "(default 0.99) and emits a per-zq reach-rate gate; cells whose "
         "empirical reach rate is below --reach-threshold at a given target "
-        "are masked out at inference.",
+        "are masked out at inference. `rd_time` (zenanalyze#56) is "
+        "size_optimal plus a REQUIRED per-cell `time_log` head trained under "
+        "--time-loss-weight (the Pareto must carry the time column; the bake "
+        "records encode_ms_p99 + median_cell_ms_per_mp for the codec's "
+        "bytes+μ·ms scorer). `time_budgeted` (zenanalyze#43) is rd_time plus "
+        "the --time-budget-multiplier label filter (REQUIRED > 0): labels are "
+        "the cheapest config inside the budget and BUDGET_INFEASIBLE gates the "
+        "corpus.",
+    )
+    parser.add_argument(
+        "--time-loss-weight",
+        type=float,
+        default=None,
+        help="α in the student's combined loss `bytes_loss + α · time_loss` "
+        "(zenanalyze#56): the time block's soft targets are scaled by sqrt(α) "
+        "for the fit and the inverse is absorbed into the final layer, so the "
+        "shipped head is still log(encode_ms). Default: "
+        f"{DEFAULT_RD_TIME_LOSS_WEIGHT} under --objective rd_time / "
+        "time_budgeted, unweighted (1.0) otherwise. 0 removes the time block "
+        "from the student fit entirely (bytes head trains exactly as without a "
+        "time head; the time outputs become the teacher's per-cell train mean); "
+        "large values make the time head dominate the shared layers at the cost "
+        "of bytes accuracy. Ignored when the Pareto has no time column.",
     )
     parser.add_argument(
         "--bytes-quantile",
@@ -3410,6 +3677,8 @@ def main():
         suffix = args.out_suffix
     elif args.objective == "zensim_strict":
         suffix = "_zensim_strict"
+    elif args.objective in TIME_AWARE_OBJECTIVES:
+        suffix = f"_{args.objective}"
     else:
         suffix = ""
     if suffix:
@@ -3430,6 +3699,8 @@ def main():
         f"{'quantile q=' + str(args.bytes_quantile) if args.objective == 'zensim_strict' else 'mean (squared error)'}\n"
         f"  reach gate: "
         f"{'>= ' + str(args.reach_threshold) + ' per zq band' if args.objective == 'zensim_strict' else 'none (any reachable cell allowed)'}\n"
+        f"  time head:   "
+        f"{'REQUIRED (' + args.objective + ')' if args.objective in TIME_AWARE_OBJECTIVES else 'when the Pareto carries the time column'}\n"
         f"  output JSON: {OUT_JSON}\n"
     )
 
@@ -3460,6 +3731,25 @@ def main():
         f"  metric column: {METRIC_COLUMN} ({METRIC_DIRECTION})\n"
         f"  time column:   {TIME_COLUMN} ({'present' if has_time_column else 'absent'})\n"
     )
+    # Time-aware objectives fail fast on their preconditions (#56 / #43):
+    # a bake labelled rd_time without a time head, or time_budgeted
+    # without a budget, would be a silently mislabelled size_optimal.
+    try:
+        validate_objective_requirements(
+            args.objective,
+            has_time_column=has_time_column,
+            time_budget_multiplier=args.time_budget_multiplier,
+            time_column=TIME_COLUMN,
+        )
+        time_loss_weight = resolve_time_loss_weight(args.objective, args.time_loss_weight)
+    except ValueError as e:
+        sys.stderr.write(f"error: {e}\n")
+        sys.exit(2)
+    if time_loss_weight is not None:
+        sys.stderr.write(
+            f"  time-loss weight α={time_loss_weight:g} "
+            f"({'time block dropped from the student fit' if time_loss_weight == 0.0 else 'time soft targets × sqrt(α) for the fit, absorbed post-fit'})\n"
+        )
     if has_ceiling_column:
         n_with_ceiling = sum(1 for v in ceilings.values() if v is not None)
         sys.stderr.write(
@@ -3737,6 +4027,17 @@ def main():
             )
         next_block += 1
 
+    # --time-loss-weight (#56): scale / drop the time block for the fit;
+    # `absorb_time_block` undoes it on the final layer right after the fit
+    # and BEFORE the scalar-block absorb below (whose indices assume the
+    # full output layout).
+    time_absorb = None
+    soft_fit = soft_tr
+    if has_time_head and time_loss_weight is not None:
+        soft_fit, time_absorb = scale_time_block_for_fit(
+            soft_tr, n_cells, 2 * n_cells, time_loss_weight
+        )
+
     hidden_repr = "x".join(str(x) for x in hidden_layer_sizes)
     sys.stderr.write(
         f"\nTraining MLP student (hidden={hidden_repr}, output_dim={soft_tr.shape[1]})...\n"
@@ -3772,7 +4073,7 @@ def main():
             )
         student = _train_torch_leakyrelu_student(
             X_tr=Xe_tr_s,
-            Y_tr=soft_tr,
+            Y_tr=soft_fit,
             hidden_layer_sizes=hidden_layer_sizes,
             lr=2e-3,
             batch_size=512,
@@ -3801,8 +4102,12 @@ def main():
             random_state=SEED,
             verbose=False,
         )
-        student.fit(Xe_tr_s, soft_tr)
+        student.fit(Xe_tr_s, soft_fit)
     sys.stderr.write(f"  trained, final loss={student.loss_:.4f}, n_iter={student.n_iter_}\n")
+    # Undo --time-loss-weight on the final layer first: the scalar-block
+    # absorb below indexes the FULL output layout, which a dropped time
+    # block would have shifted.
+    absorb_time_block(student, time_absorb, time_means_safe if has_time_head else None)
 
     # Post-fit: absorb the inverse standardization (label = ŷ_std * σ + μ)
     # into the final layer so the network's forward pass produces natural-
@@ -3838,6 +4143,9 @@ def main():
         for lo, hi in zip(output_bounds_p01, output_bounds_p99)
     ]
     pred_bytes = Y_va_pred[:, :n_cells]
+    # The STUDENT's time block (what ships) — the time-head gates and the
+    # #56 acceptance numbers are computed on it, not on the teacher.
+    student_time_pred_va = Y_va_pred[:, n_cells:2 * n_cells] if has_time_head else None
     # Use the same per-block offsets we computed for normalization above —
     # this fixes a latent bug where the original `(i+1)*n_cells` indexing
     # silently mis-sliced when `has_time_head` or `has_metric_head` shifted
@@ -4062,8 +4370,36 @@ def main():
 
     # --- Optional time + metric head R² (held-out, per cell)
     time_head_r2 = None
+    time_head_teacher_r2 = None
+    time_head_rel_err = None
+    encode_ms_p99 = {}
+    median_cell_ms_per_mp = None
     if has_time_head:
-        time_head_r2 = evaluate_per_cell_r2(time_pred_va, time_log_va, rch_va)
+        # Gate + acceptance on the shipped student; the teacher's R² is
+        # kept as a diagnostic (a large student/teacher gap = distillation
+        # capacity problem, not a data problem).
+        time_head_teacher_r2 = evaluate_per_cell_r2(time_pred_va, time_log_va, rch_va)
+        time_head_r2 = evaluate_per_cell_r2(student_time_pred_va, time_log_va, rch_va)
+        time_head_rel_err = time_head_relative_error(student_time_pred_va, time_log_va, rch_va)
+        # #56: per-(target_zq, cell) p99 encode_ms over the TRAIN corpus
+        # (baked as zentrain.encode_ms_p99) and the platform-calibration
+        # anchor (median ms/MP over reached VAL entries, training-time CPU).
+        encode_ms_p99 = compute_encode_ms_p99(time_log_tr, meta_tr, n_cells)
+        pixels_by_key = {(image, size): w * h for (image, size, w, h) in pareto.keys()}
+        median_cell_ms_per_mp = compute_median_ms_per_mp(time_log_va, meta_va, pixels_by_key)
+        sys.stderr.write(
+            f"\nTime head (student, val): per-cell R² median {time_head_r2['median']:.3f} "
+            f"min {time_head_r2['min']:.3f} (teacher median {time_head_teacher_r2['median']:.3f}); "
+            + (
+                f"|Δms|/ms p50 {time_head_rel_err['p50']:.1%} p90 {time_head_rel_err['p90']:.1%} "
+                f"p99 {time_head_rel_err['p99']:.1%} (n={time_head_rel_err['n']}); "
+                if time_head_rel_err else "no reached entries; "
+            )
+            + (
+                f"median ms/MP {median_cell_ms_per_mp:.3f}\n"
+                if median_cell_ms_per_mp is not None else "median ms/MP n/a\n"
+            )
+        )
     metric_head_r2 = None
     if has_metric_head:
         metric_head_r2 = evaluate_per_cell_r2(metric_pred_va, metric_log_va, rch_va)
@@ -4097,6 +4433,16 @@ def main():
         "feature_bounds": feature_bounds,
         "reach_safety": reach_safety,
         "time_head_r2": time_head_r2,
+        "time_head_teacher_r2": time_head_teacher_r2,
+        # #56 acceptance: predicted ms within 25 % (p50) / 50 % (p99) of
+        # measured on the training-time CPU, over reached val cells.
+        "time_head_rel_err": time_head_rel_err,
+        # #56: per-(target_zq, cell) p99 encode_ms on TRAIN → baked as
+        # zentrain.encode_ms_p99 (+ zentrain.encode_ms_p99_zq_targets).
+        "encode_ms_p99": encode_ms_p99,
+        # #56 platform calibration anchor → baked as
+        # zentrain.median_cell_ms_per_mp.
+        "median_cell_ms_per_mp": median_cell_ms_per_mp,
         "metric_head_r2": metric_head_r2,
         "budget_infeasible_fraction": budget_infeasible_fraction,
         # Which student trainer produced this bake (torch leakyrelu vs sklearn
@@ -4354,6 +4700,12 @@ def main():
             "metric_direction": METRIC_DIRECTION,
             "time_column": TIME_COLUMN if has_time_head else None,
             "has_time_head": bool(has_time_head),
+            # α in `bytes_loss + α · time_loss` (#56); None = unweighted.
+            "time_loss_weight": time_loss_weight,
+            # Median encode_ms per megapixel over reached validation
+            # entries on the training-time CPU (#56 platform calibration):
+            # codec divides its startup-measured ms/MP by this.
+            "median_cell_ms_per_mp": median_cell_ms_per_mp,
             "has_metric_head": bool(has_metric_head),
             # Budget filter applied at label-extraction time. When > 0,
             # within-cell candidates were restricted to time ≤

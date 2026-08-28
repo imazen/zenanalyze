@@ -24,7 +24,7 @@ zentrain-pytests:
       test_picker_lib_strict.py test_metapicker_lib.py \
       test_train_hybrid_knob_vetoes.py test_cargo_invocations.py \
       test_train_hybrid_backend.py test_feature_inventory.py \
-      test_canonical_tools.py \
+      test_canonical_tools.py test_train_hybrid_time_heads.py \
       --deselect test_predict_lib.py::test_student_permutation_relu \
       --deselect test_predict_lib.py::test_student_permutation_leakyrelu
 
