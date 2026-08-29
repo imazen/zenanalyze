@@ -106,7 +106,7 @@ README.
 
 ## Tier architecture quick reference
 
-Five passes, gated by the requested `FeatureSet`:
+Six passes, gated by the requested `FeatureSet`:
 
 - **Tier 1** — stripe-sampled RGB8 (variance, edges, chroma, uniformity, grayscale).
 - **Tier 2** — full-image 3-row sliding window over RGB8 (per-axis Cb/Cr sharpness).

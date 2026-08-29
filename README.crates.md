@@ -34,16 +34,17 @@ zenpixels = { version = "0.2.14", default-features = false }
 
 | feature | what it gates | count | stability |
 |---|---|---|---|
-| _(default)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | **97** | Numeric drift bounded by the threshold contract; signatures semver-governed |
-| `experimental` | Two still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss`, `XybBquarterChromaLoss`) plus the deprecated `PaletteDensity`. | +3 → 100 | Metric definition or scale may still change; opt in only if you re-validate per patch |
-| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals + the clip-and-separate `highlight_*` descriptors — 16 features, the depth tier (ids 32–39, 46, 47, 212–217). | +16 → **116** | Off by default (SDR hot path skips the tier); definitions may change per patch |
+| _(base, i.e. `--no-default-features`)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | 97 | Numeric drift bounded by the threshold contract; signatures semver-governed |
+| `experimental` — **on by default** | Four still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss` 138, `XybBquarterChromaLoss` 139), `ChromaSubsampleDctLoss` (140), and the deprecated `PaletteDensity` (12). | +4 → **101** (the default build) | Metric definition or scale may still change; `default-features = false` opts out only to pin an older schema |
+| `hdr` | Source-direct HDR / wide-gamut / bit-depth signals + the clip-and-separate `highlight_*` descriptors — 16 features, the depth tier (ids 32–39, 46, 47, 212–217). | +16 → **117** (113 without `experimental`) | Off by default (SDR hot path skips the tier); definitions may change per patch |
+| `api` | The **producer side** of the `zenanalyze-api` feature contract: `extract_offer` (one pass → a self-describing `OwnedOffer`) and `Analyzer` (this build as a `zenanalyze_api::FeatureProvider`). Enable it in the host/orchestrator that chooses the analyzer version. | — | Adds the `zenanalyze-api` dep; see [the sole-contract rule](#the-feature-contract--zenanalyze-api-is-the-sole-intermediary) |
 
 > **As of the 0.2.x line, `experimental` is narrow.** ~58 features that used to
 > sit behind it (the `AqMap*`, `NoiseFloor*`, `QuantSurvival*`,
 > `LaplacianVariance*` families, `GradientFraction`, `PatchFraction`,
 > `GrayscaleScore`, `SkinToneFraction`, `EdgeSlopeStdev`, the HVS/spectral pack,
 > etc.) were **promoted to the default surface** once their definitions pinned —
-> they need no feature flag now. The gate now scopes to only the three signals
+> they need no feature flag now. The gate now scopes to only the four signals
 > above, whose structural definition is still settling.
 >
 > **Retired likelihoods:** the four composite likelihoods `TextLikelihood`,
@@ -223,11 +224,11 @@ when you compile-in a fitted model** — feature *values* drift within a minor
 per the threshold contract, even though the id order doesn't.
 
 Because `SUPPORTED` membership depends on enabled cargo features, a model
-trained against the `experimental + hdr` 116-feature surface must be consumed by
+trained against the `experimental + hdr` 117-feature surface must be consumed by
 a build with the same features on. If you want a feature-flag-independent vector,
 request an explicit named set instead of `SUPPORTED`.
 
-**Per-codec subsets are cheaper.** A picker rarely needs all 97. Request only
+**Per-codec subsets are cheaper.** A picker rarely needs all 101. Request only
 the features the model uses and the analyzer skips whole passes. The crate ships
 one such const — `FeatureSet::ZENJPEG_PICKER_V1_1` (8 features: `Variance`,
 `EdgeDensity`, `Uniformity`, `ChromaComplexity`, `CbSharpness`, `CrSharpness`,
@@ -461,16 +462,26 @@ internals to `Vec::try_reserve` doesn't break anyone's `match`.
 
 ## How it's organised
 
-Five passes, each gated by what the requested `FeatureSet` actually needs:
+Six passes, each gated by what the requested `FeatureSet` actually needs:
 
-| Pass | Iterates over | Reads | Cost (4 MP) | Drives |
+| Pass | Iterates over | Reads | Solo cost (4 MP) | Drives |
 |---|---|---|---|---|
-| Tier 1 | Stripe-sampled rows | RGB8 | ~1 ms | luma stats, edges, chroma, uniformity, grayscale |
-| Tier 2 | 3-row sliding window | RGB8 | ~2 ms | per-axis Cb/Cr sharpness |
-| Tier 3 | Sampled 8×8 DCT blocks | RGB8 | ~3 ms | DCT energy, entropy, AQ map, noise floor, line-art, gradient, patch fraction |
-| Palette | Full image | RGB8 | ~1 ms | distinct color bins |
-| Alpha | Stride-sampled rows | **Source bytes** | ~0.3 ms | alpha presence / used / bimodal |
-| `tier_depth` (experimental) | Stride-sampled rows | **Source bytes** | ~0.5 ms HDR, ~0 SDR-fast-path | HDR / wide-gamut / bit-depth / gamut-coverage |
+| Tier 1 | Stripe-sampled rows | RGB8 | 3.6 ms | luma stats, edges, chroma, uniformity, grayscale |
+| Tier 2 | 3-row sliding window | RGB8 | 2.4 ms | per-axis Cb/Cr sharpness |
+| Tier 3 (histogram) | Sampled rows | RGB8 | 3.6 ms | entropy, line-art |
+| Tier 3 (DCT walk) | Sampled 8×8 blocks | RGB8 | 5.6 ms | DCT energy, AQ map, noise floor, gradient, patch fraction |
+| Palette (full) | Full image | RGB8 | 4.5 ms | distinct color bins |
+| Alpha | Stride-sampled rows | **Source bytes** | 2.3 ms | alpha presence / used / bimodal |
+| `tier_depth` (`hdr`) | Stride-sampled rows | **Source bytes** | 2.3 ms | HDR / wide-gamut / bit-depth / gamut-coverage |
+
+Measured 2026-06-18 on a Ryzen 9 7950X (WSL2, release, no `target-cpu=native`)
+by `examples/per_tier_cost.rs`; raw numbers and the depth-tier SDR-fast-path
+history in [`benchmarks/per_tier_cost_2026-06-18.md`](benchmarks/per_tier_cost_2026-06-18.md).
+**Solo** means "the only tier requested" — it therefore includes the shared
+`RowStream` + dispatch floor, so the column does **not** sum to the cost of
+asking for everything (19.4 ms on the same host). What dropping one feature from
+a request actually saves is the leave-one-out column of the per-feature grid,
+[`benchmarks/per_feature_cost_grid_2026-08-28.tsv`](benchmarks/per_feature_cost_grid_2026-08-28.tsv).
 
 Tier 1/2/3 + Palette read RGB8 via `RowStream`, which has three internal paths:
 
@@ -502,10 +513,15 @@ input paths cost more because RowConverter does transfer-function-
 aware narrowing — that's the correct tool for genuinely
 heterogeneous input.
 
-Per-call working-set memory is ~265 KB across ~7 allocations (largest single
-chunk is the Tier 1 stripe scratch at 9 × width × 3 = 108 KB at 4 K). All
-allocations are infallible today; the `OutOfMemory` variant exists so a
-future minor can flip them without API breakage.
+Allocation: **38 heap allocations per `analyze_features` call**, measured with
+DHAT at 1 MP on 2026-06-20 (x86-64;
+[`benchmarks/analyze_alloc_profile_2026-06-20.md`](benchmarks/analyze_alloc_profile_2026-06-20.md)).
+That is after the per-row scratch hoist, which cut 3,671 allocs/call to 38 —
+an instruction-count and allocator-pressure win, measured **wall-clock neutral**
+at every size above tiny, so don't read it as a speedup. Scratch is
+`O(width)`, not `O(pixels)`: the Tier 1 stripe buffer is the largest single
+allocation. All allocations are infallible today; the `OutOfMemory` variant
+exists so a future minor can flip them without API breakage.
 
 ## Empirical operating thresholds
 
@@ -592,6 +608,36 @@ reductions but catch any genuine architecture divergence.
 > coverage tools count each variant separately, so the raw percentage on
 > these files looks ≈30 % on x86_64. Real coverage of executable code paths
 > (counted on the dispatched variant only) is ≥95 % across every module.
+
+## The feature contract — `zenanalyze-api` is the sole intermediary
+
+A product links **many `zenanalyze` versions at once**: each codec pins the version its model
+was trained against, because re-defining a feature silently changes what its numbers mean.
+Cargo links those versions side by side happily — but their types are then distinct, so
+nothing typed in terms of `zenanalyze::feature::AnalysisResults` can cross between two codecs.
+
+**[`zenanalyze-api`](zenanalyze-api/) is the one crate everything agrees on**, and the rule is:
+
+> A codec crate's **library code** depends on `zenanalyze-api` and nothing else from the
+> zenanalyze family. It receives values as an `Offer`, or extracts them through a
+> `&dyn FeatureProvider` the host injects. It never names `zenanalyze::…`.
+
+Direct `zenanalyze` belongs to exactly two roles: the **host/orchestrator** that picks the
+version and runs the pass, and **dev tooling** (`dev/`, `examples/`, `benches/`, sweep and
+training extractors) that isn't in the product graph.
+
+One rule bites silently and is worth repeating here: **depend on the contract by crates.io
+version, never by git rev.** A registry dep and a git dep are different Cargo sources, and two
+git deps at different revs are too — either way you get two `Offer` types that don't
+interconvert. Unreleased changes go in a single workspace-root `[patch.crates-io]`.
+
+This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](src/offer.rs)):
+`extract_offer` bundles one pass as an `OwnedOffer`, and `Analyzer` is this build as a
+`FeatureProvider`.
+
+Full rules, roles, and an audit recipe: **[`docs/sole-contract.md`](docs/sole-contract.md)**.
+Mechanics, negotiation semantics, and compiled examples:
+**[`zenanalyze-api/README.md`](zenanalyze-api/README.md)**.
 
 ## Companion crates in this repo
 
