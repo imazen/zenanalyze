@@ -81,7 +81,8 @@ cargo features rather than removing them, and are recorded in the changelog:
 |---|---|---|
 | Break list | `cargo semver-checks … --release-type patch` | 223 checks, 220 pass, **3 fail**, all deliberate and listed |
 | Public-API snapshots | `ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml` | was **stale** (173-line snapshot vs a 211-line surface); regenerated and committed, now passes |
-| Packaging | `cargo publish --dry-run -p zenanalyze` | **rc=0** — 66 files, 1.4 MiB (430.5 KiB compressed), verify-build clean *(run before the `zenanalyze-api` requirement bump; see §1 for why it now blocks on step 1)* |
+| Packaging | `cargo publish --dry-run -p zenanalyze` | **rc=0** — 66 files, 1.4 MiB (430.5 KiB compressed), verify-build clean *(run before the `zenanalyze-api` requirement bump)* |
+| Packaging, after the bump | same command | **rc=101, as designed**: `failed to select a version for the requirement zenanalyze-api = "^0.1.1"` / `candidate versions found which didn't match: 0.1.0`. That is the blocker in §1 stated by Cargo itself, and it clears the moment step 5 publishes the contract. |
 | `api` feature off the registry | build `target/package/zenanalyze-0.2.0` with `--features api` | **failed** `E0432` → fixed by requiring `zenanalyze-api 0.1.1` |
 | Feature counts | `cargo run --example list_features` × 5 combos | 97 base / **101** default / 117 default+hdr / 113 hdr-only — README corrected |
 | README claims | manual, against source + `benchmarks/` | 6 wrong numbers + 8 crates.io-dead relative links fixed |
