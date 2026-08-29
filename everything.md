@@ -737,7 +737,8 @@ Status 2026-08-28: zenpipe/zencodecs and zensquoosh were already correct;
 zenwebp, zenavif, zenjpeg and zensr were migrated. jxl-encoder (`s4_eps.rs`,
 under the **default-on** `learned-admission`) and zenjxl's
 `extract_features_multiaxis` are outstanding — both repos held another agent's
-uncommitted work when the pass ran. jxl-encoder is the highest-value remainder:
+uncommitted work when the pass ran; tracked as imazen/jxl-encoder#98 and
+imazen/zenjxl#19. jxl-encoder is the highest-value remainder:
 a default-on feature puts a concrete `zenanalyze` in every graph that links it.
 zenmetrics' fleet worker and zensim's picker-prep extractor keep their direct
 deps legitimately (producer / dev-tooling roles).
