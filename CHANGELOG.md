@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Everything under `[Unreleased]` ships as part of `0.2.0`.** `Cargo.toml` is
+> already at `0.2.0` and **nothing after `0.1.0` has ever been published** —
+> crates.io still serves `zenanalyze 0.1.0` (2026-04-28). The `[0.2.0]` section
+> below carries the same not-yet-released work and the verified break list;
+> `docs/RELEASE_0.2.0.md` is the checklist.
+
 ### Added
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
@@ -369,7 +375,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sample_count_floor` recovery tests (byte-match an explicit mirror-tile reference
   across 4×4 … 127×10, incl. 2×32 / 64×4).
 
-## [0.2.0] - 2026-06-23
+## [0.2.0] - unreleased
+
+> Work in this section is dated 2026-06-23 and later; **the version was never
+> published.** crates.io still serves `0.1.0`. Release checklist:
+> `docs/RELEASE_0.2.0.md`.
+
+### Breaking changes since published 0.1.0 — the complete, measured list
+
+Measured, not asserted, on 2026-08-28 with
+`cargo semver-checks check-release -p zenanalyze --baseline-version 0.1.0
+--release-type patch` (`--release-type patch` is what forces the checks to run;
+the honest `0.1.0 → 0.2.0` invocation skips all 253 of them because a 0.x minor
+bump is *allowed* to break, which means it reports nothing). Identical result
+with `--all-features`. **223 checks: 220 pass, 3 fail** — the three failures,
+covering seven public items, are the entire 0.1 → 0.2 break surface:
+
+| # | Break | Lint | Deliberate because |
+|---|---|---|---|
+| 1 | `AnalysisFeature::TextLikelihood` (id 27), `ScreenContentLikelihood` (28), `NaturalLikelihood` (29), `LineArtScore` (45) removed | `enum_variant_missing` | The `composites` cargo feature was culled: these were hand-tuned weighted sums whose coefficients drifted faster than the API could expose, and a raw signal (`PatchFraction`, AUC 0.88) beat `ScreenContentLikelihood` as a single discriminator. Detail + migration in "[0.2.0] — breaking changes since 0.1.0 (detail)" below. |
+| 2 | `AnalysisFeature::IndexedPaletteWidth` (id 30) removed | `enum_variant_missing` | Replaced by `PaletteLog2Size` (id 121): the old codomain `{0,2,4,8}` was too coarse to be a useful model input; the new one is `[1,15] ∪ {24}`. |
+| 3 | `composites` cargo feature removed | `feature_missing` | The feature gated exactly the four variants in row 1; with them gone it gated nothing. |
+| 4 | `AnalysisFeature::PaletteDensity` (id 12) is now `#[deprecated]` | `enum_variant_marked_deprecated` | Superseded by `DistinctColorBins` (raw count) / `PaletteLog2Size` (discrete BPP). The variant still exists and still computes — this is a warning for consumers, not a removal, and it is the only *minor*-level finding of the three. |
+
+All five retired ids (27, 28, 29, 30, 45) are in `RESERVED_RETIRED_IDS`
+(`src/feature.rs`) and are **never recycled**, so a stored feature vector keyed
+by id can still be read back unambiguously.
+
+Two more changes are breaking in effect but invisible to `semver-checks`,
+because they move an item between cargo features rather than removing it:
+
+- **`tier_depth` moved from `experimental` to a new `hdr` feature** — the 10
+  HDR / wide-gamut / depth features (ids 32–39, 46, 47) are now
+  `cfg(feature = "hdr")`. A 0.1 caller who enabled `experimental` to get them
+  must now enable `hdr`. SDR callers see no behavioural change.
+- **`experimental` became default-on** (2026-06-29). This *grows*
+  `FeatureSet::SUPPORTED` for a default build rather than shrinking it, so it
+  breaks nobody at compile time, but a caller who pinned the old default set's
+  size will see a different `SUPPORTED`.
+
+Numeric drift across the whole 0.1 → 0.2 window is governed by the crate's
+threshold contract (`src/lib.rs` crate docs), not by semver: a consumer
+compiling in a fitted model pins a patch and re-validates on bump.
 
 ### Added
 
@@ -971,7 +1018,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ranges before returning. Adversarial bakes whose specs slice
   outside the discrete pool fail at load time, not at prediction.
 
-## zenanalyze (Unreleased)
+## [0.2.0] — breaking changes since 0.1.0 (detail)
+
+> The summary table with the measured `cargo semver-checks` result is in the
+> `[0.2.0]` section above; this is the long-form entry each break landed with.
+> (This section was headed "zenanalyze (Unreleased)" until 2026-08-28, which
+> read as a *second* unreleased bucket — there is only one, and it is 0.2.0.)
 
 ### Changed (breaking — landed since 0.1.0)
 
