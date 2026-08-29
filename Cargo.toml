@@ -89,8 +89,8 @@ hdr = []
 # this workspace the path dep satisfies the requirement either way, so the bug
 # is invisible locally and only fires for a downstream consumer.
 zenanalyze-api = { version = "0.1.1", path = "zenanalyze-api", optional = true }
-zenpixels = { version = "0.2.14", default-features = false, features = ["imgref"] }
-zenpixels-convert = { version = "0.2.14", default-features = false }
+zenpixels = { version = ">=0.2.14, <0.4.0", default-features = false, features = ["imgref"] }
+zenpixels-convert = { version = ">=0.2.14, <0.4.0", default-features = false }
 archmage = { version = "0.9.27", features = ["macros", "avx512", "testable_dispatch"] }
 magetypes = { version = "0.9.27", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,

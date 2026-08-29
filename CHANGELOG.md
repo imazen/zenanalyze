@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > below carries the same not-yet-released work and the verified break list;
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
+### Changed
+
+- **`zenpixels` / `zenpixels-convert` requirements now span the published minor
+  and the next one**: both move from `"0.2.14"` to `">=0.2.14, <0.4.0"`. For a
+  `0.x` crate Cargo treats the minor as the major, so the plain requirement meant
+  `^0.2.14` = `>=0.2.14, <0.3.0` and a `zenpixels 0.3.0` release would have been
+  invisible until this manifest was hand-edited. The floor is unchanged and
+  nothing newer is published, so resolution is identical — `cargo metadata` still
+  resolves exactly one `zenpixels 0.2.16` and one `zenpixels-convert 0.2.16`.
+  Widening uniformly across consumers is what prevents the split-graph failure
+  this repo already hit once, where two copies of a `0.x` crate coexist and their
+  types do not unify. The standing current-plus-next rule is documented in the
+  zencodec repo's `CLAUDE.md`.
+
 ### Performance
 
 - **`analyze_features(SUPPORTED)` is 1.04× faster at 1 MP, 1.11× at 4 MP and up
