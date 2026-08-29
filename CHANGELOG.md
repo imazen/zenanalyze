@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
+- **A `Fuzz` workflow that compile-gates `zenpredict/fuzz/` on every push and
+  PR.** That directory declares its own `[workspace]` table — it has to, since
+  cargo-fuzz's RUSTFLAGS conflict with this repo's release profile — which makes
+  it invisible to every root-level cargo invocation, so ci.yml's tests, clippy,
+  and `--all-targets` checks never compiled its two targets. They could rot
+  against a `zenpredict` API change with CI still green; a workspace-wide audit
+  on 2026-08-29 found 35 such uncompiled targets across 11 repos, one set of
+  which had been broken for about seven weeks. The gate runs `cargo check
+  --all-targets` on stable rather than `cargo fuzz build` (nightly + per-target
+  sanitizer codegen), because the rot it catches is plain type or resolution
+  error. Both targets did still compile when the gate was added.
 - **`examples/feature_bits.rs` — a byte-exact feature-vector lock**
   (`just bitlock` / `just bitlock-bless`). Feature values are training inputs,
   and `versioning::golden_is_stable` compares at `REL_TOLERANCE = 0.5 %`, so a

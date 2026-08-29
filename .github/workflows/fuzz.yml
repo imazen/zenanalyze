@@ -1,0 +1,77 @@
+name: Fuzz
+
+# A BUILD gate, not a fuzzing campaign. It compiles every fuzz target on every
+# push so API drift fails CI the day it happens.
+#
+# Why it exists: `zenpredict/fuzz/` declares its own `[workspace]` table (it has
+# to — cargo-fuzz's RUSTFLAGS conflict with this repo's release profile), which
+# makes it invisible to every root-level cargo invocation. ci.yml's tests,
+# clippy, and `--all-targets` checks all run against the root workspace, so its
+# two targets were compiled by nothing on any push and could rot against a
+# `zenpredict` API change with CI still green. A workspace-wide audit on
+# 2026-08-29 found 35 such uncompiled targets across 11 repos; zenpipe's eleven
+# had been broken for roughly seven weeks before anyone noticed. These two did
+# still compile when the gate was added, which is when it is cheapest to add.
+#
+# Why `cargo check` and not `cargo fuzz build`: `cargo fuzz` needs a nightly
+# toolchain plus `-Zsanitizer=address`, and fully codegens the dependency graph
+# with sanitizer-coverage instrumentation for every target. `cargo check`
+# catches the same class of rot — the drift actually found across the audited
+# repos was all E0063/E0308/E0599 or outright resolution failure — on stable,
+# in a fraction of the time. Actual fuzzing stays a hand-run activity; the
+# working corpus lives in block storage, not git.
+#
+# There is no seed-replay job because `zenpredict/fuzz/` has no committed
+# `regression/` corpus yet. When the first crash is minimized and committed, add
+# a `tests/fuzz_regression.rs` to `zenpredict/` modelled on zenwebp's — one that
+# asserts the seed directory is readable and non-empty, so it cannot pass
+# vacuously — and a job here to run it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Superseded runs waste runner queue; only the newest commit per ref matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Linux only, deliberately: the targets are `#![no_main]` libFuzzer bins that
+  # only ever run under `cargo fuzz` on Linux. Compiling them on Windows/macOS
+  # would gate nothing these targets can actually exercise, and ci.yml already
+  # covers the libraries themselves across its platform matrix.
+  targets:
+    name: Fuzz targets compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No sibling checkouts and no manifest rewriting. Verified with
+      # `cargo metadata` on 2026-08-29: the resolved graph is 26 packages, every
+      # one either from crates.io or the in-repo `path = ".."` — nothing outside
+      # this checkout (`zenpicker-train`, the one member that does reach a
+      # sibling repo, is excluded from the root workspace and is not in this
+      # graph). That is also why this job deliberately does NOT route through a
+      # setup action that pathes manifests: the failure this gate exists to
+      # catch is a fuzz manifest that has gone stale, and rewriting the manifest
+      # under test would mask exactly that.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-targets
+          workspaces: zenpredict/fuzz
+
+      # No `--locked`: a stale committed lock would keep resolving happily while
+      # the API it targets moved on, which is the drift this gate exists to see.
+      # `zenpredict/fuzz/Cargo.lock` stays committed for reproducible
+      # hand-fuzzing; CI is allowed to re-resolve on top of it.
+      - name: cargo check --all-targets
+        working-directory: zenpredict/fuzz
+        run: cargo check --all-targets
