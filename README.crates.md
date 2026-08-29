@@ -476,12 +476,12 @@ Six passes, each gated by what the requested `FeatureSet` actually needs:
 
 Measured 2026-06-18 on a Ryzen 9 7950X (WSL2, release, no `target-cpu=native`)
 by `examples/per_tier_cost.rs`; raw numbers and the depth-tier SDR-fast-path
-history in [`benchmarks/per_tier_cost_2026-06-18.md`](benchmarks/per_tier_cost_2026-06-18.md).
+history in [`benchmarks/per_tier_cost_2026-06-18.md`](https://github.com/imazen/zenanalyze/blob/main/benchmarks/per_tier_cost_2026-06-18.md).
 **Solo** means "the only tier requested" — it therefore includes the shared
 `RowStream` + dispatch floor, so the column does **not** sum to the cost of
 asking for everything (19.4 ms on the same host). What dropping one feature from
 a request actually saves is the leave-one-out column of the per-feature grid,
-[`benchmarks/per_feature_cost_grid_2026-08-28.tsv`](benchmarks/per_feature_cost_grid_2026-08-28.tsv).
+[`benchmarks/per_feature_cost_grid_2026-08-28.tsv`](https://github.com/imazen/zenanalyze/blob/main/benchmarks/per_feature_cost_grid_2026-08-28.tsv).
 
 Tier 1/2/3 + Palette read RGB8 via `RowStream`, which has three internal paths:
 
@@ -515,7 +515,7 @@ heterogeneous input.
 
 Allocation: **38 heap allocations per `analyze_features` call**, measured with
 DHAT at 1 MP on 2026-06-20 (x86-64;
-[`benchmarks/analyze_alloc_profile_2026-06-20.md`](benchmarks/analyze_alloc_profile_2026-06-20.md)).
+[`benchmarks/analyze_alloc_profile_2026-06-20.md`](https://github.com/imazen/zenanalyze/blob/main/benchmarks/analyze_alloc_profile_2026-06-20.md)).
 That is after the per-row scratch hoist, which cut 3,671 allocs/call to 38 —
 an instruction-count and allocator-pressure win, measured **wall-clock neutral**
 at every size above tiny, so don't read it as a speedup. Scratch is
@@ -616,7 +616,7 @@ was trained against, because re-defining a feature silently changes what its num
 Cargo links those versions side by side happily — but their types are then distinct, so
 nothing typed in terms of `zenanalyze::feature::AnalysisResults` can cross between two codecs.
 
-**[`zenanalyze-api`](zenanalyze-api/) is the one crate everything agrees on**, and the rule is:
+**[`zenanalyze-api`](https://github.com/imazen/zenanalyze/tree/main/zenanalyze-api) is the one crate everything agrees on**, and the rule is:
 
 > A codec crate's **library code** depends on `zenanalyze-api` and nothing else from the
 > zenanalyze family. It receives values as an `Offer`, or extracts them through a
@@ -631,13 +631,13 @@ version, never by git rev.** A registry dep and a git dep are different Cargo so
 git deps at different revs are too — either way you get two `Offer` types that don't
 interconvert. Unreleased changes go in a single workspace-root `[patch.crates-io]`.
 
-This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](src/offer.rs)):
+This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](https://github.com/imazen/zenanalyze/blob/main/src/offer.rs)):
 `extract_offer` bundles one pass as an `OwnedOffer`, and `Analyzer` is this build as a
 `FeatureProvider`.
 
-Full rules, roles, and an audit recipe: **[`docs/sole-contract.md`](docs/sole-contract.md)**.
+Full rules, roles, and an audit recipe: **[`docs/sole-contract.md`](https://github.com/imazen/zenanalyze/blob/main/docs/sole-contract.md)**.
 Mechanics, negotiation semantics, and compiled examples:
-**[`zenanalyze-api/README.md`](zenanalyze-api/README.md)**.
+**[`zenanalyze-api/README.md`](https://github.com/imazen/zenanalyze/blob/main/zenanalyze-api/README.md)**.
 
 ## Companion crates in this repo
 
