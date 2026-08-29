@@ -661,6 +661,21 @@ def _render_cost(agg: dict) -> list[str]:
         f"{_fmt_opt(cost['baseline_beta_ns_per_px'], '.4f')} ns/px."
     )
     L.append("")
+    L.append(
+        "> **Read the per-side baselines, not the fit.** The fitted α is dominated by the two "
+        "largest sides and is NOT a per-call floor — measured 2026-08-28, the 64² call is "
+        "~0.63 ms against an α of ~2.7 ms. The cost is not affine in pixels because the sampling "
+        "budgets cap several passes, so marginal cost per pixel falls ~26× across the sweep. "
+        "Full analysis: `benchmarks/perf_2026-08-28.md`."
+    )
+    L.append("")
+    L.append(
+        "> **Any grid whose header says `screen=gb82` measured PHOTOS.** `gb82` is the "
+        "photographic set; the screen-content set is `gb82-sc`. Fixed in "
+        "`examples/common/mod.rs` on 2026-08-28 — grids produced after that read "
+        "`screen=gb82-sc` and also carry `photohard` (gb82, correctly named) and `mixed`."
+    )
+    L.append("")
     classes = cost["classes"]
 
     def table(feats: list[str], title: str, blurb: str, limit: int | None = None) -> None:

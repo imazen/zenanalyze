@@ -312,6 +312,12 @@ Per-feature wall-clock from `examples/per_feature_cost_grid.rs` (real photo / sc
 
 Reference cell: **photo 2048²**, baseline `SUPPORTED` = **8492 µs**. Baseline by side (photo): 64² = 617 µs, 256² = 1598 µs, 1024² = 5857 µs, 2048² = 8492 µs, 4096² = 18596 µs. Fit baseline = 2703 µs + 0.9799 ns/px.
 
+> **Read the per-side baselines, not the fit.** The fitted α is dominated by the two largest sides and is NOT a per-call floor — measured 2026-08-28, the 64² call is ~0.63 ms against an α of ~2.7 ms. The cost is not affine in pixels because the sampling budgets cap several passes, so marginal cost per pixel falls ~26× across the sweep. Full analysis: `benchmarks/perf_2026-08-28.md`.
+
+> **Any grid whose header says `screen=gb82` measured PHOTOS.** `gb82` is the photographic set; the screen-content set is `gb82-sc`. Fixed in `examples/common/mod.rs` on 2026-08-28 — grids produced after that read `screen=gb82-sc` and also carry `photohard` (gb82, correctly named) and `mixed`. The `screen` columns below therefore describe photographic content and will change when this file is next regenerated.
+
+> **The baselines above predate the 2026-08-28 optimizations** (`103c5b1b`, `cca3c625`): whole-pass cost is now ~1.04× lower at 1 MP, ~1.11× at 4 MP and up to ~1.35× at 16 MP, so the absolute µs here read high. Relative ranking is unaffected.
+
 ### Supported but consumed by no listed bake — ranked by LOO (9)
 
 Optimization fodder per #41: every µs here is paid by a `SUPPORTED` request and read by nobody. Candidates for opt-in / `experimental` gating or a cheaper implementation.
