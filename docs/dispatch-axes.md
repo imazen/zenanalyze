@@ -103,10 +103,21 @@ screen crops): `examples/per_feature_cost_grid.rs` →
 consumption inventory in `docs/feature-consumption.md` ("Cost vs use") by
 `tools/feature_inventory.py --cost`. Solo cost is dominated by the pass floor
 (~2 ms for any single Tier-3 feature at 2048², aarch64) — the LOO column is the
-one that tells you what dropping a feature from a request actually saves;
-the fitted intercept of `SUPPORTED` (2.7 ms + 0.98 ns/px on aarch64) is why
-the ≤ 2 ms/call target in #50 cannot be met by request narrowing alone below
-~2 MP.
+one that tells you what dropping a feature from a request actually saves.
+
+> **Correction (2026-08-28): the "2.7 ms + 0.98 ns/px" fit for `SUPPORTED` is
+> an artifact, not a per-call floor.** The measured 64² call is **0.63 ms**,
+> four times smaller than that α. The fit is dominated by the two largest sides
+> and the cost is not affine in pixels — the sampling budgets cap several
+> passes, so marginal cost per pixel falls 26× across the sweep (16.2 ns/px
+> between 64² and 256², 0.62 ns/px between 2048² and 4096²). Read the measured
+> cell for your size, not the fit. Full table, per content class, before/after:
+> [`benchmarks/perf_2026-08-28.md`](../benchmarks/perf_2026-08-28.md).
+>
+> That file also carries the 2026-08-28 optimizations (whole-pass 1.04× at
+> 1 MP, 1.11× at 4 MP, up to 1.35× at 16 MP, byte-identical output) and the
+> note that the `screen` class in every grid before that date was sourced from
+> `gb82`, which is the *photographic* set.
 
 ## What is NOT implemented (and why)
 

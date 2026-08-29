@@ -13,6 +13,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > below carries the same not-yet-released work and the verified break list;
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
+### Performance
+
+- **`analyze_features(SUPPORTED)` is 1.04× faster at 1 MP, 1.11× at 4 MP and up
+  to 1.35× at 16 MP, with byte-identical output** (`103c5b1b`, `cca3c625`).
+  Two changes, each measured as an interleaved A/B of two prebuilt binaries over
+  real codec-corpus content at 64²–4096² × four content classes:
+  `tier3::luma_histogram_stats` now uses four interleaved bin arrays instead of
+  one (the `bins[b] += 1` read-modify-write serialized on store-to-load
+  forwarding; u32 counts make the final sum exact), and
+  `xyb_color_loss::xyb_bquarter_chroma_loss_from_stream` borrows its 2-row
+  window instead of copying it (it copied ~50 MB per call at 4096² to sample
+  ~1.5 KB). Full table, profile, and the reasoning for what was *not* changed:
+  `benchmarks/perf_2026-08-28.md`.
+- New `RowStream::try_borrow_row(&self) -> Option<&[u8]>` (crate-internal) — a
+  `&self` receiver, so a caller can hold several rows at once. `borrow_row`
+  needs `&mut self` because the converting variants share one scratch row,
+  which is why every multi-row consumer copies; `Inner::Native` has nothing to
+  materialize and can lend rows directly.
+- **Correction:** the "α = 2.7 ms + 0.98 ns/px" cost model for `SUPPORTED`
+  quoted in `docs/dispatch-axes.md` is a **fit artifact, not a per-call floor**
+  — the measured 64² call is 0.63 ms. Sampling budgets cap several passes, so
+  marginal cost per pixel falls 26× across the sweep. Corrected in place.
+
+### Testing
+
+- **`examples/feature_bits.rs` — a byte-exact feature-vector lock**
+  (`just bitlock` / `just bitlock-bless`). Feature values are training inputs,
+  and `versioning::golden_is_stable` compares at `REL_TOLERANCE = 0.5 %`, so a
+  1-ULP change from a "pure refactor" could silently invalidate every baked
+  picker. The lock compares `f32::to_bits()` over 3,740 values × 16 fixtures.
+  Mutation-verified: a 1.7e-7 perturbation of one luma weight moves 218 locked
+  values while the tolerance golden reports 4. It is a per-HOST artifact by
+  design (SIMD-reduced features diverge per tier across arches) and therefore
+  deliberately not a CI test.
+- **The `screen` content class in the cost grids was sourced from `gb82`, which
+  is the *photographic* set** — so every photo-vs-screen split before
+  2026-08-28, including `benchmarks/per_feature_cost_grid_2026-08-28.tsv` and
+  the "Cost vs use" section of `docs/feature-consumption.md` that reads it,
+  compared photos against photos. `screen` now reads `gb82-sc`; `gb82` is still
+  measured as `photohard`; a `mixed` class is added. The loader moved to
+  `examples/common/mod.rs` so the grid and the bit lock share one copy.
+
 ### Added
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
