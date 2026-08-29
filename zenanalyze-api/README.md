@@ -15,10 +15,11 @@ runs **one** analysis pass, and hands every codec the resulting `Offer`; each co
 `FeatureProvider` the host injects, so *even the fallback* stays version-free.
 `no_std + alloc`, **no dependencies**, `forbid(unsafe_code)`.
 
-**The rule this crate exists to enforce:** a codec crate's library code names
-`zenanalyze-api` and nothing else from the zenanalyze family. See
-[Compatibility rules](#compatibility-rules) — including the dependency-source rule, which
-is the one that silently bites.
+**What this crate is for:** it is the **interchange boundary**, so a host and a codec built
+against different `zenanalyze` versions can still talk. It is not a prohibition on depending
+on `zenanalyze` — a codec whose offer doesn't cover what it needs should re-analyse. See
+[Compatibility rules](#compatibility-rules); the dependency-source rule is the one that
+silently bites.
 
 ## Quick start
 
@@ -130,12 +131,16 @@ giving up.
 
 ## The intermediary — `FeatureProvider`
 
-A codec with no `Offer` to reuse still has to get values from somewhere, and reaching for
-`zenanalyze::analyze_features_rgb8` at that moment is what re-introduces the version pin the
-rest of this crate removes. `FeatureProvider` is the escape: extraction expressed as a
-contract trait, so the **host** picks the `zenanalyze` version, implements the trait over it,
-and injects `&dyn FeatureProvider`. (`zenanalyze` ships its own impl behind its `api`
-feature.) The codec's only zenanalyze-family dependency stays this crate.
+A codec with no `Offer` to reuse still has to get values from somewhere. `FeatureProvider`
+is one way: extraction expressed as a contract trait, so the **host** picks the `zenanalyze`
+version, implements the trait over it, and injects `&dyn FeatureProvider` (`zenanalyze` ships
+its own impl behind its `api` feature). A codec written against `&dyn FeatureProvider` can be
+driven by a host on any `zenanalyze` version.
+
+It is an *option*, not an obligation. A codec is equally free to depend on `zenanalyze`
+directly and run its own pass — which is often the right answer, since a shared offer may
+simply not carry what it needs. What matters is that the values cross the **crate boundary**
+as the types below, so your callers aren't pinned to your analyzer version.
 
 ```rust
 use zenanalyze_api::{FeatureProvider, Request, Select};
@@ -368,30 +373,28 @@ zenanalyze-api = { git = "https://github.com/imazen/zenanalyze" }
 
 Drop the patch once the version is published.
 
-### 2. Sole contract — a codec's library code names only this crate
+### 2. Interchange types at crate boundaries come from this crate
 
-Production/library code in a codec crate depends on `zenanalyze-api` and nothing else from
-the zenanalyze family. It receives an `Offer` or a `&dyn FeatureProvider`; it never names
-`zenanalyze::…`.
+A public signature naming `zenanalyze::feature::AnalysisResults` pins every caller to your
+`zenanalyze` version. Take an `Offer`, return `Offer` / `OwnedOffer`, accept a
+`&dyn FeatureProvider` — then a host on a different version can still call you, however you
+sourced the numbers internally. Function bodies and `pub(crate)` items are unconstrained.
 
-A direct `zenanalyze` dependency is legitimate in exactly two roles:
+**A direct `zenanalyze` dependency is fine**, including in a codec's library code, and is the
+right answer when a host-provided offer is insufficient — a missing feature, the wrong tier, a
+version-drifted or absent offer. Don't route around your own analyzer for its own sake; route
+your *boundary* through these types.
 
-- the **host/orchestrator** that chooses the version, runs the pass, and hands out the
-  `Offer` (or implements `FeatureProvider`);
-- **dev tooling** — `dev/` binaries, `examples/`, `benches/`, training/sweep extractors.
-  These are not linked into the product graph, so their pin can't collide with anyone's.
+Prefer the shared `Offer` when it covers you, because the host already paid for that pass.
 
-The failure this prevents is concrete: a codec that named `zenanalyze` types directly while
-pinning an older published version stopped compiling the moment a feature was renamed
-upstream — the crate could not be built with its analyzer enabled at all.
+### 3. This crate itself stays transport-only, and dependency-free
 
-### 3. No zenanalyze types cross this boundary
+It carries names, values, and a reuse key. It must never re-export or mirror a `zenanalyze`
+type, and it must never grow a dependency: anything it pulls in becomes another axis that can
+force a version split. Absolute-path dependency pins are likewise never acceptable anywhere in
+the family — they resolve on one machine.
 
-This crate carries transport only — names, values, a reuse key. It must never re-export or
-mirror a `zenanalyze` type, and it must never grow a dependency: anything it pulls in becomes
-another axis that can force a version split.
-
-### 4. The feature-vector layout is versioned by the identity, not by position
+### 4. The feature-vector layout is versioned by identity, not by position
 
 There is no global "feature vector layout" to keep in sync. A column is identified by its
 qualified `name@hex8`, and a value vector is built in **request order** by `reuse_for`, so a

@@ -16,38 +16,47 @@ zenanalyze-api (new `pub` items, new variants on its `#[non_exhaustive]`
 enums) is allowed and is how the contract becomes sufficient; *breaking* it
 is not.
 
-**USER DIRECTIVE 2026-08-28: `zenanalyze-api` is the SOLE contract AND
-intermediary — "so different zenanalyze versions can compile together."**
+**USER DIRECTIVE 2026-08-28: `zenanalyze-api` is the PREFERRED contract and
+interchange boundary** — *"so different zenanalyze versions can compile
+together."* **Corrected the same day, verbatim: *"a direct dep is okay though, a
+reanalysis might be needed anyway if the upstream provided features are
+insufficient."*** The first reading of this directive was a prohibition on
+depending on `zenanalyze` at all; that was too strict. Do not re-tighten it.
 
-> A codec crate's **library code** depends on `zenanalyze-api` and nothing
-> else from the zenanalyze family. It receives values as a
-> `zenanalyze_api::Offer`, or extracts them through a
-> `&dyn zenanalyze_api::FeatureProvider` the host injects. It never names
-> `zenanalyze::…`.
+Negotiation types (`Request` / `Offer` / `Catalog` / `Select`) and the
+`FeatureProvider` injection point flow through `zenanalyze-api`, so a host and a
+codec on different `zenanalyze` versions can still talk.
 
-Direct `zenanalyze` is legitimate in two roles only: the **host /
-orchestrator** that chooses the version and runs the pass, and **dev
-tooling** (`dev/` binaries, `examples/`, `benches/`, sweep and training
-extractors) that isn't linked into the product graph.
+**A direct `zenanalyze` dep in a codec is PERMITTED**, specifically for
+re-analysis when host-provided features are insufficient — a missing feature, the
+wrong tier, a stale or absent offer. A codec running its own pass is normal, not
+a failure to migrate. Preferred shape: try the shared `Offer` → else an injected
+`&dyn FeatureProvider` → else your own `zenanalyze` pass; and cross crate
+boundaries as `zenanalyze-api` types whichever way you got the numbers.
 
-Three things to get right, in the order they bite:
+Three rules are HARD, in the order they bite:
 
-1. **Depend on the contract by crates.io version, never by git rev.** A
-   registry dep and a git dep are different Cargo sources, and two git deps
-   at *different revs* are different sources too — either way you get two
-   `Offer` types that don't interconvert ("expected `Offer`, found
-   `Offer`"). Unreleased contract changes go in **one** workspace-root
-   `[patch.crates-io]`, which rewrites the registry entry everywhere and
-   keeps unification.
-2. **`Select::Features` for models, `Select::Names` for heuristics.** A
-   compiled model's coefficients were fit against one code version per
-   column, so a drift MUST miss — that's `Features`. Threshold heuristics,
-   classifiers, diagnostics and bulk export use `Names` (bare name, any
-   version), which is what lets them name features without naming a
-   zenanalyze version.
-3. **If a consumer can't migrate, extend the contract — additively — rather
-   than reporting it blocked.** That is what `Select::Names`,
-   `FeatureProvider`, `OwnedCatalog` and `ProviderError` exist for.
+1. **Depend by crates.io registry version, never a git rev.** Cargo unifies by
+   source, so a rev pin is its own source — and it silently freezes the *API*
+   too: zenavif and zenjpeg were both compiling against a `Request::new` shape
+   that no longer exists, and nothing failed because nothing ever built them next
+   to a current consumer. Unreleased changes go in **one** workspace-root
+   `[patch.crates-io]`, which also rewrites `zenanalyze`'s internal
+   `{ version, path }` dep on the contract that a rev pin cannot reach.
+2. **No absolute-path pins.** They resolve on one machine.
+3. **Interchange types at crate boundaries come from `zenanalyze-api`.** A public
+   signature naming `zenanalyze::feature::*` pins every caller to your analyzer
+   version. Bodies and `pub(crate)` items are unconstrained — this is a rule
+   about *signatures*, not about what you depend on.
+
+Also: **`Select::Features` for models, `Select::Names` for heuristics.** A
+compiled model's coefficients were fit against one code version per column, so a
+drift MUST miss — that's `Features`. Threshold heuristics, classifiers,
+diagnostics and bulk export use `Names` (bare name, any version).
+
+And: **if a consumer needs something the contract can't express, extend the
+contract — additively — rather than reporting it blocked.** That is what
+`Select::Names`, `FeatureProvider`, `OwnedCatalog` and `ProviderError` exist for.
 
 Full rules + audit recipe: `docs/sole-contract.md`. Mechanics and compiled
 examples: `zenanalyze-api/README.md`.

@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Policy correction (owner, 2026-08-28, verbatim: "a direct dep is okay though, a
+  reanalysis might be needed anyway if the upstream provided features are
+  insufficient").** The sole-contract rule as first written forbade a codec's library
+  code from naming `zenanalyze` at all. Revised everywhere it was stated
+  (`docs/sole-contract.md`, `zenanalyze-api/README.md`, `README.md`, `everything.md` §0,
+  `CLAUDE.md`): `zenanalyze-api` is the **preferred contract and interchange boundary**,
+  and a direct `zenanalyze` dep in a codec is **permitted** — specifically for
+  re-analysis when host-provided features are insufficient. Three rules stay hard:
+  registry-version deps (never a git rev), no absolute-path pins, and interchange types
+  at crate boundaries from `zenanalyze-api`. No code reverted; the audit table is
+  re-scored against the corrected policy and the audit recipe now greps for the three
+  hard rules instead of for direct deps.
 - `docs/sole-contract.md` carries the **2026-08-28 cross-repo audit** — the
   before/after state of every consumer, plus the two findings worth keeping:
   "pin every codec to the same rev" is the trap rather than the fix (Cargo

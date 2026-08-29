@@ -36,6 +36,18 @@
 - `cargo package -p zenanalyze-api`: 9 files, 25.2 KiB compressed.
 
 ### Documentation
+
+- **Policy correction (owner, 2026-08-28, verbatim: "a direct dep is okay though, a
+  reanalysis might be needed anyway if the upstream provided features are
+  insufficient").** The README's compatibility rules had been written as a prohibition —
+  a codec's library code may name this crate and nothing else. That was too strict.
+  This crate is the **interchange boundary**, not a ban on depending on `zenanalyze`: a
+  codec whose offer doesn't cover what it needs should re-analyse, and `FeatureProvider`
+  is an option offered to codecs rather than a hoop they must jump through. What stays
+  hard is the *boundary* — a public signature naming `zenanalyze::feature::*` pins every
+  caller to your analyzer version — plus registry-version deps (never a git rev) and no
+  absolute-path pins. No API change.
+
 - README gained a **Compatibility rules** section — the four rules that make a multi-version
   build work: one dependency source (a crates.io *version*, never a git rev; override with a
   single workspace-root `[patch.crates-io]`), sole contract (a codec's library code names only

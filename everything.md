@@ -704,44 +704,54 @@ downstream is **`zenanalyze-api`** — see §0 below.
 
 ---
 
-## 0. `zenanalyze-api` is the sole contract and intermediary
+## 0. `zenanalyze-api` is the preferred contract and interchange boundary
 
 **Owner directive, 2026-08-28:** *"Zenanalyze-api should be the sole contract and
 intermediary so different zenanalyze versions can compile together."*
+**Owner correction, same day (verbatim):** *"a direct dep is okay though, a
+reanalysis might be needed anyway if the upstream provided features are
+insufficient."*
 
-> A codec crate's **library code** depends on `zenanalyze-api` and nothing else
-> from the zenanalyze family. It receives values as a `zenanalyze_api::Offer`, or
-> extracts them through a `&dyn zenanalyze_api::FeatureProvider` the host injects.
-> It never names `zenanalyze::…`.
+`zenanalyze-api` is the **preferred contract and interchange boundary**, not a
+prohibition. Negotiation types (`Request` / `Offer` / `Catalog` / `Select`) and
+the `FeatureProvider` injection point flow through it, so a host and a codec on
+different `zenanalyze` versions can still talk.
 
-Direct `zenanalyze` is legitimate in two roles only: the **host/orchestrator**
-that chooses the version and runs the pass, and **dev tooling** (`dev/`,
-`examples/`, `benches/`, sweep/training extractors) that isn't linked into the
-product graph.
+**A direct `zenanalyze` dep in a codec is PERMITTED** — specifically for
+re-analysis when the host-provided features are insufficient (missing feature,
+wrong tier, stale or absent offer). Don't force a codec through a provider it
+can't rely on. The shape the migrated codecs use: try the shared `Offer`, else an
+injected `&dyn FeatureProvider`, else your own `zenanalyze` pass — and hand
+results across crate boundaries as `zenanalyze-api` types either way.
 
-Why: a product links many `zenanalyze` versions at once, each codec pinning the
-version its model was trained against. Those versions' types are distinct, so
-nothing typed in `zenanalyze::feature::*` can cross between two codecs.
+Why any of it: a product links many `zenanalyze` versions at once, each codec
+pinning the version its model was trained against, and those versions' types are
+distinct — so nothing typed in `zenanalyze::feature::*` can cross between two
+codecs.
 
-The rule that bites silently: **depend on the contract by crates.io version,
-never by git rev.** A registry dep and a git dep are different Cargo sources, and
-two git deps at different revs are too — either way you get two `Offer` types
-that don't interconvert, and the error surfaces far from the cause. Unreleased
-contract changes go in a single workspace-root `[patch.crates-io]`.
+Three rules stay HARD:
+1. **Depend by crates.io registry version, never a git rev.** Cargo unifies by
+   source, so a rev pin is its own source — and it silently freezes the API too
+   (zenavif and zenjpeg were both on a `Request::new` shape that no longer
+   exists). Unreleased changes go in one workspace-root `[patch.crates-io]`,
+   which also reaches `zenanalyze`'s internal `{ version, path }` dep on the
+   contract that a rev pin cannot.
+2. **No absolute-path pins** — they resolve on one machine.
+3. **Interchange types at crate boundaries come from `zenanalyze-api`.** A public
+   signature naming `zenanalyze::feature::*` pins every caller to your analyzer
+   version; bodies and `pub(crate)` items are unconstrained.
 
 Full rules + audit recipe: **`docs/sole-contract.md`**, which also carries the
 2026-08-28 **cross-repo audit** — the before/after state of every consumer.
 Mechanics and compiled examples: **`zenanalyze-api/README.md`**.
 
 Status 2026-08-28: zenpipe/zencodecs and zensquoosh were already correct;
-zenwebp, zenavif, zenjpeg and zensr were migrated. jxl-encoder (`s4_eps.rs`,
-under the **default-on** `learned-admission`) and zenjxl's
-`extract_features_multiaxis` are outstanding — both repos held another agent's
-uncommitted work when the pass ran; tracked as imazen/jxl-encoder#98 and
-imazen/zenjxl#19. jxl-encoder is the highest-value remainder:
-a default-on feature puts a concrete `zenanalyze` in every graph that links it.
-zenmetrics' fleet worker and zensim's picker-prep extractor keep their direct
-deps legitimately (producer / dev-tooling roles).
+zenwebp, zenavif, zenjpeg and zensr were migrated. Re-scored after the correction: jxl-encoder's
+`s4_eps.rs` re-analysis is **compliant as-is** (permitted direct dep, already a
+registry version, extraction is `pub(crate)`) — imazen/jxl-encoder#98 closed.
+zenjxl's `extract_features_multiaxis` stays open as a rule-2 violation
+(absolute `/home/lilith/...` path): imazen/zenjxl#19. zenmetrics' fleet worker
+and zensim's picker-prep extractor keep their direct deps with no finding.
 
 ---
 
