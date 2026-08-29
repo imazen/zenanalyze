@@ -89,6 +89,36 @@ Both live in [`src/offer.rs`](../src/offer.rs), behind the `api` cargo feature:
 publishes); `benchmarks/feature_qualified_names.tsv` is the committed copy a golden tripwire
 keeps in sync, and is what off-Rust tooling should read rather than re-deriving the hash.
 
+## Cross-repo audit, 2026-08-28
+
+State of every crate in `~/work` and `~/work/zen` that named a zenanalyze-family
+dependency, at the time the directive landed. "Library" means production code linked
+into the product graph; dev tooling and host wiring are called out separately.
+
+| Repo | Before | After |
+|---|---|---|
+| **zenpipe** / `zencodecs` | Already correct — `zenanalyze-api = "0.1.0"` in `zencodecs`, one root `[patch.crates-io]` to the git repo. Its manifest comment records the E0308 that taught it. | Unchanged. **The exemplar** — copy this shape. |
+| **zensquoosh** | Correct by shape: the contract appears only inside the root `[patch.crates-io]`, so one source. Rev-pinned by that table's deliberate reproducibility policy. | Unchanged. Re-syncs when zenpipe re-pins, per its own note. |
+| **zenwebp** | Library named `zenanalyze::feature::AnalysisFeature` against a registry `0.1.0` pin. `--features analyzer` **had not compiled** since `IndexedPaletteWidth` → `PaletteLog2Size`; CI never enabled it. | Classifier reads by bare name through the contract (`Select::Names` — thresholds, not coefficients). `analyzer` = contract only, builds anywhere and is CI-covered; `analyzer-bundled` adds `zenanalyze::Analyzer`. |
+| **zenavif** | `zenanalyze-api` git-rev `47b4d0f5` — old enough that the crate compiled against a **superseded contract API** and could not have built beside a correctly-pinned consumer. | Registry version + one root patch. Five reuse sites version-pinned per feature (`Select::Features`) — all feed fitted coefficients or thresholds. |
+| **zenjpeg** | Two *different* git revs of the same repo (`zenanalyze` 13d40c3, `zenanalyze-api` 47b4d0f5); also on the superseded contract API. | Registry versions + one root patch. `pick_config_from_offer` gates on the model's stamps, then per feature on its code version. |
+| **zensr** | Library `chooser` called `analyze_features_rgb8` directly against git-rev `a7d8224`. | Contract-only `chooser`; `chooser-bundled` supplies the provider. Known gap recorded in-source: the fit didn't record its training-time feature versions, so reuse is by bare name until the next re-fit stamps them. |
+| **jxl-encoder** | Library `s4_eps.rs` (feature `learned-admission`, **default-on**) names `zenanalyze::feature::*`. | **Not migrated** — another agent held uncommitted work in its working copy. Highest-value remaining item: a default-on feature puts a concrete zenanalyze in every jxl-encoder graph. |
+| **zenjxl** | `extract_features_multiaxis` dev tool pins zenanalyze by an absolute path (`/home/lilith/...`) that doesn't resolve on every machine. | **Not migrated** — another agent had paused mid-task with uncommitted work. Dev tooling, so the direct dep is fine; only the absolute path needs fixing. |
+| **zenmetrics** (`zenfleet-vastai`), **zensim** (`zensim-picker-prep`) | Direct `zenanalyze` path deps in worker/extractor binaries. | Unchanged, and correct: these are the producer and dev-tooling roles the rule allows. |
+
+Two findings worth keeping:
+
+1. **"Pin every codec to the same rev" is the trap, not the fix.** Three repos carried a
+   rev pin under a comment explaining that identical revs keep the contract type unified.
+   Cargo unifies by *source*, so each rev is its own source, and the pins had already
+   drifted apart (`47b4d0f5`, `7b84d53c`, floating). A rev pin also cannot rewrite
+   `zenanalyze`'s **internal** `{ version, path }` dep on the contract; a root patch can.
+2. **A rev pin silently freezes the API, not just the version.** zenavif and zenjpeg were
+   both compiling against a `Request::new(names, analyzer_version, defs_version,
+   config_hash)` that no longer exists. Nothing failed, because nothing ever built them
+   next to a current consumer — which is the whole failure mode, arriving quietly.
+
 ## Auditing a consumer
 
 ```bash

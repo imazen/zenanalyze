@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- `docs/sole-contract.md` carries the **2026-08-28 cross-repo audit** — the
+  before/after state of every consumer, plus the two findings worth keeping:
+  "pin every codec to the same rev" is the trap rather than the fix (Cargo
+  unifies by source, and a rev pin cannot rewrite zenanalyze's own internal
+  `{ version, path }` dep on the contract), and a rev pin silently freezes the
+  contract *API*, not just the version — zenavif and zenjpeg were both compiling
+  against a `Request::new` shape that no longer exists.
 - `docs/sole-contract.md` — the rule of record: which crates may depend on
   `zenanalyze` directly (host/orchestrator + dev tooling only), why version skew
   breaks otherwise, the four compatibility rules, `Features`-vs-`Names`

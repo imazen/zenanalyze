@@ -729,8 +729,18 @@ two git deps at different revs are too — either way you get two `Offer` types
 that don't interconvert, and the error surfaces far from the cause. Unreleased
 contract changes go in a single workspace-root `[patch.crates-io]`.
 
-Full rules + audit recipe: **`docs/sole-contract.md`**. Mechanics and compiled
-examples: **`zenanalyze-api/README.md`**.
+Full rules + audit recipe: **`docs/sole-contract.md`**, which also carries the
+2026-08-28 **cross-repo audit** — the before/after state of every consumer.
+Mechanics and compiled examples: **`zenanalyze-api/README.md`**.
+
+Status 2026-08-28: zenpipe/zencodecs and zensquoosh were already correct;
+zenwebp, zenavif, zenjpeg and zensr were migrated. jxl-encoder (`s4_eps.rs`,
+under the **default-on** `learned-admission`) and zenjxl's
+`extract_features_multiaxis` are outstanding — both repos held another agent's
+uncommitted work when the pass ran. jxl-encoder is the highest-value remainder:
+a default-on feature puts a concrete `zenanalyze` in every graph that links it.
+zenmetrics' fleet worker and zensim's picker-prep extractor keep their direct
+deps legitimately (producer / dev-tooling roles).
 
 ---
 
