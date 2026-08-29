@@ -15,7 +15,9 @@
 //! a tight loop with deterministic feature vectors. Measures the
 //! actual hot path codecs and zensim run — not a synthetic microbench.
 
-use rand::Rng;
+// rand 0.10 moved `random_range` off `Rng` onto the new `RngExt` extension
+// trait, and nothing here needs `Rng` itself any more.
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 

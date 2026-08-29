@@ -103,7 +103,7 @@ garb = { version = "0.2.8", default-features = false, features = ["experimental"
 linear-srgb = { version = "0.6.12", features = ["transfer"] }
 
 [dev-dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 # Mitchell-sharp renditioning for the imazen-26 training-corpus build
 # (render_imazen26_variants example). Example-only.
 zenresize = "0.3.1"

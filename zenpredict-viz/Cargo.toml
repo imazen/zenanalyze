@@ -41,8 +41,8 @@ serde-wasm-bindgen = "0.6.5"
 onnx-pb = { version = "0.1.4", optional = true }
 prost = { version = "0.6.1", optional = true }
 serde_json = { version = "1.0.140", optional = true }
-parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }
-arrow = { version = "58.3.0", default-features = false, optional = true }
+parquet = { version = "59.2.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "59.2.0", default-features = false, optional = true }
 
 [features]
 default = []
