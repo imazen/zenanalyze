@@ -80,7 +80,15 @@ hdr = []
 # by the `api` feature), 1.0 and zero-dep so every zenanalyze version depends on
 # the SAME zenanalyze-api and their Offers unify across a multi-version build.
 # Publish zenanalyze-api before zenanalyze when releasing with `api` enabled.
-zenanalyze-api = { version = "0.1.0", path = "zenanalyze-api", optional = true }
+#
+# The requirement is `0.1.1`, not `0.1.0`, and that is load-bearing: `src/offer.rs`
+# imports `FeatureProvider` / `OwnedCatalog` / `ProviderError`, which exist only
+# from 0.1.1. Measured 2026-08-28 by building the packaged crate against the
+# registry: with `version = "0.1.0"`, `cargo build --features api` fails with
+# E0432 unresolved imports, because Cargo is free to pick published 0.1.0. In
+# this workspace the path dep satisfies the requirement either way, so the bug
+# is invisible locally and only fires for a downstream consumer.
+zenanalyze-api = { version = "0.1.1", path = "zenanalyze-api", optional = true }
 zenpixels = { version = "0.2.14", default-features = false, features = ["imgref"] }
 zenpixels-convert = { version = "0.2.14", default-features = false }
 archmage = { version = "0.9.27", features = ["macros", "avx512", "testable_dispatch"] }

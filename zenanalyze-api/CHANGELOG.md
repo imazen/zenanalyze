@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.1] - unreleased
+
+> `Cargo.toml` is at `0.1.1`; crates.io still serves `0.1.0`. **This crate
+> publishes before `zenanalyze`** — `zenanalyze 0.2.0`'s `api` feature requires
+> `zenanalyze-api >= 0.1.1` for `FeatureProvider` and cannot compile against
+> published `0.1.0` (measured; see `docs/RELEASE_0.2.0.md`).
 
 ### Added
 - `Select::Names(&[&str])` — version-**agnostic** selection by bare feature name, next to the
