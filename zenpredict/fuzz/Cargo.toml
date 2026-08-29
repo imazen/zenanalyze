@@ -12,8 +12,8 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4.13"
+arbitrary = { version = "1.4.2", features = ["derive"] }
 # `advanced` pulls in the typed multi-output / scorer API exercised by
 # predictor_predict. The lz4 whole-bake decompression path is no longer
 # feature-gated (lz4_flex is an unconditional dep; the compressed flag is
