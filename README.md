@@ -493,6 +493,17 @@ its narrowing clips PQ / HLG into sRGB-display).
 
 ## Performance
 
+> **Provenance warning (audited 2026-08-28): the table below is undated and no
+> file in `benchmarks/` reproduces it.** It is kept because the *ordering* and
+> the RowStream-path column are structural facts about the code, but treat the
+> absolute milliseconds as unverified — and note they predate the 2026-08-28
+> optimizations, which cut the whole pass by ~1.11× at 4 MP. Numbers you can
+> trace, with host, date, commit and content class, are in
+> [`benchmarks/perf_2026-08-28.md`](https://github.com/imazen/zenanalyze/blob/main/benchmarks/perf_2026-08-28.md)
+> (aarch64, RGB8, 64²–4096² × four content classes). Re-measuring this table
+> per input format is queued; until then it is the one performance claim in this
+> README that is not backed by a committed measurement.
+
 Release build, AVX2, no `target-cpu=native`, full `FeatureSet::SUPPORTED`:
 
 | Input | 4 MP | RowStream path |

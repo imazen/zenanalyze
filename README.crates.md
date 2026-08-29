@@ -495,6 +495,17 @@ its narrowing clips PQ / HLG into sRGB-display).
 
 ## Performance
 
+> **Provenance warning (audited 2026-08-28): the table below is undated and no
+> file in `benchmarks/` reproduces it.** It is kept because the *ordering* and
+> the RowStream-path column are structural facts about the code, but treat the
+> absolute milliseconds as unverified — and note they predate the 2026-08-28
+> optimizations, which cut the whole pass by ~1.11× at 4 MP. Numbers you can
+> trace, with host, date, commit and content class, are in
+> [`benchmarks/perf_2026-08-28.md`](https://github.com/imazen/zenanalyze/blob/main/benchmarks/perf_2026-08-28.md)
+> (aarch64, RGB8, 64²–4096² × four content classes). Re-measuring this table
+> per input format is queued; until then it is the one performance claim in this
+> README that is not backed by a committed measurement.
+
 Release build, AVX2, no `target-cpu=native`, full `FeatureSet::SUPPORTED`:
 
 | Input | 4 MP | RowStream path |
@@ -616,20 +627,24 @@ was trained against, because re-defining a feature silently changes what its num
 Cargo links those versions side by side happily — but their types are then distinct, so
 nothing typed in terms of `zenanalyze::feature::AnalysisResults` can cross between two codecs.
 
-**[`zenanalyze-api`](https://github.com/imazen/zenanalyze/tree/main/zenanalyze-api) is the one crate everything agrees on**, and the rule is:
+**[`zenanalyze-api`](https://github.com/imazen/zenanalyze/tree/main/zenanalyze-api) is the one crate everything agrees on** — the
+**interchange boundary**, so a host and a codec on different `zenanalyze` versions can still
+talk. Prefer the shared `Offer` when it covers you; the host already paid for that pass.
 
-> A codec crate's **library code** depends on `zenanalyze-api` and nothing else from the
-> zenanalyze family. It receives values as an `Offer`, or extracts them through a
-> `&dyn FeatureProvider` the host injects. It never names `zenanalyze::…`.
+**A direct `zenanalyze` dependency in a codec is fine**, and is the right answer when the
+host-provided features are insufficient — a missing feature, the wrong tier, a stale or absent
+offer. A codec re-analysing with its own `zenanalyze` is normal, not a failure to migrate.
 
-Direct `zenanalyze` belongs to exactly two roles: the **host/orchestrator** that picks the
-version and runs the pass, and **dev tooling** (`dev/`, `examples/`, `benches/`, sweep and
-training extractors) that isn't in the product graph.
+Three rules are hard, because each one caused a real failure here:
 
-One rule bites silently and is worth repeating here: **depend on the contract by crates.io
-version, never by git rev.** A registry dep and a git dep are different Cargo sources, and two
-git deps at different revs are too — either way you get two `Offer` types that don't
-interconvert. Unreleased changes go in a single workspace-root `[patch.crates-io]`.
+1. **Depend by crates.io registry version, never a git rev.** Cargo unifies by source, so a
+   rev pin is its own source — and it silently freezes the *API* too: two codecs here were
+   compiling against a `Request::new` shape that no longer exists. Unreleased changes go in a
+   single workspace-root `[patch.crates-io]`.
+2. **No absolute-path pins** — they resolve on one machine.
+3. **Interchange types at crate boundaries come from `zenanalyze-api`**, not `zenanalyze`. A
+   public signature naming `zenanalyze::feature::AnalysisResults` pins every caller to your
+   analyzer version; function bodies and `pub(crate)` items are unconstrained.
 
 This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](https://github.com/imazen/zenanalyze/blob/main/src/offer.rs)):
 `extract_offer` bundles one pass as an `OwnedOffer`, and `Analyzer` is this build as a
