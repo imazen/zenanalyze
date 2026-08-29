@@ -430,6 +430,44 @@ impl<'a> RowStream<'a> {
         }
     }
 
+    /// Zero-copy borrow of row `y`, **or `None`** when this stream has to
+    /// materialize the row first.
+    ///
+    /// The difference from [`Self::borrow_row`] is the receiver: this takes
+    /// `&self`, so a caller can hold several rows at once. `borrow_row` needs
+    /// `&mut self` because the converting paths write into one shared scratch
+    /// row, which makes a second borrow invalidate the first — and that is why
+    /// every multi-row consumer (Tier 1's stripe, Tier 3's 8-row block band,
+    /// the 2-row XYB-BQuarter window) copies into its own buffer instead.
+    ///
+    /// Only `Inner::Native` — an RGB8 source already in the display domain —
+    /// can answer, because it is the one variant whose rows are already the
+    /// bytes the caller wants, sitting in the source buffer. Everything else
+    /// returns `None` and the caller keeps its copying path, so behaviour is
+    /// identical either way: the bytes handed back here are byte-for-byte the
+    /// ones `fetch_into` would have copied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= height`.
+    pub(crate) fn try_borrow_row(&self, y: u32) -> Option<&[u8]> {
+        assert!(
+            y < self.height,
+            "row {y} out of bounds (height={})",
+            self.height
+        );
+        match &self.inner {
+            Inner::Native(slice) => Some(&slice.row(y)[..self.width as usize * 3]),
+            _ => None,
+        }
+    }
+
+    /// Whether [`Self::try_borrow_row`] can answer for this stream — hoist it
+    /// out of a hot loop rather than re-matching per row.
+    pub(crate) fn can_borrow_rows(&self) -> bool {
+        matches!(self.inner, Inner::Native(_))
+    }
+
     /// Bulk-fill `dst` with rows `range` packed back-to-back at
     /// `width * 3` stride. Used by tiers that hold a multi-row
     /// window (Tier 1 stripe scratch, Tier 2 sliding window, Tier 3

@@ -150,6 +150,16 @@ pub(crate) fn xyb_bquarter_chroma_loss_from_stream(stream: &mut RowStream<'_>) -
     let row_bytes = w * 3;
     let mut two = vec![0u8; 2 * row_bytes];
     let (mut xy_sum, mut samp) = (0.0f64, 0u64);
+    // The 2-row window used to be COPIED for every block-row, and at large
+    // sizes that copy dwarfs the work it feeds: at 4096² the sampling stride
+    // divides the block-row width evenly, so all 2048 block-rows are visited,
+    // each copying 2 × 12 KiB of pixels in order to read 8 blocks × 4 pixels =
+    // 96 bytes. ~50 MB memmoved per call to sample 1.5 KB. On a Native RGB8
+    // stream the rows are already the bytes we want, so borrow them instead —
+    // `try_borrow_row` takes `&self`, which is what lets both rows be held at
+    // once. Byte-for-byte the same window either way; converting streams keep
+    // the copy.
+    let can_borrow = stream.can_borrow_rows();
     for by in 0..bh {
         // first sampled block in this block-row (raster block order)
         let first = (bstride - (by * bw) % bstride) % bstride;
@@ -157,8 +167,15 @@ pub(crate) fn xyb_bquarter_chroma_loss_from_stream(stream: &mut RowStream<'_>) -
             continue;
         }
         let y0 = (by * 2) as u32;
-        stream.fetch_range(y0..y0 + 2, &mut two);
-        let (r0, r1) = two.split_at(row_bytes);
+        let (r0, r1): (&[u8], &[u8]) = if can_borrow {
+            (
+                stream.try_borrow_row(y0).expect("can_borrow_rows"),
+                stream.try_borrow_row(y0 + 1).expect("can_borrow_rows"),
+            )
+        } else {
+            stream.fetch_range(y0..y0 + 2, &mut two);
+            two.split_at(row_bytes)
+        };
         let mut bx = first;
         while bx < bw {
             let px = bx * 2;
