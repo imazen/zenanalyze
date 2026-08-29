@@ -9,28 +9,43 @@
 
 ## summary
 #
+#   pub modules                                 1
 #   pub types (struct/enum/trait/alias)         1
+#   pub consts/statics                          7
 #   free functions                              1
-#   inherent methods                            5
-#   trait roster entries (type × trait)         4
+#   inherent methods                            7
+#   trait roster entries (type × trait)         6
 #
 # per-module pub lines:
-#   (root)                            1
-#   feature                           6
+#   (root)                            3
+#   __bench_sets                      7
+#   feature                           7
 
-## items (7 lines)
+## items (17 lines)
 
+pub const __bench_sets::ALPHA: feature::FeatureSet
+pub const __bench_sets::DEPTH: feature::FeatureSet
+pub const __bench_sets::PALETTE: feature::FeatureSet
+pub const __bench_sets::TIER1_EXTRAS: feature::FeatureSet
+pub const __bench_sets::TIER1_FULL: feature::FeatureSet
+pub const __bench_sets::TIER2: feature::FeatureSet
+pub const __bench_sets::TIER3: feature::FeatureSet
+pub fn Analyzer::assert_fields_are_eq(&self)
 pub fn __analyze_internal(zenpixels::buffer::PixelSlice<'_>, &feature::InternalQuery) -> core::result::Result<feature::AnalysisResults, AnalyzeError>
 pub fn feature::AnalysisFeature::assert_fields_are_eq(&self)
 pub fn feature::AnalysisQuery::__internal_with_overrides(feature::FeatureSet, usize, usize) -> feature::InternalQuery
 pub fn feature::FeatureSet::assert_fields_are_eq(&self)
 pub fn feature::MissingFeatures::assert_fields_are_eq(&self)
 pub fn feature::PackError::assert_fields_are_eq(&self)
+pub fn feature::TransformHint::assert_fields_are_eq(&self)
+pub mod __bench_sets
 pub struct feature::InternalQuery
 
-## trait impls (4 types)
+## trait impls (6 types)
 
+Analyzer: TrivialClone
 feature::AnalysisFeature: TrivialClone
 feature::FeatureSet: TrivialClone
 feature::FeatureValue: TrivialClone
 feature::ImageGeometry: TrivialClone
+feature::TransformHint: TrivialClone

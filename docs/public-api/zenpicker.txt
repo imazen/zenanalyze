@@ -6,23 +6,24 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpicker.txt 38 lines (supported surface) | zenpicker.features.txt 0 added (features: std) | zenpicker.internal.txt 4 lines (4 hidden + 0 excluded-feature)
+# files: zenpicker.txt 71 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 5 lines (5 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 1
-#   pub types (struct/enum/trait/alias)         4
-#   pub consts/statics                          9
-#   inherent methods                            9
-#   struct fields                               2
-#   enum variants                               9
-#   trait roster entries (type × trait)        16
-#   auto-trait-complete types                   4
+#   pub types (struct/enum/trait/alias)         6
+#   pub consts/statics                         17
+#   free functions                              3
+#   inherent methods                           19
+#   struct fields                               4
+#   enum variants                              15
+#   trait roster entries (type × trait)        23
+#   auto-trait-complete types                   6
 #
 # per-module pub lines:
-#   (root)                           34
+#   (root)                           65
 
-## items (34 lines)
+## items (65 lines)
 
 pub mod zenpicker
 #[non_exhaustive] #[repr(u8)] pub enum CodecFamily
@@ -41,30 +42,63 @@ pub MetaPickerError::FamilyOrderMismatch
 pub MetaPickerError::FamilyOrderMismatch::actual: alloc::string::String
 pub MetaPickerError::FamilyOrderMismatch::expected: alloc::string::String
 pub MetaPickerError::Metadata(alloc::string::String)
+pub MetaPickerError::OutputShape
+pub MetaPickerError::OutputShape::expected: usize
+pub MetaPickerError::OutputShape::got: usize
+pub MetaPickerError::PairwiseRouterNeedsRoute
 pub MetaPickerError::Predict(zenpredict::error::PredictError)
+pub MetaPickerError::RouterIncomplete
+#[non_exhaustive] pub enum QualityTarget
+pub QualityTarget::Lossless
+pub QualityTarget::Ssim2(f32)
+pub QualityTarget::Zq(f32)
+pub const fn QualityTarget::is_lossless(self) -> bool
+pub const fn QualityTarget::score_input(self) -> f32
 pub struct AllowedFamilies
+pub const AllowedFamilies::LOSSLESS: Self
+pub const AllowedFamilies::LOSSY: Self
 pub const fn AllowedFamilies::all() -> Self
 pub fn AllowedFamilies::allow(self, CodecFamily) -> Self
 pub fn AllowedFamilies::any(self) -> bool
 pub const fn AllowedFamilies::as_slice(&self) -> &[bool]
 pub fn AllowedFamilies::deny(self, CodecFamily) -> Self
 pub fn AllowedFamilies::from_allowed<I: core::iter::traits::collect::IntoIterator<Item = CodecFamily>>(I) -> Self
+pub fn AllowedFamilies::intersect(self, Self) -> Self
 pub fn AllowedFamilies::is_allowed(self, CodecFamily) -> bool
 pub const fn AllowedFamilies::none() -> Self
+pub fn AllowedFamilies::viable(self, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> Self
 pub struct MetaPicker<'b>
+pub fn MetaPicker<'static>::default_routers() -> Self
+pub fn MetaPicker<'b>::feature_request(&self) -> core::option::Option<zenanalyze_api::Request<'_>>
 pub fn MetaPicker<'b>::new(&'b zenpredict::model::Model) -> Self
 pub fn MetaPicker<'b>::pick(&mut self, &[f32], &AllowedFamilies) -> core::result::Result<core::option::Option<CodecFamily>, MetaPickerError>
 pub fn MetaPicker<'b>::predictor(&mut self) -> &mut zenpredict::predictor::Predictor<'b>
+pub fn MetaPicker<'b>::route(&mut self, &zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
 pub fn MetaPicker<'b>::validate_family_order(&mut self) -> core::result::Result<(), MetaPickerError>
+pub fn MetaPicker<'b>::with_router(self, &'b zenpredict::model::Model, &'b zenpredict::model::Model) -> Self
+pub struct RouteDecision
+pub fn RouteDecision::family(&self) -> CodecFamily
+pub fn RouteDecision::lossless(&self) -> bool
+pub fn RouteDecision::ranked(&self) -> &[CodecFamily]
+pub fn RouteDecision::resolve(bool, &[f32; 6], AllowedFamilies) -> core::option::Option<Self>
 pub const ALL_LABELS_CSV: &str
 pub const FAMILY_ORDER_KEY: &str
+pub const LOSSLESS_QUALITY: f32
+pub const LOSSY_PAIRWISE_KEY: &str
+pub static LOSSLESS_PREFERENCE: [CodecFamily; 4]
+pub static LOSSY_PREFERENCE: [CodecFamily; 5]
+pub fn content_capability(&zenanalyze_api::Offer<'_>) -> AllowedFamilies
+pub fn default_route(&zenanalyze_api::Offer<'_>, QualityTarget, &[CodecFamily], zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
+pub fn family_rule(&zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::option::Option<CodecFamily>
 
-## trait impls (3 types)
+## trait impls (5 types)
 
 AllowedFamilies: Clone, Copy, Debug, Eq, PartialEq
 CodecFamily: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 MetaPickerError: Debug, Display, Error
+QualityTarget: Clone, Copy, Debug, PartialEq
+RouteDecision: Clone, Debug, PartialEq
 
 ## auto traits
 
-4 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

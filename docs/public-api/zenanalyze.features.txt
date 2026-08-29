@@ -1,5 +1,5 @@
 # zenanalyze public API — additions from non-default features
-# features: experimental,hdr
+# features: api,experimental,full-budgets,hdr
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,12 +9,19 @@
 
 ## summary
 #
-#   enum variants                              13
+#   pub types (struct/enum/trait/alias)         1
+#   pub consts/statics                          1
+#   free functions                              2
+#   enum variants                              16
+#   trait roster entries (type × trait)         7
+#   auto-trait-complete types                   1
 #
 # per-module pub lines:
-#   feature                          13
+#   (root)                            3
+#   feature                          16
+#   versioning                        1
 
-## items (13 lines)
+## items (20 lines)
 
 pub feature::AnalysisFeature::EffectiveBitDepth = 38
 pub feature::AnalysisFeature::GamutCoverageP3 = 47
@@ -22,10 +29,25 @@ pub feature::AnalysisFeature::GamutCoverageSrgb = 46
 pub feature::AnalysisFeature::HdrHeadroomStops = 34
 pub feature::AnalysisFeature::HdrPixelFraction = 35
 pub feature::AnalysisFeature::HdrPresent = 39
+pub feature::AnalysisFeature::HighlightChromaMean = 214
+pub feature::AnalysisFeature::HighlightChromaStd = 215
+pub feature::AnalysisFeature::HighlightEdgeCount = 216
+pub feature::AnalysisFeature::HighlightLumaMean = 212
+pub feature::AnalysisFeature::HighlightLumaStd = 213
+pub feature::AnalysisFeature::HighlightOrientationRatio = 217
 pub feature::AnalysisFeature::P99LuminanceNits = 33
-pub feature::AnalysisFeature::PaletteDensity = 12
 pub feature::AnalysisFeature::PeakLuminanceNits = 32
 pub feature::AnalysisFeature::WideGamutFraction = 37
 pub feature::AnalysisFeature::WideGamutPeak = 36
-pub feature::AnalysisFeature::Xyb444ColorLoss = 138
-pub feature::AnalysisFeature::XybBquarterChromaLoss = 139
+pub fn versioning::feature_qualified_names() -> alloc::vec::Vec<(&'static str, alloc::string::String)>
+pub struct Analyzer
+pub const fn Analyzer::new() -> Self
+pub fn extract_offer(&[u8], u32, u32, &feature::AnalysisQuery, u64) -> zenanalyze_api::OwnedOffer
+
+## trait impls (1 types)
+
+Analyzer: Clone, Copy, Debug, Default, Eq, PartialEq, zenanalyze_api::FeatureProvider
+
+## auto traits
+
+1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

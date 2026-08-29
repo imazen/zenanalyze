@@ -9,14 +9,16 @@
 
 ## summary
 #
-#   inherent methods                            1
+#   inherent methods                            2
 #   trait roster entries (type × trait)         7
 #
 # per-module pub lines:
+#   append                            1
 #   composer                          1
 
-## items (1 lines)
+## items (2 lines)
 
+pub fn append::AppendError::assert_fields_are_eq(&self)
 pub fn composer::BakeError::assert_fields_are_eq(&self)
 
 ## trait impls (7 types)

@@ -9,44 +9,58 @@
 
 ## summary
 #
-#   inherent methods                           11
-#   trait roster entries (type × trait)        23
+#   inherent methods                           15
+#   trait roster entries (type × trait)        33
 #
 # per-module pub lines:
-#   (root)                            7
+#   (root)                           11
 #   argmin                            1
 #   output_spec                       1
 #   rescue                            2
 
-## items (11 lines)
+## items (15 lines)
 
 pub fn Activation::assert_fields_are_eq(&self)
+pub fn EncodeBudget::assert_fields_are_eq(&self)
+pub fn EncodeMode::assert_fields_are_eq(&self)
 pub fn FeatureTransform::assert_fields_are_eq(&self)
 pub fn MetadataType::assert_fields_are_eq(&self)
+pub fn PickerStrategy::assert_fields_are_eq(&self)
 pub fn PredictError::assert_fields_are_eq(&self)
 pub fn SafetyProfile::assert_fields_are_eq(&self)
 pub fn Section::assert_fields_are_eq(&self)
+pub fn VetoOp::assert_fields_are_eq(&self)
 pub fn WeightDtype::assert_fields_are_eq(&self)
 pub fn argmin::ScoreTransform::assert_fields_are_eq(&self)
 pub fn output_spec::OutputTransform::assert_fields_are_eq(&self)
 pub fn rescue::RescueDecision::assert_fields_are_eq(&self)
 pub fn rescue::RescueStrategy::assert_fields_are_eq(&self)
 
-## trait impls (23 types)
+## trait impls (33 types)
 
 Activation: TrivialClone
 CellHint: TrivialClone
+EncodeBudget: TrivialClone
+EncodeMode: TrivialClone
 FallbackEntry: TrivialClone
 FeatureBound: TrivialClone
 FeatureTransform: TrivialClone
 Header: TrivialClone
+KnobVeto<'a>: TrivialClone
 LayerEntry: TrivialClone
 MetadataEntry<'a>: TrivialClone
 MetadataType: TrivialClone
+PickerStrategy: TrivialClone
+PreArgminDecision: TrivialClone
+QualityTarget: TrivialClone
 SafetyCompact: TrivialClone
 SafetyProfile: TrivialClone
 Section: TrivialClone
+Trial: TrivialClone
+UnachievableZone: TrivialClone
+VetoOp: TrivialClone
 WeightDtype: TrivialClone
+ZoneFallback: TrivialClone
 argmin::AllowedMask<'a>: TrivialClone
 argmin::ArgminOffsets<'a>: TrivialClone
 argmin::ScoreTransform: TrivialClone

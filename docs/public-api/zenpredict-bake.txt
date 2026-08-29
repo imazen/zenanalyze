@@ -6,30 +6,59 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict-bake.txt 366 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 8 lines (8 hidden + 0 excluded-feature)
+# files: zenpredict-bake.txt 430 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 9 lines (9 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        32
-#   free functions                             21
+#   pub modules                                 7
+#   pub types (struct/enum/trait/alias)        34
+#   free functions                             23
 #   inherent methods                           24
-#   struct fields                             212
-#   enum variants                              75
-#   trait roster entries (type × trait)        53
-#   auto-trait-complete types                  17
+#   struct fields                             242
+#   enum variants                             105
+#   trait roster entries (type × trait)        59
+#   auto-trait-complete types                  18
 #
 # per-module pub lines:
-#   (root)                          168
+#   (root)                          201
+#   append                           29
 #   cli                               3
 #   composer                        117
-#   json                             69
+#   json                             72
 #   optimize                          9
 #   zero_bias                         4
 
-## items (347 lines)
+## items (410 lines)
 
 pub mod zenpredict_bake
+pub mod append
+pub append::AppendError::BadMagic
+pub append::AppendError::BadMagic::found: [u8; 4]
+pub append::AppendError::DecompressFailed
+pub append::AppendError::InvalidMetadata(zenpredict::error::PredictError)
+pub append::AppendError::KeyEmpty
+pub append::AppendError::KeyTooLong
+pub append::AppendError::KeyTooLong::len: usize
+pub append::AppendError::Malformed
+pub append::AppendError::Malformed::what: &'static str
+pub append::AppendError::OutputValidation(zenpredict::error::PredictError)
+pub append::AppendError::SectionOutOfRange
+pub append::AppendError::SectionOutOfRange::what: &'static str
+pub append::AppendError::TooLarge
+pub append::AppendError::TooLarge::len: usize
+pub append::AppendError::Truncated
+pub append::AppendError::Truncated::have: usize
+pub append::AppendError::Truncated::want: usize
+pub append::AppendError::UnsupportedCompressionAlgo
+pub append::AppendError::UnsupportedCompressionAlgo::algo: u8
+pub append::AppendError::UnsupportedLayout
+pub append::AppendError::UnsupportedLayout::what: &'static str
+pub append::AppendError::UnsupportedMetadataKind
+pub append::AppendError::UnsupportedVersion
+pub append::AppendError::UnsupportedVersion::expected: u16
+pub append::AppendError::UnsupportedVersion::version: u16
+pub append::AppendError::ValueTooLong
+pub append::AppendError::ValueTooLong::len: usize
 pub mod cli
 pub fn cli::run_bake_cli(&[alloc::string::String]) -> std::process::ExitCode
 pub fn cli::run_inspect_cli(&[alloc::string::String]) -> std::process::ExitCode
@@ -166,8 +195,11 @@ pub json::BakeLayerJson::dtype: json::DtypeJson
 pub json::BakeLayerJson::in_dim: usize
 pub json::BakeLayerJson::out_dim: usize
 pub json::BakeLayerJson::weights: alloc::vec::Vec<f32>
+pub json::BakeRequestJson::analyzer_version: core::option::Option<alloc::string::String>
 pub json::BakeRequestJson::compressed: bool
 pub json::BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJson>
+pub json::BakeRequestJson::feature_config_hash: core::option::Option<u64>
+pub json::BakeRequestJson::feature_defs_version: core::option::Option<u32>
 pub json::BakeRequestJson::flags: u16
 pub json::BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
 pub json::BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
@@ -206,6 +238,34 @@ pub enum ActivationJson [also: json]
 pub ActivationJson::Identity
 pub ActivationJson::LeakyRelu
 pub ActivationJson::Relu
+#[non_exhaustive] pub enum AppendError [also: append]
+pub AppendError::BadMagic
+pub AppendError::BadMagic::found: [u8; 4]
+pub AppendError::DecompressFailed
+pub AppendError::InvalidMetadata(zenpredict::error::PredictError)
+pub AppendError::KeyEmpty
+pub AppendError::KeyTooLong
+pub AppendError::KeyTooLong::len: usize
+pub AppendError::Malformed
+pub AppendError::Malformed::what: &'static str
+pub AppendError::OutputValidation(zenpredict::error::PredictError)
+pub AppendError::SectionOutOfRange
+pub AppendError::SectionOutOfRange::what: &'static str
+pub AppendError::TooLarge
+pub AppendError::TooLarge::len: usize
+pub AppendError::Truncated
+pub AppendError::Truncated::have: usize
+pub AppendError::Truncated::want: usize
+pub AppendError::UnsupportedCompressionAlgo
+pub AppendError::UnsupportedCompressionAlgo::algo: u8
+pub AppendError::UnsupportedLayout
+pub AppendError::UnsupportedLayout::what: &'static str
+pub AppendError::UnsupportedMetadataKind
+pub AppendError::UnsupportedVersion
+pub AppendError::UnsupportedVersion::expected: u16
+pub AppendError::UnsupportedVersion::version: u16
+pub AppendError::ValueTooLong
+pub AppendError::ValueTooLong::len: usize
 #[non_exhaustive] pub enum BakeError [also: composer]
 pub BakeError::BiasLengthMismatch
 pub BakeError::BiasLengthMismatch::expected: usize
@@ -338,8 +398,11 @@ pub fn composer::BakeRequestBuilder<'a>::output_order(self, &'a [u32]) -> Self
 pub fn composer::BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self
 pub fn composer::BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
 #[non_exhaustive] pub struct BakeRequestJson [also: json]
+pub BakeRequestJson::analyzer_version: core::option::Option<alloc::string::String>
 pub BakeRequestJson::compressed: bool
 pub BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJson>
+pub BakeRequestJson::feature_config_hash: core::option::Option<u64>
+pub BakeRequestJson::feature_defs_version: core::option::Option<u32>
 pub BakeRequestJson::flags: u16
 pub BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
 pub BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
@@ -368,6 +431,7 @@ pub OutputSpecJson::transform: core::option::Option<json::OutputTransformJson>
 pub struct SparseOverrideJson [also: json]
 pub SparseOverrideJson::idx: u32
 pub SparseOverrideJson::value: core::option::Option<f32>
+pub fn append_metadata_utf8(&[u8], &str, &str) -> core::result::Result<alloc::vec::Vec<u8>, append::AppendError> [also: append]
 pub fn apply_zero_bias(&[f32], usize, f32) -> alloc::vec::Vec<f32> [also: zero_bias]
 pub fn apply_zero_bias_in_place(&mut [f32], usize, f32) [also: zero_bias]
 pub fn apply_zero_bias_per_layer(&[f32], f32) -> alloc::vec::Vec<f32> [also: zero_bias]
@@ -377,8 +441,9 @@ pub fn bake_from_json(&json::BakeRequestJson) -> core::result::Result<alloc::vec
 pub fn bake_from_json_str(&str) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
 pub fn bake_optimized(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: optimize]
 
-## trait impls (18 types)
+## trait impls (19 types)
 
+append::AppendError: Clone, Debug, Display, Eq, Error, PartialEq
 composer::BakeError: Clone, Debug, Display, Eq, Error, PartialEq
 json::ActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::BakeJsonError: Debug, Display, Error, From<composer::BakeError>
@@ -400,4 +465,4 @@ zenpredict::output_spec::OutputTransform: From<json::OutputTransformJson>
 
 ## auto traits
 
-17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+18 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

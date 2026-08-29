@@ -6,25 +6,26 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenanalyze.txt 173 lines (supported surface) | zenanalyze.features.txt 13 added (features: experimental,hdr) | zenanalyze.internal.txt 11 lines (11 hidden + 0 excluded-feature)
+# files: zenanalyze.txt 211 lines (supported surface) | zenanalyze.features.txt 22 added (features: api,experimental,full-budgets,hdr) | zenanalyze.internal.txt 23 lines (23 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 2
-#   pub types (struct/enum/trait/alias)        10
-#   pub consts/statics                         29
-#   free functions                              3
-#   inherent methods                            9
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)        11
+#   pub consts/statics                         39
+#   free functions                             19
+#   inherent methods                           10
 #   struct fields                               2
-#   enum variants                             107
-#   trait roster entries (type × trait)        44
-#   auto-trait-complete types                  10
+#   enum variants                             115
+#   trait roster entries (type × trait)        50
+#   auto-trait-complete types                  11
 #
 # per-module pub lines:
-#   (root)                           38
-#   feature                         124
+#   (root)                           58
+#   feature                         134
+#   versioning                        7
 
-## items (162 lines)
+## items (199 lines)
 
 pub mod zenanalyze
 pub mod feature
@@ -54,6 +55,7 @@ pub feature::AnalysisFeature::ChannelCount = 67
 pub feature::AnalysisFeature::ChromaComplexity = 2
 pub feature::AnalysisFeature::ChromaLumaCovarianceCb = 132
 pub feature::AnalysisFeature::ChromaLumaCovarianceCr = 133
+pub feature::AnalysisFeature::ChromaSubsampleDctLoss = 140
 pub feature::AnalysisFeature::Colourfulness = 7
 pub feature::AnalysisFeature::CrHorizSharpness = 16
 pub feature::AnalysisFeature::CrPeakSharpness = 18
@@ -104,6 +106,7 @@ pub feature::AnalysisFeature::NoiseFloorYP50 = 74
 pub feature::AnalysisFeature::NoiseFloorYP75 = 75
 pub feature::AnalysisFeature::NoiseFloorYP90 = 76
 pub feature::AnalysisFeature::OrientationEnergyRatio = 136
+pub feature::AnalysisFeature::PaletteDensity = 12
 pub feature::AnalysisFeature::PaletteFitsIn256 = 31
 pub feature::AnalysisFeature::PaletteLog2Size = 121
 pub feature::AnalysisFeature::PatchFraction = 23
@@ -126,9 +129,13 @@ pub feature::AnalysisFeature::SpectralSlopeY = 137
 pub feature::AnalysisFeature::Uniformity = 5
 pub feature::AnalysisFeature::Variance = 0
 pub feature::AnalysisFeature::VarianceSpread = 9
+pub feature::AnalysisFeature::Xyb444ColorLoss = 138
+pub feature::AnalysisFeature::XybBquarterChromaLoss = 139
+pub fn feature::AnalysisFeature::from_name(&str) -> core::option::Option<Self>
 pub const fn feature::AnalysisFeature::from_u16(u16) -> core::option::Option<Self>
 pub const fn feature::AnalysisFeature::id(self) -> u16
 pub const fn feature::AnalysisFeature::name(self) -> &'static str
+pub const fn feature::AnalysisFeature::recommended_transform(self) -> feature::TransformHint
 #[non_exhaustive] pub enum feature::FeatureValue
 pub feature::FeatureValue::Bool(bool)
 pub feature::FeatureValue::F32(f32)
@@ -142,9 +149,20 @@ pub fn feature::FeatureValue::to_f32(self) -> f32
 #[non_exhaustive] pub enum feature::PackError
 pub feature::PackError::DuplicateId(u16)
 pub feature::PackError::NonFiniteValue(u16)
+#[non_exhaustive] pub enum feature::TransformHint
+pub feature::TransformHint::Identity
+pub feature::TransformHint::Log
+pub feature::TransformHint::Log1p
+pub feature::TransformHint::SignedCbrt
+pub const fn feature::TransformHint::as_str(self) -> &'static str
 pub struct feature::AnalysisQuery
+pub const fn feature::AnalysisQuery::config_hash(&self) -> u64
+pub const fn feature::AnalysisQuery::diffuse_white_clip(&self) -> bool
 pub const fn feature::AnalysisQuery::features(&self) -> feature::FeatureSet
+pub const fn feature::AnalysisQuery::linear_light(&self) -> bool
 pub const fn feature::AnalysisQuery::new(feature::FeatureSet) -> Self
+pub const fn feature::AnalysisQuery::with_diffuse_white_clip(self, bool) -> Self
+pub const fn feature::AnalysisQuery::with_linear_light(self, bool) -> Self
 pub struct feature::AnalysisResults
 pub fn feature::AnalysisResults::from_packed(&[(u16, f32)]) -> core::result::Result<Self, feature::PackError>
 pub const fn feature::AnalysisResults::geometry(&self) -> feature::ImageGeometry
@@ -179,6 +197,14 @@ pub const fn feature::ImageGeometry::pixels(self) -> u64
 pub const fn feature::ImageGeometry::width(self) -> u32
 pub struct feature::MissingFeatures
 pub feature::MissingFeatures::missing: alloc::vec::Vec<u16>
+pub mod versioning
+pub const versioning::REL_TOLERANCE: f32
+pub fn versioning::caret_root(&str) -> &str
+pub fn versioning::descriptor_hash(&zenpixels::buffer::PixelSlice<'_>) -> u64
+pub fn versioning::descriptor_hash_of(&zenpixels::descriptor::PixelDescriptor, core::option::Option<f32>) -> u64
+pub fn versioning::feature_version_hash(feature::AnalysisFeature) -> core::option::Option<u64>
+pub fn versioning::feature_version_hash_by_name(&str) -> core::option::Option<u64>
+pub fn versioning::rgb8_srgb_descriptor_hash() -> u64
 #[non_exhaustive] pub enum AnalyzeError
 pub AnalyzeError::Convert(alloc::string::String)
 pub AnalyzeError::Internal(alloc::string::String)
@@ -187,9 +213,21 @@ pub AnalyzeError::OutOfMemory
 pub AnalyzeError::OutOfMemory::bytes_requested: core::option::Option<usize>
 pub fn analyze_features(zenpixels::buffer::PixelSlice<'_>, &feature::AnalysisQuery) -> core::result::Result<feature::AnalysisResults, AnalyzeError>
 pub fn analyze_features_rgb8(&[u8], u32, u32, &feature::AnalysisQuery) -> feature::AnalysisResults
+pub const fn analyzer_version() -> &'static str
+pub fn feature_count() -> usize
+pub const fn feature_defs_version() -> u32
+pub fn feature_id_by_name(&str) -> core::option::Option<u16>
+pub fn feature_id_supported(u16) -> bool
+pub fn feature_ids(&mut [u16]) -> usize
+pub fn feature_name(u16) -> core::option::Option<&'static str>
+pub fn feature_vector(zenpixels::buffer::PixelSlice<'_>, &[u16], &mut [f32]) -> bool
+pub fn feature_vector_all(zenpixels::buffer::PixelSlice<'_>, &mut [f32]) -> bool
+pub fn feature_vector_packed8(&[u8], u32, u32, usize, u8, &[u16], &mut [f32]) -> bool
+pub fn feature_vector_packed8_all(&[u8], u32, u32, usize, u8, &mut [f32]) -> bool
+pub fn resolve_feature_ids<S: core::convert::AsRef<str>>(&[S]) -> core::option::Option<alloc::vec::Vec<u16>>
 pub fn try_analyze_features_rgb8(&[u8], u32, u32, &feature::AnalysisQuery) -> core::result::Result<feature::AnalysisResults, AnalyzeError>
 
-## trait impls (10 types)
+## trait impls (11 types)
 
 AnalyzeError: Debug, Display, Error
 feature::AnalysisFeature: Clone, Copy, Debug, Eq, Hash, PartialEq
@@ -201,7 +239,8 @@ feature::FeatureValue: Clone, Copy, Debug, From<bool>, From<f32>, From<u32>, Fro
 feature::ImageGeometry: Clone, Copy, Debug
 feature::MissingFeatures: Clone, Debug, Display, Eq, Error, PartialEq
 feature::PackError: Clone, Debug, Display, Eq, Error, PartialEq
+feature::TransformHint: Clone, Copy, Debug, Eq, Hash, PartialEq
 
 ## auto traits
 
-10 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

@@ -10,7 +10,7 @@
 ## summary
 #
 #   inherent methods                            2
-#   trait roster entries (type × trait)         2
+#   trait roster entries (type × trait)         3
 #
 # per-module pub lines:
 #   (root)                            2
@@ -20,7 +20,8 @@
 pub fn AllowedFamilies::assert_fields_are_eq(&self)
 pub fn CodecFamily::assert_fields_are_eq(&self)
 
-## trait impls (2 types)
+## trait impls (3 types)
 
 AllowedFamilies: TrivialClone
 CodecFamily: TrivialClone
+QualityTarget: TrivialClone
