@@ -89,3 +89,20 @@ viz-build:
 
 viz-serve port="3142": viz-build
     python3 -m http.server -d zenpredict-viz/web {{port}}
+
+# Byte-exact feature lock (examples/feature_bits.rs) — the gate an optimization
+# has to pass. Per-HOST artifact by design: SIMD-reduced features diverge per
+# tier across architectures, so this is never a CI test. Bless BEFORE touching a
+# kernel, check after; a failure means values moved, which invalidates every
+# baked picker fit against them.
+bitlock:
+    cargo run --release --features hdr --example feature_bits
+
+bitlock-bless:
+    cargo run --release --features hdr --example feature_bits -- --bless
+
+# Size x content-class cost sweep for FeatureSet::SUPPORTED only (no per-feature
+# solo/LOO) — the alpha + beta*pixels input. ~1/235th the cost of the full grid.
+perf-grid out="benchmarks/perf_grid.tsv" sides="64,256,1024,2048,4096":
+    PFC_BASELINE_ONLY=1 PFC_SIDES={{sides}} PFC_CROPS=3 PFC_OUT={{out}} \
+      cargo run --release --features hdr --example per_feature_cost_grid

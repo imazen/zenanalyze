@@ -15,12 +15,11 @@
 //!   adds when everything else is already computed; ≤ 0 = shares a pass, noise).
 //!
 //! Content (no synthetic gradients — sweep rule): tiles are centre crops of
-//! codec-corpus images, mosaicked when no source is large enough (2×2 / 4×4 /
-//! 8×8 of DISTINCT crops; every pixel stays real content at the cost of seam
-//! lines — same trade `scripts/make_costgrid_crops.py` made). Photo: CID22
-//! (512²) for 64/256, clic2025 (min dim ≥ 1024) for 1024+. Screen: gb82 (576²),
-//! 512-tiles mosaicked for 1024+ (25 sources, so 4096² repeats tiles).
-//! Deterministic: sorted walks, fixed offsets, no RNG.
+//! codec-corpus images, mosaicked when no source is large enough. The loader
+//! and the four content classes (`photo`, `photohard`, `screen`, `mixed`) live
+//! in `examples/common/mod.rs`, which also records why `screen` changed source
+//! on 2026-08-28 (it read `gb82`, the *photographic* set; the screen-content
+//! set is `gb82-sc`). Deterministic: sorted walks, fixed offsets, no RNG.
 //!
 //! Output is a raw TSV (one row per class × side × crop × feature) that
 //! `tools/feature_inventory.py --cost <tsv>` aggregates (median over crops,
@@ -34,120 +33,23 @@
 //! ```
 //!
 //! Env: `ZENANALYZE_CORPUS_DIR` (default `../codec-corpus`), `PFC_SIDES`
-//! (comma list, default all five), `PFC_CLASSES` (default `photo,screen`),
+//! (comma list, default all five), `PFC_CLASSES` (default
+//! `photo,photohard,screen,mixed`),
 //! `PFC_CROPS` (crops per class × side, default 2), `PFC_OUT` (default
 //! `benchmarks/per_feature_cost_grid_<date>.tsv`), `PFC_APPEND=1` (append rows
-//! without a header, for size-by-size runs).
+//! without a header, for size-by-size runs), `PFC_BASELINE_ONLY=1` (emit only
+//! the `__supported__` cost per cell — the size x class sweep alone).
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use zenanalyze::analyze_features;
 use zenanalyze::feature::{AnalysisFeature, AnalysisQuery, FeatureSet};
 use zenpixels::{PixelDescriptor, PixelSlice};
 
-const ALL_SIDES: [u32; 5] = [64, 256, 1024, 2048, 4096];
-
-struct Class {
-    name: &'static str,
-    /// (max side served by these sources, tile side, sources) — first entry whose
-    /// `max_side >= side` wins; larger sides mosaic `tile` crops of it.
-    tiers: Vec<(u32, u32, Vec<PathBuf>)>,
-}
-
-fn walk_pngs(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
-    entries.sort();
-    for p in entries {
-        if p.is_dir() {
-            walk_pngs(&p, out);
-        } else if p.extension().is_some_and(|e| e == "png") {
-            out.push(p);
-        }
-    }
-}
-
-fn png_dims(p: &Path) -> Option<(u32, u32)> {
-    let bytes = std::fs::read(p).ok()?;
-    if bytes.len() < 24 || &bytes[12..16] != b"IHDR" {
-        return None;
-    }
-    let w = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
-    let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
-    Some((w, h))
-}
-
-fn sources(dir: &Path, min_dim: u32) -> Vec<PathBuf> {
-    let mut all = Vec::new();
-    walk_pngs(dir, &mut all);
-    all.into_iter()
-        .filter(|p| png_dims(p).is_some_and(|(w, h)| w.min(h) >= min_dim))
-        .collect()
-}
-
-fn classes(corpus: &Path) -> Vec<Class> {
-    let cid22 = sources(&corpus.join("CID22"), 512);
-    let clic = sources(&corpus.join("clic2025"), 1024);
-    let gb82 = sources(&corpus.join("gb82"), 512);
-    assert!(!cid22.is_empty(), "no CID22 PNGs ≥ 512 under {corpus:?}");
-    assert!(!clic.is_empty(), "no clic2025 PNGs ≥ 1024 under {corpus:?}");
-    assert!(!gb82.is_empty(), "no gb82 PNGs ≥ 512 under {corpus:?}");
-    vec![
-        Class {
-            name: "photo",
-            tiers: vec![(512, 512, cid22), (u32::MAX, 1024, clic)],
-        },
-        Class {
-            name: "screen",
-            tiers: vec![(u32::MAX, 512, gb82)],
-        },
-    ]
-}
-
-/// RGB8 `side`×`side` buffer: a `side/tile` × `side/tile` mosaic of centre crops
-/// of distinct sources, starting at source index `start` (crop `i` uses
-/// sources `i*n*n ..`, wrapping when the pool is exhausted).
-fn build(side: u32, class: &Class, crop_idx: usize) -> (Vec<u8>, usize) {
-    let (_, tile_side, srcs) = class
-        .tiers
-        .iter()
-        .find(|(max_side, _, _)| *max_side >= side)
-        .expect("tier");
-    let tile = (*tile_side).min(side);
-    let n = side / tile;
-    assert_eq!(n * tile, side, "side {side} not a multiple of tile {tile}");
-    let mut buf = vec![0u8; (side as usize) * (side as usize) * 3];
-    let per_crop = (n * n) as usize;
-    let start = crop_idx * per_crop;
-    let mut used = 0usize;
-    for ty in 0..n {
-        for tx in 0..n {
-            let k = start + (ty * n + tx) as usize;
-            let src = &srcs[k % srcs.len()];
-            used += 1;
-            let img = image::open(src)
-                .unwrap_or_else(|e| panic!("{src:?}: {e}"))
-                .to_rgb8();
-            let (w, h) = (img.width(), img.height());
-            let x0 = (w - tile) / 2;
-            let y0 = (h - tile) / 2;
-            let crop = image::imageops::crop_imm(&img, x0, y0, tile, tile).to_image();
-            let raw = crop.as_raw();
-            for row in 0..tile as usize {
-                let dst_y = (ty * tile) as usize + row;
-                let dst_x = (tx * tile) as usize;
-                let dst = (dst_y * side as usize + dst_x) * 3;
-                let src_off = row * tile as usize * 3;
-                buf[dst..dst + tile as usize * 3]
-                    .copy_from_slice(&raw[src_off..src_off + tile as usize * 3]);
-            }
-        }
-    }
-    (buf, used)
-}
+#[path = "common/mod.rs"]
+mod common;
+use common::{ALL_SIDES, Class, build, classes};
 
 /// Median wall-clock ns of `analyze_features(query)`: ≥ 5 runs and ≥ 100 ms of
 /// measurement (≤ 300 runs), after 2 warm-ups.
@@ -231,12 +133,17 @@ fn main() {
     for s in &sides {
         assert!(ALL_SIDES.contains(s), "side {s} not in {ALL_SIDES:?}");
     }
-    let want_classes = env_list("PFC_CLASSES", "photo,screen");
+    let want_classes = env_list("PFC_CLASSES", "photo,photohard,screen,mixed");
     let n_crops: usize = std::env::var("PFC_CROPS")
         .ok()
         .map(|v| v.parse().expect("PFC_CROPS: usize"))
         .unwrap_or(2);
     let append = std::env::var("PFC_APPEND").is_ok_and(|v| v == "1");
+    // Baseline-only mode: emit one row per cell holding the SUPPORTED cost and
+    // nothing else. That is the size x class sweep (alpha + beta*pixels) on its
+    // own, which costs ~1/235th of the full per-feature grid because it skips
+    // the 117 solo + 117 leave-one-out measurements per cell.
+    let baseline_only = std::env::var("PFC_BASELINE_ONLY").is_ok_and(|v| v == "1");
     let out = std::env::var("PFC_OUT")
         .unwrap_or_else(|_| format!("benchmarks/per_feature_cost_grid_{}.tsv", date()));
 
@@ -260,7 +167,7 @@ fn main() {
             f,
             "# zenanalyze per-feature cost grid — analyze_features RGB8_SRGB, real content\n\
              # git={} host={} arch={} date={} corpus={} crops/cell={n_crops} features={} (FeatureSet::SUPPORTED of this build)\n\
-             # sides={sides:?} classes={want_classes:?}; photo=CID22 512² (64/256) + clic2025 1024² centre crops (1024+, 2×2/4×4 mosaics); screen=gb82 512² centre crops (mosaicked 2×2..8×8 for 1024+)\n\
+             # sides={sides:?} classes={want_classes:?}; photo=CID22 512² (64/256) + clic2025 1024² (1024+); photohard=gb82 512²; screen=gb82-sc 512²; mixed=photo/screen checkerboard — all centre crops, mosaicked 2×2..8×8 for larger sides\n\
              # baseline_ns = median of SUPPORTED; solo_ns = median with only this feature requested; loo_ns = baseline − median(SUPPORTED \\ feature) (≤ 0 → shares a pass / noise)\n\
              # median over ≥ 5 runs and ≥ 100 ms per cell; tiles = number of distinct source crops mosaicked",
             cmd("git", &["rev-parse", "--short", "HEAD"]),
@@ -285,7 +192,19 @@ fn main() {
                 let (buf, tiles) = build(side, class, crop_idx);
                 let t_cell = Instant::now();
                 let baseline = median_ns(&buf, side, &AnalysisQuery::new(supported));
-                for &feat in &feats {
+                if baseline_only {
+                    writeln!(
+                        f,
+                        "{}\t{side}\t{}\t{crop_idx}\t{tiles}\t-1\t__supported__\t{baseline:.0}\t{baseline:.0}\t0",
+                        class.name,
+                        (side as u64) * (side as u64),
+                    )
+                    .unwrap();
+                }
+                for &feat in feats
+                    .iter()
+                    .take(if baseline_only { 0 } else { usize::MAX })
+                {
                     let solo = median_ns(&buf, side, &AnalysisQuery::new(FeatureSet::just(feat)));
                     let without =
                         median_ns(&buf, side, &AnalysisQuery::new(supported.without(feat)));
