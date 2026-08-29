@@ -611,22 +611,59 @@ fn luma_histogram_stats(stream: &mut RowStream<'_>) -> LumaHistStats {
     let qr = w.qr as u32;
     let qg = w.qg as u32;
     let qb = w.qb as u32;
-    let mut bins = [0u32; 32];
+    // FOUR interleaved bin arrays, summed at the end, instead of one.
+    //
+    // The histogram increment `bins[b] += 1` is a read-modify-write to an
+    // address the next iteration may hit again, so consecutive samples landing
+    // in the same bin serialize on store-to-load forwarding — which is the
+    // common case, since neighbouring pixels have neighbouring luma. Four
+    // independent arrays let four increments be in flight at once; the counts
+    // are u32 integers, so summing the four at the end is **exact** — the same
+    // numbers, in a different order of addition, and integer addition does not
+    // care. (Nothing here may be reassociated in floating point; the entropy
+    // and Otsu passes below still consume `bins` in index order.)
+    let mut bins_a = [0u32; 32];
+    let mut bins_b = [0u32; 32];
+    let mut bins_c = [0u32; 32];
+    let mut bins_d = [0u32; 32];
     let mut n = 0u32;
     let mut carry: usize = 0;
+    // Luma of the pixel at column `x` of `row`, exactly as the scalar loop
+    // computed it (BT.601-family fixed point, round-half-up, >> 8).
+    let luma_at = |row: &[u8], x: usize| -> usize {
+        let off = x * 3;
+        let p = &row[off..off + 3];
+        let y = ((qr * p[0] as u32 + qg * p[1] as u32 + qb * p[2] as u32 + 128) >> 8) as u8;
+        (y >> 3) as usize
+    };
     for yy in 0..height {
         let row = stream.borrow_row(yy as u32);
         let start = (4 - carry) % 4;
         let mut x = start;
+        // Four samples per iteration — the sample positions (every 4th pixel)
+        // are untouched, only which accumulator receives each one.
+        while x + 12 < width {
+            let b0 = luma_at(row, x);
+            let b1 = luma_at(row, x + 4);
+            let b2 = luma_at(row, x + 8);
+            let b3 = luma_at(row, x + 12);
+            bins_a[b0] += 1;
+            bins_b[b1] += 1;
+            bins_c[b2] += 1;
+            bins_d[b3] += 1;
+            n += 4;
+            x += 16;
+        }
         while x < width {
-            let off = x * 3;
-            let p = &row[off..off + 3];
-            let y = ((qr * p[0] as u32 + qg * p[1] as u32 + qb * p[2] as u32 + 128) >> 8) as u8;
-            bins[(y >> 3) as usize] += 1;
+            bins_a[luma_at(row, x)] += 1;
             n += 1;
             x += 4;
         }
         carry = (carry + width) % 4;
+    }
+    let mut bins = [0u32; 32];
+    for i in 0..32 {
+        bins[i] = bins_a[i] + bins_b[i] + bins_c[i] + bins_d[i];
     }
     if n == 0 {
         return LumaHistStats {
