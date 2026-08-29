@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Third-party dependency pass** (f9a62c7). `arrow` + `parquet` 58.3.0 → 59.2.0
+  in `zenpredict-bake` (the `fit-yj` Yeo-Johnson MLE binary's training-parquet
+  reader) and `zenpredict-viz` (`sample-pack`), no source change needed;
+  `rand` 0.9.2 → 0.10.2 as a dev-dependency in `zenpredict` and
+  `zenpredict-bake` — `small_rng` is obsolete in 0.10 so it comes off the
+  feature list, and `random_range` moved from `Rng` to the new `RngExt` trait,
+  a one-line import change in `zenpredict-bake/benches/predict.rs` (the only
+  file in either crate that uses `rand`); and `image` `"0.25"` → `"0.25.10"`,
+  a truncated requirement written in full. **The bit-lock held**: `just bitlock`
+  reports 3740 values byte-identical over 16 fixtures against the committed
+  `benchmarks/feature_bits_aarch64.tsv`, before and after, so no feature value
+  moved by a bit and no baked picker is invalidated. A local `cargo update`
+  alongside this moved 30 third-party packages and zero zen-family ones.
+  Two dependencies are deliberately held: `lz4_flex` stays at 0.11.6 because
+  0.14 stops re-exporting `compress` as a function from `lz4_flex::block` under
+  this crate's feature set, which makes it a source migration on the ZNPR
+  payload encode path rather than a version bump; and `prost` stays at 0.6.1
+  because `onnx-pb` 0.1.4 (the latest, from 2020) hard-requires `prost ^0.6.1`,
+  so `cargo outdated` flagging it is a false positive.
 - **`zenpixels` / `zenpixels-convert` requirements now span the published minor
   and the next one**: both move from `"0.2.14"` to `">=0.2.14, <0.4.0"`. For a
   `0.x` crate Cargo treats the minor as the major, so the plain requirement meant
