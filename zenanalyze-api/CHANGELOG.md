@@ -19,6 +19,17 @@
   known at runtime: `new`, `available()` (lends borrowed `NamedFeature`s), `len`, `is_empty`,
   and the same `offers` / `has_name` / `unmet` / `union` queries.
 
+### Verified
+
+- `cargo semver-checks check-release --baseline-version 0.1.0`: **196 checks, 196
+  pass, 0 fail — "no semver update required."** Every addition above is
+  compatible with published `0.1.0`, which is the property the freeze plan rests
+  on: the contract can grow the surface consumers need without splitting anyone,
+  because private fields and `#[non_exhaustive]` make additions non-breaking.
+  Run this before every release of this crate — a break here splits the
+  ecosystem, and it is the one crate where that is unrecoverable.
+- `cargo package -p zenanalyze-api`: 9 files, 25.2 KiB compressed.
+
 ### Documentation
 - README gained a **Compatibility rules** section — the four rules that make a multi-version
   build work: one dependency source (a crates.io *version*, never a git rev; override with a
