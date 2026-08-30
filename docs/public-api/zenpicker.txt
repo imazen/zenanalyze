@@ -6,26 +6,30 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpicker.txt 71 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 5 lines (5 hidden + 0 excluded-feature)
+# files: zenpicker.txt 108 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 9 lines (9 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 1
-#   pub types (struct/enum/trait/alias)         6
-#   pub consts/statics                         17
+#   pub types (struct/enum/trait/alias)        11
+#   pub consts/statics                         22
 #   free functions                              3
-#   inherent methods                           19
+#   inherent methods                           39
 #   struct fields                               4
-#   enum variants                              15
-#   trait roster entries (type × trait)        23
-#   auto-trait-complete types                   6
+#   enum variants                              18
+#   trait roster entries (type × trait)        42
+#   auto-trait-complete types                  11
 #
 # per-module pub lines:
-#   (root)                           65
+#   (root)                           98
 
-## items (65 lines)
+## items (98 lines)
 
 pub mod zenpicker
+#[non_exhaustive] pub enum CellMode
+pub CellMode::Lossless
+pub CellMode::Lossy
+pub const fn CellMode::label(self) -> &'static str
 #[non_exhaustive] #[repr(u8)] pub enum CodecFamily
 pub CodecFamily::Avif = 3
 pub CodecFamily::Gif = 5
@@ -38,6 +42,7 @@ pub const CodecFamily::COUNT: usize
 pub const fn CodecFamily::index(self) -> usize
 pub const fn CodecFamily::label(self) -> &'static str
 #[non_exhaustive] pub enum MetaPickerError
+pub MetaPickerError::CellContract(alloc::string::String)
 pub MetaPickerError::FamilyOrderMismatch
 pub MetaPickerError::FamilyOrderMismatch::actual: alloc::string::String
 pub MetaPickerError::FamilyOrderMismatch::expected: alloc::string::String
@@ -67,6 +72,30 @@ pub fn AllowedFamilies::intersect(self, Self) -> Self
 pub fn AllowedFamilies::is_allowed(self, CodecFamily) -> bool
 pub const fn AllowedFamilies::none() -> Self
 pub fn AllowedFamilies::viable(self, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> Self
+pub struct CellContract
+pub fn CellContract::build_input<F>(&self, f32, F) -> core::result::Result<alloc::vec::Vec<f32>, MetaPickerError> where F: core::ops::function::FnMut(&str) -> core::option::Option<f32>
+pub fn CellContract::cells(&self) -> &[FamilyModeCell]
+pub fn CellContract::families(&self) -> AllowedFamilies
+pub fn CellContract::from_model(&zenpredict::model::Model) -> core::result::Result<Self, MetaPickerError>
+pub fn CellContract::image_features(&self) -> &[alloc::string::String]
+pub fn CellContract::input_order(&self) -> &[alloc::string::String]
+pub fn CellContract::zq_index(&self) -> usize
+pub struct CellPicker
+pub fn CellPicker::contract(&self) -> &CellContract
+pub fn CellPicker::from_znpr_bytes(&[u8]) -> core::result::Result<Self, MetaPickerError>
+pub fn CellPicker::from_znpr_bytes_with_schema(&[u8], u64) -> core::result::Result<Self, MetaPickerError>
+pub fn CellPicker::meta_picker(&self) -> MetaPicker<'_>
+pub fn CellPicker::model(&self) -> &zenpredict::model::Model
+pub fn CellPicker::predict_cells<'c>(&'c self, &[f32], &AllowedFamilies, core::option::Option<&[bool]>) -> core::result::Result<CellPrediction<'c>, MetaPickerError>
+pub struct CellPrediction<'c>
+pub fn CellPrediction<'c>::family(&self) -> core::option::Option<CodecFamily>
+pub fn CellPrediction<'c>::mode(&self) -> core::option::Option<CellMode>
+pub fn CellPrediction<'c>::pick(&self) -> core::option::Option<&'c FamilyModeCell>
+pub fn CellPrediction<'c>::scores(&self) -> &[f32]
+pub struct FamilyModeCell
+pub fn FamilyModeCell::family(&self) -> CodecFamily
+pub fn FamilyModeCell::label(&self) -> &str
+pub fn FamilyModeCell::mode(&self) -> CellMode
 pub struct MetaPicker<'b>
 pub fn MetaPicker<'static>::default_routers() -> Self
 pub fn MetaPicker<'b>::feature_request(&self) -> core::option::Option<zenanalyze_api::Request<'_>>
@@ -82,23 +111,31 @@ pub fn RouteDecision::lossless(&self) -> bool
 pub fn RouteDecision::ranked(&self) -> &[CodecFamily]
 pub fn RouteDecision::resolve(bool, &[f32; 6], AllowedFamilies) -> core::option::Option<Self>
 pub const ALL_LABELS_CSV: &str
+pub const CELL_LABELS_KEY: &str
 pub const FAMILY_ORDER_KEY: &str
+pub const IMAGE_FEATURE_NAMES_KEY: &str
+pub const INPUT_ORDER_KEY: &str
 pub const LOSSLESS_QUALITY: f32
 pub const LOSSY_PAIRWISE_KEY: &str
+pub const ZQ_NORM_INPUT: &str
 pub static LOSSLESS_PREFERENCE: [CodecFamily; 4]
 pub static LOSSY_PREFERENCE: [CodecFamily; 5]
 pub fn content_capability(&zenanalyze_api::Offer<'_>) -> AllowedFamilies
 pub fn default_route(&zenanalyze_api::Offer<'_>, QualityTarget, &[CodecFamily], zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
 pub fn family_rule(&zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::option::Option<CodecFamily>
 
-## trait impls (5 types)
+## trait impls (9 types)
 
 AllowedFamilies: Clone, Copy, Debug, Eq, PartialEq
+CellContract: Clone, Debug, Eq, PartialEq
+CellMode: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+CellPrediction<'c>: Clone, Debug, PartialEq
 CodecFamily: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+FamilyModeCell: Clone, Debug, Eq, PartialEq
 MetaPickerError: Debug, Display, Error
 QualityTarget: Clone, Copy, Debug, PartialEq
 RouteDecision: Clone, Debug, PartialEq
 
 ## auto traits
 
-6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

@@ -9,19 +9,23 @@
 
 ## summary
 #
-#   inherent methods                            2
-#   trait roster entries (type × trait)         3
+#   inherent methods                            5
+#   trait roster entries (type × trait)         4
 #
 # per-module pub lines:
-#   (root)                            2
+#   (root)                            5
 
-## items (2 lines)
+## items (5 lines)
 
 pub fn AllowedFamilies::assert_fields_are_eq(&self)
+pub fn CellContract::assert_fields_are_eq(&self)
+pub fn CellMode::assert_fields_are_eq(&self)
 pub fn CodecFamily::assert_fields_are_eq(&self)
+pub fn FamilyModeCell::assert_fields_are_eq(&self)
 
-## trait impls (3 types)
+## trait impls (4 types)
 
 AllowedFamilies: TrivialClone
+CellMode: TrivialClone
 CodecFamily: TrivialClone
 QualityTarget: TrivialClone

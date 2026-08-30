@@ -101,6 +101,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`zenpicker` learns the family×mode cell contract — INERT** (criterion 8).
+  A `zenpicker-train` meta-picker bake does not score families, it scores
+  `family × {lossy, lossless}` **cells** declared by name in its own metadata,
+  so feeding one to `MetaPicker::pick` would read `CodecFamily::ALL[cell_index]`
+  and mis-map every output. New `zenpicker::cell` (re-exported at the root):
+  `CellContract` (validates `zenpicker_train.cell_labels` /
+  `.image_feature_names` / `.input_order` against the model's real widths and
+  refuses on any mismatch), `CellContract::build_input` (**the** contract
+  mapping — one pass over the input order, each source-feature name read
+  exactly once, `zq_norm` placed exactly once, a missing feature is a loud
+  error not a silent zero), `CellPicker::from_znpr_bytes[_with_schema]`
+  (owns the parsed bake + validated contract), `CellPicker::predict_cells`
+  (one forward pass → every cell's `bytes_log` + the masked argmin cell, over
+  the caller's family mask ∩ an optional per-cell reach mask), plus
+  `FamilyModeCell` / `CellMode` / `CellPrediction` and the three metadata-key
+  consts. `MetaPickerError` gains `CellContract(String)`.
+  **Nothing existing changed**: `default_route`, `MetaPicker::route`,
+  `MetaPicker::default_routers` and the three shipped routers are untouched,
+  and the shipped routers are *refused* as cell bakes by a test. The bake
+  itself stays out of git (104 KB, block storage — see
+  `benchmarks/metapicker_v1_2026-08-30.pointer.md`).
+
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
   2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a
   `zenanalyze_api::FeatureProvider` — so a codec can run its own analysis pass

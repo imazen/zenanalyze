@@ -75,6 +75,12 @@ use alloc::string::{String, ToString};
 
 use zenpredict::{AllowedMask, ArgminOffsets, Model, PredictError, Predictor, ScoreTransform};
 
+mod cell;
+pub use cell::{
+    CELL_LABELS_KEY, CellContract, CellMode, CellPicker, CellPrediction, FamilyModeCell,
+    IMAGE_FEATURE_NAMES_KEY, INPUT_ORDER_KEY, ZQ_NORM_INPUT,
+};
+
 mod route;
 pub use route::{
     LOSSLESS_PREFERENCE, LOSSLESS_QUALITY, LOSSY_PREFERENCE, QualityTarget, RouteDecision,
@@ -719,6 +725,12 @@ pub enum MetaPickerError {
     /// [`LOSSY_PAIRWISE_KEY`]): its outputs are per-pair margins, not per-family scores, so a raw
     /// argmin is meaningless. Use [`route`](MetaPicker::route), which applies the round-robin.
     PairwiseRouterNeedsRoute,
+    /// A bake does not satisfy the family×mode [`CellContract`]: a missing or malformed
+    /// `zenpicker_train.*` metadata key, a cell label that is not `<family>_<mode>`, a declared
+    /// width that disagrees with the model, an input order that is not a bijection over the
+    /// image features + [`ZQ_NORM_INPUT`], or a source feature the caller could not supply.
+    /// The payload names what disagreed.
+    CellContract(String),
 }
 
 #[cfg(feature = "std")]
@@ -747,6 +759,7 @@ impl core::fmt::Display for MetaPickerError {
                 f,
                 "pick() called on a pairwise lossy router (per-pair margins); use route()"
             ),
+            Self::CellContract(s) => write!(f, "cell contract: {}", s),
         }
     }
 }
