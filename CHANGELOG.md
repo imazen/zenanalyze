@@ -31,15 +31,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     max statistics dominate the non-converging group, as expected.
   - The dominant knob is **`hf_max_blocks`, not `pixel_budget`** — every one of
     the 25 largest drifts at 4096² is tier-3 block-cap driven.
-  - Found: the **zenjpeg picker is degenerate at large sizes** — 15 distinct
-    cells at 1024², 3 at 2048², 1 at 4096². Its 0 % change rate at 4096² is
-    saturation, not robustness.
-  - Found: the **three shipped `zenpicker` routers cannot reuse any offer from
-    current `main`**. They were baked against
+  - **Found (imazen/zenjpeg#200): the zenjpeg picker bake is out of distribution
+    above 2048².** At 4096² it predicts a median **151 GB** for a JPEG whose
+    measured size is 2.3–8.7 MB (~20 000× off) and collapses to **one** output
+    cell for every input at every target; median predicted bytes grow 28× then
+    80 700× per 4× pixel step where truth is ≈ 4×. Not a near-tie — worst/best
+    cell spread widens with size (1.45 → 1.85 → 7.28), so it is confidently
+    wrong. The bake ships no `feature_bounds`, so the `first_out_of_distribution`
+    seam `run_model` already calls is dormant and cannot catch it. Diagnosed with
+    the new `AB_DUMP_SCORES=1` mode; raw scores committed as
+    `benchmarks/budget_zenjpeg_cell_scores_2026-08-30.tsv`.
+  - **Found (#88): the three shipped `zenpicker` routers cannot reuse any offer
+    from current `main`.** They were baked against
     `chroma_subsample_dct_loss@48f0f976`; this build emits `@fabc9776`, and
     `Select::Features` is all-or-nothing, so `default_route` returns `Ok(None)`
     universally and consumers silently fall back to `family_rule`. Needs a
-    re-bake; the gate itself is behaving correctly.
+    re-bake plus a CI tripwire asserting every shipped bake's columns resolve
+    against `feature_qualified_names()`; the gate itself is behaving correctly.
+  - Verified along the way: `__analyze_internal` at the default budgets is
+    **bit-identical** to `analyze_features_rgb8(FeatureSet::SUPPORTED)` across
+    4 content classes × {1024, 2048, 4096}², zero differing features — so the
+    study's baseline arm is the shipping path, not a proxy for it.
 
 ### Fixed
 
