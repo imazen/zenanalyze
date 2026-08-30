@@ -2,9 +2,9 @@
 
 # zenpicker
 
-Codec-family meta-picker. Given image features + a quality target + an allowed-family mask, picks one of `{jpeg, webp, jxl, avif, png, gif}`. Per-codec pickers (separate ZNPR v3 bakes shipped by the codec crate) handle config selection within the chosen family.
+Cross-codec **family router**: given image features (a zenanalyze `Offer`) + a quality target + the formats you can emit, it picks the best of `{jpeg, webp, jxl, avif, png, gif}` — **one-shot, no trial encodes**. Per-codec pickers (separate ZNPR bakes shipped by each codec crate) then choose the config *within* the chosen family.
 
-`#![forbid(unsafe_code)]`. `no_std + alloc` capable. Built on top of [zenpredict](https://github.com/imazen/zenanalyze/tree/main/zenpredict) — wraps a `Predictor` whose output dimension equals the number of families. AGPL-3.0-only / Commercial dual license.
+`#![forbid(unsafe_code)]`, `no_std + alloc` capable. Built on top of [zenpredict](https://github.com/imazen/zenanalyze/tree/main/zenpredict) (the ZNPR runtime). AGPL-3.0-only / Commercial dual license.
 
 ## Where it sits
 
@@ -13,8 +13,8 @@ Codec-family meta-picker. Given image features + a quality target + an allowed-f
                               │
                               ▼
                  ┌──────────────────────┐
-                 │ zenpicker            │   one ZNPR v3 model;
-                 │  meta-picker         │   N_outputs = N families
+                 │ zenpicker            │   gate + lossy +
+                 │  family router       │   lossless routers
                  └──────────┬───────────┘
                             │ chosen family
                             ▼
@@ -29,6 +29,28 @@ Codec-family meta-picker. Given image features + a quality target + an allowed-f
 
 The meta-picker emits a `CodecFamily`; it does **not** know how to resolve a family into a concrete encoder config. That's the per-codec picker's job — same ZNPR v3 format, separate `.bin`, baked from a sweep over that codec's config grid.
 
+## The decision
+
+```text
+lossless?  — caller asked, or target ≥ ~96 (near-perfect → store exact)
+viable     — formats you allow  ∩  formats the image needs (alpha / HDR — content_capability)
+                                 ∩  formats fast enough for the latency budget (viable)
+order      — best-first among the viable; take the top
+```
+
+The **order** is the only place judgment lives, and there are two ways to get it:
+
+- **`default_route` (the shipped default)** — runs the baked routers: a **6-pairwise-discriminant
+  linear lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on
+  the zensim-A retrain, 7f4d914 — the *median* pick is the oracle), an auto-gate (lossy vs
+  lossless), and a lossless family router. Image-aware, one-shot, and the lossy router's weights
+  are readable (the size-dependence is isolated to the jxl-vs-avif pair; the rest is pure content).
+- **`family_rule` (the no-model fallback)** — a fixed codec-reality prior (`JXL > AVIF > WebP > JPEG
+  > GIF` lossy; `JXL > WebP > PNG > GIF` lossless), now confirmed by the data. Use it when you have
+  no features, or want an obviously-correct, model-free path.
+
+Both mask to **any subset of available formats** — one, several, or none — so the pick is always sane.
+
 ## Quick start
 
 ```toml
@@ -38,47 +60,97 @@ zenpredict = "0.2.0"   # the runtime; provides `Model` and the ZNPR v3 parser
 ```
 
 ```rust,ignore
-use zenpicker::{AllowedFamilies, CodecFamily, MetaPicker};
-use zenpredict::Model;
+use zenpicker::{CodecFamily, QualityTarget, default_route};
+use zenpredict::EncodeMode;
 
-// `Model::from_bytes*` copies the bake into an owned, internally-aligned
-// buffer, so a plain `include_bytes!` works as-is (no `#[repr(align)]` wrapper).
-const META_BIN: &[u8] = include_bytes!("meta_picker_v1.bin");
-// The schema hash chosen at bake time (read it with `zenpredict-inspect`),
-// compiled in so a stale/mismatched bake fails loudly at load.
-const MY_SCHEMA_HASH: u64 = 0x0123_4567_89ab_cdef;
-
-let model = Model::from_bytes_with_schema(META_BIN, MY_SCHEMA_HASH)?;
-let mut meta = MetaPicker::new(&model);  // borrows the Model; Model must outlive it
-meta.validate_family_order()?;          // hard-fail if bake disagrees with enum
-
-let allowed = AllowedFamilies::all()
-    .deny(CodecFamily::Gif)              // caller bans GIF for this request
-    .deny(CodecFamily::Png);
-let chosen = meta.pick(&features, &allowed)?;
-match chosen {
-    Some(CodecFamily::Webp) => /* dispatch to per-codec webp picker */,
-    Some(CodecFamily::Jxl)  => /* … */,
-    None                    => /* nothing allowed; caller fallback */,
-    // …
+// `offer` is a zenanalyze-api `Offer` (the image's features). Mask to the formats you can emit:
+let decision = default_route(
+    &offer,
+    QualityTarget::Zq(82.0),
+    &[CodecFamily::Jpeg, CodecFamily::Webp, CodecFamily::Avif], // available formats
+    EncodeMode::QueuedBalanced,   // no latency budget; RealtimeFastest would drop slow codecs
+    None,                         // latency_ms
+    &[0; CodecFamily::COUNT],     // per-family encode-time estimates (used by realtime modes)
+)?;
+match decision {
+    Some(d) => { let _family = d.family(); /* → dispatch to that codec's per-codec picker */ }
+    None    => { /* nothing available can encode it, or no features — fall back to family_rule */ }
 }
 ```
 
+No features (or want an obviously-correct, model-free path)? Use the prior — just capability + the codec-reality order, no offer-materialization:
+
+```rust,ignore
+use zenpicker::{family_rule, AllowedFamilies, CodecFamily, QualityTarget};
+use zenpredict::EncodeMode;
+
+let family: Option<CodecFamily> = family_rule(
+    &offer, QualityTarget::Zq(82.0),
+    AllowedFamilies::from_allowed([CodecFamily::Webp, CodecFamily::Avif]),
+    EncodeMode::QueuedBalanced, None, &[0; CodecFamily::COUNT],
+);
+```
+
+For a hot loop, hold one `MetaPicker::default_routers()` and call `.route(..)` repeatedly — the parsed models are process-static (`OnceLock`); only the per-call `Predictor` scratch is rebuilt.
+
+## `pick` vs `route`
+
+`MetaPicker::pick(features, allowed)` is a raw masked-argmin over a **family-score** model — for per-codec pickers, the auto-gate, or the lossless router. It **refuses the pairwise lossy router** (which emits per-pair margins, not family scores) with `MetaPickerError::PairwiseRouterNeedsRoute`: use `route` / `default_route` for the lossy family choice, which round-robins the margins into a family.
+
+## Cell-layout bakes — `CellPicker` (inert, not wired into `default_route`)
+
+A `zenpicker-train` meta-picker does **not** score families. Its outputs are
+`family × {lossy, lossless}` **cells**, named in the bake's own metadata, and there
+are as many as the training corpus had — 7 for the current `metapicker_v1`, over 5
+families. `pick` reads `CodecFamily::ALL[output_index]`, so handing it a cell bake
+would mis-map every output. `CellPicker` is the separate load/forward path for that
+layout:
+
+```rust,ignore
+use zenpicker::{AllowedFamilies, CellPicker};
+
+let picker = CellPicker::from_znpr_bytes(&bytes)?;   // refuses a non-cell bake
+let c = picker.contract();                           // validated at load
+let input = c.build_input(target_zq / 100.0, |name| my_features.get(name).copied())?;
+let pred = picker.predict_cells(&input, &allowed, Some(&reachable))?;
+let (family, mode) = (pred.family(), pred.mode());
+```
+
+`CellContract::from_model` validates the bake's three `zenpicker_train.*` metadata
+keys against its real widths and **refuses** on any disagreement — a cell label that
+is not `<family>_<mode>`, a cell count that is not `n_outputs`, or an input order
+that is not exactly "every source feature once, plus `zq_norm` once".
+`build_input` is the one mapping from named source features to the input vector: it
+reads each declared feature exactly once, places `zq_norm` itself, never touches a
+name outside the contract, and errors naming a feature the caller could not supply
+rather than substituting a zero.
+
+`predict_cells` argmins the predicted `bytes_log` over the caller's family mask
+intersected with an optional per-cell reach mask (the cells that can hit the
+requested quality) — the same masked argmin the trainer's held-out panel scores. It
+builds one `Predictor`'s scratch per call, like `default_route`.
+
+Nothing here is reachable from `default_route` / `route` / `default_routers`: the
+shipped routers are untouched, and a test asserts each of them is *refused* as a cell
+bake. Wiring a cell bake into the shipped path is a separate, gated decision.
+
 ## Family order is a load-time contract
 
-The output index of the meta-picker model maps 1:1 to a `CodecFamily` discriminant. The bake declares the order via the `zenpicker.family_order` metadata key (UTF-8, comma-separated lowercase labels). `MetaPicker::validate_family_order` reads that key on a parsed `Model` and refuses if it doesn't match the runtime's `ALL_LABELS_CSV`.
+For a **family-score** model (the auto-gate, the lossless router, per-codec pickers) the output index maps 1:1 to a `CodecFamily` discriminant. The bake declares the order via the `zenpicker.family_order` metadata key (UTF-8, comma-separated lowercase labels). `MetaPicker::validate_family_order` reads that key on a parsed `Model` and refuses if it doesn't match the runtime's `ALL_LABELS_CSV`.
+
+(The **pairwise lossy router** is the exception: its 6 outputs are codec *pairs*, not families — `route` round-robins them into a family. It records the pair order in `zenpicker.lossy_pairwise`, and `pick` refuses it.)
 
 Adding a `CodecFamily` variant is a breaking change for any baked meta-picker that existed before — bake a fresh meta-picker that includes the new family before deploying.
 
 ## Companion crates
 
 - **[zenpredict](https://github.com/imazen/zenanalyze/tree/main/zenpredict)** — the runtime this crate composes on. Owns the ZNPR v3 binary format, the parser, the forward pass, the masked-argmin math, the metadata blob, and the `Predictor`. zenpicker adds: family enum + family-order validation + `AllowedFamilies` mask sugar.
-- **[zentrain](https://github.com/imazen/zenanalyze/tree/main/zentrain)** — the Python training pipeline that produces the `.bin` artifact a meta-picker (or a per-codec picker) loads. Train with `cells = families` and `output_layout = bytes_log` only (purely categorical, no scalar heads). The bake's metadata block must include `zenpicker.family_order`.
+- **[zentrain](https://github.com/imazen/zenanalyze/tree/main/zentrain)** — the Python training pipeline + `bake_picker.py` (the `BakeRequestJson` emitter). The **lossy router** is fit as 6 pairwise linear discriminants (zenmetrics `scripts/picker/pairwise_discriminants.py`) and baked **f32** via `bake_picker.py`; the auto-gate, lossless, and per-codec pickers are trained via `train_hybrid.py`. Bakes carry `zenpicker.family_order` (+ `zenpicker.lossy_pairwise` for the lossy router).
 - **[zenanalyze](https://github.com/imazen/zenanalyze)** — the feature extractor that produces the input vector both this meta-picker and the per-codec pickers consume.
 
 ## Status
 
-v0.1 establishes the crate boundary and the API shape. Baking an actual cross-codec meta-picker is downstream work — once a labelled training set exists where each row maps `(image features, target_zq) → best family`, run zentrain's `train_hybrid.py` with cells = families and `output_layout` of `bytes_log` only.
+The shipped routers (`MetaPicker::default_routers`) are baked and wired: an **f32 6-pairwise-discriminant lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on the zensim-A retrain (7f4d914) — the median pick is the oracle, the loss is a thin tail concentrated on tiny images), plus **i8** auto-gate + lossless family routers, all trained on confound-corrected sweep data (no re-sweep). `default_route` is the one-call entry, masked by available format. Methodology + the per-percentile RD distribution: zenmetrics `docs/HOW_THE_PICKER_DECIDES.md`.
 
 ## License
 
@@ -88,21 +160,22 @@ AGPL-3.0-only OR LicenseRef-Imazen-Commercial.
 
 | | |
 |:--|:--|
-| **Codecs** ¹ | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zenbitmaps] · [heic] · [zentiff] · [zenpdf] · [zensvg] · [zenjp2] · [zenraw] · [ultrahdr] |
-| Codec internals | [zenjxl-decoder] · [jxl-encoder] · [zenrav1e] · [rav1d-safe] · [zenavif-parse] · [zenavif-serialize] |
+| **Codecs** ¹ | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zenjxl-decoder] · [jxl-encoder] · [zenbitmaps] · [heic] · [zentiff] · [zenpdf] · [zensvg] · [zenjp2] · [zenraw] · [ultrahdr] |
+| Codec internals | [zenrav1e] · [rav1d-safe] · [zenravif] · [zenavif-parse] · [zenavif-serialize] |
 | Compression | [zenflate] · [zenzop] · [zenzstd] |
 | Processing | [zenresize] · [zenquant] · [zenblend] · [zenfilters] · [zensally] · [zentone] |
-| Pixels & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
+| Pixels & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] · [zenyuv] |
 | Pipeline & framework | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] · [zenwasm] · [zentract] |
 | Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [zenmetrics] · [resamplescope-rs] |
-| Pickers & ML | [zenanalyze] · [zenpredict] · **zenpicker** |
+| Pickers & ML | [zenanalyze] · [zenpredict] · **zenpicker** · [zenanalyze-api] |
+| Test corpora | [codec-corpus] · [imazen-26] |
 | Products | [Imageflow] image engine ([.NET][imageflow-dotnet] · [Node][imageflow-node] · [Go][imageflow-go]) · [Imageflow Server] · [ImageResizer] (C#) |
 
 <sub>¹ pure-Rust, `#![forbid(unsafe_code)]` codecs, as of 2026</sub>
 
 ### General Rust awesomeness
 
-[zenbench] · [archmage] · [magetypes] · [enough] · [whereat] · [cargo-copter]
+[zenbench] · [archmage] · [magetypes] · [enough] · [whereat] · [cargo-copter] · [zenutils]
 
 [Open source](https://www.imazen.io/open-source) · [@imazen](https://github.com/imazen) · [@lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith)
 
@@ -112,37 +185,39 @@ AGPL-3.0-only OR LicenseRef-Imazen-Commercial.
 [zengif]: https://github.com/imazen/zengif
 [zenavif]: https://github.com/imazen/zenavif
 [zenjxl]: https://github.com/imazen/zenjxl
+[zenjxl-decoder]: https://github.com/imazen/zenjxl-decoder
+[jxl-encoder]: https://github.com/imazen/jxl-encoder
 [zenbitmaps]: https://github.com/imazen/zenbitmaps
 [heic]: https://github.com/imazen/heic
-[zentiff]: https://github.com/imazen/zentiff
-[zenpdf]: https://github.com/imazen/zenpdf
+[zentiff]: https://github.com/imazen/zenextras
+[zenpdf]: https://github.com/imazen/zenextras
 [zensvg]: https://github.com/imazen/zenextras
 [zenjp2]: https://github.com/imazen/zenextras
 [zenraw]: https://github.com/imazen/zenraw
 [ultrahdr]: https://github.com/imazen/ultrahdr
-[zenjxl-decoder]: https://github.com/imazen/zenjxl-decoder
-[jxl-encoder]: https://github.com/imazen/jxl-encoder
 [zenrav1e]: https://github.com/imazen/zenrav1e
 [rav1d-safe]: https://github.com/imazen/rav1d-safe
-[zenavif-parse]: https://github.com/imazen/zenavif-parse
-[zenavif-serialize]: https://github.com/imazen/zenavif-serialize
+[zenravif]: https://github.com/imazen/cavif-rs
+[zenavif-parse]: https://github.com/imazen/zenavif
+[zenavif-serialize]: https://github.com/imazen/zenavif
 [zenflate]: https://github.com/imazen/zenflate
 [zenzop]: https://github.com/imazen/zenzop
 [zenzstd]: https://github.com/imazen/zenzstd
 [zenresize]: https://github.com/imazen/zenresize
 [zenquant]: https://github.com/imazen/zenquant
 [zenblend]: https://github.com/imazen/zenblend
-[zenfilters]: https://github.com/imazen/zenfilters
+[zenfilters]: https://github.com/imazen/zenpipe
 [zensally]: https://github.com/imazen/zensally
 [zentone]: https://github.com/imazen/zentone
 [zenpixels]: https://github.com/imazen/zenpixels
 [zenpixels-convert]: https://github.com/imazen/zenpixels
 [linear-srgb]: https://github.com/imazen/linear-srgb
 [garb]: https://github.com/imazen/garb
+[zenyuv]: https://github.com/imazen/zenjpeg
 [zenpipe]: https://github.com/imazen/zenpipe
 [zencodec]: https://github.com/imazen/zencodec
-[zencodecs]: https://github.com/imazen/zencodecs
-[zenlayout]: https://github.com/imazen/zenlayout
+[zencodecs]: https://github.com/imazen/zenpipe
+[zenlayout]: https://github.com/imazen/zenpipe
 [zennode]: https://github.com/imazen/zennode
 [zenwasm]: https://github.com/imazen/zenwasm
 [zentract]: https://github.com/imazen/zentract
@@ -153,12 +228,16 @@ AGPL-3.0-only OR LicenseRef-Imazen-Commercial.
 [resamplescope-rs]: https://github.com/imazen/resamplescope-rs
 [zenanalyze]: https://github.com/imazen/zenanalyze
 [zenpredict]: https://github.com/imazen/zenanalyze
+[zenanalyze-api]: https://github.com/imazen/zenanalyze
+[codec-corpus]: https://github.com/imazen/codec-corpus
+[imazen-26]: https://github.com/imazen/imazen-26
 [zenbench]: https://github.com/imazen/zenbench
 [archmage]: https://github.com/imazen/archmage
 [magetypes]: https://github.com/imazen/archmage
 [enough]: https://github.com/imazen/enough
 [whereat]: https://github.com/lilith/whereat
 [cargo-copter]: https://github.com/imazen/cargo-copter
+[zenutils]: https://github.com/imazen/zenutils
 [Imageflow]: https://github.com/imazen/imageflow
 [Imageflow Server]: https://github.com/imazen/imageflow-dotnet-server
 [ImageResizer]: https://github.com/imazen/resizer
