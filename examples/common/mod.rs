@@ -128,6 +128,63 @@ pub fn classes(corpus: &Path) -> Vec<Class> {
     ]
 }
 
+/// Classes **in addition to** [`classes`], for grids that need more per-class
+/// crop diversity or a line-art class than the four cost-grid classes give.
+///
+/// Deliberately NOT folded into [`classes`]: `examples/feature_bits.rs` (the
+/// byte-exact optimization lock) iterates `classes()`, so adding to it would
+/// silently change the lock's fixture set. Callers opt in.
+///
+/// | class | sources | why it exists |
+/// |---|---|---|
+/// | `screenwide` | `gb82-sc` + `qoi-benchmark/screenshot_web` | `screen`'s 8-source pool makes every mosaic crop **identical** at 2048² and 4096² (`n·n` tiles per crop is a multiple of 8, so `k % len` repeats), so `screen` has an effective sample size of 1 there. 22 sources breaks the aliasing. |
+/// | `lineart` | 6 synthetic-graphics / diagram sources | the four cost-grid classes have no line-art class at all. |
+///
+/// **`lineart` is a thin pool — 6 sources, two of them Frymire variants.** It is
+/// enough to show whether line art behaves like the other classes, not enough
+/// for a tight per-class percentile. Sources were selected by measured signature
+/// (high `flat_color_block_ratio`, low `distinct_color_bins` / `gradient_fraction`),
+/// not by filename.
+#[allow(dead_code)] // used by budget_drift_grid, not by the cost grid or the lock
+pub fn extra_classes(corpus: &Path) -> Vec<Class> {
+    let mut wide = sources(&corpus.join("gb82-sc"), 512);
+    wide.extend(sources(&corpus.join("qoi-benchmark/screenshot_web"), 512));
+    assert!(wide.len() > 10, "screenwide pool too small: {}", wide.len());
+
+    // Explicit list: these are picked out of three different corpus dirs by
+    // content signature, not by a directory that happens to hold only line art.
+    let lineart: Vec<PathBuf> = [
+        "imageflow/test_inputs/rings2.png",
+        "imageflow/test_inputs/frymire.png",
+        "imageflow/test_inputs/frymire-srgb.png",
+        "png-conformance/wm_upload_wikimedia_org_c8a458b0cef3d942.png",
+        "image-rs/test-images/png/bugfixes/debug_triangle_corners_widescreen.png",
+        "image-rs/test-images/png/iptc.png",
+    ]
+    .iter()
+    .map(|r| corpus.join(r))
+    .filter(|p| p.exists())
+    .collect();
+    assert!(
+        lineart.len() >= 5,
+        "line-art pool is {} sources; expected 6 — corpus checkout incomplete?",
+        lineart.len()
+    );
+
+    vec![
+        Class {
+            name: "screenwide",
+            tiers: vec![(u32::MAX, 512, wide)],
+            interleave_with: None,
+        },
+        Class {
+            name: "lineart",
+            tiers: vec![(u32::MAX, 512, lineart)],
+            interleave_with: None,
+        },
+    ]
+}
+
 fn tier_for(class: &Class, side: u32) -> &(u32, u32, Vec<PathBuf>) {
     class
         .tiers

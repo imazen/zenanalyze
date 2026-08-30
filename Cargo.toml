@@ -110,6 +110,13 @@ zenresize = "0.3.1"
 # Interleaved/paired microbench harness for the linear-intermediate
 # representation A/B (bench_linear_repr example). Example-only.
 zenbench = "0.1.8"
+# Decision-change measurement (budget_decision_ab example): drives the SHIPPED
+# cross-codec routers through their real entry point (`zenpicker::default_route`)
+# under two feature-extraction regimes, and replays the zenjpeg picker bake with
+# `zenpredict`. Both are workspace members, so this adds nothing to the published
+# dependency graph — dev-only, and neither is a dependency of the library.
+zenpicker = { path = "zenpicker", features = ["api"] }
+zenpredict = { path = "zenpredict" }
 
 [[example]]
 name = "render_imazen26_variants"
@@ -238,3 +245,11 @@ harness = false
 [[bench]]
 name = "tier_kernels"
 harness = false
+
+[[bench]]
+name = "budget_cost"
+harness = false
+
+[[example]]
+name = "budget_decision_ab"
+required-features = ["api"]
