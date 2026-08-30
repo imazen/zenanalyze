@@ -13,6 +13,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > below carries the same not-yet-released work and the verified break list;
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
+### Added
+
+- **Sampling-budget scaling study** — measures whether analysis thoroughness
+  should scale with image size, and what it would cost.
+  `benchmarks/budget_scaling_2026-08-30.md` + the per-feature
+  `budget_drift_summary_2026-08-30.tsv`. **Verdict: leave the budgets alone.**
+  Full sampling costs 24× at 4096² (16.1 ms → 381.6 ms, 2.7× a fast JPEG encode
+  of the same bytes) and changes the zenjpeg pick 0 % of the time there. Below
+  1024² every feature is bit-identical across every budget arm. New instruments:
+  `examples/budget_drift_grid.rs`, `examples/budget_decision_ab.rs`,
+  `benches/budget_cost.rs`, `tools/budget_drift.py`. No default, budget, or
+  feature definition changed.
+  - A **convergence floor** (option 2 of the three designs considered) is ruled
+    out: of 65 features that move at 4096², only 4 converge monotonically along
+    their driving knob's ladder, and 3 of those barely move. The percentile /
+    max statistics dominate the non-converging group, as expected.
+  - The dominant knob is **`hf_max_blocks`, not `pixel_budget`** — every one of
+    the 25 largest drifts at 4096² is tier-3 block-cap driven.
+  - Found: the **zenjpeg picker is degenerate at large sizes** — 15 distinct
+    cells at 1024², 3 at 2048², 1 at 4096². Its 0 % change rate at 4096² is
+    saturation, not robustness.
+  - Found: the **three shipped `zenpicker` routers cannot reuse any offer from
+    current `main`**. They were baked against
+    `chroma_subsample_dct_loss@48f0f976`; this build emits `@fabc9776`, and
+    `Select::Features` is all-or-nothing, so `default_route` returns `Ok(None)`
+    universally and consumers silently fall back to `family_rule`. Needs a
+    re-bake; the gate itself is behaving correctly.
+
+### Fixed
+
+- **`benches/tier_isolation.rs` comment was inverted** — it credited the default
+  `experimental` feature with raising the sampling budget to full. That is
+  `full-budgets`, which is off by default; `experimental` gates feature
+  *definitions*. The comment then drew the opposite conclusion about which sizes
+  are capped. Corrected, with a pointer to `benches/budget_cost.rs` for the
+  uncapped size axis.
+
 ### Changed
 
 - **Third-party dependency pass** (f9a62c7). `arrow` + `parquet` 58.3.0 → 59.2.0

@@ -65,10 +65,18 @@ fn bench_tiers(suite: &mut Suite) {
     set_simd(true);
     eprintln!("[tier_isolation] comparing {TIER_NAME} vs forced scalar");
 
-    // NOTE: the default `experimental` feature raises the sampling budget to
-    // full (pixel_budget = usize::MAX). With it off, extraction stride-samples
-    // to ~500k pixels and the 1024x1024 and 2048x2048 cases would do the same
-    // amount of work — which would silently flatten the size axis.
+    // NOTE: these sizes are measured under the CRATE-INVARIANT budgets
+    // (`DEFAULT_PIXEL_BUDGET` = 500k px, `DEFAULT_HF_MAX_BLOCKS` = 1024), because
+    // that is what ships. The budget-raising cargo feature is `full-budgets`, and
+    // it is OFF by default (`default = ["experimental"]`; `experimental` gates
+    // feature *definitions*, not budgets — an earlier version of this comment had
+    // the two swapped and drew the opposite conclusion from it).
+    //
+    // So the size axis here IS partly capped: 512² (262k px) is under the budget
+    // and 2048² (4.2 MP) is ~8× over it, which is the intended contrast — the
+    // scalar-vs-SIMD ratio is what this bench measures, and both arms are capped
+    // identically. For the size axis *uncapped*, see `benches/budget_cost.rs`,
+    // which varies the budgets directly (`benchmarks/budget_scaling_2026-08-30.md`).
     for &(label, w, h) in &[("512x512", 512usize, 512usize), ("2048x2048", 2048, 2048)] {
         let rgb: &'static [u8] = Box::leak(make_rgb(w, h).into_boxed_slice());
         let query: &'static AnalysisQuery =
