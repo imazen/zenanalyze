@@ -85,9 +85,16 @@ jobs:
         # half of the feature contract is never exercised in CI (the consumer is
         # exactly the half that silently rots). Run the gated integration tests
         # AND clippy the gated path under -D warnings.
+        #
+        # `--skip metapicker_v1_` is the CALLER'S skip decision, made here and
+        # visible in the chain (CI -> justfile -> test): those tests need the
+        # 104 KB metapicker_v1 bake, which lives in block storage and is never
+        # in git, so a GitHub runner cannot have it. They FAIL LOUDLY rather
+        # than self-skipping when `ZENPICKER_METAPICKER_V1_BAKE` is unset —
+        # run them locally with `just metapicker-v1-test`.
         if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
         run: |
-          cargo test -p zenpicker --features api --tests
+          cargo test -p zenpicker --features api --tests -- --skip metapicker_v1_
           cargo clippy -p zenpicker --features api --all-targets -- -D warnings
       - name: Clippy zenpicker
         if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'

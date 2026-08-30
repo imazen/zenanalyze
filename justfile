@@ -82,6 +82,14 @@ viz-test:
 viz-test-shipped bakes="../zensim/zensim/weights":
     ZENPREDICT_VIZ_BAKES={{bakes}} cargo test -p zenpredict-viz --test forward_parity shipped_bakes_parity -- --nocapture
 
+# zenpicker's metapicker_v1 cell-contract + TOUCH-ONCE tests against the REAL
+# bake. The bake is 104 KB so it is never in git (block storage; tracked
+# reference: benchmarks/metapicker_v1_2026-08-30.pointer.md). The tests FAIL
+# LOUDLY when ZENPICKER_METAPICKER_V1_BAKE is unset — CI skips them explicitly
+# with `-- --skip metapicker_v1_` because a runner has no block storage.
+metapicker-v1-test bake="/mnt/v/output/zensim/metapicker-2026-08-30/metapicker_v1.bin":
+    ZENPICKER_METAPICKER_V1_BAKE={{bake}} cargo test -p zenpicker --features api --test metapicker_v1_contract -- --nocapture
+
 # Build the static site (wasm-pack + bake copy + feature catalog) into
 # zenpredict-viz/web and serve it. Same steps the Pages workflow runs.
 viz-build:

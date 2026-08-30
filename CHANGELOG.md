@@ -122,6 +122,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the shipped routers are *refused* as cell bakes by a test. The bake
   itself stays out of git (104 KB, block storage — see
   `benchmarks/metapicker_v1_2026-08-30.pointer.md`).
+- **`zenpicker` touch-once contract test** —
+  `zenpicker/tests/metapicker_v1_contract.rs` runs the real `metapicker_v1`
+  bake through `CellContract` and asserts the mapping is a **bijection**: each
+  of the 61 declared source features is requested from the caller's source
+  **exactly once**, `zq_norm` is placed exactly once at its declared index and
+  never requested from the source, no name outside the contract is ever read,
+  and every input slot carries the value belonging to the name declared there
+  (the probe source is injective by construction, so a mis-ordered mapping
+  cannot hide). Alongside it: the registered 7-cell shape, a missing source
+  feature failing loudly, the schema-hash gate, and the masked-argmin forward
+  pass (family mask, per-cell reach mask, wrong-width input and wrong-width
+  reach mask all refused). The bake is located via
+  `ZENPICKER_METAPICKER_V1_BAKE`; unset ⇒ the tests **fail loudly**, never
+  self-skip. Run with `just metapicker-v1-test`; CI (no block storage) makes
+  the skip decision explicitly with `-- --skip metapicker_v1_`.
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
   2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a
