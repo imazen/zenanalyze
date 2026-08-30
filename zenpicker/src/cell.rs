@@ -173,7 +173,7 @@ pub struct CellContract {
 impl CellContract {
     /// Read + validate the contract from a parsed bake.
     ///
-    /// Checks, in order — each failure is a
+    /// Checks, in the order they run — each failure is a
     /// [`CellContract`](MetaPickerError::CellContract) error naming what
     /// disagreed:
     ///
@@ -183,12 +183,13 @@ impl CellContract {
     /// 3. the cell count equals the model's `n_outputs`;
     /// 4. the image-feature names are unique and none of them is
     ///    [`ZQ_NORM_INPUT`];
-    /// 5. the input order holds every image feature **exactly once** plus
-    ///    exactly one [`ZQ_NORM_INPUT`], and nothing else;
-    /// 6. the input order's length equals the model's
+    /// 5. the input order's length equals the model's
     ///    [`caller_input_width`](Model::caller_input_width) — the width a
     ///    caller must supply, which is not `n_inputs` on a
-    ///    dead-column-pruned bake.
+    ///    dead-column-pruned bake — and is exactly one more than the
+    ///    image-feature count;
+    /// 6. the input order holds every image feature **exactly once** plus
+    ///    exactly one [`ZQ_NORM_INPUT`], and nothing else.
     pub fn from_model(model: &Model) -> Result<Self, MetaPickerError> {
         let mut cells = Vec::new();
         for label in read_list(model, CELL_LABELS_KEY)? {

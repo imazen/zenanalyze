@@ -158,6 +158,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CellContract::build_input`, and prints all 7 cell `bytes_log` scores plus
   the pick. Verified against the real bake and corpus (a 36×64 rendition at
   target zq 82 routes to `zenavif_lossy`).
+- **`zenpicker/tests/cell_contract.rs`** — 13 CI-runnable tests that bake tiny
+  models in-process (`zenpredict-bake`) and exercise **every** refusal path the
+  cell contract promises: missing metadata keys, a cell label that is not
+  `<family>_<mode>`, a repeated `(family, mode)`, a cell count that disagrees
+  with `n_outputs`, an input order whose length disagrees with the model, an
+  order with no `zq_norm`, one that repeats a feature, one naming an undeclared
+  feature, `zq_norm` declared as a source feature, a repeated source-feature
+  name, a short *or* long input vector, a wrong-width reach mask, and the
+  schema gate. Plus the positive path end to end (contract → `build_input` →
+  masked argmin, with family and reach masks). No block storage needed, so the
+  validation surface is covered on every CI run.
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
   2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a
