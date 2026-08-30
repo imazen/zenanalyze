@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenanalyze.txt 211 lines (supported surface) | zenanalyze.features.txt 22 added (features: api,experimental,full-budgets,hdr) | zenanalyze.internal.txt 23 lines (23 hidden + 0 excluded-feature)
+# files: zenanalyze.txt 211 lines (supported surface) | zenanalyze.features.txt 19 added (features: api,experimental,full-budgets,hdr) | zenanalyze.internal.txt 21 lines (21 hidden + 0 excluded-feature)
 
 ## summary
 #

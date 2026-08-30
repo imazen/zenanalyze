@@ -9,19 +9,15 @@
 
 ## summary
 #
-#   pub types (struct/enum/trait/alias)         1
-#   pub consts/statics                          1
-#   free functions                              2
+#   free functions                              3
 #   enum variants                              16
-#   trait roster entries (type × trait)         7
-#   auto-trait-complete types                   1
 #
 # per-module pub lines:
-#   (root)                            3
+#   (root)                            2
 #   feature                          16
 #   versioning                        1
 
-## items (20 lines)
+## items (19 lines)
 
 pub feature::AnalysisFeature::EffectiveBitDepth = 38
 pub feature::AnalysisFeature::GamutCoverageP3 = 47
@@ -40,14 +36,5 @@ pub feature::AnalysisFeature::PeakLuminanceNits = 32
 pub feature::AnalysisFeature::WideGamutFraction = 37
 pub feature::AnalysisFeature::WideGamutPeak = 36
 pub fn versioning::feature_qualified_names() -> alloc::vec::Vec<(&'static str, alloc::string::String)>
-pub struct Analyzer
-pub const fn Analyzer::new() -> Self
 pub fn extract_offer(&[u8], u32, u32, &feature::AnalysisQuery, u64) -> zenanalyze_api::OwnedOffer
-
-## trait impls (1 types)
-
-Analyzer: Clone, Copy, Debug, Default, Eq, PartialEq, zenanalyze_api::FeatureProvider
-
-## auto traits
-
-1 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+pub fn offer_for_request(&[u8], u32, u32, &zenanalyze_api::Request<'_>) -> core::result::Result<zenanalyze_api::OwnedOffer, AnalyzeError>

@@ -1,0 +1,117 @@
+# zenanalyze-api public API — supported surface (default features)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+#
+# files: zenanalyze-api.txt 86 lines (supported surface) | zenanalyze-api.features.txt 0 added (features: none) | zenanalyze-api.internal.txt 12 lines (12 hidden + 0 excluded-feature)
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)        11
+#   pub consts/statics                         24
+#   inherent methods                           27
+#   enum variants                              10
+#   trait roster entries (type × trait)        50
+#   auto-trait-complete types                  11
+#
+# per-module pub lines:
+#   (root)                           73
+
+## items (73 lines)
+
+pub mod zenanalyze_api
+#[non_exhaustive] pub enum FormatError
+pub FormatError::BadLine
+pub FormatError::MissingHeader
+pub FormatError::UnknownFormat
+#[non_exhaustive] pub enum Select<'a>
+pub Select::All
+pub Select::Features(&'a [NamedFeature<'a>])
+pub Select::Names(&'a [&'a str])
+#[non_exhaustive] pub enum Value
+pub Value::Bool(bool)
+pub Value::F32(f32)
+pub Value::U32(u32)
+pub Value::U64(u64)
+pub const fn Value::to_f32(self) -> f32
+pub struct Catalog<'a>
+pub const fn Catalog<'a>::available(&self) -> &'a [NamedFeature<'a>]
+pub fn Catalog<'a>::has_name(&self, &str) -> bool
+pub const fn Catalog<'a>::new(&'a [NamedFeature<'a>]) -> Self
+pub fn Catalog<'a>::offers(&self, &NamedFeature<'_>) -> bool
+pub fn Catalog<'a>::union(&self, &[Request<'a>]) -> alloc::vec::Vec<&'a str>
+pub fn Catalog<'a>::unmet<'w>(&self, &'w [NamedFeature<'_>]) -> alloc::vec::Vec<&'w str>
+pub struct FeatureResult<'a>
+pub const fn FeatureResult<'a>::feature(&self) -> NamedFeature<'a>
+pub const fn FeatureResult<'a>::float(&self) -> f32
+pub fn FeatureResult<'a>::name(&self) -> &'a str
+pub fn FeatureResult<'a>::new(NamedFeature<'a>, impl core::convert::Into<Value>) -> Self
+pub const fn FeatureResult<'a>::value(&self) -> Value
+pub struct NamedFeature<'a>
+pub const fn NamedFeature<'a>::fold_hash(u64) -> u32
+pub const fn NamedFeature<'a>::from_qualified(&'a str) -> Self
+pub const fn NamedFeature<'a>::is_valid_name(&str) -> bool
+pub fn NamedFeature<'a>::name(&self) -> &'a str
+pub const fn NamedFeature<'a>::parse(&'a str) -> core::option::Option<Self>
+pub fn NamedFeature<'a>::qualified_for(&str, u32) -> alloc::string::String
+pub const fn NamedFeature<'a>::qualified_name(&self) -> &'a str
+pub fn NamedFeature<'a>::version_hash(&self) -> u32
+pub struct Offer<'a>
+pub const fn Offer<'a>::features(&self) -> &'a [FeatureResult<'a>]
+pub fn Offer<'a>::get(&self, &str) -> core::option::Option<&FeatureResult<'a>>
+pub const fn Offer<'a>::new(&'a [FeatureResult<'a>], Provenance<'a>) -> Self
+pub const fn Offer<'a>::provenance(&self) -> Provenance<'a>
+pub fn Offer<'a>::reuse_for(&self, &Request<'_>) -> core::option::Option<alloc::vec::Vec<f32>>
+pub fn Offer<'a>::satisfies(&self, &Request<'_>) -> bool
+pub fn Offer<'a>::schema_hash(&self) -> u64
+pub fn Offer<'a>::to_block(&self) -> alloc::string::String
+pub struct OwnedFeatureResult
+pub fn OwnedFeatureResult::as_ref(&self) -> FeatureResult<'_>
+pub const fn OwnedFeatureResult::float(&self) -> f32
+pub fn OwnedFeatureResult::name(&self) -> &str
+pub fn OwnedFeatureResult::new(&str, impl core::convert::Into<Value>) -> Self
+pub fn OwnedFeatureResult::qualified_name(&self) -> &str
+pub const fn OwnedFeatureResult::value(&self) -> Value
+pub fn OwnedFeatureResult::version_hash(&self) -> u32
+pub struct OwnedOffer
+pub fn OwnedOffer::features(&self) -> &[OwnedFeatureResult]
+pub fn OwnedOffer::get(&self, &str) -> core::option::Option<&OwnedFeatureResult>
+pub fn OwnedOffer::new(alloc::vec::Vec<OwnedFeatureResult>, Provenance<'_>) -> Self
+pub fn OwnedOffer::parse(&str) -> core::result::Result<Self, FormatError>
+pub fn OwnedOffer::provenance(&self) -> Provenance<'_>
+pub fn OwnedOffer::reuse_for(&self, &Request<'_>) -> core::option::Option<alloc::vec::Vec<f32>>
+pub fn OwnedOffer::satisfies(&self, &Request<'_>) -> bool
+pub fn OwnedOffer::schema_hash(&self) -> u64
+#[non_exhaustive] pub struct Provenance<'a>
+pub const fn Provenance<'a>::analyzer_version(&self) -> &'a str
+pub const fn Provenance<'a>::config_hash(&self) -> u64
+pub const fn Provenance<'a>::descriptor_hash(&self) -> u64
+pub const fn Provenance<'a>::new(&'a str) -> Self
+pub const fn Provenance<'a>::with_config(self, u64) -> Self
+pub const fn Provenance<'a>::with_descriptor(self, u64) -> Self
+pub struct Request<'a>
+pub const fn Request<'a>::new(Select<'a>) -> Self
+pub const fn Request<'a>::select(&self) -> Select<'a>
+
+## trait impls (12 types)
+
+Catalog<'a>: Clone, Copy, Debug
+FeatureResult<'a>: Clone, Copy, Debug, PartialEq
+FormatError: Clone, Copy, Debug, Display, Eq, Error, PartialEq
+NamedFeature<'_>: Display
+NamedFeature<'a>: Clone, Copy, Debug, Eq, Hash, PartialEq, TryFrom<&'a str>
+Offer<'a>: Clone, Copy, Debug
+OwnedFeatureResult: Clone, Debug, From<FeatureResult<'_>>, PartialEq
+OwnedOffer: Clone, Debug
+Provenance<'a>: Clone, Copy, Debug, Eq, PartialEq
+Request<'a>: Clone, Copy, Debug
+Select<'a>: Clone, Copy, Debug
+Value: Clone, Copy, Debug, From<bool>, From<f32>, From<u32>, From<u64>, PartialEq
+
+## auto traits
+
+11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
