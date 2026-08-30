@@ -23,16 +23,26 @@ reanalysis might be needed anyway if the upstream provided features are
 insufficient."*** The first reading of this directive was a prohibition on
 depending on `zenanalyze` at all; that was too strict. Do not re-tighten it.
 
-Negotiation types (`Request` / `Offer` / `Catalog` / `Select`) and the
-`FeatureProvider` injection point flow through `zenanalyze-api`, so a host and a
-codec on different `zenanalyze` versions can still talk.
+Negotiation types (`Request` / `Offer` / `Catalog` / `Select`) flow through
+`zenanalyze-api`, so a host and a codec on different `zenanalyze` versions can
+still talk.
+
+**The contract is data, not behaviour** (2026-08-30). It carries no extraction
+trait. The model is *push*: the host runs one pass and GIVES the codec the data,
+the codec answers yes/no, and on "no" it runs its own scan. `FeatureProvider` /
+`ProviderError` / `OwnedCatalog` were developed for 0.1.1 and cut before it
+shipped — they inverted that direction of control (a `&dyn` lets the codec reach
+back into a live analyzer), and every verb the flow needs was already in 0.1.0.
+Do not re-propose the trait; the reasoning is in `zenanalyze-api/README.md`
+("Why there is no provider trait") and the 0.1.1 CHANGELOG.
 
 **A direct `zenanalyze` dep in a codec is PERMITTED**, specifically for
 re-analysis when host-provided features are insufficient — a missing feature, the
 wrong tier, a stale or absent offer. A codec running its own pass is normal, not
-a failure to migrate. Preferred shape: try the shared `Offer` → else an injected
-`&dyn FeatureProvider` → else your own `zenanalyze` pass; and cross crate
-boundaries as `zenanalyze-api` types whichever way you got the numbers.
+a failure to migrate. Preferred shape: try the shared `Offer` → else your own
+`zenanalyze` pass (`zenanalyze::offer_for_request(rgb, w, h, &request)` answers a
+contract `Request` in one call); and cross crate boundaries as `zenanalyze-api`
+types whichever way you got the numbers.
 
 Three rules are HARD, in the order they bite:
 
@@ -56,7 +66,9 @@ diagnostics and bulk export use `Names` (bare name, any version).
 
 And: **if a consumer needs something the contract can't express, extend the
 contract — additively — rather than reporting it blocked.** That is what
-`Select::Names`, `FeatureProvider`, `OwnedCatalog` and `ProviderError` exist for.
+`Select::Names` exists for. Extend it with *data* — a selector, a value type, a
+field — never with behaviour: see the note above on why there is no provider
+trait.
 
 Full rules + audit recipe: `docs/sole-contract.md`. Mechanics and compiled
 examples: `zenanalyze-api/README.md`.

@@ -37,7 +37,7 @@ zenpixels = { version = "0.2.14", default-features = false }
 | _(base, i.e. `--no-default-features`)_ | The full mature surface: luma stats, edges, chroma sharpness, DCT energy, alpha, palette, distinct-color bins, AQ-map / noise-floor / quant-survival / Laplacian-variance families, gradient & patch fractions, grayscale & skin-tone scores, geometry, and the HVS/spectral pack. | 97 | Numeric drift bounded by the threshold contract; signatures semver-governed |
 | `experimental` — **on by default** | Four still-settling definitions: the XYB color-loss pair (`Xyb444ColorLoss` 138, `XybBquarterChromaLoss` 139), `ChromaSubsampleDctLoss` (140), and the deprecated `PaletteDensity` (12). | +4 → **101** (the default build) | Metric definition or scale may still change; `default-features = false` opts out only to pin an older schema |
 | `hdr` | Source-direct HDR / wide-gamut / bit-depth signals + the clip-and-separate `highlight_*` descriptors — 16 features, the depth tier (ids 32–39, 46, 47, 212–217). | +16 → **117** (113 without `experimental`) | Off by default (SDR hot path skips the tier); definitions may change per patch |
-| `api` | The **producer side** of the `zenanalyze-api` feature contract: `extract_offer` (one pass → a self-describing `OwnedOffer`) and `Analyzer` (this build as a `zenanalyze_api::FeatureProvider`). Enable it in the host/orchestrator that chooses the analyzer version. | — | Adds the `zenanalyze-api` dep; see [the sole-contract rule](#the-feature-contract--zenanalyze-api-is-the-sole-intermediary) |
+| `api` | The **producer side** of the `zenanalyze-api` feature contract: `extract_offer` (one pass → a self-describing `OwnedOffer`) and `offer_for_request` (one pass answering a contract `Request`). Enable it in the host/orchestrator that chooses the analyzer version. | — | Adds the `zenanalyze-api` dep; see [the sole-contract rule](#the-feature-contract--zenanalyze-api-is-the-sole-intermediary) |
 
 > **As of the 0.2.x line, `experimental` is narrow.** ~58 features that used to
 > sit behind it (the `AqMap*`, `NoiseFloor*`, `QuantSurvival*`,
@@ -647,8 +647,9 @@ Three rules are hard, because each one caused a real failure here:
    analyzer version; function bodies and `pub(crate)` items are unconstrained.
 
 This crate's producer side lives behind the `api` cargo feature ([`src/offer.rs`](https://github.com/imazen/zenanalyze/blob/main/src/offer.rs)):
-`extract_offer` bundles one pass as an `OwnedOffer`, and `Analyzer` is this build as a
-`FeatureProvider`.
+`extract_offer` bundles one pass as an `OwnedOffer`, and `offer_for_request` answers a
+contract `Request` in one call — the "the offer I was handed wasn't enough, scan it myself"
+path. The contract itself carries no extraction trait: it is data, not behaviour.
 
 Full rules, roles, and an audit recipe: **[`docs/sole-contract.md`](https://github.com/imazen/zenanalyze/blob/main/docs/sole-contract.md)**.
 Mechanics, negotiation semantics, and compiled examples:

@@ -22,9 +22,16 @@ with compiled doctests); this page is the repo-facing version.
 ## The policy
 
 **Preferred — the interchange boundary.** Negotiation types (`Request` / `Offer` / `Catalog` /
-`Select`) and the `FeatureProvider` injection point flow through `zenanalyze-api`, so a host
-and a codec built against *different* `zenanalyze` versions can still talk. Reach for the
-shared `Offer` first: it is free, the host already paid for the pass.
+`Select`) flow through `zenanalyze-api`, so a host and a codec built against *different*
+`zenanalyze` versions can still talk. Reach for the shared `Offer` first: it is free, the host
+already paid for the pass.
+
+**The contract is data, not behaviour.** It carries no extraction trait, deliberately. The
+model is *push* — the host runs one pass and GIVES the codec the data, the codec answers
+yes/no, and on "no" it runs its own scan. A `FeatureProvider` trait was developed for 0.1.1
+and cut before it shipped: it inverted the direction of control, and `satisfies` / `reuse_for`
+/ `get` already covered every step of the flow in 0.1.0. Full reasoning in
+`zenanalyze-api/README.md`.
 
 **Permitted — a direct `zenanalyze` dependency in a codec.** Specifically for **re-analysis
 when the host-provided features are insufficient**: a feature the offer doesn't carry, the
@@ -34,12 +41,13 @@ failure to migrate.
 
 The design that follows from both together — and what the migrated codecs now do — is:
 
-1. try the shared `Offer`;
-2. else a `&dyn FeatureProvider` if the host injected one;
-3. else its own `zenanalyze` pass;
-4. and whatever the source, hand results across crate boundaries as `zenanalyze-api` types.
+1. try the shared `Offer` — `offer.satisfies(&req)` is the yes/no, `reuse_for` the values,
+   and `get` per want tells you exactly which ones were missing or drifted;
+2. else its own `zenanalyze` pass — `zenanalyze::offer_for_request(rgb, w, h, &request)`
+   answers the same `Request` and hands back an `OwnedOffer` you negotiate identically;
+3. and whatever the source, hand results across crate boundaries as `zenanalyze-api` types.
 
-Step 3 is the one this correction restores. Steps 1, 2 and 4 are what keep a mixed-version
+Step 2 is the one this correction restores. Steps 1 and 3 are what keep a mixed-version
 graph linkable.
 
 ## The rules that are hard
@@ -61,9 +69,9 @@ These are not preferences. Each one caused a real failure in this tree.
    checkout; absolute ones are never right.
 3. **Interchange types at crate boundaries come from `zenanalyze-api`, not `zenanalyze`.**
    A public signature naming `zenanalyze::feature::AnalysisResults` pins every caller to your
-   `zenanalyze` version. Take an `Offer`, return `Offer`/`OwnedOffer`, accept
-   `&dyn FeatureProvider` — then a host on a different version can still call you, however you
-   sourced the numbers internally.
+   `zenanalyze` version. Take an `Offer` / `&OwnedOffer`, return `Offer`/`OwnedOffer` — then a
+   host on a different version can still call you, however you sourced the numbers internally.
+   Function bodies are unconstrained: run your own `zenanalyze` pass in there all you like.
 
 Rule 3 is the one that makes rule "permitted" safe: a codec can depend on `zenanalyze`
 directly *because* its boundary doesn't leak it.
@@ -120,10 +128,10 @@ Both live in [`src/offer.rs`](../src/offer.rs), behind the `api` cargo feature:
 
 - `extract_offer(rgb, w, h, &query, descriptor_hash) -> OwnedOffer` — one pass, bundled as a
   self-describing offer with each feature's code version folded into its qualified name.
-- `Analyzer` — this build as a `zenanalyze_api::FeatureProvider`. This is what a host injects
-  so a codec *can* run a pass without naming a `zenanalyze` type. It is an option offered to
-  codecs, not a hoop they must jump through: a codec with its own `zenanalyze` is free to call
-  `extract_offer` (or `analyze_features_rgb8`) directly.
+- `offer_for_request(rgb, w, h, &request) -> Result<OwnedOffer, AnalyzeError>` — one pass
+  answering a contract `Request` directly, so the "my offer wasn't enough, scan it myself"
+  path is one call with the same `Request` object. The `Select` → `FeatureSet` resolution
+  lives here, once, so no consumer re-implements it.
 
 `versioning::feature_qualified_names()` is the build's vocabulary (and what `Analyzer::catalog`
 publishes); `benchmarks/feature_qualified_names.tsv` is the committed copy a golden tripwire

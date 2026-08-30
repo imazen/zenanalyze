@@ -20,7 +20,14 @@ is.** Same shape in `zenavif` (`version = "0.2.0", path = "../zenanalyze"`).
 
 | # | Crate | Version | Why this position |
 |---|---|---|---|
-| 1 | `zenanalyze-api` | 0.1.1 | `zenanalyze 0.2.0`'s `api` feature imports `FeatureProvider` / `OwnedCatalog` / `ProviderError`, which do not exist in published 0.1.0. **Measured**: build the packaged crate with `--features api` against the registry and it fails `E0432: unresolved imports`. `Cargo.toml`'s requirement is now `0.1.1`, so until this publishes, `cargo publish --dry-run -p zenanalyze` cannot resolve — that failure is correct, not a regression. |
+| 1 | `zenanalyze-api` | 0.1.1 | `zenanalyze 0.2.0`'s `api` feature matches on `Select::Names`, which does not exist in published 0.1.0, so `offer_for_request` cannot compile against it. `Cargo.toml`'s requirement is `0.1.1` (line 91), so until this publishes, `cargo publish --dry-run -p zenanalyze` cannot resolve — that failure is correct, not a regression. |
+
+> **Reason updated 2026-08-30.** This row previously said the blocker was
+> `zenanalyze 0.2.0` importing `FeatureProvider` / `OwnedCatalog` / `ProviderError`.
+> Those three were cut from 0.1.1 before it shipped (see the `zenanalyze-api`
+> CHANGELOG), so that is no longer why. The publish *order* is unchanged — the
+> single remaining 0.1.1-only item, `Select::Names`, still forces it — but the
+> stated reason had to be corrected rather than left to mislead a future release.
 | 2 | `zenanalyze` | 0.2.0 | The crate this document is about. |
 
 Not part of this release, and not blocking it: `zenpicker`, `zenpredict`,
