@@ -398,113 +398,52 @@ fn names_select_works_on_owned_offers_and_in_union() {
     );
 }
 
-// ───────────────────────────── OwnedCatalog ────────────────────────────────
+// ─────────────────────── the intended model, end to end ────────────────────
 
-/// The owned catalog answers exactly the borrowed one's queries over runtime-built names.
+/// **The whole flow, in 0.1.0 verbs plus `Select::Names`.** The host runs one pass and
+/// *gives* the codec the data; the codec answers yes/no; on "no" it learns exactly which
+/// wants were missing and runs its own scan.
+///
+/// This test is the reason `zenanalyze-api` has no extraction trait. Every step below is
+/// `Offer` / `Request` / `Select` — data the host already has. A `&dyn` provider would let
+/// the codec reach *back* into an analyzer to pull values, which inverts the direction of
+/// control and is a step this flow never takes.
 #[test]
-fn owned_catalog_matches_borrowed_catalog() {
-    let qualified = ["variance@11111111", "edge_density@22222222"];
-    let owned = OwnedCatalog::new(qualified);
-    let borrowed_names = [nf("variance@11111111"), nf("edge_density@22222222")];
-    let borrowed = Catalog::new(&borrowed_names);
+fn push_model_answers_yes_no_and_names_the_gaps() {
+    let (features, version) = sample();
+    let offer = Offer::new(&features, Provenance::new(version));
 
-    assert_eq!(owned.len(), 2);
-    assert!(!owned.is_empty());
-    assert!(OwnedCatalog::new(core::iter::empty::<&str>()).is_empty());
-    assert_eq!(
-        owned.available().map(|n| n.name()).collect::<Vec<_>>(),
-        alloc::vec!["variance", "edge_density"]
-    );
+    // ── yes ── everything the codec wants is present, at whatever version the host ran.
+    let covered = ["variance", "edge_density"];
+    let req = Request::new(Select::Names(&covered));
+    assert!(offer.satisfies(&req), "the shared pass covered this codec");
+    assert_eq!(offer.reuse_for(&req), Some(alloc::vec![0.5, 12.0]));
 
-    for want in [nf("variance@11111111"), nf("variance@ffffffff")] {
-        assert_eq!(owned.offers(&want), borrowed.offers(&want));
-    }
-    assert!(owned.has_name("variance"));
-    assert!(!owned.has_name("peak_luminance_nits"));
-
-    let wants = [nf("variance@ffffffff"), nf("edge_density@22222222")];
-    assert_eq!(owned.unmet(&wants), borrowed.unmet(&wants));
-
-    let reqs = [Request::new(Select::All)];
-    assert_eq!(owned.union(&reqs), borrowed.union(&reqs));
-}
-
-// ──────────────────────────── FeatureProvider ──────────────────────────────
-
-/// A stand-in provider — the shape a `zenanalyze` version's impl takes: it owns the
-/// vocabulary (qualified names carrying ITS code versions) and answers through the contract.
-struct FakeProvider;
-
-impl FeatureProvider for FakeProvider {
-    fn analyzer_version(&self) -> &str {
-        "0.2.7"
-    }
-    fn catalog(&self) -> OwnedCatalog {
-        OwnedCatalog::new(["variance@11111111", "edge_density@22222222"])
-    }
-    fn extract_rgb8(
-        &self,
-        rgb: &[u8],
-        width: u32,
-        height: u32,
-        request: &Request<'_>,
-    ) -> Result<OwnedOffer, ProviderError> {
-        if rgb.len() != (width as usize) * (height as usize) * 3 {
-            return Err(ProviderError::BadInput);
-        }
-        let catalog = self.catalog();
-        if let Select::Features(wants) = request.select()
-            && !catalog.unmet(wants).is_empty()
-        {
-            return Err(ProviderError::Unavailable);
-        }
-        Ok(OwnedOffer::new(
-            alloc::vec![
-                OwnedFeatureResult::new("variance@11111111", 0.5f32),
-                OwnedFeatureResult::new("edge_density@22222222", 12.0f32),
-            ],
-            Provenance::new(self.analyzer_version()),
-        ))
-    }
-}
-
-/// A consumer holding only `&dyn FeatureProvider` extracts and negotiates without ever
-/// naming a `zenanalyze` type — the whole point of the intermediary.
-#[test]
-fn dyn_provider_extracts_and_negotiates() {
-    let provider: &dyn FeatureProvider = &FakeProvider;
-    assert_eq!(provider.analyzer_version(), "0.2.7");
-    assert_eq!(provider.catalog().len(), 2);
-
-    let wants = ["variance"];
+    // ── no ── one want is absent, so the answer is a clean miss, not a partial vector.
+    let wants = ["variance", "skin_tone_fraction", "edge_density"];
     let req = Request::new(Select::Names(&wants));
-    let offer = provider
-        .extract_rgb8(&[0u8; 4 * 4 * 3], 4, 4, &req)
-        .expect("a well-formed buffer extracts");
-    assert_eq!(offer.provenance().analyzer_version(), "0.2.7");
-    assert_eq!(offer.reuse_for(&req), Some(alloc::vec![0.5]));
-
-    // A short buffer is BadInput; an identity this build can't produce is Unavailable.
+    assert!(!offer.satisfies(&req));
     assert_eq!(
-        provider.extract_rgb8(&[0u8; 3], 4, 4, &req).unwrap_err(),
-        ProviderError::BadInput
+        offer.reuse_for(&req),
+        None,
+        "all-or-nothing: never a silent hole"
     );
-    let impossible = [nf("variance@ffffffff")];
-    assert_eq!(
-        provider
-            .extract_rgb8(
-                &[0u8; 4 * 4 * 3],
-                4,
-                4,
-                &Request::new(Select::Features(&impossible))
-            )
-            .unwrap_err(),
-        ProviderError::Unavailable
-    );
-}
 
-#[test]
-fn provider_error_is_an_error() {
-    let e: &dyn core::error::Error = &ProviderError::OutOfMemory;
-    assert_eq!(alloc::format!("{e}"), "allocation failed");
+    // ── which ones ── `Offer::get` (0.1.0) classifies every want without a re-run, so the
+    // codec's own scan can be narrowed to exactly the gap. No catalog type is involved:
+    // this is a question about an OFFER, not about what some build could produce.
+    let missing: Vec<&str> = wants
+        .iter()
+        .copied()
+        .filter(|w| offer.get(w).is_none())
+        .collect();
+    assert_eq!(missing, alloc::vec!["skin_tone_fraction"]);
+
+    // A present-but-drifted want is a DIFFERENT answer than an absent one — `get` returns
+    // `Some` and the version hash disagrees. That distinction is what lets a codec choose
+    // between "re-scan" and "accept at another version".
+    let drifted = [nf("variance@ffffffff")];
+    assert!(!offer.satisfies(&Request::new(Select::Features(&drifted))));
+    let cell = offer.get("variance").expect("present by name");
+    assert_ne!(cell.feature().version_hash(), drifted[0].version_hash());
 }

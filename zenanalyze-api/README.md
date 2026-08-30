@@ -11,9 +11,13 @@ version and it *unifies* across the whole build.
 
 The flow it serves: an orchestrator collects each codec's `Request`, **unionizes** them,
 runs **one** analysis pass, and hands every codec the resulting `Offer`; each codec checks
-`offer.satisfies(&its_request)` and reuses, or runs its own pass — the latter through a
-`FeatureProvider` the host injects, so *even the fallback* stays version-free.
-`no_std + alloc`, **no dependencies**, `forbid(unsafe_code)`.
+`offer.satisfies(&its_request)` and reuses, or — when the answer is no — runs its own pass
+against whatever `zenanalyze` it likes. `no_std + alloc`, **no dependencies**,
+`forbid(unsafe_code)`.
+
+**The contract is data, not behaviour.** It carries no extraction trait, and that is a
+design decision rather than an omission — see [Why there is no provider
+trait](#why-there-is-no-provider-trait).
 
 **What this crate is for:** it is the **interchange boundary**, so a host and a codec built
 against different `zenanalyze` versions can still talk. It is not a prohibition on depending
@@ -129,44 +133,48 @@ assert_eq!(offer.reuse_for(&Request::new(Select::Names(&names))), Some(vec![0.5]
 **Never feed a compiled model from `Names`** — that miss is the safety property you'd be
 giving up.
 
-## The intermediary — `FeatureProvider`
+## Why there is no provider trait
 
-A codec with no `Offer` to reuse still has to get values from somewhere. `FeatureProvider`
-is one way: extraction expressed as a contract trait, so the **host** picks the `zenanalyze`
-version, implements the trait over it, and injects `&dyn FeatureProvider` (`zenanalyze` ships
-its own impl behind its `api` feature). A codec written against `&dyn FeatureProvider` can be
-driven by a host on any `zenanalyze` version.
-
-It is an *option*, not an obligation. A codec is equally free to depend on `zenanalyze`
-directly and run its own pass — which is often the right answer, since a shared offer may
-simply not carry what it needs. What matters is that the values cross the **crate boundary**
-as the types below, so your callers aren't pinned to your analyzer version.
+A codec with no `Offer` to reuse still has to get values from somewhere. This crate
+deliberately does **not** answer that with a trait. The model is *push*: the host runs a
+pass and **gives** the codec data; the codec answers yes/no; on "no" it runs its own scan.
 
 ```rust
-use zenanalyze_api::{FeatureProvider, Request, Select};
+use zenanalyze_api::{Offer, Request, Select};
 
-/// A codec's picker: no `zenanalyze` type anywhere in the signature or the body.
-fn pick(offer: Option<&zenanalyze_api::Offer<'_>>,
-        provider: Option<&dyn FeatureProvider>,
-        rgb: &[u8], w: u32, h: u32) -> Option<Vec<f32>> {
+/// A codec's picker. The host already paid for a pass and hands the result over.
+/// `None` means "not enough — I'll run my own scan", and the caller does exactly that
+/// with whatever `zenanalyze` it depends on. No `zenanalyze` type in the signature.
+fn pick(offer: Option<&Offer<'_>>) -> Option<Vec<f32>> {
     const WANTED: [&str; 2] = ["variance", "edge_density"];
     let req = Request::new(Select::Names(&WANTED));
-    if let Some(values) = offer.and_then(|o| o.reuse_for(&req)) {
-        return Some(values);          // the shared pass covered us
-    }
-    let owned = provider?.extract_rgb8(rgb, w, h, &req).ok()?;  // our own pass, version-free
-    owned.reuse_for(&req)
+    offer?.reuse_for(&req)
 }
 ```
 
-`catalog()` reports what a provider build can produce as an `OwnedCatalog` — the owned twin
-of `Catalog`, for a provider whose qualified names are only known at runtime. Extraction
-failures are a `ProviderError`: `BadInput` (buffer length / dimensions), `Unavailable` (this
-build can't produce a wanted identity — `OwnedCatalog::unmet` says which), `OutOfMemory`.
+Every verb that model needs — `satisfies` (yes/no), `reuse_for` (the values), `get` (which
+wants were missing, and whether a present one drifted) — is already here, and was already
+here in `0.1.0`. An extraction trait would sit on none of those steps. Four reasons it stays
+out, in order of force:
 
-An implementor must honor the `Request` exactly. Returning an offer that silently drops a
-want is a contract violation: `satisfies` is a *reuse* decision on the consumer side, not a
-correctness backstop.
+1. **It is the wrong direction of control.** Push hands data across a boundary; a `&dyn`
+   lets the codec reach *back* into a live analyzer to pull values. The intended flow never
+   takes that step.
+2. **Data serializes; a trait does not.** An `Offer` crosses a process, a file, a cache, and
+   a *version* boundary — `to_block` / `parse` are right here. A `&dyn` crosses none of them.
+   For a contract whose whole purpose is letting analyzer versions coexist, serializable data
+   is strictly more powerful than dynamic dispatch.
+3. **A trait is a promise about _how_.** This surface freezes at `1.0` and never breaks after
+   that. A decade is too long to freeze someone else's method set.
+4. **It drags a pixel buffer into a contract that has nothing to do with pixels.** The trait
+   this crate briefly carried took tightly-packed RGB8 with no row stride — which this
+   workspace's pixel-buffer rule forbids, and which had already cost one consumer a
+   full-image copy per call to work around. With no pixel buffer in the contract, that entire
+   class of mistake is unrepresentable.
+
+What matters is unchanged: values cross the **crate boundary** as the types below, so your
+callers aren't pinned to your analyzer version. Depending on `zenanalyze` directly, inside
+your own crate, is explicitly fine — see [Compatibility rules](#compatibility-rules).
 
 ## Native values, canonical f32
 
@@ -314,24 +322,6 @@ What a build can produce: `Catalog::new(available)`, `available() -> &[NamedFeat
 `offers(want) -> bool`, `has_name(name) -> bool`, `unmet(wants) -> Vec<&str>`, and
 `union(requests) -> Vec<&str>` (the "unionize" step, resolving `Select::All`).
 
-### `struct OwnedCatalog`
-
-The owned twin of `Catalog`, for a provider whose vocabulary is built at runtime.
-`OwnedCatalog::new(qualified_names)`, `available() -> impl Iterator<Item = NamedFeature>`
-(the owned→borrowed bridge), `len()`, `is_empty()`, plus the same `offers` / `has_name` /
-`unmet` / `union` queries.
-
-### `trait FeatureProvider`
-
-The extraction intermediary — object-safe, used as `&dyn FeatureProvider`.
-`analyzer_version() -> &str`, `catalog() -> OwnedCatalog`, and
-`extract_rgb8(rgb, width, height, request) -> Result<OwnedOffer, ProviderError>` over a
-tightly-packed 8-bit sRGB buffer (`rgb.len() == width * height * 3`).
-
-### `enum ProviderError` `#[non_exhaustive]`
-
-`BadInput` / `Unavailable` / `OutOfMemory`; implements `core::error::Error`.
-
 ### `struct OwnedOffer`
 
 The owned twin of `Offer`. Build from parts with `OwnedOffer::new(features, provenance)` (the
@@ -376,9 +366,10 @@ Drop the patch once the version is published.
 ### 2. Interchange types at crate boundaries come from this crate
 
 A public signature naming `zenanalyze::feature::AnalysisResults` pins every caller to your
-`zenanalyze` version. Take an `Offer`, return `Offer` / `OwnedOffer`, accept a
-`&dyn FeatureProvider` — then a host on a different version can still call you, however you
-sourced the numbers internally. Function bodies and `pub(crate)` items are unconstrained.
+`zenanalyze` version. Take an `Offer` / `&OwnedOffer`, return `Offer` / `OwnedOffer` — then a
+host on a different version can still call you, however you sourced the numbers internally.
+Function bodies and `pub(crate)` items are unconstrained: run your own `zenanalyze` pass in
+there all you like, just don't put its types in the signature.
 
 **A direct `zenanalyze` dependency is fine**, including in a codec's library code, and is the
 right answer when a host-provided offer is insufficient — a missing feature, the wrong tier, a

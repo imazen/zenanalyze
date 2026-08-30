@@ -190,13 +190,13 @@ pub(crate) mod tier_depth;
 pub(crate) mod xyb_color_loss;
 
 /// Producer side of the `zenanalyze-api` feature contract: [`offer::extract_offer`] (one
-/// pass → an offer) and [`offer::Analyzer`] (this build as a
-/// [`zenanalyze_api::FeatureProvider`], so a consumer can extract through the contract
-/// instead of through this crate's types).
+/// pass → an offer) and [`offer::offer_for_request`] (one pass answering a contract
+/// [`zenanalyze_api::Request`] — the "the offer I was handed wasn't enough, scan it myself"
+/// path, with the `Select` → `FeatureSet` resolution kept in one place).
 #[cfg(feature = "api")]
 mod offer;
 #[cfg(feature = "api")]
-pub use offer::{Analyzer, extract_offer};
+pub use offer::{extract_offer, offer_for_request};
 
 /// Content-hash feature versioning + the golden test set ([`versioning`]).
 pub mod versioning;
