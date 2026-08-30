@@ -137,6 +137,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ZENPICKER_METAPICKER_V1_BAKE`; unset ⇒ the tests **fail loudly**, never
   self-skip. Run with `just metapicker-v1-test`; CI (no block storage) makes
   the skip decision explicitly with `-- --skip metapicker_v1_`.
+- **The metapicker_v1 slot→feature identity, recovered** —
+  `benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv`. The bake declares
+  its inputs as positional placeholders (`feat_0..feat_60`), so the bake alone
+  cannot say which analyzer feature belongs in which slot: the qualified
+  `name@hex8` identities were dropped by the meta-input builder (zensim
+  `scripts/canonical_corpus/build_metapicker_input_2026-08-30.py:59` renames
+  the source columns to `feat_<j>` and records the original names nowhere).
+  The table recovers all 61 by re-running the builder's own deterministic
+  column rule against the sha256-pinned source TSV, and a test keeps it in
+  lockstep with the bake: one row per declared slot in the same order, every
+  name a well-formed zenanalyze-api identity (also checked through
+  `NamedFeature::parse` under the `api` feature), no duplicates — and an
+  assertion that fires when a future bake declares qualified names directly,
+  which is the signal to retire the table.
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
   2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a

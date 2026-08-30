@@ -1,0 +1,83 @@
+# metapicker_v1 input-slot -> zenanalyze qualified feature name.
+#
+# The bake declares its inputs as positional placeholders (feat_0..feat_60 in
+# `zenpicker_train.image_feature_names` / `.input_order`), so the bake ALONE does
+# not say which analyzer feature belongs in which slot. The identity was dropped
+# upstream by the meta-input builder
+#   zensim scripts/canonical_corpus/build_metapicker_input_2026-08-30.py:59
+#     for j,n in enumerate(fnames): data[f"feat_{j}"]=pa.array(fcols[j])
+# which renames the qualified source columns to feat_<j> and records `fnames`
+# nowhere (not in the parquets, not in _MANIFEST.json). This file recovers it.
+#
+# RECOVERY (deterministic, same rule as the builder, lines 20-30 of that script):
+#   source : /mnt/v/output/clean-picker-corpus-2026-06-26/clean_features.tsv
+#   sha256 : f00bca56368d05ae3e145d10100484310ec905653325e8be58b6afd73214e4d8
+#   rule   : columns 8.. of the header, dropping every column that is EMPTY on
+#            any of the 4497 renditions (36 size-gated columns), header order kept.
+#   result : 61 slots, 36 dropped  (matches the bake's 61 + zq_norm = 62)
+#
+# Slot 61 is `zq_norm` = the caller's requested quality / 100 (NOT a source
+# feature, and not listed here). Names are zenanalyze-api qualified
+# `name@hex8` identities, i.e. exactly what `NamedFeature::parse` takes.
+slot	input_name	zenanalyze_feature
+0	feat_0	variance@8e9a50f1
+1	feat_1	edge_density@4d8b833e
+2	feat_2	chroma_complexity@296da35d
+3	feat_3	cb_sharpness@8c598dce
+4	feat_4	cr_sharpness@d63fb62b
+5	feat_5	uniformity@63836451
+6	feat_6	flat_color_block_ratio@4abb6d9b
+7	feat_7	colourfulness@565ef18c
+8	feat_8	laplacian_variance@4b241385
+9	feat_9	variance_spread@1d5b275c
+10	feat_10	distinct_color_bins@4b461bf0
+11	feat_11	cb_horiz_sharpness@2249c81d
+12	feat_12	cb_vert_sharpness@61016450
+13	feat_13	cb_peak_sharpness@99deeb0a
+14	feat_14	cr_horiz_sharpness@664bed01
+15	feat_15	cr_vert_sharpness@dadfa13e
+16	feat_16	cr_peak_sharpness@bd31738c
+17	feat_17	high_freq_energy_ratio@9df18f16
+18	feat_18	luma_histogram_entropy@4881f42a
+19	feat_19	dct_compressibility_y@794690ab
+20	feat_20	dct_compressibility_uv@4a332970
+21	feat_21	patch_fraction@4d52aebc
+22	feat_22	alpha_present@f307e9da
+23	feat_23	alpha_used_fraction@ec61d7c5
+24	feat_24	alpha_bimodal_score@1ec8c890
+25	feat_25	palette_fits_in_256@8027dc58
+26	feat_26	grayscale_score@8f08a6a5
+27	feat_27	aq_map_mean@f0b3ec4a
+28	feat_28	aq_map_std@575083ff
+29	feat_29	noise_floor_y@6b8f1013
+30	feat_30	noise_floor_uv@767aeeb2
+31	feat_31	gradient_fraction@b7cfe644
+32	feat_32	skin_tone_fraction@6b3d9c3c
+33	feat_33	edge_slope_stdev@5ba2543a
+34	feat_34	patch_fraction_fast@d19dc492
+35	feat_35	quant_survival_y@0e06739e
+36	feat_36	quant_survival_uv@befaf02a
+37	feat_37	is_grayscale@7587a9be
+38	feat_38	pixel_count@d49a1919
+39	feat_39	log_pixels@1c094010
+40	feat_40	min_dim@d1246f28
+41	feat_41	max_dim@643711c1
+42	feat_42	bitmap_bytes@4c898cd0
+43	feat_43	aspect_min_over_max@fb87c54b
+44	feat_44	log_aspect_abs@eda8176b
+45	feat_45	block_misalignment_8@3180b005
+46	feat_46	block_misalignment_32@274e887e
+47	feat_47	channel_count@aa8817e3
+48	feat_48	log_padded_pixels_8@4fb0bdbd
+49	feat_49	log_padded_pixels_16@913f254f
+50	feat_50	log_padded_pixels_32@68bf0b0f
+51	feat_51	laplacian_variance_p1@e84b3af0
+52	feat_52	laplacian_variance_p5@8736231b
+53	feat_53	laplacian_variance_p10@cd113d1e
+54	feat_54	gradient_fraction_smooth@71d0f5a3
+55	feat_55	palette_log2_size@01c777d9
+56	feat_56	chroma_luma_covariance_cb@3e5ca2e1
+57	feat_57	chroma_luma_covariance_cr@ca45d43f
+58	feat_58	info_weight_mean@0b1e7c72
+59	feat_59	orientation_energy_ratio@bc450f3f
+60	feat_60	spectral_slope_y@91277465

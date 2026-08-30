@@ -357,3 +357,88 @@ fn metapicker_v1_schema_gate_refuses_a_wrong_hash() {
         "a wrong schema hash must be refused at load"
     );
 }
+
+/// The bake's declared source-feature names are **positional placeholders**
+/// (`feat_0..feat_60`), so the bake alone does not say which zenanalyze
+/// feature belongs in which slot — the identity was dropped upstream by the
+/// meta-input builder. `benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv`
+/// recovers it. This test keeps the two in lockstep: one recovered row per
+/// declared slot, in the same order, each naming a well-formed
+/// zenanalyze-api qualified identity — so a caller can resolve the contract
+/// mapping against a real `Offer`.
+#[test]
+fn metapicker_v1_recovered_feature_slots_resolve_the_contract() {
+    let picker = load();
+    let c = picker.contract();
+    let tsv = include_str!("../../benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv");
+
+    let rows: Vec<(usize, &str, &str)> = tsv
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+        .skip(1) // header
+        .map(|l| {
+            let mut f = l.split('\t');
+            let slot: usize = f
+                .next()
+                .expect("slot")
+                .trim()
+                .parse()
+                .expect("slot is a number");
+            let input = f.next().expect("input_name").trim();
+            let feat = f.next().expect("zenanalyze_feature").trim();
+            (slot, input, feat)
+        })
+        .collect();
+
+    assert_eq!(
+        rows.len(),
+        c.image_features().len(),
+        "the recovered slot table and the bake's declared feature list disagree on length"
+    );
+    for (i, (slot, input, feat)) in rows.iter().enumerate() {
+        assert_eq!(*slot, i, "slot column must be dense and in order");
+        assert_eq!(
+            *input,
+            c.image_features()[i].as_str(),
+            "slot {i}: recovered input_name does not match the bake's declared name"
+        );
+        // A zenanalyze-api qualified identity: `<name>@<8 lowercase hex>`.
+        let (name, hash) = feat
+            .rsplit_once('@')
+            .unwrap_or_else(|| panic!("slot {i}: {feat:?} is not a qualified name@hex8"));
+        assert!(!name.is_empty(), "slot {i}: empty feature name in {feat:?}");
+        assert!(
+            hash.len() == 8
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "slot {i}: {hash:?} is not 8 lowercase hex digits"
+        );
+        #[cfg(feature = "api")]
+        assert!(
+            zenanalyze_api::NamedFeature::parse(feat).is_some(),
+            "slot {i}: zenanalyze_api::NamedFeature::parse rejected {feat:?}"
+        );
+    }
+
+    // Every recovered zenanalyze name is distinct — a duplicate would mean two
+    // slots claim the same analyzer feature.
+    let mut seen: Vec<&str> = rows.iter().map(|(_, _, f)| *f).collect();
+    seen.sort_unstable();
+    let n = seen.len();
+    seen.dedup();
+    assert_eq!(
+        seen.len(),
+        n,
+        "the recovered slot table names a feature twice"
+    );
+
+    // Documents the gap this file exists to close: the bake's OWN names carry
+    // no analyzer identity. If a future bake ever declares qualified names
+    // directly, this assertion is the signal to retire the recovery table.
+    assert!(
+        c.image_features().iter().all(|f| !f.contains('@')),
+        "the bake now declares qualified feature names — retire \
+         benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv and read them from the bake"
+    );
+}
