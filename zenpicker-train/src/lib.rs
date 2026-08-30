@@ -73,7 +73,8 @@ pub use pareto_dataset::{
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
 pub use picker_eval::{
-    PickerEval, ScalarHeadEval, evaluate_picker, evaluate_picker_bake, evaluate_scalar_heads,
+    FixedBaseline, PickerEval, ScalarHeadEval, evaluate_fixed_baselines, evaluate_picker,
+    evaluate_picker_bake, evaluate_scalar_heads,
 };
 pub use search::{GridPoint, SearchResult, default_grid, run_search, run_search_distill};
 

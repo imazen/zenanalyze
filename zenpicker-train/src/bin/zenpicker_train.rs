@@ -29,10 +29,10 @@ use zenpicker_train::{
     CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, ScalarAxisSpec,
     ScalarHeadSpec, SearchCandidate, SearchManifest, ShapingMode, TeacherParams, TrainError,
     apply_inplace, bake_mlp_picker, bake_picker, build_picker_dataset, build_picker_dataset_with,
-    default_grid, default_zq_targets, evaluate, evaluate_picker_bake, evaluate_scalar_heads,
-    export_teacher_dataset, fit_standardizer, fit_transforms, grouped_split_picker,
-    load_soft_targets, load_training_rows, run_search, run_search_distill, standardize_all,
-    teacher_params_fingerprint, train_ridge,
+    default_grid, default_zq_targets, evaluate, evaluate_fixed_baselines, evaluate_picker_bake,
+    evaluate_scalar_heads, export_teacher_dataset, fit_standardizer, fit_transforms,
+    grouped_split_picker, load_soft_targets, load_training_rows, run_search, run_search_distill,
+    standardize_all, teacher_params_fingerprint, train_ridge,
 };
 
 const USAGE: &str = "\
@@ -84,6 +84,22 @@ OPTIONS:
                             reachable: soft_weight*soft + (1-soft_weight)*hard. A principled
                             extension to probe when pure soft distillation doesn't close the gap.
 
+  eval-only (no training, no --out):
+    --eval-bake <PATH>      Score an EXTERNAL ZNPR v3 picker bake on the held-out
+                            split of --input, through the deployed runtime path
+                            (predict[_transformed] -> masked argmin). Prints
+                            argmin_acc / overhead mean,p50,p90 / bytes SROCC.
+                            Use --val-frac 1.0 to score an ENTIRE held-out view
+                            (e.g. an origin-split validate parquet).
+    --baselines             With --eval-bake, also print the trivial fixed-choice
+                            policies on the same rows and the same per-row oracle:
+                            'cell:<label>' and 'family:<prefix>' (a family's own
+                            best reachable cell — the strongest fixed-family
+                            policy, hence the most conservative bar). Read the
+                            overheads next to 'coverage': a family that cannot
+                            reach the target on every row is not a usable policy,
+                            and its overhead is measured only where it can reach.
+
   ridge-mode only:
     --target-column <NAME>  Supervised target column (e.g. score_zensim).
     --lambda <F>            Ridge L2 penalty (default 1.0).
@@ -134,6 +150,10 @@ struct Args {
     soft_weight: Option<f64>,
     input_shaping: Option<String>,
     eval_bake: Option<String>,
+    /// `--baselines`: also report the trivial fixed-choice policies
+    /// (always-one-cell / always-one-family) on the same rows and the same
+    /// oracle — the pre-declared baseline gate.
+    baselines: Option<bool>,
     /// `--scalar-axes` CSV (e.g. "chroma_scale,lambda") → hybrid scalar
     /// prediction heads. Empty = bytes-only categorical picker.
     scalar_axes: Option<String>,
@@ -160,6 +180,7 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         soft_weight: None,
         input_shaping: None,
         eval_bake: None,
+        baselines: None,
         scalar_axes: None,
     };
     let mut it = argv.iter();
@@ -210,6 +231,7 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
             "--input-shaping" => a.input_shaping = Some(next_val(&mut it, "--input-shaping")?),
             "--scalar-axes" => a.scalar_axes = Some(next_val(&mut it, "--scalar-axes")?),
             "--eval-bake" => a.eval_bake = Some(next_val(&mut it, "--eval-bake")?),
+            "--baselines" => a.baselines = Some(true),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -262,7 +284,13 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(bake_path) = args.eval_bake {
         let codec = args.codec.or(recipe.codec);
         let val_frac = args.val_frac.or(recipe.val_frac).unwrap_or(0.2);
-        return run_eval_bake(Path::new(&input), codec, val_frac, &bake_path);
+        return run_eval_bake(
+            Path::new(&input),
+            codec,
+            val_frac,
+            &bake_path,
+            args.baselines.unwrap_or(false),
+        );
     }
 
     let out = args
@@ -346,6 +374,7 @@ fn run_eval_bake(
     codec: Option<String>,
     val_frac: f64,
     bake_path: &str,
+    baselines: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let zq_targets = default_zq_targets();
     let ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
@@ -372,6 +401,28 @@ fn run_eval_bake(
             );
         }
         None => eprintln!("[zenpicker-train] eval-bake: no scorable held-out rows"),
+    }
+    if baselines {
+        // The pre-declared baseline gate: the trivial fixed-choice policies,
+        // on the SAME rows and the SAME per-row oracle the bake was just
+        // scored against. `family:*` uses that family's own best reachable
+        // cell (the strongest fixed-family policy = the most conservative
+        // bar). `coverage` is load-bearing: a family that cannot reach the
+        // target on every row is not a usable fixed policy, and its overhead
+        // is measured only where it CAN reach.
+        for b in evaluate_fixed_baselines(&ds, &val_rows) {
+            println!(
+                "baseline={} overhead_mean={:.4} overhead_p50={:.4} overhead_p90={:.4} \
+                 argmin_acc={:.4} n_rows={} coverage={:.4}",
+                b.label,
+                b.overhead_mean,
+                b.overhead_p50,
+                b.overhead_p90,
+                b.argmin_acc,
+                b.n_rows,
+                b.coverage
+            );
+        }
     }
     Ok(())
 }

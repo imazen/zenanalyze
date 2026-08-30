@@ -670,3 +670,139 @@ mod panel_parity_tests {
         assert_panel_eq(&scores, &humans, "scale n=3000");
     }
 }
+
+/// One trivial fixed-choice baseline: "always this cell" or "always this
+/// family" (the family's own oracle — its best reachable cell — which is
+/// the STRONGEST fixed-family policy and therefore the most conservative
+/// bar for a picker to clear).
+#[derive(Clone, Debug)]
+pub struct FixedBaseline {
+    /// `cell:<label>` or `family:<prefix>` (the cell label's `<family>_`
+    /// prefix), or `oracle` for the perfect picker.
+    pub label: String,
+    /// Byte overhead vs the per-row oracle, over the rows where this
+    /// choice was reachable (`0.204` = 20.4% extra bytes).
+    pub overhead_mean: f64,
+    pub overhead_p50: f64,
+    pub overhead_p90: f64,
+    /// Fraction of scored rows where this fixed choice IS the oracle.
+    pub argmin_acc: f64,
+    /// Rows where this choice had at least one reachable cell.
+    pub n_rows: usize,
+    /// `n_rows / <rows the picker scored>` — a fixed family that cannot
+    /// reach the target everywhere is not a usable policy, so the
+    /// overhead numbers above must always be read next to this.
+    pub coverage: f64,
+}
+
+/// Fixed-choice baselines on the SAME rows and the SAME oracle the picker
+/// is scored against (`evaluate_picker_bake`) — the pre-declared
+/// "always-best-single-family" gate, computed on the picker's own dense
+/// grid rather than a coarser side grid.
+///
+/// A row is scored when at least one cell reaches its target (identical to
+/// the picker's rule). For each family, the fixed policy picks that
+/// family's own best reachable cell; rows where the family reaches nothing
+/// are excluded from its overhead and counted against its `coverage`.
+/// Per-cell baselines are reported too, so a single-cell family and a
+/// multi-cell family are directly comparable.
+pub fn evaluate_fixed_baselines(ds: &PickerDataset, val_rows: &[usize]) -> Vec<FixedBaseline> {
+    let n_cells = ds.n_cells;
+
+    // Family = the cell label's prefix before the final '_' (the mode).
+    let family_of: Vec<&str> = ds
+        .cell_labels
+        .iter()
+        .map(|l| l.rsplit_once('_').map_or(l.as_str(), |(f, _)| f))
+        .collect();
+    let mut families: Vec<&str> = family_of.clone();
+    families.sort_unstable();
+    families.dedup();
+
+    // Candidate policies: one per cell, one per family, in that order.
+    let mut policies: Vec<(String, Vec<usize>)> = Vec::new();
+    for c in 0..n_cells {
+        policies.push((format!("cell:{}", ds.cell_labels[c]), alloc_one(c)));
+    }
+    for fam in &families {
+        let cells: Vec<usize> = (0..n_cells).filter(|&c| family_of[c] == *fam).collect();
+        policies.push((format!("family:{fam}"), cells));
+    }
+
+    let mut overheads: Vec<Vec<f64>> = vec![Vec::new(); policies.len()];
+    let mut correct: Vec<usize> = vec![0; policies.len()];
+    let mut scored_rows = 0usize;
+
+    for &r in val_rows {
+        let reach = &ds.reach[r * n_cells..(r + 1) * n_cells];
+        let truth = &ds.bytes_log[r * n_cells..(r + 1) * n_cells];
+        let mut best_true_c: Option<usize> = None;
+        let mut best_true_v = f64::INFINITY;
+        for c in 0..n_cells {
+            if reach[c] && truth[c] < best_true_v {
+                best_true_v = truth[c];
+                best_true_c = Some(c);
+            }
+        }
+        let Some(best_true_c) = best_true_c else {
+            continue;
+        };
+        scored_rows += 1;
+        let best_bytes = best_true_v.exp();
+        if !(best_bytes > 0.0) {
+            continue;
+        }
+        for (p, (_, cells)) in policies.iter().enumerate() {
+            let mut pick_c: Option<usize> = None;
+            let mut pick_v = f64::INFINITY;
+            for &c in cells {
+                if reach[c] && truth[c] < pick_v {
+                    pick_v = truth[c];
+                    pick_c = Some(c);
+                }
+            }
+            let Some(pick_c) = pick_c else { continue };
+            if pick_c == best_true_c {
+                correct[p] += 1;
+            }
+            let pick_bytes = pick_v.exp();
+            if pick_bytes.is_finite() {
+                overheads[p].push(pick_bytes / best_bytes - 1.0);
+            }
+        }
+    }
+
+    let denom = scored_rows.max(1) as f64;
+    policies
+        .into_iter()
+        .enumerate()
+        .map(|(p, (label, _))| {
+            let mut o = core::mem::take(&mut overheads[p]);
+            o.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+            let pct = |q: f64| -> f64 {
+                if o.is_empty() {
+                    return f64::NAN;
+                }
+                let idx = ((o.len() as f64 - 1.0) * q).round() as usize;
+                o[idx.min(o.len() - 1)]
+            };
+            FixedBaseline {
+                label,
+                overhead_mean: if o.is_empty() {
+                    f64::NAN
+                } else {
+                    o.iter().sum::<f64>() / o.len() as f64
+                },
+                overhead_p50: pct(0.50),
+                overhead_p90: pct(0.90),
+                argmin_acc: correct[p] as f64 / denom,
+                n_rows: o.len(),
+                coverage: o.len() as f64 / denom,
+            }
+        })
+        .collect()
+}
+
+fn alloc_one(c: usize) -> Vec<usize> {
+    vec![c]
+}
