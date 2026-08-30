@@ -95,6 +95,43 @@ For a hot loop, hold one `MetaPicker::default_routers()` and call `.route(..)` r
 
 `MetaPicker::pick(features, allowed)` is a raw masked-argmin over a **family-score** model — for per-codec pickers, the auto-gate, or the lossless router. It **refuses the pairwise lossy router** (which emits per-pair margins, not family scores) with `MetaPickerError::PairwiseRouterNeedsRoute`: use `route` / `default_route` for the lossy family choice, which round-robins the margins into a family.
 
+## Cell-layout bakes — `CellPicker` (inert, not wired into `default_route`)
+
+A `zenpicker-train` meta-picker does **not** score families. Its outputs are
+`family × {lossy, lossless}` **cells**, named in the bake's own metadata, and there
+are as many as the training corpus had — 7 for the current `metapicker_v1`, over 5
+families. `pick` reads `CodecFamily::ALL[output_index]`, so handing it a cell bake
+would mis-map every output. `CellPicker` is the separate load/forward path for that
+layout:
+
+```rust,ignore
+use zenpicker::{AllowedFamilies, CellPicker};
+
+let picker = CellPicker::from_znpr_bytes(&bytes)?;   // refuses a non-cell bake
+let c = picker.contract();                           // validated at load
+let input = c.build_input(target_zq / 100.0, |name| my_features.get(name).copied())?;
+let pred = picker.predict_cells(&input, &allowed, Some(&reachable))?;
+let (family, mode) = (pred.family(), pred.mode());
+```
+
+`CellContract::from_model` validates the bake's three `zenpicker_train.*` metadata
+keys against its real widths and **refuses** on any disagreement — a cell label that
+is not `<family>_<mode>`, a cell count that is not `n_outputs`, or an input order
+that is not exactly "every source feature once, plus `zq_norm` once".
+`build_input` is the one mapping from named source features to the input vector: it
+reads each declared feature exactly once, places `zq_norm` itself, never touches a
+name outside the contract, and errors naming a feature the caller could not supply
+rather than substituting a zero.
+
+`predict_cells` argmins the predicted `bytes_log` over the caller's family mask
+intersected with an optional per-cell reach mask (the cells that can hit the
+requested quality) — the same masked argmin the trainer's held-out panel scores. It
+builds one `Predictor`'s scratch per call, like `default_route`.
+
+Nothing here is reachable from `default_route` / `route` / `default_routers`: the
+shipped routers are untouched, and a test asserts each of them is *refused* as a cell
+bake. Wiring a cell bake into the shipped path is a separate, gated decision.
+
 ## Family order is a load-time contract
 
 For a **family-score** model (the auto-gate, the lossless router, per-codec pickers) the output index maps 1:1 to a `CodecFamily` discriminant. The bake declares the order via the `zenpicker.family_order` metadata key (UTF-8, comma-separated lowercase labels). `MetaPicker::validate_family_order` reads that key on a parsed `Model` and refuses if it doesn't match the runtime's `ALL_LABELS_CSV`.

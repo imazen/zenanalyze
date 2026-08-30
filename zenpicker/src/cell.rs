@@ -437,6 +437,11 @@ impl CellPicker {
     /// non-trivial ones — the same branch the trainer's evaluator takes.
     ///
     /// `Ok(pred)` with `pred.pick() == None` when every cell is masked out.
+    ///
+    /// Builds one [`Predictor`]'s scratch per call — the same cost shape
+    /// [`crate::default_route`] documents. A meta-pick happens once per
+    /// image, so this is not a hot loop; if it ever becomes one, hold the
+    /// [`Predictor`] yourself over [`model`](Self::model).
     pub fn predict_cells<'c>(
         &'c self,
         input: &[f32],
