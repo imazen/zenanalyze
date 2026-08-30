@@ -7,8 +7,19 @@ the model's own predicted byte penalty is a median **0.26 % / 1.11 %**. The
 expected byte saving across the corpus is ~**0.01–0.06 %** for a 4–24× analysis
 cost increase.
 
-Two findings came out of the measurement that matter more than the budget
-question itself, and both are actionable today — see [Incidental findings](#incidental-findings).
+**Two findings that came out of this measurement matter more than the budget
+question, and both are actionable today.** They are written up first, below,
+because the budget answer is "change nothing" and these are not:
+
+- **[A. The zenjpeg picker's byte model breaks down above 2048²](#a-the-zenjpeg-picker-breaks-down-above-2048)** — it predicts a median
+  **151 GB** for a 4096² JPEG whose real size is **2.3–8.7 MB**, and collapses to
+  a single output cell.
+- **[B. The three shipped zenpicker routers reuse nothing from current `main`](#b-the-shipped-cross-codec-routers-reuse-nothing-from-current-main)** —
+  one drifted feature column makes `default_route` return `Ok(None)` for every
+  offer, on every image, silently.
+
+Neither is caused by sampling budgets; both were found by pointing the
+instruments at real consumers.
 
 Host: Apple M4 Pro, 12 cores, macOS 26.5.2, aarch64. Release profile
 (`lto = "thin"`, `codegen-units = 1`), **no `-C target-cpu=native`**. Every cargo
@@ -32,10 +43,123 @@ nice -n 19 cargo bench --features hdr --bench budget_cost
 python3 tools/budget_drift.py --grid <grid.tsv> --native <native.tsv> --decisions <ab.tsv>
 ```
 
-Aggregated per-feature output is committed as
+Committed data: the aggregated per-feature drift table
 [`budget_drift_summary_2026-08-30.tsv`](budget_drift_summary_2026-08-30.tsv)
-(117 features × 5 sizes). The raw grids (26 MB + 11 MB) are **not** committed —
-they regenerate deterministically from the harness above.
+(117 features × 5 sizes) and the raw zenjpeg cell scores
+[`budget_zenjpeg_cell_scores_2026-08-30.tsv`](budget_zenjpeg_cell_scores_2026-08-30.tsv)
+(5 760 rows — the evidence for §A). The raw drift grids (26 MB + 11 MB) are
+**not** committed; they regenerate deterministically from the harness above.
+
+**The "default" arm is the shipping path, verified, not a proxy for it.**
+`__analyze_internal` at `(500 000, 1 024)` was compared feature-by-feature with
+`f32::to_bits()` against `analyze_features_rgb8(FeatureSet::SUPPORTED)` over
+4 content classes × {1024, 2048, 4096}²: **zero differing features**. Without
+that, every number here would be measuring the harness rather than the crate.
+
+## A. The zenjpeg picker breaks down above 2048²
+
+`zenjpeg/zenjpeg/src/encode/picker.rs` predicts log-bytes for each of 36
+categorical cells and takes the argmin. Dumping the **shape** of those 36 scores
+at the shipping budgets, over 1 152 (image × target) combinations per size —
+6 content classes × 8 crops × 24 targets from zq 5 to 97 — against the **measured**
+size of the same buffer encoded as JPEG on the same host:
+
+| side | distinct cells picked | median predicted best-cell bytes | measured real JPEG (q50 – q95) | model error |
+|---|--:|--:|--:|--:|
+| 64 | 16 / 36 | 834 B | — | plausible |
+| 256 | 18 / 36 | 4.23 KB | — | plausible |
+| 1024 | 15 / 36 | 66.9 KB | 80 KB – 565 KB | plausible |
+| 2048 | **3 / 36** | 1.87 MB | 400 KB – 2.28 MB | plausible |
+| 4096 | **1 / 36** | **151 GB** | 1.74 MB – 8.71 MB | **~20 000–65 000×** |
+
+The measured column is `image` 0.25's baseline JPEG encoder over the same mosaics
+the picker was fed, across the four cost-grid classes (`benchmarks/` regenerable;
+photo 4096² is 2.26 MB at q50, 4.67 MB at q85, 8.71 MB at q95).
+
+Two distinct failures, and they start at different sizes:
+
+1. **Output diversity collapses at 2048².** 15 distinct cells at 1024², 3 at
+   2048², and at 4096² the picker returns `420/base/plain/balanced` for *every*
+   input at *every* target from zq 5 to 97 — all six content classes, all 1 152
+   combinations. A picker that ignores both content and quality target is not
+   picking.
+2. **The byte prediction explodes at 4096².** Growth in median predicted bytes
+   per 4× pixel step: 1024→2048 is **28×** and 2048→4096 is **80 700×**, where
+   the real ratio is ≈ 4× at both steps. The model is extrapolating off a cliff,
+   almost certainly because it was trained on smaller renditions and the size
+   inputs (`log_pixels`, `pixel_count`, `bitmap_bytes`) leave its fitted range.
+
+It is **not** a near-tie that argmin resolves arbitrarily — the model is
+confidently wrong. Spread between the worst and best cell *widens* with size
+(median bytes ratio 1.45 at 1024², 1.85 at 2048², **7.28** at 4096²), and the
+top-2 margin widens with it (1.016 → 1.066 → 1.170).
+
+The bake declares no `feature_bounds` (`model.feature_bounds()` is empty), so
+`first_out_of_distribution` — the OOD rescue seam the picker already calls — is
+dormant and cannot catch this. Populating bounds at bake time would convert a
+silent 20 000× error into a clean `None`, which the encoder already handles by
+keeping its heuristic config.
+
+Reproduce:
+```bash
+AB_DUMP_SCORES=1 cargo run --release --features hdr,api --example budget_decision_ab
+```
+
+**Bearing on the budget question:** the zenjpeg picker's 0 % decision-change rate
+at 4096² in §2 below is this bug, not robustness. No sampling policy can improve
+a decision that is already constant, so 4K is moot for the budget question
+regardless of how it is answered.
+
+## B. The shipped cross-codec routers reuse nothing from current `main`
+
+Each of `zenpicker/benchmarks/zenpicker_router_{lossy,lossless,gate}_v0.1.bin`
+declares 101 qualified `name@hex8` feature columns. **100 match this build. One
+does not:**
+
+```
+routers want:  chroma_subsample_dct_loss@48f0f976
+this build:    chroma_subsample_dct_loss@fabc9776
+```
+
+`Select::Features` is all-or-nothing by design, so one drifted column misses the
+whole want-set. `MetaPicker::route` maps "the offer cannot satisfy a model's
+columns" to `Ok(None)` — correctly, since the caller is meant to re-extract — so
+**`zenpicker::default_route` returns `Ok(None)` for every offer this build can
+produce, at every target, on every image.** Consumers fall back to `family_rule`,
+the no-features prior, and cannot distinguish that from "no family survived the
+mask".
+
+The gate is doing exactly what it exists for: refusing to feed a compiled model a
+re-defined column, which is the entire reason `Select::Features` exists rather
+than `Select::Names`. The defect is that the bakes are stale relative to current
+feature definitions, so the refusal is total rather than occasional — and silent.
+
+Reproduce:
+```bash
+grep -a -o -E "[a-z_0-9]{4,}@[0-9a-f]{8}" \
+  zenpicker/benchmarks/zenpicker_router_lossy_v0.1.bin | sort -u
+```
+and diff against `zenanalyze::versioning::feature_qualified_names()`. All three
+bins carry the same stale column. End to end:
+`AB_NO_BRIDGE=1 cargo run --release --features hdr,api --example budget_decision_ab`
+returns `none` for every routed decision.
+
+Fix: re-bake the three routers, and add a CI tripwire asserting every shipped
+bake's declared columns resolve against `feature_qualified_names()`. The tripwire
+is the part that matters — one assert would have caught this at the commit that
+redefined `chroma_subsample_dct_loss`, and it generalises to every bake in the
+tree (zenjpeg's `feature_order.txt`, zenavif's `rav1e_picker_v0_1_1.bin`, these
+three routers). Filed as imazen/zenanalyze#88; blocks the decision
+`docs/meta-picker-degradation-2026-08-28.md` is waiting on, since degradation
+offsets threaded into a router that never runs buy nothing.
+
+**Bearing on the budget question:** to measure routing at all, `budget_decision_ab`
+re-qualifies that one column to the hash the routers expect. That is precisely
+the silent substitution `Select::Features` exists to prevent, done deliberately
+in a measurement harness and flagged in the source as something that must never
+be copied into production. It is sound *there* only because it is applied
+identically to both arms, so it cannot manufacture or mask a difference between
+them — it only makes the router answer.
 
 ## What was measured
 
@@ -147,11 +271,10 @@ that is not robustness.
 
 Three things to read off this:
 
-1. **The zenjpeg picker is degenerate at large sizes.** 15 distinct cells at
-   1024², 3 at 2048², **1** at 4096². Its 0 % change rate at 4096² is not
-   evidence that sampling does not matter — it is evidence the picker has stopped
-   discriminating. That is a defect worth its own investigation, and it makes the
-   sampling question moot at that size regardless of how it is answered.
+1. **The zenjpeg picker's 0 % at 4096² is the §A bug, not robustness.** It emits
+   one constant cell there, so nothing about sampling could have moved it — which
+   also makes 4K moot for the budget question either way. Full diagnosis,
+   including the 151 GB byte prediction, in [§A](#a-the-zenjpeg-picker-breaks-down-above-2048).
 2. **zenwebp's classifier never changes.** Expected: it is three live threshold
    rules on four features (`skin_tone_fraction`, `edge_slope_stdev`,
    `flat_color_block_ratio`, `distinct_color_bins`) with wide margins, and most
@@ -281,41 +404,12 @@ If anyone revisits this, the ordering the data implies is: fix the degenerate
 zenjpeg picker first (it is a bigger lever than sampling), then look at
 `hf_max_blocks`, not `pixel_budget`.
 
-## Incidental findings
+## Smaller corrections
 
-These came out of the measurement and are independent of the budget question.
+The two consequential findings are §A and §B at the top. These are the minor
+ones, also independent of the budget question.
 
-### A. The shipped cross-codec routers cannot reuse any offer from current `main`
-
-All three baked routers (`zenpicker/benchmarks/zenpicker_router_{lossy,lossless,gate}_v0.1.bin`)
-declare 101 qualified feature columns. **100 match this build; one does not:**
-
-```
-routers want:  chroma_subsample_dct_loss@48f0f976
-this build:    chroma_subsample_dct_loss@fabc9776
-```
-
-`Select::Features` is all-or-nothing, so that single drifted column makes every
-want miss and `zenpicker::default_route` returns `Ok(None)` for **every** offer
-from this build — at every target, on every image. Consumers fall back to
-`family_rule`, the no-features prior. This is the version gate working correctly
-(it is refusing to feed a model substituted inputs), but the practical effect is
-that the shipped routers are inert against current `main` and nothing reports it.
-
-Reproduce:
-```bash
-grep -a -o -E "[a-z_0-9]{4,}@[0-9a-f]{8}" \
-  zenpicker/benchmarks/zenpicker_router_lossy_v0.1.bin | sort -u
-```
-or run `budget_decision_ab` with `AB_NO_BRIDGE=1` and observe universal `none`.
-
-Fix is a re-bake of the three routers against current feature versions. Until
-then `budget_decision_ab` re-qualifies that one column to the routers' expected
-hash — applied identically to both arms so it cannot manufacture or mask a
-difference, and loudly flagged in the source as something that must never be
-copied into production.
-
-### B. `benches/tier_isolation.rs` has an inverted comment
+### `benches/tier_isolation.rs` has an inverted comment
 
 Lines 68–71 say the default `experimental` feature "raises the sampling budget to
 full (pixel_budget = usize::MAX)". It does not — that is `full-budgets`, which is
@@ -325,7 +419,7 @@ work" without it, which is backwards: with default features the budgets *do*
 bind, and it is the *capped* case that flattens the size axis. Corrected in the
 same change as this report.
 
-### C. Corrections to the crate index
+### Corrections to the crate index
 
 - `~/.claude/CLAUDE.md` lists `zenwebp_picker_v0.1.bin` as "wired into a codec in
   production". It does not exist — `find zenwebp -name '*.bin'` outside `target/`

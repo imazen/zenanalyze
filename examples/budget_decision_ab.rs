@@ -36,6 +36,15 @@
 //! each. A row is emitted per (consumer, cell, target), with both decisions and
 //! whether they differ.
 //!
+//! **The default arm is the shipping path, verified.** `__analyze_internal` at
+//! `(500_000, 1_024)` was checked feature-by-feature (`f32::to_bits()`) against
+//! `analyze_features_rgb8(FeatureSet::SUPPORTED)` over 4 content classes ×
+//! {1024, 2048, 4096}²: **zero differing features**. So "default" here is not a
+//! proxy for what ships, it is what ships — which is what makes the A/B mean
+//! anything. (Below 128 px the two do diverge: the public entry point
+//! mirror-tiles tiny inputs to recover percentile features and the internal one
+//! does not. Irrelevant at every size where the budgets bind.)
+//!
 //! Targets sweep the quality dial at equal density across the whole range —
 //! `zq` 5..97 step 4 — because the low-q regime is where picks are most
 //! contested and a high-q-dense grid would understate the change rate.
@@ -45,7 +54,13 @@
 //! ```
 //!
 //! Env: `ZENANALYZE_CORPUS_DIR`, `AB_SIDES`, `AB_CLASSES`, `AB_CROPS` (default 8),
-//! `AB_OUT`, `ZENJPEG_PICKER_DIR` (default `../zenjpeg/zenjpeg/src/encode/picker_data`).
+//! `AB_OUT`, `ZENJPEG_PICKER_DIR` (default `../zenjpeg/zenjpeg/src/encode/picker_data`),
+//! `AB_NO_BRIDGE=1` (see the version-bridge note on `offer_cells`),
+//! `AB_DUMP_SCORES=1` (diagnostic: dump the SHAPE of the zenjpeg bake's 36 cell
+//! scores instead of running the A/B — best cell, predicted bytes, worst/best
+//! spread, top-2 margin. This is what diagnosed imazen/zenjpeg#200: the bake
+//! predicts a median 151 GB for a 4096² JPEG whose real size is 2.3–8.7 MB, and
+//! collapses to one cell).
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -313,12 +328,26 @@ fn main() {
         eprintln!("WARNING: no zenjpeg bake at {zj_dir:?} — skipping that consumer");
     }
 
+    // Diagnostic mode for the zenjpeg picker's collapse at large sizes: instead
+    // of the A/B, dump the SHAPE of the 36 predicted cell scores. Separates "the
+    // model confidently prefers one cell" from "all 36 cells are within noise of
+    // each other and the argmin is a coin flip" — different bugs, different fixes.
+    let dump_scores = std::env::var("AB_DUMP_SCORES").is_ok_and(|v| v == "1");
+
     let mut out = std::io::BufWriter::new(std::fs::File::create(&out_path).unwrap());
-    writeln!(
-        out,
-        "consumer\tclass\tside\tcrop\ttarget\tdecision_default\tdecision_full\tchanged\tregret"
-    )
-    .unwrap();
+    if dump_scores {
+        writeln!(
+            out,
+            "class\tside\tcrop\ttarget\tbest_cell\tbest_bytes\tspread_ratio\ttop2_margin"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "consumer\tclass\tside\tcrop\ttarget\tdecision_default\tdecision_full\tchanged\tregret"
+        )
+        .unwrap();
+    }
 
     let mut all: Vec<Class> = classes(&corpus);
     all.extend(extra_classes(&corpus));
@@ -344,6 +373,35 @@ fn main() {
                 eprintln!("{} {side}² crop{crop}", class.name);
                 let (buf, _) = build(side, class, crop);
                 let r_def = analyze(&buf, side, DEFAULT_PIXEL_BUDGET, DEFAULT_HF_MAX_BLOCKS);
+
+                if dump_scores {
+                    // Shape of the zenjpeg bake's 36 cell scores at the SHIPPING
+                    // budgets — the diagnostic for its large-size collapse.
+                    if let Some(zj) = &zj {
+                        for t in targets() {
+                            let Some(s) = zj.scores(&r_def, t) else {
+                                continue;
+                            };
+                            let mut idx: Vec<usize> = (0..s.len()).collect();
+                            idx.sort_by(|&a, &b| s[a].total_cmp(&s[b]));
+                            let (best, second) = (idx[0], idx[1]);
+                            // Outputs are log-bytes, so a difference exponentiates
+                            // to a bytes ratio.
+                            let spread = (s[*idx.last().unwrap()] - s[best]).exp();
+                            let top2 = (s[second] - s[best]).exp();
+                            writeln!(
+                                out,
+                                "{}\t{side}\t{crop}\t{t}\t{}\t{:.6e}\t{spread:.6}\t{top2:.6}",
+                                class.name,
+                                zj_cell_label(best),
+                                s[best].exp()
+                            )
+                            .unwrap();
+                        }
+                    }
+                    continue;
+                }
+
                 let r_full = analyze(&buf, side, usize::MAX, HF_UNCAPPED);
 
                 // --- zenwebp content label (size-only input besides features)
