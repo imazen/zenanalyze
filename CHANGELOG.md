@@ -158,6 +158,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CellContract::build_input`, and prints all 7 cell `bytes_log` scores plus
   the pick. Verified against the real bake and corpus (a 36×64 rendition at
   target zq 82 routes to `zenavif_lossy`).
+- **metapicker_v1 k-seed spread (k = 5)** —
+  `benchmarks/metapicker_kseed_spread_2026-08-30.tsv`. The grid winner
+  retrained at 5 seeds with the identical recipe (`--hidden 128,128 --seed N`;
+  only the seed varies) and each bake scored on the full origin-validate view.
+  **Two reproduction gates first**: seed 0 reproduces `metapicker_v1.bin`
+  **byte-for-byte** (sha256 `4479ef9c874ebf1c…`) with an identical `[heldout]`
+  block to every digit, and seed 1 reproduces the v1 manifest's grid candidate
+  #4 exactly — so the wave provably varies nothing but the seed and training is
+  bit-deterministic. **Band**: argmin median 0.7519 sd 0.0021 [0.7500–0.7551];
+  overhead mean median 0.0445 sd 0.0012 [0.0427–0.0456]; **p50 0.0000 at every
+  seed**; p90 median 0.1453 sd 0.0039 [0.1370–0.1469]; bytes-SROCC median
+  0.9859 sd 0.0010 [0.9843–0.9869]. The picker is seed-stable on every decision
+  metric. **Selection** by the trainer's registered rule (max held-out argmin,
+  ties → bytes-SROCC) run on the honest panel picks **seed 4**, sha256
+  `4485cf37da8f…` (argmin 0.7551, overhead 4.27 % / 0 / 13.70 %). **Finding**:
+  the trainer's *internal* held-out split and the honest origin-validate panel
+  rank the seeds in opposite order — the internal-best seed (seed 0, the
+  shipped v1) is the honest-worst — so selection must run on the honest panel.
+  **Baseline gate re-run at the band's worst seed passes**: 4.47 % mean vs
+  always-avif's 19.75 % (4.4×), median pick free; the ledger's coarse-grid
+  20.4 % holds on the dense grid, with the correction that avif covers only
+  94.44 % of cells rather than all of them.
 - **`zenpicker/tests/cell_contract.rs`** — 13 CI-runnable tests that bake tiny
   models in-process (`zenpredict-bake`) and exercise **every** refusal path the
   cell contract promises: missing metadata keys, a cell label that is not

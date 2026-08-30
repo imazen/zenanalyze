@@ -1,0 +1,40 @@
+# metapicker_v1 k-seed spread — the grid winner retrained at k=5 seeds.
+#
+# RECIPE (identical for every seed; ONLY --seed varies):
+#   zenpicker-train --input meta_train.parquet --out <bake> --mode mlp \
+#                   --hidden 128,128 --seed <N>
+# `--hidden` disables the bounded grid search and fits exactly that topology at
+# MlpConfig::default().lr = 2e-3 = grid candidate #2 (the v1 winner). Default
+# --val-frac 0.2, grouped-by-image split, no shaping, no distillation.
+#
+# REPRODUCTION GATES (both measured 2026-08-30):
+#   seed 0 reproduces metapicker_v1.bin BYTE-FOR-BYTE (sha 4479ef9c874ebf1c...)
+#          with an identical [heldout] block to every digit.
+#   seed 1 reproduces the v1 manifest's grid candidate #4 exactly
+#          (heldout argmin 0.682832352029749, srocc 0.9899166802888568).
+#
+# COLUMNS
+#   heldout_*  = the TRAINER'S INTERNAL held-out split (20% of the TRAIN view's
+#                images) — the surface the bounded grid search ranks on.
+#   val_*      = the HONEST origin-validate panel: the ENTIRE held-out
+#                meta_validate.parquet view (--val-frac 1.0), 38,696 (image,zq)
+#                rows / 245,585 reachable (row,cell) pairs, scored through the
+#                deployed runtime path (--eval-bake).
+#   overhead   = bytes(pick)/bytes(oracle) - 1 over reachable cells.
+#
+# Driver: zenpicker-train/scripts/metapicker_kseed_spread.sh
+# Bakes:  /mnt/v/output/zensim/metapicker-2026-08-30/{kseed,kseed_b,kseed_c}/
+seed	lane	bake	sha256	bytes	heldout_argmin	heldout_srocc	val_argmin	val_overhead_mean	val_overhead_p50	val_overhead_p90	val_bytes_srocc	val_rows	val_pairs
+0	kseed	metapicker_v1_s0.bin	4479ef9c874ebf1c83d059794d2959e725c1ea9d1aa77a5721c7a26a31624e34	104193	0.7021227145955996	0.9900475507450045	0.7500	0.0447	0.0000	0.1453	0.9869	38696	245585
+1	kseed	metapicker_v1_s1.bin	f47d81b9fbe8fb1b9fb33d7849a7feedf0ed600614f0222c63d21608d16cbf94	104193	0.682832352029749	0.9899166802888568	0.7519	0.0456	0.0000	0.1469	0.9861	38696	245585
+2	kseed_c	metapicker_v1_s2.bin	5bf753c9cfd1fbbeffc445d0729015596c256fb1965ee1650c413092c689226c	104193	0.6817477533312675	0.9896469962090679	0.7545	0.0445	0.0000	0.1453	0.9843	38696	245585
+3	kseed_b	metapicker_v1_s3.bin	b88671d4e0308e567842bcad31c1249f601ab9310b1a344a097326613de0306e	104193	0.6966997211031918	0.9898422884705059	0.7519	0.0431	0.0000	0.1444	0.9854	38696	245585
+4	kseed_b	metapicker_v1_s4.bin	4485cf37da8f0f79c4f0a1b79bed20117d2c2555c46bbc3669511779270c3b44	104193	0.6954601797334986	0.9905539974014334	0.7551	0.0427	0.0000	0.1370	0.9859	38696	245585
+#
+# BAND (k=5): metric	median	sd	min	max
+# band	val_argmin	0.7519	0.0021	0.7500	0.7551
+# band	val_overhead_mean	0.0445	0.0012	0.0427	0.0456
+# band	val_overhead_p50	0.0000	0.0000	0.0000	0.0000
+# band	val_overhead_p90	0.1453	0.0039	0.1370	0.1469
+# band	val_bytes_srocc	0.9859	0.0010	0.9843	0.9869
+# band	heldout_argmin	0.6955	0.0090	0.6817	0.7021
