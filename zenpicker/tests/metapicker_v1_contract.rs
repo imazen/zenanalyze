@@ -92,6 +92,15 @@ fn metapicker_v1_contract_is_the_registered_shape() {
         EXPECTED_N_INPUTS,
         "the width a caller must supply must equal the declared input order"
     );
+    // v1 is not dead-column pruned, so every declared input actually reaches
+    // the net. (A pruned bake would keep caller_input_width at 62 and forward
+    // fewer — legal, and the contract would still hold — but it is not what
+    // this bake is, and saying so pins the property.)
+    assert_eq!(
+        picker.model().n_inputs(),
+        picker.model().caller_input_width(),
+        "metapicker_v1 is expected to be unpruned: every declared input is forwarded"
+    );
 
     let got: Vec<(&str, CodecFamily, CellMode)> = c
         .cells()
