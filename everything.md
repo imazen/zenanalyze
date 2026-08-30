@@ -1341,6 +1341,28 @@ rustfmt drift cleanup` (zensim).
 ## 7. What needs revisiting (priority backlog)
 
 ### IMMEDIATE — production blockers
+
+0. **The three shipped `zenpicker` routers are inert against current `main`**
+   (found 2026-08-30). All of
+   `zenpicker/benchmarks/zenpicker_router_{lossy,lossless,gate}_v0.1.bin`
+   declare `chroma_subsample_dct_loss@48f0f976`; this build emits `@fabc9776`.
+   `Select::Features` is all-or-nothing, so `zenpicker::default_route` returns
+   `Ok(None)` for **every** offer at every target on every image, and consumers
+   silently fall back to `family_rule` (the no-features prior). The version gate
+   is behaving correctly — the bakes are stale. Needs (a) a re-bake of the three
+   routers, and (b) a CI tripwire asserting every shipped bake's declared columns
+   resolve against `zenanalyze::versioning::feature_qualified_names()`, which
+   would have caught this at the redefining commit. Detail:
+   `docs/meta-picker-degradation-2026-08-28.md` ("Blocker found 2026-08-30").
+
+0b. **The zenjpeg picker is degenerate at large sizes** (found 2026-08-30).
+   Distinct cells emitted across 1 152 (image × target) combinations: 15 at
+   1024², **3** at 2048², **1** at 4096² — it returns `420/base/plain/balanced`
+   for every 4K input at every target from zq 5 to 97. Likely the size features
+   pushing the model off its training distribution. Measured in
+   `benchmarks/budget_scaling_2026-08-30.md` §2; the picker itself lives in
+   `zenjpeg/zenjpeg/src/encode/picker.rs`.
+
 1. **Land the `feat/features-backfill` zenmetrics branch** (commit
    `bd86239`, 752 LOC + 286 LOC tests at `crates/zenmetrics-cli/src/backfill.rs`).
    The recovery register lists this as "kept" but it never merged; the

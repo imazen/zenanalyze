@@ -48,6 +48,14 @@ default = ["experimental"]
 # multi-cell pickers (medium >500k px is the only stride-sampled size + worst at
 # sub). A model trained on full-budget features must be served them at inference.
 # Off by default; the public budget stays a crate invariant.
+#
+# MEASURED 2026-08-30 (benchmarks/budget_scaling_2026-08-30.md): raising the
+# budgets is NOT worth it. Full sampling costs 24x at 4096^2 (16.1 ms -> 381.6 ms,
+# 2.7x a fast JPEG encode of the same bytes) and changes the shipped zenjpeg pick
+# 0% of the time there. Below 1024^2 the budgets do not bind at all — every
+# feature is bit-identical. Where picks do change (1024/2048) the expected
+# corpus-wide saving is ~0.01% bytes. Also: the dominant knob is hf_max_blocks,
+# not pixel_budget. Read the study before re-opening this.
 full-budgets = []
 # Opt into the `zenanalyze-api` producer surface: `OwnedOffer::extract` runs one
 # analysis pass and lends a `zenanalyze_api::Offer` (the frozen, version-unifying

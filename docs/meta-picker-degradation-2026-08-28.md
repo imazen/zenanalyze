@@ -54,6 +54,56 @@ webp m2 / m4 / m6 = 95 / 131 / 238; avif s8 / s6 / s4 / s2 = 2161 / 2866 / 6867 
   has no `large` renditions) — the `tiny` ms/MP is fixed-cost dominated, read the
   fits.
 
+## Blocker found 2026-08-30: the shipped routers reuse NOTHING from current `main`
+
+Whatever is decided below, it is worth knowing that **all three shipped router
+bakes are currently inert against this build**, and nothing reports it.
+
+Each of `zenpicker/benchmarks/zenpicker_router_{lossy,lossless,gate}_v0.1.bin`
+declares 101 qualified `name@hex8` feature columns. 100 of them match this
+build. One does not:
+
+```
+routers want:  chroma_subsample_dct_loss@48f0f976
+this build:    chroma_subsample_dct_loss@fabc9776
+```
+
+`Select::Features` is all-or-nothing by design, so that single drifted column
+makes the whole want-set miss. `MetaPicker::route` treats "the offer cannot
+satisfy a model's columns" as `Ok(None)` (correctly — the caller is supposed to
+re-extract), so **`zenpicker::default_route` returns `Ok(None)` for every offer
+this build can produce, at every target, on every image.** Consumers fall back to
+`family_rule`, the no-features prior, and never learn that the model was skipped.
+
+The gate is doing exactly what it exists to do — refusing to feed a compiled
+model a re-defined column. The problem is that the bakes are stale relative to
+the feature definitions, so the refusal is total rather than occasional, and it
+is silent.
+
+Reproduce:
+
+```bash
+grep -a -o -E "[a-z_0-9]{4,}@[0-9a-f]{8}" \
+  zenpicker/benchmarks/zenpicker_router_lossy_v0.1.bin | sort -u
+```
+and compare against `zenanalyze::versioning::feature_qualified_names()`. Or run
+`cargo run --release --features hdr,api --example budget_decision_ab` with
+`AB_NO_BRIDGE=1` and observe that every routed decision is `none`.
+
+Two things follow:
+
+- **The three routers need a re-bake** against current feature versions before
+  any degradation work below is worth landing — offsets threaded into a router
+  that never runs buy nothing.
+- **A CI tripwire is missing.** A one-assert test that every shipped bake's
+  declared columns resolve against `feature_qualified_names()` would have caught
+  this at the commit that redefined `chroma_subsample_dct_loss`. Worth adding
+  regardless of which option below is chosen; it generalises to every bake in the
+  tree, not just these three.
+
+Found while measuring `benchmarks/budget_scaling_2026-08-30.md`; not caused by
+sampling budgets, and independent of that study's conclusions.
+
 ## What is NOT landed, and the decision it needs
 
 The offsets cannot be threaded into `RouteDecision::resolve` as a plain

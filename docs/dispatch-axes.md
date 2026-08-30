@@ -60,6 +60,19 @@ Two more parameters are budgets, not gates: `pixel_budget`
 `full-budgets` cargo feature const-folds them to MAX / 4096); only the test /
 oracle override path varies them.
 
+**They bind only above ~1 MP, and raising them is measured to not be worth it.**
+Both are fixed *absolute* caps, so the sampled fraction shrinks as images grow
+(4096² is 16.8 MP against a 500 k budget, ~3 % sampled). Below 1024² they do not
+bind at all — every feature is bit-identical across every budget arm. Above it,
+65 of 117 features move, but fully sampling costs **24× at 4096²** and changes
+the shipped zenjpeg pick **0 %** of the time there. Full study, including why a
+per-feature convergence floor is unsound (only 4 of 65 moving features converge
+monotonically): `benchmarks/budget_scaling_2026-08-30.md`.
+
+Note which knob matters if you do touch this: **`hf_max_blocks` dominates**.
+Every one of the 25 largest feature drifts at 4096² is driven by the tier-3 8×8
+block cap, not by `pixel_budget`.
+
 ## Pass order inside an arm
 
 1. `scan_alpha` (if `ALPHA`) — source bytes.
