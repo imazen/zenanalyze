@@ -444,10 +444,28 @@ fn metapicker_v1_recovered_feature_slots_resolve_the_contract() {
 
     // Documents the gap this file exists to close: the bake's OWN names carry
     // no analyzer identity. If a future bake ever declares qualified names
-    // directly, this assertion is the signal to retire the recovery table.
+    // directly, these assertions are the signal to retire the recovery table.
     assert!(
         c.image_features().iter().all(|f| !f.contains('@')),
         "the bake now declares qualified feature names — retire \
          benchmarks/metapicker_v1_feature_slots_2026-08-30.tsv and read them from the bake"
     );
+    // ... and it carries no `zentrain.feature_columns` either, so the
+    // zenanalyze-api negotiation path sees nothing: `feature_columns()` is
+    // empty and `MetaPicker::feature_request()` is None. That is exactly why
+    // v1 cannot consume a shared `Offer` today.
+    assert_eq!(
+        picker.model().feature_columns().count(),
+        0,
+        "v1 is expected to carry no zentrain.feature_columns"
+    );
+    #[cfg(feature = "api")]
+    {
+        let mp = picker.meta_picker();
+        assert!(
+            mp.feature_request().is_none(),
+            "with no qualified feature columns, feature_request() must be None \
+             (never a vacuously-satisfied empty request)"
+        );
+    }
 }
