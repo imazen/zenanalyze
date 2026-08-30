@@ -90,6 +90,37 @@ Once `q` is out of the features the numbers are MUCH lower than the
 leaky 0.9988 — that is correct and the point. A picker over 36
 fine-grained cells with sparse-q data is a hard rank problem.
 
+### Scoring an external bake (`--eval-bake`) and the baseline gate
+
+`--eval-bake <bake.bin>` scores an already-baked ZNPR v3 picker on the
+held-out split of `--input`, through the deployed runtime path
+(`predict[_transformed]` → masked argmin) — no training, no `--out`. With
+`--val-frac 1.0` the "held-out split" is the ENTIRE input, which is how you
+score a bake on a separately-built validate view (an origin-split parquet)
+rather than on a sub-split of its own training data.
+
+`--baselines` adds the trivial fixed-choice policies on the **same rows, the
+same reach mask and the same per-row oracle**:
+
+- `cell:<label>` — always this one cell.
+- `family:<prefix>` — always this family, taking that family's own best
+  reachable cell. That is the *strongest* fixed-family policy, so it is the
+  most conservative bar a picker has to clear.
+
+Read every overhead next to its `coverage`. A fixed family that cannot reach
+the target on some rows has its overhead measured only where it *can* reach;
+without the coverage column a partial policy looks cheaper than it is. Rows no
+cell reaches are not scored at all — the same rule the picker is scored under.
+
+```sh
+zenpicker-train --input meta_validate.parquet \
+    --eval-bake metapicker_v1.bin --val-frac 1.0 --baselines
+```
+
+`scripts/metapicker_kseed_spread.sh` drives the seed-stability wave on top of
+this: retrain one recipe at k seeds, score every bake on the full validate
+view, append one TSV row per seed.
+
 ## Usage
 
 ```sh
