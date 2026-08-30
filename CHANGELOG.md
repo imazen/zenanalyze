@@ -151,6 +151,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NamedFeature::parse` under the `api` feature), no duplicates — and an
   assertion that fires when a future bake declares qualified names directly,
   which is the signal to retire the table.
+- **`zenpicker/examples/cell_pick_demo.rs`** — the inert cell path end to end
+  from REAL analyzer values: reads one rendition's features keyed by their
+  qualified `name@hex8` identities, resolves them to the bake's positional
+  slots through the compiled-in recovery table, builds the input via
+  `CellContract::build_input`, and prints all 7 cell `bytes_log` scores plus
+  the pick. Verified against the real bake and corpus (a 36×64 rendition at
+  target zq 82 routes to `zenavif_lossy`).
 
 - **`zenanalyze-api` is the sole contract and intermediary** (owner directive
   2026-08-28). `src/offer.rs` gains `Analyzer` — this build as a
