@@ -30,8 +30,9 @@ the record is not silently rewritten.
 - `OwnedCatalog` (struct + `new` / `available` / `len` / `is_empty` / `offers` / `has_name` /
   `unmet` / `union`)
 
-Roughly twelve permanent public items, removed for one reason: **the contract is data, not
-behaviour.** In order of force —
+17 permanent public items — 3 types, 3 trait methods, 3 enum variants, 8 inherent methods,
+plus `Display` and `core::error::Error` impls — removed for one reason: **the contract is
+data, not behaviour.** In order of force —
 
 1. **The trait was the wrong direction of control.** Push hands data across a boundary; a
    `&dyn` lets a codec reach *back* into a live analyzer to pull values. Every verb the

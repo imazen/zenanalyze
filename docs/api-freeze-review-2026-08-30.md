@@ -4,8 +4,11 @@ Fine-tooth-comb review of everything added between published `0.1.0` and unpubli
 `0.1.1`, against the standard *"it will be set in stone for a decade, less is more"*:
 default verdict **cut**, burden of proof on keeping.
 
-**Outcome: 0.1.1 = 0.1.0 + `Select::Names`.** One enum variant. Roughly twelve permanent
-public items were removed before publication.
+**Outcome: 0.1.1 = 0.1.0 + `Select::Names`.** One enum variant. **17 permanent public items**
+were removed before publication — 3 types (`FeatureProvider`, `ProviderError`, `OwnedCatalog`),
+3 trait methods, 3 enum variants and 8 inherent methods, plus two trait impls (`Display` and
+`core::error::Error` for `ProviderError`). (The working estimate during review was "roughly
+twelve"; the counted figure is 17.)
 
 Verified mechanically — the complete public-surface delta against the published crate:
 
