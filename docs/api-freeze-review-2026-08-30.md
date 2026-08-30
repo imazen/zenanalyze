@@ -181,6 +181,32 @@ signature** of either codec, so a host on a different `zenanalyze` version can s
 an inherent method's return type changing and cannot model behavioural breaks. The actual proof
 is that all four real consumers compile and pass against the trimmed tree.
 
+## The surface is now recorded, and one gate is missing
+
+Two things found by going looking, not by any gate firing:
+
+- **`docs/public-api/zenanalyze.features.txt` was stale.** It still listed
+  `pub struct Analyzer`, `Analyzer::new`, and the roster line
+  `Analyzer: … zenanalyze_api::FeatureProvider` after the trait was cut. Regenerated.
+- **`zenanalyze-api` had no snapshot at all.** The apidoc runner carries an explicit crate
+  list and the contract crate was not on it — so the one published crate in this repo that
+  must *never* break was the only one with no committed surface record. Added, listed first.
+  `docs/public-api/zenanalyze-api.txt` is now the diffable record of exactly what freezes at
+  `1.0`: 11 types, 73 public lines, `Select::Names` present and no `FeatureProvider` /
+  `ProviderError` / `OwnedCatalog`.
+
+**The gap I did not close:** these snapshots are **not gated in CI**. `apidoc/` is
+workspace-excluded precisely so no CI job compiles it or runs rustdoc, and the only check is
+the manual `just api-doc-check`. That is why the stale entry above survived. A gate would have
+caught it, but adding one trades against a deliberate choice to keep rustdoc out of CI — the
+owner's call, not mine to make unilaterally.
+
+Worth knowing: **`zencodec` has the identical gap and it has already bitten.** Its
+`docs/public-api/zencodec-testkit.txt` is stale by one item (`check_gain_map_roundtrip`,
+`zencodec-testkit/src/lib.rs:1459`, added in `857fab1` after the last regeneration), and its
+CI has no `api-doc` job either. `zenpixels` *does* gate it — which is exactly why zenpixels'
+snapshot was caught and regenerated while these two drifted.
+
 ## Loose ends, for the owner
 
 1. **`zensr`'s graph resolves two `zenanalyze` sources.** `zenjpeg`'s rev pin
