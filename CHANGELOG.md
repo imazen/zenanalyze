@@ -247,8 +247,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the contract instead of naming a `zenanalyze` type, and a host can
   pick the version by choosing which `Analyzer` it injects. Exported as
   `zenanalyze::Analyzer` behind the `api` feature. The contract crate grew the
-  surface this needs (`FeatureProvider`, `ProviderError`, `OwnedCatalog`,
-  `Select::Names`) — see `zenanalyze-api/CHANGELOG.md`.
+  surface this needs — see `zenanalyze-api/CHANGELOG.md`.
+  - **Corrected 2026-09-04:** this entry used to list that surface as
+    `FeatureProvider`, `ProviderError`, `OwnedCatalog` and `Select::Names`.
+    Three of those four were **cut before 0.1.1 shipped** (`62bfd43`), so only
+    `Select::Names` actually landed; the api crate's own CHANGELOG has carried
+    the accurate "Removed before publication" list since. The stale wording had
+    propagated downstream — zenpipe's `[patch.crates-io]` comment justified its
+    zenanalyze-api git patch by citing `FeatureProvider` as a needed addition,
+    which no longer exists and has no consumer anywhere in that graph.
+
+- **`zenanalyze-api 0.1.1` being unpublished is what keeps every downstream
+  consumer off crates.io** (measured 2026-09-04 from the zenpipe graph). 0.1.1
+  is `0.1.0` plus one variant on an already `#[non_exhaustive]` enum, so the
+  frozen-0.1.x contract is intact and the `cargo public-api` item diff against
+  the published crate is EMPTY. But `zenanalyze` 0.2.x **matches** on
+  `Select::Names` (`src/offer.rs`) and therefore requires `^0.1.1`, which the
+  registry cannot satisfy — so zenpipe, zencodecs, zenpicker and zenavif all
+  have to reach the contract through a git patch instead of the registry, and
+  a stale lock among those git edges silently splits `Offer` into two types.
+  Publishing zenanalyze-api 0.1.1 (a patch release, no API break) removes the
+  patch tables from every consumer at once. Nothing else blocks it.
 - CI now clippies `zenanalyze-api --all-targets -D warnings` and runs
   `cargo test --features api,hdr --doc`, so the contract crate's lints and the
   `Analyzer` doctest can't rot.
