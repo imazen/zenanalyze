@@ -740,6 +740,25 @@ def encode_metadata(model: dict, out_path: Path) -> list[dict]:
             "text": "\n".join(feat_cols),
         })
 
+    # input_layout — the ENGINEERED input vector's aux-slot names, in order,
+    # newline-separated utf8 (the same list that feeds `schema_hash`). The
+    # runtime's input vector is `feat_cols` (in order) followed by exactly
+    # these, so a consumer can reconstruct the layout from the bake alone
+    # instead of hardcoding it. That matters because the size one-hot is
+    # RUNTIME-SCOPED: `train_hybrid._scope_size_classes` narrows it to the
+    # size classes the corpus actually covers, so `n_inputs` is
+    # `2*len(feat_cols) + 5 + len(SIZE_CLASSES) + 1`, NOT a fixed 2n+10. A
+    # consumer that hardcodes four size slots hands a mis-sized vector to any
+    # bake trained on a corpus that skipped a size class (it fails loud on the
+    # length check rather than scoring garbage, but it fails).
+    extra_axes_meta = derive_extra_axes(int(model["n_inputs"]), feat_cols or [], model)
+    if extra_axes_meta:
+        entries.append({
+            "key": "zentrain.input_layout",
+            "type": "utf8",
+            "text": "\n".join(extra_axes_meta),
+        })
+
     # feature_transforms — parallel array to feat_cols. Newline-separated
     # utf8 of {"identity", "log", "log1p"}. Codec runtimes that consume
     # this MUST apply the named per-feature transform BEFORE the

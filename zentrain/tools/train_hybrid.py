@@ -485,6 +485,24 @@ METRIC_DIRECTION: str = "higher_better"
 # objective. Defaults to "encode_ms" (matches existing harnesses).
 TIME_COLUMN: str = "encode_ms"
 
+# Train/val/test split rule. `None` = the CANONICAL origin even/odd rule
+# (origin_split.py: {0,2,4,6,8}=train, {1,3,5}=val, {7,9}=test), which is the
+# default and the only rule for any corpus that spans both parities.
+#
+# "even_only_eval8" is the registered sub-split for a corpus that is
+# EVEN-ORIGIN BY CONSTRUCTION — one selected under `--parity 0`, where the
+# canonical val/test buckets are structurally empty and the canonical rule
+# therefore yields zero validation rows. Precedent + registration:
+# `zensim/docs/DATA_SPLITS.md` line 158 (`avifgen-2026-08-06`), owner
+# `zenmetrics/scripts/jobsys/avifgen_training_views.py`: origins ending
+# {0,2,4,6} train, origins ending {8} = the leg-side eval holdout.
+#
+# This does NOT weaken the contamination guard it sits beside — the guard
+# exists so training never sees odd-origin (val/test) content, and this rule
+# subdivides the TRAIN bucket only. It hard-errors if any origin is not
+# canonical-train, so it cannot be used to launder an odd-origin corpus.
+SPLIT_RULE: str | None = None
+
 # Per-feature pre-standardize transform. Codec configs declare a
 # {feat_name: "log" | "log1p" | "identity"} dict; the trainer applies
 # the transform once at feature-load time, BEFORE the StandardScaler
@@ -549,6 +567,7 @@ def load_codec_config(name: str, drop_features=None):
     global ZQ_TARGETS, KEEP_FEATURES, parse_config_name
     global CATEGORICAL_AXES, SCALAR_AXES, SCALAR_SENTINELS, SCALAR_DISPLAY_RANGES
     global METRIC_COLUMN, METRIC_DIRECTION, TIME_COLUMN, REACH_UNDERSHOOT, VERIFY_K
+    global SPLIT_RULE
     global FEATURE_TRANSFORMS, FEATURE_TRANSFORM_PARAMS, OUTPUT_SPECS, SPARSE_OVERRIDES
     global ANALYSIS_PROVENANCE
     mod = importlib.import_module(name)
@@ -608,6 +627,13 @@ def load_codec_config(name: str, drop_features=None):
         METRIC_DIRECTION = d
     if hasattr(mod, "TIME_COLUMN"):
         TIME_COLUMN = str(mod.TIME_COLUMN)
+    if hasattr(mod, "SPLIT_RULE") and mod.SPLIT_RULE is not None:
+        r = str(mod.SPLIT_RULE)
+        if r not in ("canonical", "even_only_eval8"):
+            raise ValueError(
+                f"SPLIT_RULE must be 'canonical' or 'even_only_eval8', got {r!r}"
+            )
+        SPLIT_RULE = None if r == "canonical" else r
     # Optional p50 RD-hugging quality-tolerance band (--reach-undershoot in main
     # overrides this). A codec config sets REACH_UNDERSHOOT > 0 for its p50
     # variant; absent / 0 = the strict p90 quality-safe default.
@@ -3880,7 +3906,31 @@ def main():
             "(zenmetrics/scripts/picker/origin_split.py) — refusing to fall back to a "
             f"leaky random split. Add scripts/picker to PYTHONPATH. ({_e})"
         )
-    _spl = [_origin_split_of(m[0]) for m in meta]
+    if SPLIT_RULE == "even_only_eval8":
+        # Registered even-only sub-split (DATA_SPLITS.md L158, avifgen-2026-08-06
+        # precedent). Every origin MUST be canonical-train — the corpus was
+        # selected under --parity 0 — and we subdivide THAT bucket only:
+        # {0,2,4,6} -> train, {8} -> val (the leg-side eval holdout). `test` stays
+        # structurally empty and is reported as such, never as a passing zero.
+        from origin_split import origin_id as _origin_id
+        _bad = sorted({m[0] for m in meta if _origin_split_of(m[0]) != "train"})
+        if _bad:
+            raise SystemExit(
+                "SPLIT_RULE='even_only_eval8' requires an even-origin-only corpus, but "
+                f"{len(_bad)} image(s) are not canonical-train (e.g. {_bad[:5]}). "
+                "This rule subdivides the TRAIN bucket; it must never be used to admit "
+                "val/test-origin content into training."
+            )
+        _spl = []
+        for m in meta:
+            oid = _origin_id(m[0])
+            _spl.append(None if oid is None else ("val" if oid[-1] == "8" else "train"))
+        sys.stderr.write(
+            "Split rule: even_only_eval8 (registered sub-split of the TRAIN bucket; "
+            "canonical val/test buckets are structurally EMPTY for this corpus)\n"
+        )
+    else:
+        _spl = [_origin_split_of(m[0]) for m in meta]
     n_unsplit = sum(1 for s in _spl if s is None)
     # dtype pinned: an EMPTY bucket (e.g. a corpus with no 7/9-digit origins, or
     # train+validate canonical splits fed without test) would otherwise be a
@@ -3900,7 +3950,14 @@ def main():
     if len(va) == 0:
         raise SystemExit(
             "0 validation rows (no origins ending in 1/3/5). Train on the full "
-            "imazen-26 corpus, not a train-biased even-only set."
+            "imazen-26 corpus, not a train-biased even-only set. (A corpus that is "
+            "even-origin BY CONSTRUCTION may declare SPLIT_RULE='even_only_eval8' "
+            "in its codec config — see DATA_SPLITS.md L158.)"
+        )
+    if SPLIT_RULE == "even_only_eval8" and len(te) != 0:
+        raise SystemExit(
+            f"even_only_eval8 produced {len(te)} test rows; the rule emits only "
+            "train/val by construction — the corpus is not what it declared."
         )
 
     Xs_tr, Xs_va = Xs[tr], Xs[va]
