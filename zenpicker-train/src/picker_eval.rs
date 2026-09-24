@@ -749,7 +749,7 @@ pub fn evaluate_fixed_baselines(ds: &PickerDataset, val_rows: &[usize]) -> Vec<F
         };
         scored_rows += 1;
         let best_bytes = best_true_v.exp();
-        if !(best_bytes > 0.0) {
+        if best_bytes.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             continue;
         }
         for (p, (_, cells)) in policies.iter().enumerate() {

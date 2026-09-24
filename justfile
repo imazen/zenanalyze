@@ -115,3 +115,9 @@ bitlock-bless:
 perf-grid out="benchmarks/perf_grid.tsv" sides="64,256,1024,2048,4096":
     PFC_BASELINE_ONLY=1 PFC_SIDES={{sides}} PFC_CROPS=3 PFC_OUT={{out}} \
       cargo run --release --features hdr --example per_feature_cost_grid
+
+# The trainer is workspace-excluded; run its full local gate explicitly.
+picker-train-check:
+    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo fmt --manifest-path zenpicker-train/Cargo.toml --check
+    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo clippy --manifest-path zenpicker-train/Cargo.toml --all-targets --locked -- -D warnings
+    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo test --manifest-path zenpicker-train/Cargo.toml --locked

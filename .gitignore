@@ -40,3 +40,6 @@ zenpredict-viz/web/bakes/
 
 # zenbench local baselines (per-machine timing state, never shared)
 .zenbench/
+
+# Workspace-excluded local trainer build output.
+zenpicker-train/target/
