@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local `zenpicker-train`: opt-in measured encode-time budgets keep byte and scalar targets on the same eligible candidate and refuse unreachable image targets (`01088356`).
+
 - **Sampling-budget scaling study** — measures whether analysis thoroughness
   should scale with image size, and what it would cost.
   `benchmarks/budget_scaling_2026-08-30.md` + the per-feature

@@ -28,12 +28,15 @@ use serde::Deserialize;
 use zenpicker_train::{
     CodecFilter, DistillManifest, GridPoint, MlpConfig, MlpPickerManifestInputs, ScalarAxisSpec,
     ScalarHeadSpec, SearchCandidate, SearchManifest, ShapingMode, TeacherParams, TrainError,
-    apply_inplace, bake_mlp_picker, bake_picker, build_picker_dataset, build_picker_dataset_with,
-    default_grid, default_zq_targets, evaluate, evaluate_fixed_baselines, evaluate_picker_bake,
-    evaluate_scalar_heads, export_teacher_dataset, fit_standardizer, fit_transforms,
-    grouped_split_picker, load_soft_targets, load_training_rows, run_search, run_search_distill,
-    standardize_all, teacher_params_fingerprint, train_ridge,
+    apply_inplace, bake_mlp_picker, bake_picker, default_grid, default_zq_targets, evaluate,
+    evaluate_fixed_baselines, evaluate_picker_bake, evaluate_scalar_heads, export_teacher_dataset,
+    fit_standardizer, fit_transforms, grouped_split_picker, load_soft_targets, load_training_rows,
+    run_search, run_search_distill, standardize_all, teacher_params_fingerprint, train_ridge,
 };
+
+#[path = "zenpicker_train/time_budget.rs"]
+mod time_budget;
+use time_budget::TimeBudget;
 
 const USAGE: &str = "\
 zenpicker-train — per-codec quality picker trainer
@@ -62,6 +65,12 @@ OPTIONS:
                             natural units (bounds/snap baked as output_specs). The
                             knob values are read from knob_tuple_json. Omit for the
                             bytes-only categorical picker. (zenjpeg axes only today.)
+
+    --encode-time-column <NAME> (mlp/eval) Measured Float64 encoding time.
+    --time-budget-column <NAME> Paired Float64 per-rendition budget, same units.
+                            Both required together; winner must meet quality AND
+                            time <= budget. No eligible candidate is an error.
+                            Eval records <bake>.eval.toml; export records <export>.toml.
 
   mlp distillation (zentrain teacher -> student recipe):
     --distill               Distill the MLP student against a per-cell HistGB
@@ -128,6 +137,8 @@ struct RecipeToml {
     python: Option<String>,
     soft_weight: Option<f64>,
     input_shaping: Option<String>,
+    encode_time_column: Option<String>,
+    time_budget_column: Option<String>,
 }
 
 struct Args {
@@ -149,6 +160,8 @@ struct Args {
     python: Option<String>,
     soft_weight: Option<f64>,
     input_shaping: Option<String>,
+    encode_time_column: Option<String>,
+    time_budget_column: Option<String>,
     eval_bake: Option<String>,
     /// `--baselines`: also report the trivial fixed-choice policies
     /// (always-one-cell / always-one-family) on the same rows and the same
@@ -179,6 +192,8 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
         python: None,
         soft_weight: None,
         input_shaping: None,
+        encode_time_column: None,
+        time_budget_column: None,
         eval_bake: None,
         baselines: None,
         scalar_axes: None,
@@ -229,6 +244,12 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
                 )
             }
             "--input-shaping" => a.input_shaping = Some(next_val(&mut it, "--input-shaping")?),
+            "--encode-time-column" => {
+                a.encode_time_column = Some(next_val(&mut it, "--encode-time-column")?)
+            }
+            "--time-budget-column" => {
+                a.time_budget_column = Some(next_val(&mut it, "--time-budget-column")?)
+            }
             "--scalar-axes" => a.scalar_axes = Some(next_val(&mut it, "--scalar-axes")?),
             "--eval-bake" => a.eval_bake = Some(next_val(&mut it, "--eval-bake")?),
             "--baselines" => a.baselines = Some(true),
@@ -272,6 +293,18 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         RecipeToml::default()
     };
 
+    let time_budget = TimeBudget::from_columns(
+        args.encode_time_column.or(recipe.encode_time_column),
+        args.time_budget_column.or(recipe.time_budget_column),
+    )?;
+    let mode = args
+        .mode
+        .or(recipe.mode)
+        .unwrap_or_else(|| "mlp".to_string());
+    if time_budget.is_some() && mode != "mlp" {
+        return Err("time-budget selection requires --mode mlp".into());
+    }
+
     let input = args
         .input
         .or(recipe.input)
@@ -290,6 +323,7 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             val_frac,
             &bake_path,
             args.baselines.unwrap_or(false),
+            time_budget.as_ref(),
         );
     }
 
@@ -298,10 +332,6 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .or(recipe.out)
         .ok_or("--out (or manifest `out`) is required")?;
     let codec = args.codec.or(recipe.codec);
-    let mode = args
-        .mode
-        .or(recipe.mode)
-        .unwrap_or_else(|| "mlp".to_string());
     let val_frac = args.val_frac.or(recipe.val_frac).unwrap_or(0.2);
 
     let input_path = Path::new(&input);
@@ -331,6 +361,7 @@ fn run(argv: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 .or(recipe.input_shaping)
                 .unwrap_or_else(|| "none".to_string()),
             args.scalar_axes,
+            time_budget.as_ref(),
         ),
         "ridge" => run_ridge(
             &input,
@@ -375,9 +406,11 @@ fn run_eval_bake(
     val_frac: f64,
     bake_path: &str,
     baselines: bool,
+    time_budget: Option<&TimeBudget>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let zq_targets = default_zq_targets();
-    let ds = build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?;
+    let ds =
+        time_budget::load_dataset(input_path, codec.as_deref(), &zq_targets, &[], time_budget)?;
     let (_train_rows, val_rows) = grouped_split_picker(&ds, val_frac);
     let bytes =
         std::fs::read(bake_path).map_err(|e| TrainError::Io(format!("read {bake_path}: {e}")))?;
@@ -386,7 +419,8 @@ fn run_eval_bake(
         bytes.len(),
         val_rows.len()
     );
-    match evaluate_picker_bake(&bytes, &ds, &val_rows).map_err(TrainError::Bake)? {
+    let evaluation = evaluate_picker_bake(&bytes, &ds, &val_rows).map_err(TrainError::Bake)?;
+    match &evaluation {
         Some(e) => {
             println!(
                 "bake={bake_path}\nargmin_acc={:.4} overhead_mean={:.4} overhead_p50={:.4} \
@@ -401,6 +435,21 @@ fn run_eval_bake(
             );
         }
         None => eprintln!("[zenpicker-train] eval-bake: no scorable held-out rows"),
+    }
+    if let Some(budget) = time_budget {
+        if evaluation.is_none() {
+            return Err("time-budget evaluation has no scorable held-out rows".into());
+        }
+        budget.write_record(
+            Path::new(&sibling(Path::new(bake_path), "eval.toml")),
+            input_path,
+            Path::new(bake_path),
+            "evaluation",
+            codec.as_deref(),
+            val_frac,
+            &ds,
+            evaluation.as_ref(),
+        )?;
     }
     if baselines {
         // The pre-declared baseline gate: the trivial fixed-choice policies,
@@ -439,6 +488,7 @@ fn run_mlp(
     distill_opts: DistillOpts,
     shaping_mode_str: String,
     scalar_axes_csv: Option<String>,
+    time_budget: Option<&TimeBudget>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let codec_family = codec.clone().unwrap_or_else(|| "unknown".to_string());
     eprintln!(
@@ -482,11 +532,13 @@ fn run_mlp(
     }
 
     let zq_targets = default_zq_targets();
-    let mut ds = if dataset_axes.is_empty() {
-        build_picker_dataset(input_path, codec.as_deref(), &zq_targets)?
-    } else {
-        build_picker_dataset_with(input_path, codec.as_deref(), &zq_targets, &dataset_axes)?
-    };
+    let mut ds = time_budget::load_dataset(
+        input_path,
+        codec.as_deref(),
+        &zq_targets,
+        &dataset_axes,
+        time_budget,
+    )?;
     eprintln!(
         "[zenpicker-train] built picker dataset: {} (image,target_zq) rows | {} image features (+zq_norm = {} inputs) | {} categorical cells",
         ds.n_rows(),
@@ -548,6 +600,18 @@ fn run_mlp(
             ds.n_cells,
             ds.n_in
         );
+        if let Some(budget) = time_budget {
+            budget.write_record(
+                Path::new(&format!("{export_path}.toml")),
+                input_path,
+                Path::new(export_path),
+                "dataset_export",
+                codec.as_deref(),
+                val_frac,
+                &ds,
+                None,
+            )?;
+        }
         return Ok(());
     }
 
@@ -723,20 +787,7 @@ fn run_mlp(
     }
 
     let input_sha = zenpicker_train::file_sha256(input_path)?;
-    let heldout = zenpicker_train::HeldoutManifest {
-        bytes_srocc: eval.bytes_panel.srocc,
-        bytes_plcc: eval.bytes_panel.plcc,
-        bytes_krocc: eval.bytes_panel.krocc,
-        bytes_pwrc: eval.bytes_panel.pwrc,
-        bytes_z_rmse: eval.bytes_panel.z_rmse,
-        bytes_or_ratio: eval.bytes_panel.or_ratio,
-        argmin_acc: eval.argmin_acc,
-        overhead_mean: eval.overhead_mean,
-        overhead_p50: eval.overhead_p50,
-        overhead_p90: eval.overhead_p90,
-        n_rows: eval.n_rows,
-        n_pairs: eval.n_pairs,
-    };
+    let heldout = time_budget::heldout_manifest(&eval);
     let outcome = bake_mlp_picker(
         &model,
         &mean,
@@ -770,6 +821,10 @@ fn run_mlp(
             scalar_heads: &scalar_heads,
         },
     )?;
+
+    if let Some(budget) = time_budget {
+        budget.annotate_training(Path::new(&outcome.manifest_path))?;
+    }
 
     eprintln!(
         "[zenpicker-train] wrote ZNPR v3 bake: {} ({} bytes)",

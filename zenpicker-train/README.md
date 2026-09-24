@@ -242,3 +242,11 @@ retain an e7 fallback, and subtract measured feature/selection overhead from
 at most 1.5 times that baseline to form the encoding budget. This API does not
 infer baselines or certify model runtime. Held-out actual encode timing and
 byte comparisons remain necessary before adopting a model.
+
+The CLI enables this policy with paired `--encode-time-column encode_ms`
+and `--time-budget-column budget_ms` options (also TOML recipe keys
+`encode_time_column` and `time_budget_column`). They apply to MLP training,
+`--export-dataset`, and `--eval-bake`; ridge mode refuses them. Training records
+the objective and column names in the existing `<bake>.toml` manifest. Evaluation
+writes `<bake>.eval.toml`, and export writes `<export>.toml`, with the input and
+artifact hashes. Omitting both options retains the unconstrained workflow.

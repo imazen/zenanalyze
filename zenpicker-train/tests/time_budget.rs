@@ -354,3 +354,205 @@ fn codec_filter_applies_before_time_value_validation() {
     );
     assert_eq!(load(&path, &[100]).unwrap().n_rows(), 1);
 }
+
+fn cli(args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_zenpicker-train"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn success(output: std::process::Output) {
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn manifest(path: &Path) -> toml::Table {
+    toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn check_policy(value: &toml::Table) {
+    assert_eq!(
+        value["formulation"].as_str(),
+        Some("min_encoded_bytes_subject_to_quality_and_encode_time_budget")
+    );
+    assert_eq!(
+        value["dataset_selection"]["encode_time_column"].as_str(),
+        Some("encode_ms")
+    );
+    assert_eq!(
+        value["dataset_selection"]["time_budget_column"].as_str(),
+        Some("budget_ms")
+    );
+}
+
+#[test]
+fn cli_requires_paired_nonempty_columns_and_mlp_mode() {
+    for args in [
+        vec!["--encode-time-column", "encode_ms"],
+        vec!["--time-budget-column", "budget_ms"],
+        vec![
+            "--encode-time-column",
+            "",
+            "--time-budget-column",
+            "budget_ms",
+        ],
+    ] {
+        let result = cli(&args);
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("must be supplied together"));
+    }
+    let result = cli(&[
+        "--mode",
+        "ridge",
+        "--encode-time-column",
+        "encode_ms",
+        "--time-budget-column",
+        "budget_ms",
+    ]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("requires --mode mlp"));
+}
+
+#[test]
+fn cli_export_train_and_eval_apply_and_record_the_same_constraint() {
+    use arrow::array::Array;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let mut data = rows();
+    let mut second = rows();
+    for r in &mut second {
+        r.image = "b_64.png";
+    }
+    data.extend(second);
+    let path = write_sweep(
+        "cli",
+        &data,
+        Some(DataType::Float64),
+        Some(DataType::Float64),
+    );
+    let dir = path.parent().unwrap();
+    let export = dir.join("teacher.parquet");
+    let bake = dir.join("budget.bin");
+    let plain = dir.join("plain.bin");
+    let recipe = dir.join("recipe.toml");
+    // Exercise TOML defaults and overriding one column via the CLI.
+    std::fs::write(
+        &recipe,
+        "encode_time_column = 'wrong'\ntime_budget_column = 'budget_ms'\n",
+    )
+    .unwrap();
+    let input = path.to_str().unwrap();
+    let out = bake.to_str().unwrap();
+    success(cli(&[
+        "--input",
+        input,
+        "--codec",
+        "zenjxl",
+        "--out",
+        out,
+        "--export-dataset",
+        export.to_str().unwrap(),
+        "--manifest",
+        recipe.to_str().unwrap(),
+        "--encode-time-column",
+        "encode_ms",
+    ]));
+    let exported = manifest(&dir.join("teacher.parquet.toml"));
+    check_policy(&exported);
+    assert_eq!(exported["codec_filter"].as_str(), Some("zenjxl"));
+    assert_eq!(
+        exported["artifact_sha256"].as_str(),
+        Some(zenpicker_train::file_sha256(&export).unwrap().as_str())
+    );
+    let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&export).unwrap())
+        .unwrap()
+        .build()
+        .unwrap();
+    let mut n = 0;
+    for batch in reader {
+        let batch = batch.unwrap();
+        let bytes = batch
+            .column_by_name("bytes_log_0")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+        for i in 0..batch.num_rows() {
+            assert!(!bytes.is_null(i));
+            assert_eq!(bytes.value(i).to_bits(), (120_f64.ln() as f32).to_bits());
+            n += 1;
+        }
+    }
+    assert_eq!(n, 2 * zenpicker_train::default_zq_targets().len());
+
+    success(cli(&[
+        "--input",
+        input,
+        "--codec",
+        "zenjxl",
+        "--out",
+        out,
+        "--hidden",
+        "2",
+        "--encode-time-column",
+        "encode_ms",
+        "--time-budget-column",
+        "budget_ms",
+    ]));
+    let trained = manifest(&dir.join("budget.bin.toml"));
+    check_policy(&trained);
+    assert_eq!(
+        trained["input_sha256"].as_str(),
+        Some(zenpicker_train::file_sha256(&path).unwrap().as_str())
+    );
+    assert_eq!(
+        trained["bake_sha256"].as_str(),
+        Some(zenpicker_train::file_sha256(&bake).unwrap().as_str())
+    );
+
+    success(cli(&[
+        "--input",
+        input,
+        "--codec",
+        "zenjxl",
+        "--eval-bake",
+        out,
+        "--val-frac",
+        "1.0",
+        "--baselines",
+        "--encode-time-column",
+        "encode_ms",
+        "--time-budget-column",
+        "budget_ms",
+    ]));
+    let evaluated = manifest(&dir.join("budget.bin.eval.toml"));
+    check_policy(&evaluated);
+    assert_eq!(evaluated["codec_filter"].as_str(), Some("zenjxl"));
+    assert_eq!(evaluated["phase"].as_str(), Some("evaluation"));
+    assert_eq!(evaluated["heldout"]["n_rows"].as_integer(), Some(n as i64));
+    assert_eq!(
+        evaluated["artifact_sha256"].as_str(),
+        trained["bake_sha256"].as_str()
+    );
+
+    success(cli(&[
+        "--input",
+        input,
+        "--codec",
+        "zenjxl",
+        "--out",
+        plain.to_str().unwrap(),
+        "--hidden",
+        "2",
+    ]));
+    let unbudgeted = manifest(&dir.join("plain.bin.toml"));
+    assert_eq!(
+        unbudgeted["formulation"].as_str(),
+        Some("within_cell_optimal_bytes_argmin")
+    );
+    assert!(!unbudgeted.contains_key("dataset_selection"));
+}

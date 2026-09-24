@@ -356,6 +356,13 @@ Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
   schema/value refusals, unreachable images, codec filtering and frozen legacy
   output. Scoped formatting and standalone all-target Clippy pass. This is
   dataset infrastructure only; no lossless picker has been trained or qualified.
+  CLI training, dataset export and evaluation share that selection policy and
+  record its objective and column names. The CLI regression reads the exported
+  targets and checks training/evaluation manifest hashes; missing paired flags
+  and ridge mode refuse. The existing builders remain unconstrained by default.
+  Owner decision: defer picker tuning/oracle qualification until the fleetwide
+  encode run. No model/default promotion is authorized.
+  Full local gate: 27 tests, scoped formatting and all-target Clippy pass.
   Use `just picker-train-check`; the crate is excluded from the root workspace.
 
 - **Feature versioning is platform-aware by construction (2026-06-20).** The
