@@ -57,6 +57,7 @@ struct RawRow {
     cell_key: String,
     score: f64,
     bytes: f64,
+    within_time_budget: bool,
     feat: Vec<f32>,
     /// This config's value for each requested scalar axis, parallel to
     /// the caller's `scalar_axes` order. `NaN` where the knob is absent
@@ -302,6 +303,47 @@ pub fn build_picker_dataset_with(
     zq_targets: &[i64],
     scalar_axes: &[ScalarAxisSpec],
 ) -> Result<PickerDataset, TrainError> {
+    build_picker_dataset_impl(path, codec_filter, zq_targets, scalar_axes, None)
+}
+
+/// Like [`crate::build_picker_dataset_with`], requiring each winning row to
+/// satisfy both quality and `encode_time <= time_budget` (inclusive).
+///
+/// Both named columns must be Float64 in the same units, with finite positive
+/// values on every codec-selected row. The budget must be identical across
+/// configs for each image identifier. Image identifiers must uniquely identify
+/// renditions (including size); do not reuse a basename across different sizes.
+/// Cells remain in the output even when no candidate fits their budget.
+/// Returns an error if any selected image/target has no eligible candidate,
+/// rather than silently excluding it. Scalar targets follow the same winner.
+///
+/// This constrains measured training candidates, not the runtime of model picks.
+/// Callers must account for feature/selection overhead in their supplied budget
+/// and independently validate held-out encode runtimes.
+pub fn build_picker_dataset_with_time_budget(
+    path: &Path,
+    codec_filter: Option<&str>,
+    zq_targets: &[i64],
+    scalar_axes: &[ScalarAxisSpec],
+    encode_time_column: &str,
+    time_budget_column: &str,
+) -> Result<PickerDataset, TrainError> {
+    build_picker_dataset_impl(
+        path,
+        codec_filter,
+        zq_targets,
+        scalar_axes,
+        Some((encode_time_column, time_budget_column)),
+    )
+}
+
+fn build_picker_dataset_impl(
+    path: &Path,
+    codec_filter: Option<&str>,
+    zq_targets: &[i64],
+    scalar_axes: &[ScalarAxisSpec],
+    time_columns: Option<(&str, &str)>,
+) -> Result<PickerDataset, TrainError> {
     let file = File::open(path).map_err(|e| TrainError::Io(format!("{}: {e}", path.display())))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| TrainError::Parquet(e.to_string()))?;
@@ -343,6 +385,25 @@ pub fn build_picker_dataset_with(
         column: "image_basename|image_path".into(),
     })?;
 
+    let time_indices = time_columns
+        .map(|(encode, budget)| {
+            let index = |name: &str| {
+                let i = col_idx(name).ok_or_else(|| TrainError::MissingTargetColumn {
+                    column: name.to_string(),
+                })?;
+                if schema.field(i).data_type() != &arrow::datatypes::DataType::Float64 {
+                    return Err(TrainError::Parquet(format!(
+                        "time column {name:?} must be Float64"
+                    )));
+                }
+                Ok(i)
+            };
+            Ok::<_, TrainError>((index(encode)?, index(budget)?))
+        })
+        .transpose()?;
+    let mut times = Vec::new();
+    let mut budgets = Vec::new();
+
     let mut feat_idx: Vec<usize> = Vec::with_capacity(feature_names.len());
     for n in &feature_names {
         feat_idx.push(col_idx(n).expect("feature col from same schema"));
@@ -376,6 +437,14 @@ pub fn build_picker_dataset_with(
             .ok_or_else(|| TrainError::Parquet("score_zensim not numeric".into()))?;
         push_numeric(&batch, bytes_idx, &mut bytes_v)
             .ok_or_else(|| TrainError::Parquet("encoded_bytes not numeric".into()))?;
+        if let Some((ti, bi)) = time_indices {
+            // The schema check above guarantees Float64; preserve nulls as NaN
+            // for row-specific diagnostics after codec filtering.
+            push_numeric(&batch, ti, &mut times)
+                .ok_or_else(|| TrainError::Parquet("encode time must be Float64".into()))?;
+            push_numeric(&batch, bi, &mut budgets)
+                .ok_or_else(|| TrainError::Parquet("time budget must be Float64".into()))?;
+        }
         for (slot, &ci) in feat_idx.iter().enumerate() {
             push_numeric(&batch, ci, &mut feat_cols[slot])
                 .ok_or_else(|| TrainError::Parquet(format!("feature col {ci} not numeric")))?;
@@ -390,6 +459,7 @@ pub fn build_picker_dataset_with(
     // cell index independent of row order.
     let mut cell_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let want = codec_filter.map(|c| c.to_ascii_lowercase());
+    let mut image_budgets: BTreeMap<&str, f64> = BTreeMap::new();
     for r in 0..total {
         if let (Some(w), Some(ci)) = (&want, codec_idx) {
             let _ = ci;
@@ -398,9 +468,36 @@ pub fn build_picker_dataset_with(
                 continue;
             }
         }
+        let within_time_budget = if let Some((encode, budget)) = time_columns {
+            for (name, value) in [(encode, times[r]), (budget, budgets[r])] {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(TrainError::Parquet(format!(
+                        "row {r}, image {:?}: {name:?} must be finite and positive, got {value}",
+                        images[r]
+                    )));
+                }
+            }
+            if let Some(previous) = image_budgets.insert(&images[r], budgets[r])
+                && previous != budgets[r]
+            {
+                return Err(TrainError::Parquet(format!(
+                    "row {r}, image {:?}: inconsistent time budget {previous} versus {}",
+                    images[r], budgets[r]
+                )));
+            }
+            times[r] <= budgets[r]
+        } else {
+            true
+        };
         let s = scores[r];
         let b = bytes_v[r];
         if !s.is_finite() || !b.is_finite() || b <= 0.0 {
+            if time_columns.is_some() {
+                return Err(TrainError::Parquet(format!(
+                    "row {r}, image {:?}: invalid score or encoded_bytes in time-budget dataset",
+                    images[r]
+                )));
+            }
             continue;
         }
         let mut feat: Vec<f32> = Vec::with_capacity(feat_idx.len());
@@ -414,6 +511,12 @@ pub fn build_picker_dataset_with(
             feat.push(v as f32);
         }
         if !ok {
+            if time_columns.is_some() {
+                return Err(TrainError::Parquet(format!(
+                    "row {r}, image {:?}: invalid feature in time-budget dataset",
+                    images[r]
+                )));
+            }
             continue;
         }
         let cell_key = cell_key_from_knob(&knobs[r], scalar_axes);
@@ -424,6 +527,7 @@ pub fn build_picker_dataset_with(
             cell_key,
             score: s,
             bytes: b,
+            within_time_budget,
             feat,
             scalar_vals: scalars_from_knob(&knobs[r], scalar_axes),
         });
@@ -475,7 +579,7 @@ pub fn build_picker_dataset_with(
             let mut cell_reach = vec![false; n_cells];
             let mut cell_scalar = vec![vec![f64::NAN; n_cells]; n_axes];
             for rr in rows {
-                if rr.score >= zq as f64 {
+                if rr.score >= zq as f64 && rr.within_time_budget {
                     let c = cell_index[rr.cell_key.as_str()];
                     if rr.bytes < cell_min_bytes[c] {
                         cell_min_bytes[c] = rr.bytes;
@@ -490,6 +594,11 @@ pub fn build_picker_dataset_with(
             // unreachable for this image at the sampled q ladder (the
             // ceiling-aware skip in zentrain's build_dataset).
             if !cell_reach.iter().any(|&r| r) {
+                if time_columns.is_some() {
+                    return Err(TrainError::Degenerate(format!(
+                        "image {image:?}, target {zq}: no candidate reaches quality within time budget"
+                    )));
+                }
                 continue;
             }
             // Emit the row.

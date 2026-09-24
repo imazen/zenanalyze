@@ -349,6 +349,15 @@ Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
 
 ## Investigation Notes
 
+- **2026-09-24: opt-in picker time budgets.** The shared Rust dataset loader
+  now supports `build_picker_dataset_with_time_budget`: inclusive measured-time
+  eligibility, per-image budget consistency, and scalar targets from the same
+  min-byte eligible row. Five tabular policy tests cover boundary selection,
+  schema/value refusals, unreachable images, codec filtering and frozen legacy
+  output. Scoped formatting and standalone all-target Clippy pass. This is
+  dataset infrastructure only; no lossless picker has been trained or qualified.
+  Use `just picker-train-check`; the crate is excluded from the root workspace.
+
 - **Feature versioning is platform-aware by construction (2026-06-20).** The
   `versioning` golden tripwire surfaced that 9 SIMD-reduced statistical features
   have per-SIMD-tier value divergence (6 at <0.3 % from f64 reduction order; 3

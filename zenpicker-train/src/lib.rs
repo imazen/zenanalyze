@@ -69,7 +69,8 @@ pub use mlp::{Mlp, MlpConfig, train_mlp};
 pub use model::{RidgeModel, Standardizer, train_ridge};
 pub use pareto_dataset::{
     PickerDataset, ScalarAxisSpec, build_picker_dataset, build_picker_dataset_with,
-    default_zq_targets, fit_standardizer, grouped_split_picker, standardize_all,
+    build_picker_dataset_with_time_budget, default_zq_targets, fit_standardizer,
+    grouped_split_picker, standardize_all,
 };
 pub use parquet_input::{CodecFilter, TrainingData, grouped_split, load_training_rows};
 pub use picker_eval::{

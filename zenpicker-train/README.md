@@ -223,3 +223,22 @@ F32 ZNPR v3, with the input standardizer folded into the bake's
 - **Cross-codec `MetaPicker` auto-regeneration** when a per-codec bake
   updates.
 - **Per-band panel gate** + ship/no-ship verdict integration.
+
+## Measured encode-time budgets
+
+`zenpicker_train::build_picker_dataset_with_time_budget` adds an opt-in
+constraint to the existing dataset builder: the winning candidate must meet
+quality and have measured encode time less than or equal to its budget.
+Both time columns must be finite, positive Float64 values in matching units.
+Budgets must agree across all configurations of an image/rendition. Give each
+rendition a unique image identifier, including its size. Codec filtering happens
+before value validation. Invalid selected rows and image/target pairs with no
+eligible candidate return errors; over-budget cells retain their labels.
+Bytes and scalar targets always come from the same eligible row.
+The existing builders retain their quality-only selection and ceiling skips.
+
+For the JXL lossless picker, supply a measured e7 baseline for each rendition,
+retain an e7 fallback, and subtract measured feature/selection overhead from
+at most 1.5 times that baseline to form the encoding budget. This API does not
+infer baselines or certify model runtime. Held-out actual encode timing and
+byte comparisons remain necessary before adopting a model.
