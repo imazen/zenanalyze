@@ -82,6 +82,13 @@ experimental = []
 # tier entirely. Codecs that handle PQ / HLG / 10-bit / wide-gamut
 # content opt in. See `tier_depth` for the implementation.
 hdr = []
+# Dev-only: enables archmage's `testable_dispatch` so the tier benches can
+# disable a tier the build guarantees at compile time (NEON on aarch64, or any
+# tier under `-C target-cpu=native`). Never put `testable_dispatch` in
+# `[dependencies]`: Cargo unifies features, so it would reach every downstream
+# build and turn each archmage `summon()` there, even the x86-64 baseline one,
+# into a cache read.
+_dev = ["archmage/testable_dispatch"]
 
 [dependencies]
 # The frozen, version-unifying feature contract (Request/Offer). Optional (gated
@@ -99,7 +106,7 @@ hdr = []
 zenanalyze-api = { version = "0.1.1", path = "zenanalyze-api", optional = true }
 zenpixels = { version = ">=0.2.14, <0.4.0", default-features = false, features = ["imgref"] }
 zenpixels-convert = { version = ">=0.2.14, <0.4.0", default-features = false }
-archmage = { version = "0.9.27", features = ["macros", "avx512", "testable_dispatch"] }
+archmage = { version = "0.9.27", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.27", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,
 # `bgra_to_rgb`, etc.) via `archmage::incant!` — used by the

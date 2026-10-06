@@ -6,9 +6,10 @@
 //! any architecture — a kernel slower than its own scalar fallback would be
 //! invisible. (The same gap in linear-srgb was hiding a real regression.)
 //!
-//! Run: `cargo bench --bench tier_isolation`
-//! Do NOT build with `-C target-cpu=native`: that pins the tier at compile
-//! time, after which it cannot be disabled and this bench skips rather than
+//! Run: `cargo bench --bench tier_isolation --features _dev`
+//! `_dev` enables archmage's `testable_dispatch`. Without it, a tier the build
+//! guarantees at compile time (NEON on aarch64, or any tier under
+//! `-C target-cpu=native`) cannot be disabled, and this bench skips rather than
 //! silently reporting the SIMD path under both labels.
 
 use zenanalyze::feature::{AnalysisQuery, FeatureSet};

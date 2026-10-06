@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > below carries the same not-yet-released work and the verified break list;
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
+### Fixed
+
+- The library no longer enables `archmage/testable_dispatch` for its consumers. Cargo unifies features, so it reached every downstream build and turned each archmage `summon()` there into a cache read, even for the x86-64 baseline token. The tier benches get it from the new dev-only `_dev` feature: `cargo bench --bench tier_isolation --features _dev`.
+
 ### Added
 
 - Local `zenpicker-train`: opt-in measured encode-time budgets keep byte and scalar targets on the same eligible candidate and refuse unreachable image targets (`01088356`).

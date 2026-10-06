@@ -14,9 +14,10 @@
 //! autovectorized by LLVM. A ratio near 1.00 does NOT mean SIMD is missing —
 //! it means both arms compiled to equivalent work.
 //!
-//! Run: `cargo bench --bench tier_kernels`
-//! Do NOT pass `-C target-cpu=native`: that pins the tier at compile time,
-//! after which it cannot be disabled and this bench skips rather than
+//! Run: `cargo bench --bench tier_kernels --features _dev`
+//! `_dev` enables archmage's `testable_dispatch`. Without it, a tier the build
+//! guarantees at compile time (NEON on aarch64, or any tier under
+//! `-C target-cpu=native`) cannot be disabled, and this bench skips rather than
 //! silently reporting the SIMD path under both labels.
 
 use zenanalyze::__bench_sets as sets;
