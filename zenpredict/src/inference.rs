@@ -124,13 +124,7 @@ fn run_node(
             // Zero-variance columns: sklearn's `_handle_zeros_in_scale`
             // replaces `scale=0` with `1.0` so the column passes through as
             // `(x - mean)`. Mirror that defensively.
-            let mean = model.scaler_mean();
-            let scale = model.scaler_scale();
-            for i in 0..dst.len() {
-                let s = scale[i];
-                let safe_s = if s == 0.0 { 1.0 } else { s };
-                dst[i] = (features[i] - mean[i]) / safe_s;
-            }
+            scale_inputs(features, model.scaler_mean(), model.scaler_scale(), dst);
         }
         NodeKind::Dense { input, ref layer } => {
             let view = model.materialize_offsets(layer);
@@ -223,6 +217,19 @@ fn init_bias(dst: &mut [f32], biases: &[f32], has_bias: bool) {
         dst.copy_from_slice(biases);
     } else {
         dst.fill(0.0);
+    }
+}
+
+/// `dst[i] = (x[i] - mean[i]) / scale[i]`, `scale == 0` treated as 1.
+/// Subtraction and division are correctly rounded per lane, so the
+/// `#[autoversion]` variant (8-wide under `+avx2`) is bit-identical to the
+/// scalar loop. Zipped iterators keep bounds checks out of the loop so it
+/// vectorizes at all.
+#[cfg_attr(feature = "simd", autoversion(v3))]
+fn scale_inputs(x: &[f32], mean: &[f32], scale: &[f32], dst: &mut [f32]) {
+    for (((d, &v), &m), &s) in dst.iter_mut().zip(x).zip(mean).zip(scale) {
+        let safe_s = if s == 0.0 { 1.0 } else { s };
+        *d = (v - m) / safe_s;
     }
 }
 
@@ -646,6 +653,38 @@ mod simd_parity_tests {
             mul_elementwise(&a, &b, &mut x);
             mul_elementwise_scalar(st, &a, &b, &mut y);
             assert_bits(&x, &y, "mul", len, 1, tier);
+        }
+    }
+
+    /// The Input-node scaler: dispatcher vs scalar, bit for bit, including
+    /// zero scales (treated as 1) and special values.
+    #[test]
+    fn scaler_dispatcher_agrees_bitwise() {
+        use super::{scale_inputs, scale_inputs_scalar};
+        let tier = if archmage::X64V3Token::summon().is_some() {
+            "v3 (AVX2+FMA)"
+        } else {
+            "scalar"
+        };
+        let st = ScalarToken::summon().expect("ScalarToken is always available");
+        let mut rng = Rng(0x5ca1_e000_0000_0001);
+        for len in [1usize, 7, 8, 9, 31, 228, 944] {
+            let x: Vec<f32> = (0..len)
+                .map(|i| match i % 9 {
+                    0 => f32::NAN,
+                    1 => f32::INFINITY,
+                    2 => -0.0,
+                    _ => rng.next_f32(),
+                })
+                .collect();
+            let mean: Vec<f32> = (0..len).map(|_| rng.next_f32()).collect();
+            let scale: Vec<f32> = (0..len)
+                .map(|i| if i % 5 == 0 { 0.0 } else { rng.next_f32() })
+                .collect();
+            let (mut a, mut b) = (vec![0.0f32; len], vec![0.0f32; len]);
+            scale_inputs(&x, &mean, &scale, &mut a);
+            scale_inputs_scalar(st, &x, &mean, &scale, &mut b);
+            assert_bits(&a, &b, "scaler", len, 1, tier);
         }
     }
 

@@ -328,3 +328,43 @@ pub fn compare(bytes: &[u8], n: usize, seed: u64) -> Compared {
         mismatches,
     }
 }
+
+/// A two-layer chain baked with the old composer (`dtype` 0=f32 1=f16
+/// 2=i8), LeakyReLU hidden, Identity out — the zenpredict-bake `predict`
+/// bench shapes.
+pub fn bench_shape(n_in: usize, n_hidden: usize, n_out: usize, dtype: u8, seed: u64) -> Vec<u8> {
+    use zp_old::{Activation, WeightDtype};
+    use zpb_old::{BakeLayer, BakeRequest, bake};
+    let mut rng = Rng(seed | 1);
+    let dt = match dtype {
+        0 => WeightDtype::F32,
+        1 => WeightDtype::F16,
+        _ => WeightDtype::I8,
+    };
+    let mean: Vec<f32> = (0..n_in).map(|_| rng.range(-1.0, 1.0)).collect();
+    let scale: Vec<f32> = (0..n_in).map(|_| rng.range(0.5, 1.5)).collect();
+    let w0: Vec<f32> = (0..n_in * n_hidden).map(|_| rng.range(-0.3, 0.3)).collect();
+    let w1: Vec<f32> = (0..n_hidden * n_out)
+        .map(|_| rng.range(-0.3, 0.3))
+        .collect();
+    let (b0, b1) = (vec![0.0; n_hidden], vec![0.0; n_out]);
+    let layers = [
+        BakeLayer {
+            in_dim: n_in,
+            out_dim: n_hidden,
+            activation: Activation::LeakyRelu,
+            dtype: dt,
+            weights: &w0,
+            biases: &b0,
+        },
+        BakeLayer {
+            in_dim: n_hidden,
+            out_dim: n_out,
+            activation: Activation::Identity,
+            dtype: dt,
+            weights: &w1,
+            biases: &b1,
+        },
+    ];
+    bake(&BakeRequest::new(0, 0, &mean, &scale, &layers)).expect("bake shape")
+}
