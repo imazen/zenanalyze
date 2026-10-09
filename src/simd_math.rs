@@ -89,7 +89,7 @@ pub(crate) fn rsqrt_stable_into(token: Token, x: &[f32], out: &mut [f32]) {
     for c in 0..n {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
-        let xv = f32x8::load(token, arr);
+        let xv = f32x8::load_t(token, arr);
         let mut buf = [0.0f32; 8];
         rsqrt_stable!(f32x8, token, xv).store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
@@ -105,7 +105,7 @@ pub(crate) fn rsqrt_nt_into(token: Token, x: &[f32], out: &mut [f32]) {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
         let mut buf = [0.0f32; 8];
-        f32x8::load(token, arr).rsqrt().store(&mut buf);
+        f32x8::load_t(token, arr).rsqrt().store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
     }
 }
@@ -118,7 +118,7 @@ pub(crate) fn rsqrt_hw_into(token: Token, x: &[f32], out: &mut [f32]) {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
         let mut buf = [0.0f32; 8];
-        f32x8::load(token, arr).rsqrt_approx().store(&mut buf);
+        f32x8::load_t(token, arr).rsqrt_approx().store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
     }
 }
@@ -140,7 +140,7 @@ pub(crate) fn magnitude_methods(
     for c in 0..chunks {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
-        let xv = f32x8::load(token, arr);
+        let xv = f32x8::load_t(token, arr);
         let mut buf = [0.0f32; 8];
 
         (xv * xv.rsqrt_approx()).store(&mut buf);
@@ -166,7 +166,7 @@ pub(crate) fn log2_lowp_into(token: Token, x: &[f32], out: &mut [f32]) {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
         let mut buf = [0.0f32; 8];
-        f32x8::load(token, arr).log2_lowp().store(&mut buf);
+        f32x8::load_t(token, arr).log2_lowp().store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
     }
 }
@@ -180,7 +180,7 @@ pub(crate) fn log2_midp_into(token: Token, x: &[f32], out: &mut [f32]) {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
         let mut buf = [0.0f32; 8];
-        f32x8::load(token, arr).log2_midp().store(&mut buf);
+        f32x8::load_t(token, arr).log2_midp().store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
     }
 }
@@ -195,7 +195,7 @@ pub(crate) fn ln_midp_into(token: Token, x: &[f32], out: &mut [f32]) {
         let off = c * 8;
         let arr: &[f32; 8] = x[off..off + 8].try_into().unwrap();
         let mut buf = [0.0f32; 8];
-        f32x8::load(token, arr).ln_midp().store(&mut buf);
+        f32x8::load_t(token, arr).ln_midp().store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);
     }
 }

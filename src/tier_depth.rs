@@ -211,15 +211,15 @@ fn eotf_slice(tf_kind: TransferFunction, values: &mut [f32]) {
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn nits_bin_value_slice(token: Token, nits: &[f32], out: &mut [f32]) {
     const SCALE: f32 = HIST_BINS as f32 / 14.0;
-    let scale = f32x8::splat(token, SCALE);
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::splat(token, 0.0);
+    let scale = f32x8::splat_t(token, SCALE);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::splat_t(token, 0.0);
     let n = nits.len();
     let nchunks = n / 8;
     for c in 0..nchunks {
         let off = c * 8;
         let arr: &[f32; 8] = nits[off..off + 8].try_into().unwrap();
-        let v = (f32x8::load(token, arr).max(zero) + one).log2_midp() * scale;
+        let v = (f32x8::load_t(token, arr).max(zero) + one).log2_midp() * scale;
         let mut buf = [0.0f32; 8];
         v.store(&mut buf);
         out[off..off + 8].copy_from_slice(&buf);

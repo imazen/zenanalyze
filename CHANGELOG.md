@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Migrate analyzer and SIMD-example constructors to magetypes 0.9.30 token-taking `_t` forms, preserving feature bits at v4/v3/scalar. See [the qualification record](benchmarks/magetypes030_2026-10-09.md).
 - **zenpredict-viz refuses ZNPR v4 graph bakes.** zenpredict now loads
   v4 op graphs, and the viz walks `layers()` as a feature-reading chain
   with full biases, so a v4 bake panicked (`parse_bake`,

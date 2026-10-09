@@ -24,12 +24,12 @@ fn leak<T>(v: Vec<T>) -> &'static [T] {
 // ---- f32x8: 4 accumulators, f32 lanes reduced to f64 at the end ----
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn var_f32_simd(token: Token, p: &[f32]) -> f64 {
-    let mut s = [f32x8::zero(token); 4];
-    let mut sq = [f32x8::zero(token); 4];
+    let mut s = [f32x8::zero_t(token); 4];
+    let mut sq = [f32x8::zero_t(token); 4];
     let mut it = p.chunks_exact(32);
     for c in &mut it {
         for k in 0..4 {
-            let v = f32x8::from_slice(token, &c[k * 8..k * 8 + 8]);
+            let v = f32x8::from_slice_t(token, &c[k * 8..k * 8 + 8]);
             s[k] += v;
             sq[k] = v.mul_add(v, sq[k]);
         }
@@ -52,14 +52,14 @@ fn var_f32_simd(token: Token, p: &[f32]) -> f64 {
 #[magetypes(define(i32x8), v4, v3, neon, wasm128, scalar)]
 fn var_i32_simd(token: Token, p: &[i32]) -> i64 {
     const FLUSH: usize = 120;
-    let mut s = [i32x8::zero(token); 4];
-    let mut sq = [i32x8::zero(token); 4];
+    let mut s = [i32x8::zero_t(token); 4];
+    let mut sq = [i32x8::zero_t(token); 4];
     let (mut st, mut sqt) = (0i64, 0i64);
     let mut cnt = 0usize;
     let mut it = p.chunks_exact(32);
     for c in &mut it {
         for k in 0..4 {
-            let v = i32x8::from_slice(token, &c[k * 8..k * 8 + 8]);
+            let v = i32x8::from_slice_t(token, &c[k * 8..k * 8 + 8]);
             s[k] += v;
             sq[k] += v * v;
         }
@@ -72,8 +72,8 @@ fn var_i32_simd(token: Token, p: &[i32]) -> i64 {
                 for lane in sq[k].to_array() {
                     sqt += lane as i64;
                 }
-                s[k] = i32x8::zero(token);
-                sq[k] = i32x8::zero(token);
+                s[k] = i32x8::zero_t(token);
+                sq[k] = i32x8::zero_t(token);
             }
             cnt = 0;
         }

@@ -335,7 +335,24 @@ runtime branch).
 
 ## Known Bugs
 
-_None currently open._
+- **2026-10-09 — magetypes 0.9.30 constructor deprecations: FIXED locally.**
+  The old analyzer calls produced 201 denied diagnostics per compiled target
+  from 153 distinct source calls; eight more calls in `bench_repr_simd` were
+  exposed by all-targets clippy. They now use token-taking `_t` spellings with
+  unchanged arguments/arithmetic. The magetypes minimum is 0.9.30. All 18,216
+  before/after typed values over the existing 26 golden images, both light
+  modes and v4/v3/scalar match exactly; workspace tests and CI clippy pass.
+  See [the migration gate record](benchmarks/magetypes030_2026-10-09.md).
+
+- **2026-10-09 — forced-scalar golden tolerance: OPEN, pre-existing.**
+  On the unchanged main kernels with magetypes 0.9.30, forced scalar fails
+  `patch_fraction[16]`, `chroma_luma_covariance_cb[3]`,
+  `chroma_luma_covariance_cr[3]` and `spectral_slope_y[9]` against the
+  existing x86 golden. The identical failure remains after the name-only
+  migration, while v4/v3 and ordinary workspace tests pass. No expectation
+  was relaxed or golden re-blessed. This is separate from the within-tier
+  before/after bit-identity gate; ARM/WASM were not measured in this lane.
+
 
 Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
 - The SIMD edge kernel computed the gradient magnitude with the hardware

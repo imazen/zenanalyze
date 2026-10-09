@@ -362,12 +362,12 @@ fn process_row_group_simd<R: ChunkInput>(
     scratch: &mut RowGroupScratch,
 ) -> RowGroupStats {
     // Constants for the boost factor.
-    let y_max_v = f32x8::splat(token, 9.0 * 255.0);
-    let y_max_x2_v = f32x8::splat(token, 2.0 * 9.0 * 255.0);
-    let y_half_v = f32x8::splat(token, 9.0 * 255.0 / 2.0);
-    let inv_32_v = f32x8::splat(token, 1.0 / 32.0);
-    let inv_128_v = f32x8::splat(token, 1.0 / 128.0);
-    let zero_v = f32x8::zero(token);
+    let y_max_v = f32x8::splat_t(token, 9.0 * 255.0);
+    let y_max_x2_v = f32x8::splat_t(token, 2.0 * 9.0 * 255.0);
+    let y_half_v = f32x8::splat_t(token, 9.0 * 255.0 / 2.0);
+    let inv_32_v = f32x8::splat_t(token, 1.0 / 32.0);
+    let inv_128_v = f32x8::splat_t(token, 1.0 / 128.0);
+    let zero_v = f32x8::zero_t(token);
 
     let mut sum_cb_h_v = zero_v;
     let mut sum_cr_h_v = zero_v;
@@ -463,21 +463,21 @@ fn process_row_group_simd<R: ChunkInput>(
         // Overlapping f32x8 loads from the deinterleaved scratch.
         // a/b/c on row0: cols [s..s+8], [s+1..s+9], [s+2..s+10].
         // a1/a2 on row1/row2: cols [s..s+8].
-        let a_y_v = f32x8::load(token, (&y0[s..s + 8]).try_into().unwrap());
-        let b_y_v = f32x8::load(token, (&y0[s + 1..s + 9]).try_into().unwrap());
-        let c_y_v = f32x8::load(token, (&y0[s + 2..s + 10]).try_into().unwrap());
-        let a_cb_v = f32x8::load(token, (&cb0[s..s + 8]).try_into().unwrap());
-        let b_cb_v = f32x8::load(token, (&cb0[s + 1..s + 9]).try_into().unwrap());
-        let c_cb_v = f32x8::load(token, (&cb0[s + 2..s + 10]).try_into().unwrap());
-        let a_cr_v = f32x8::load(token, (&cr0[s..s + 8]).try_into().unwrap());
-        let b_cr_v = f32x8::load(token, (&cr0[s + 1..s + 9]).try_into().unwrap());
-        let c_cr_v = f32x8::load(token, (&cr0[s + 2..s + 10]).try_into().unwrap());
-        let a1_y_v = f32x8::load(token, (&y1[s..s + 8]).try_into().unwrap());
-        let a1_cb_v = f32x8::load(token, (&cb1[s..s + 8]).try_into().unwrap());
-        let a1_cr_v = f32x8::load(token, (&cr1[s..s + 8]).try_into().unwrap());
-        let a2_y_v = f32x8::load(token, (&y2[s..s + 8]).try_into().unwrap());
-        let a2_cb_v = f32x8::load(token, (&cb2[s..s + 8]).try_into().unwrap());
-        let a2_cr_v = f32x8::load(token, (&cr2[s..s + 8]).try_into().unwrap());
+        let a_y_v = f32x8::load_t(token, (&y0[s..s + 8]).try_into().unwrap());
+        let b_y_v = f32x8::load_t(token, (&y0[s + 1..s + 9]).try_into().unwrap());
+        let c_y_v = f32x8::load_t(token, (&y0[s + 2..s + 10]).try_into().unwrap());
+        let a_cb_v = f32x8::load_t(token, (&cb0[s..s + 8]).try_into().unwrap());
+        let b_cb_v = f32x8::load_t(token, (&cb0[s + 1..s + 9]).try_into().unwrap());
+        let c_cb_v = f32x8::load_t(token, (&cb0[s + 2..s + 10]).try_into().unwrap());
+        let a_cr_v = f32x8::load_t(token, (&cr0[s..s + 8]).try_into().unwrap());
+        let b_cr_v = f32x8::load_t(token, (&cr0[s + 1..s + 9]).try_into().unwrap());
+        let c_cr_v = f32x8::load_t(token, (&cr0[s + 2..s + 10]).try_into().unwrap());
+        let a1_y_v = f32x8::load_t(token, (&y1[s..s + 8]).try_into().unwrap());
+        let a1_cb_v = f32x8::load_t(token, (&cb1[s..s + 8]).try_into().unwrap());
+        let a1_cr_v = f32x8::load_t(token, (&cr1[s..s + 8]).try_into().unwrap());
+        let a2_y_v = f32x8::load_t(token, (&y2[s..s + 8]).try_into().unwrap());
+        let a2_cb_v = f32x8::load_t(token, (&cb2[s..s + 8]).try_into().unwrap());
+        let a2_cr_v = f32x8::load_t(token, (&cr2[s..s + 8]).try_into().unwrap());
 
         // Horizontal: (a, b, c) — center b. 2nd diff = a + c − 2b.
         let cb_h = a_cb_v + c_cb_v - b_cb_v - b_cb_v;

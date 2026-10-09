@@ -140,3 +140,29 @@ picker-train-check:
     TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo fmt --manifest-path zenpicker-train/Cargo.toml --check
     TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo clippy --manifest-path zenpicker-train/Cargo.toml --all-targets --locked -- -D warnings
     TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo test --manifest-path zenpicker-train/Cargo.toml --locked
+
+# Exact per-tier dump over the existing golden test corpus; fresh single-test process.
+# Output is separate from versioning_golden.tsv and does not bless expectations.
+magetypes030-dump tier output:
+    ZENANALYZE_FEATURE_DUMP="{{output}}" ZENANALYZE_FEATURE_DUMP_TIER="{{tier}}" cargo test -p zenanalyze --features experimental,hdr,_dev --lib versioning::tests::golden_is_stable -- --exact --nocapture --test-threads=1
+
+# Four analyzer CI matrix feature sets plus its api,hdr clippy step.
+magetypes030-clippy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for features in '' experimental hdr experimental,hdr; do
+        cargo clippy --no-default-features --features "$features" --all-targets -- -D warnings
+    done
+    cargo clippy --features api,hdr --all-targets -- -D warnings
+    cargo clippy --features experimental,hdr --all-targets -- -D warnings
+    cargo clippy -p zenanalyze-api --all-targets -- -D warnings
+    cargo clippy -p zenpicker --features api --all-targets -- -D warnings
+    cargo clippy -p zenpicker --all-targets -- -D warnings
+    cargo clippy -p zenpredict --no-default-features --features std,advanced --all-targets -- -D warnings
+    cargo clippy -p zenpredict-bake --all-features --all-targets -- -D warnings
+    cargo clippy -p zenpredict-viz --all-targets --features onnx-export,feature-catalog -- -D warnings
+    cargo clippy -p zenanalyze --features experimental,hdr,_dev --all-targets -- -D warnings
+
+# Run every workspace test with the real external model fixtures explicitly supplied.
+magetypes030-workspace-test metapicker bake:
+    ZENPICKER_METAPICKER_V1_BAKE="{{metapicker}}" ZENPREDICT_VIZ_BAKES="{{bake}}" cargo test --workspace --features hdr,zenpredict/advanced,zenpredict-bake/fit-yj,zenpredict-viz/onnx-export,zenpredict-viz/feature-catalog
