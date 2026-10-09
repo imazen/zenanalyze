@@ -67,6 +67,9 @@ parquet = { version = "59.2.0", default-features = false, features = ["arrow", "
 arrow = { version = "59.2.0", default-features = false, optional = true }
 
 [dev-dependencies]
+# Reference evaluator in tests/graph.rs: the graph runtime's Exp / Softplus
+# call libm on every build, so the reference must too to compare bits.
+libm = { version = "0.2.16", default-features = false }
 rand = { version = "0.10.2", default-features = false, features = ["std", "std_rng"] }
 zenbench = "0.1.8"
 # Lifecycle / safety / output-specs integration tests cover the

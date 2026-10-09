@@ -604,6 +604,51 @@ mod simd_parity_tests {
         assert_bits(&a, &b, "f32/special", in_dim, out_dim, tier);
     }
 
+    /// The graph executor's elementwise Add / Mul: the dispatcher (vector
+    /// under `+avx2`) and the scalar variant must agree bit for bit on
+    /// random, tail-length and special-value operands.
+    #[test]
+    fn elementwise_dispatcher_agrees_bitwise() {
+        use super::{add_elementwise, add_elementwise_scalar};
+        use super::{mul_elementwise, mul_elementwise_scalar};
+        let tier = if archmage::X64V3Token::summon().is_some() {
+            "v3 (AVX2+FMA)"
+        } else {
+            "scalar"
+        };
+        let st = ScalarToken::summon().expect("ScalarToken is always available");
+        let specials = [
+            0.0f32,
+            -0.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            f32::MIN_POSITIVE / 4.0,
+            f32::MAX,
+            -f32::MAX,
+        ];
+        let mut rng = Rng(0x00e1_e3e4_7a5e_0001);
+        for len in [1usize, 3, 7, 8, 9, 15, 16, 17, 31, 64, 129, 944] {
+            let a: Vec<f32> = (0..len)
+                .map(|i| {
+                    if i % 5 == 0 {
+                        specials[(i / 5) % specials.len()]
+                    } else {
+                        rng.next_f32()
+                    }
+                })
+                .collect();
+            let b: Vec<f32> = (0..len).map(|_| rng.next_f32()).collect();
+            let (mut x, mut y) = (vec![0.0f32; len], vec![0.0f32; len]);
+            add_elementwise(&a, &b, &mut x);
+            add_elementwise_scalar(st, &a, &b, &mut y);
+            assert_bits(&x, &y, "add", len, 1, tier);
+            mul_elementwise(&a, &b, &mut x);
+            mul_elementwise_scalar(st, &a, &b, &mut y);
+            assert_bits(&x, &y, "mul", len, 1, tier);
+        }
+    }
+
     fn assert_bits(a: &[f32], b: &[f32], what: &str, in_dim: usize, out_dim: usize, tier: &str) {
         assert_eq!(a.len(), b.len());
         for (k, (x, y)) in a.iter().zip(b.iter()).enumerate() {
@@ -687,5 +732,107 @@ mod f16_tests {
         check(0xfc00, f32::NEG_INFINITY, "-inf");
         let nan = f16_bits_to_f32(0x7e00);
         assert!(nan.is_nan(), "0x7e00 should be NaN");
+    }
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::{apply_activation, exp_clamped, softplus};
+    use crate::model::{Activation, EXP_INPUT_CLAMP, SOFTPLUS_THRESHOLD};
+
+    #[test]
+    fn exp_is_clamped_and_finite() {
+        let top = libm::expf(EXP_INPUT_CLAMP);
+        let bottom = libm::expf(-EXP_INPUT_CLAMP);
+        assert!(top.is_finite() && bottom > 0.0);
+        assert_eq!(exp_clamped(f32::INFINITY).to_bits(), top.to_bits());
+        assert_eq!(exp_clamped(f32::MAX).to_bits(), top.to_bits());
+        assert_eq!(exp_clamped(1.0e6).to_bits(), top.to_bits());
+        assert_eq!(exp_clamped(f32::NEG_INFINITY).to_bits(), bottom.to_bits());
+        assert!(exp_clamped(f32::NAN).is_nan());
+        assert_eq!(exp_clamped(0.0), 1.0);
+        assert_eq!(exp_clamped(-0.0), 1.0);
+        // A gated product with a zero gate stays exactly zero.
+        assert_eq!(
+            (0.0 * exp_clamped(f32::INFINITY)).to_bits(),
+            0.0f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn exp_matches_f64_reference() {
+        let mut x = -EXP_INPUT_CLAMP;
+        while x <= EXP_INPUT_CLAMP {
+            let got = exp_clamped(x) as f64;
+            let want = (x as f64).exp();
+            assert!(
+                ((got - want) / want).abs() < 2.0e-7,
+                "exp({x}) = {got}, want {want}"
+            );
+            x += 0.0137;
+        }
+    }
+
+    #[test]
+    fn softplus_matches_reference_and_threshold() {
+        let mut x = -40.0f32;
+        while x <= SOFTPLUS_THRESHOLD {
+            let got = softplus(x) as f64;
+            let want = (x as f64).exp().ln_1p();
+            assert!(
+                (got - want).abs() <= 2.0e-7 * want.max(1e-30),
+                "softplus({x}) = {got}, want {want}"
+            );
+            assert!(got >= 0.0);
+            x += 0.0173;
+        }
+        // Above the threshold: identity, exactly.
+        for x in [20.000002f32, 25.0, 1.0e10, f32::MAX, f32::INFINITY] {
+            assert_eq!(softplus(x).to_bits(), x.to_bits());
+        }
+        assert_eq!(softplus(-200.0), 0.0);
+        assert_eq!(softplus(f32::NEG_INFINITY), 0.0);
+        assert!(softplus(f32::NAN).is_nan());
+    }
+
+    #[test]
+    fn apply_activation_covers_every_variant() {
+        let src = [-2.0f32, -0.0, 0.0, 0.5, 30.5];
+        for act in [
+            Activation::Identity,
+            Activation::Relu,
+            Activation::LeakyRelu,
+            Activation::Exp,
+            Activation::Softplus,
+        ] {
+            let mut buf = src;
+            apply_activation(&mut buf, act);
+            for (i, (&got, &x)) in buf.iter().zip(&src).enumerate() {
+                let want = match act {
+                    Activation::Identity => x,
+                    Activation::Relu => {
+                        if x < 0.0 {
+                            0.0
+                        } else {
+                            x
+                        }
+                    }
+                    Activation::LeakyRelu => {
+                        if x < 0.0 {
+                            x * 0.01
+                        } else {
+                            x
+                        }
+                    }
+                    Activation::Exp => exp_clamped(x),
+                    Activation::Softplus => softplus(x),
+                };
+                assert_eq!(got.to_bits(), want.to_bits(), "{act:?}[{i}]");
+            }
+        }
+        // ReLU keeps -0.0 (as v3 always has).
+        let mut z = [-0.0f32];
+        apply_activation(&mut z, Activation::Relu);
+        assert_eq!(z[0].to_bits(), (-0.0f32).to_bits());
     }
 }

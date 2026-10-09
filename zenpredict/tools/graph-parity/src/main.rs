@@ -88,7 +88,9 @@ fn perm(rng: &mut Rng, n: usize) -> Vec<u32> {
 
 macro_rules! bake_with {
     ($zp:ident, $zpb:ident, $case:expr) => {{
-        use $zp::{Activation, FeatureBound, MetadataType, OutputSpec, SparseOverride, WeightDtype};
+        use $zp::{
+            Activation, FeatureBound, MetadataType, OutputSpec, SparseOverride, WeightDtype,
+        };
         use $zpb::{BakeLayer, BakeMetadataEntry, BakeRequest};
         let c: &Case = $case;
         let layers: Vec<BakeLayer<'_>> = c

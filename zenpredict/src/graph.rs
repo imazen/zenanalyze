@@ -520,8 +520,8 @@ fn plan_slots(nodes: &mut [GraphNode], bytes: &[u8]) -> Result<usize, PredictErr
     // last_use[j] = index of the last node reading j (usize::MAX = none).
     let mut last_use: Vec<usize> = try_vec_with_capacity(n)?;
     last_use.resize(n, usize::MAX);
-    for i in 0..n {
-        for_each_input(&nodes[i].kind, bytes, |j| last_use[j] = i);
+    for (i, node) in nodes.iter().enumerate() {
+        for_each_input(&node.kind, bytes, |j| last_use[j] = i);
     }
     for (j, &u) in last_use.iter().enumerate().take(last) {
         if u == usize::MAX {

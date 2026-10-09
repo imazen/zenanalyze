@@ -1,0 +1,25 @@
+{
+  "schema_hash": 3335,
+  "scaler_mean": [0.0, 0.0, 0.0, 0.5, -1.0, 2.0],
+  "scaler_scale": [1.0, 1.0, 1.0, 2.0, 0.5, 1.0],
+  "metadata": [
+    { "key": "zentrain.bake_name", "type": "utf8",
+      "text": "gated_head_example: g = sum_k v_k * relu(w_k . d) * exp(u_k . r), d = inputs 0..3, r = inputs 3..6" }
+  ],
+  "graph": [
+    { "op": "input", "width": 6 },
+    { "op": "gather", "input": 0, "indices": [0, 1, 2] },
+    { "op": "gather", "input": 0, "indices": [3, 4, 5] },
+    { "op": "dense", "input": 1, "out_dim": 4, "activation": "relu", "dtype": "f32",
+      "weights": [ 0.9, -0.4,  0.3,  0.7,
+                  -0.2,  0.8,  0.5, -0.6,
+                   0.4,  0.1, -0.9,  0.25] },
+    { "op": "dense", "input": 2, "out_dim": 4, "activation": "exp", "dtype": "f32",
+      "weights": [ 0.3, -0.5,  0.2,  0.1,
+                   0.6,  0.4, -0.3,  0.2,
+                  -0.1,  0.2,  0.5, -0.4] },
+    { "op": "mul", "a": 3, "b": 4 },
+    { "op": "dense", "input": 5, "out_dim": 1, "activation": "identity", "dtype": "f32",
+      "weights": [1.5, -0.75, 2.0, 0.5] }
+  ]
+}

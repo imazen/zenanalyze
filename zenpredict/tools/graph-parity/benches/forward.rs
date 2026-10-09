@@ -26,7 +26,9 @@ fn shape(n_in: usize, n_hidden: usize, n_out: usize, dtype: u8, seed: u64) -> Ve
     let mean: Vec<f32> = (0..n_in).map(|_| rng.range(-1.0, 1.0)).collect();
     let scale: Vec<f32> = (0..n_in).map(|_| rng.range(0.5, 1.5)).collect();
     let w0: Vec<f32> = (0..n_in * n_hidden).map(|_| rng.range(-0.3, 0.3)).collect();
-    let w1: Vec<f32> = (0..n_hidden * n_out).map(|_| rng.range(-0.3, 0.3)).collect();
+    let w1: Vec<f32> = (0..n_hidden * n_out)
+        .map(|_| rng.range(-0.3, 0.3))
+        .collect();
     let (b0, b1) = (vec![0.0; n_hidden], vec![0.0; n_out]);
     let layers = [
         BakeLayer {
@@ -55,7 +57,10 @@ fn leak<T>(v: T) -> &'static T {
 
 zenbench::main!(|suite| {
     let mut bakes: Vec<(String, Vec<u8>)> = vec![
-        ("sota944_944x128x1_f32".into(), shape(944, 128, 1, 0, 0x944f)),
+        (
+            "sota944_944x128x1_f32".into(),
+            shape(944, 128, 1, 0, 0x944f),
+        ),
         ("v018_228x384x1_i8".into(), shape(228, 384, 1, 2, 0xfeed)),
         ("webp_51x64x24_f16".into(), shape(51, 64, 24, 1, 0xb33f)),
     ];
@@ -70,8 +75,10 @@ zenbench::main!(|suite| {
         }
     }
     for (name, bytes) in bakes {
-        let old: &'static zp_old::Model = leak(zp_old::Model::from_bytes(&bytes).expect("old load"));
-        let new: &'static zp_new::Model = leak(zp_new::Model::from_bytes(&bytes).expect("new load"));
+        let old: &'static zp_old::Model =
+            leak(zp_old::Model::from_bytes(&bytes).expect("old load"));
+        let new: &'static zp_new::Model =
+            leak(zp_new::Model::from_bytes(&bytes).expect("new load"));
         let v = make_vectors(
             old.n_inputs(),
             old.caller_input_width(),
