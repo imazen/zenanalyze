@@ -1,6 +1,6 @@
 # zenpredict [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenanalyze/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenanalyze/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenpredict?style=flat-square)](https://crates.io/crates/zenpredict) [![lib.rs](https://img.shields.io/crates/v/zenpredict?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenpredict) [![docs.rs](https://img.shields.io/docsrs/zenpredict?style=flat-square)](https://docs.rs/zenpredict) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenpredict?style=flat-square)](#license)
 
-Zero-copy MLP runtime. Parse a packed binary model (ZNPR v3), run scaler + layer-by-layer forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg / zenwebp / zenavif / zenjxl picker selection and zensim perceptual distance.
+Zero-copy MLP runtime. Parse a packed binary model (ZNPR v3 layer chain or v4 op graph), run scaler + forward pass, surface typed metadata, run masked argmin for codec-config selection. Core of zenjpeg / zenwebp / zenavif / zenjxl picker selection and zensim perceptual distance.
 
 `#![forbid(unsafe_code)]`. `no_std + alloc` capable. MIT / Apache-2.0 dual license — the runtime is intentionally permissive so it can be embedded in any MIT/Apache consumer.
 
@@ -39,7 +39,7 @@ This split exists so codec-runtime binaries don't pay for `serde_json` and the J
 - [`zenpredict-bake`](https://github.com/imazen/zenanalyze/tree/main/zenpredict-bake) — Rust composer + JSON baker + `zenpredict-bake` / `zenpredict-inspect` CLIs.
 - [`zentrain`](https://github.com/imazen/zenanalyze/tree/main/zentrain) — Python training pipeline: pareto sweep, teacher fit, distill, ablation, holdout probes, safety reports, `.bin` bake (via `tools/bake_picker.py` shelling out to `zenpredict-bake`).
 
-All version independently. The binary format (ZNPR v3) is the contract between them.
+All version independently. The binary format (ZNPR v3 chains, v4 graphs) is the contract between them.
 
 **Hard fork at 0.2.0** — v2 bins do not load. Migrate existing bakes via [`zentrain/tools/migrate_znpr_v2_to_v3.py`](https://github.com/imazen/zenanalyze/blob/main/zentrain/tools/migrate_znpr_v2_to_v3.py); the rewrite is byte-perfect for the layer payloads (only the header version field changes).
 
@@ -156,7 +156,22 @@ Three weight dtypes:
 - **F16** — half the size at ~no accuracy cost. Conversion is built in (no `half` dep) — compact integer bit math, see [`f16_bits_to_f32`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/src/inference.rs).
 - **I8** — `1/4` size with one f32 scale per output neuron. Per-output (column-wise) scaling — each output has its own dynamic range so one big-magnitude column doesn't waste i8 resolution on the small-magnitude ones.
 
-Three activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`.
+Three activations in v3 layers: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`. v4 graphs add `Exp` (input clamped to ±30) and `Softplus` (β=1, threshold 20), computed with `libm` on every build so every platform returns the same bits.
+
+## Format (ZNPR v4 op graphs)
+
+A v4 file keeps the v3 header, scaler, metadata and output sections and replaces the layer chain with a small static op graph, so a new head shape is export work rather than runtime work. Nodes are stored in topological order (each reads only earlier nodes); the last node is the output:
+
+| op | computes |
+|---|---|
+| `Input` | the scaled feature vector (node 0, exactly one) |
+| `Dense` | `act(b + x·W)` — the v3 layer kernel, f32/f16/i8, bias optional |
+| `Activation` | elementwise `Identity` / `ReLU` / `LeakyReLU` / `Exp` / `Softplus` |
+| `Gather` | `y[j] = x[idx[j]]` (a contiguous range is a slice) |
+| `Add`, `Mul` | elementwise, equal widths |
+| `Concat` | inputs end to end |
+
+Everything is validated at load (op bytes, topological order, arity, widths, section sizes, gather ranges, dead nodes, `limits::{MAX_NODES, MAX_TOTAL_WEIGHTS, MAX_SCRATCH_ELEMS}`), scratch is planned once by liveness, and `predict` allocates nothing. v3 files load unchanged and run on the same executor as `Input → Dense → …`, bit-identical to the pre-graph runtime. Inspect a graph with `Model::nodes()` / `NodeView`; bake one with `zenpredict_bake::bake_graph` or a JSON `"graph"` spec ([`zenpredict-bake/examples/gated_head.json`](https://github.com/imazen/zenanalyze/blob/main/zenpredict-bake/examples/gated_head.json) is the gated head `Σ v·ReLU(w·d)·exp(u·r)`). Spec: [`docs/ZNPR_V4_GRAPH.md`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/docs/ZNPR_V4_GRAPH.md).
 
 ## Metadata
 

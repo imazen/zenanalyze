@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+- `ActivationJson` gains `Exp` and `Softplus`; exhaustive matches on it
+  need the two arms (`ea8f3fb0`).
+
+### Added
+
+- **ZNPR v4 graph baking** (`ea8f3fb0`): `bake_graph(&BakeRequest, &[BakeNode])`
+  and the `BakeNode` enum write a v4 op graph around the same scaler /
+  metadata / output-spec sections `bake` writes, then load the result
+  once with `zenpredict::Model::from_bytes` (the parser owns the graph
+  rules; a rejection is `BakeError::GraphRejected`). JSON: a non-empty
+  `graph` array (`BakeNodeJson`, tagged by `"op"`) bakes a graph;
+  `layers` is now optional; `zerobias_tau` and `compressed` apply,
+  `optimize` is refused for graphs. New `BakeError::{GraphInvalid,
+  GraphRejected, ChainActivationUnsupported}`.
+- `examples/gated_head.{json,rs}`: the hand-built E33 arm-B gated head
+  (`026b4f48`).
+
+### Changed
+
+- `bake()` (v3 chains) output is byte-identical to before — checked
+  against the pre-graph composer on 2,000 random requests
+  (`zenpredict/tools/graph-parity`). Its section writers were factored
+  out for `bake_graph`. It now refuses `Exp` / `Softplus` layers
+  (`ChainActivationUnsupported`): a v3 reader would reject the file.
+- CLI (`7a190081`): `zenpredict-bake` reports version / outputs / layers /
+  nodes from the written bake; `zenpredict-inspect` adds `n_nodes`,
+  `is_layer_chain` and a `nodes` list and names `exp` / `softplus`;
+  `zenpredict repack` refuses v4 graphs rather than flattening them.
+
 ### Fixed
 
 - clippy 1.98 `chunks_exact_to_as_chunks` in `json.rs::decode_hex`: now

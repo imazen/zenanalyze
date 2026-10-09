@@ -218,6 +218,8 @@ pub const MAX_SCRATCH_ELEMS: usize = 1 << 22;
 
 // wire.rs
 pub const NODE_ENTRY_SIZE: usize = 48;
+pub const NODE_OFF_INPUTS: usize = 8; pub const NODE_OFF_DATA0: usize = 16;
+pub const NODE_OFF_DATA1: usize = 24; pub const NODE_OFF_DATA2: usize = 32;
 pub const OP_INPUT: u8 = 0; pub const OP_DENSE: u8 = 1; pub const OP_ACTIVATION: u8 = 2;
 pub const OP_GATHER: u8 = 3; pub const OP_ADD: u8 = 4; pub const OP_MUL: u8 = 5;
 pub const OP_CONCAT: u8 = 6;
@@ -271,6 +273,11 @@ ChainActivationUnsupported { layer: usize },   // Exp/Softplus in a v3 chain
 // JSON: BakeRequestJson gains `graph: Vec<BakeNodeJson>` (serde default empty);
 // `layers` becomes serde-default. ActivationJson gains Exp, Softplus.
 ```
+
+Tools that rewrite a bake in place stay v3-only for now and refuse v4
+cleanly: `append_metadata_utf8` returns `AppendError::UnsupportedVersion`, and
+`zenpredict repack` (which rebuilds from `layers()`) exits with an error
+instead of flattening a graph.
 
 `bake()` keeps writing v3 chains byte-identically; it now refuses `Exp` /
 `Softplus` layers (they would produce a file v3 readers reject). The JSON baker

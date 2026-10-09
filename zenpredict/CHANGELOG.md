@@ -13,6 +13,47 @@
 
 ### Added
 
+- **ZNPR v4: static op graphs** (`docs/ZNPR_V4_GRAPH.md`; `ea8f3fb0`). The
+  fixed `scaler → [Dense]×N` chain becomes a topologically ordered node
+  graph — `Input`, `Dense` (f32/f16/i8, optional bias, fused activation),
+  `Activation`, `Gather`, `Add`, `Mul`, `Concat` — so new heads (e.g.
+  zensim E33's gated `Σ v·ReLU(w·d)·exp(u·r)`) are export work, not
+  runtime work. v3 files still parse exactly as before and are lowered
+  to `Input → Dense → …`; one executor runs both, with a
+  liveness-packed scratch arena planned at load (no per-call
+  allocation). Load-time validation: known op/activation/dtype bytes,
+  strict topological order, arity, per-op widths, Dense section sizes,
+  Gather ranges, no dead nodes, zero reserved fields. Measured
+  bit-identical to the pre-graph runtime (`tools/graph-parity`, `b3a63a06`)
+  on 260 unique repo/consumer ZNPR files, the rev4 production bake
+  (50,000 vectors), 504 sampled rev4 bakes, and 2,000 synthetic chains
+  (27.2 M outputs, composer bytes identical too); forward pass on the
+  production bake measured 2.2 % faster (zenbench paired CI
+  [-2.3 %, -2.1 %]).
+  New public items: `Activation::{Exp, Softplus}` (v4-only; libm on
+  every build, `Exp` input clamped to ±`EXP_INPUT_CLAMP` = 30,
+  `Softplus` identity above `SOFTPLUS_THRESHOLD` = 20),
+  `GRAPH_FORMAT_VERSION`, `NodeView`, `Model::{n_nodes, node, nodes,
+  is_layer_chain}`, `Predictor::try_new`, `limits::{MAX_NODES,
+  MAX_NODE_INPUTS, MAX_TOTAL_WEIGHTS, MAX_SCRATCH_ELEMS}`,
+  `wire::{NODE_ENTRY_SIZE, NODE_OFF_*, OP_*}`, and `PredictError::
+  {UnknownGraphOp, GraphInputRef, GraphShapeMismatch, GraphMalformed,
+  AllocFailed}`. Tests: `zenpredict-bake/tests/graph.rs` (`026b4f48`);
+  fuzz targets `graph_from_bytes` / `graph_structured` with curated
+  seeds and `tests/fuzz_regression.rs` (`7a190081`).
+
+### Changed
+
+- `Model::from_bytes*` allocate the owned bake buffer fallibly
+  (`PredictError::AllocFailed` instead of an abort), and every model —
+  v3 included — is checked against `limits::MAX_TOTAL_WEIGHTS` (2^24
+  multiply-adds per forward pass) and `limits::MAX_SCRATCH_ELEMS` at
+  load. Sections may alias, so file size alone never bounded compute.
+  No shipped or plausible v3 bake comes near either limit (`ea8f3fb0`).
+- `Model::layers()` / `n_layers()` on a v4 graph walk its Dense nodes;
+  check `is_layer_chain()` before treating `layer(0)` as the layer that
+  reads the features. v3 behaviour is unchanged (`ea8f3fb0`).
+
 - **`simd` feature (default-on): runtime FMA dispatch for the forward pass —
   17-26× on `Predictor::predict`, bit-identical output.** Baseline x86-64 has
   no FMA, so `f32::mul_add` in the SAXPY kernels compiled to an out-of-line

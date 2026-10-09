@@ -15,6 +15,23 @@ api-doc:
 api-doc-check:
     ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml
 
+# ZNPR v4 graph runtime: cross-version parity gate. Links the pre-graph
+# zenpredict (git e6c72f99) and this tree side by side; `synth` bakes random
+# v3 chains with both composers (bytes must match) and compares outputs bit
+# for bit; `check` does the same for every given .bin.
+graph-parity *files:
+    cd zenpredict/tools/graph-parity && cargo run --release -- synth 2000
+    cd zenpredict/tools/graph-parity && cargo run --release -- check {{files}}
+
+# Paired old-vs-new forward-pass bench (zenbench). BAKES is ';'-separated.
+graph-parity-bench bakes="":
+    cd zenpredict/tools/graph-parity && ZPGRAPH_BENCH_BAKES='{{bakes}}' cargo bench --bench forward
+
+# Bounded fuzz of the v4 graph parser/executor (nightly + cargo-fuzz).
+fuzz-graph seconds="900" workers="8":
+    cd zenpredict/fuzz && cargo +nightly fuzz run -O --target x86_64-unknown-linux-gnu graph_from_bytes corpus/graph_from_bytes seeds/graph_from_bytes -- -max_total_time={{seconds}} -jobs={{workers}} -workers={{workers}}
+    cd zenpredict/fuzz && cargo +nightly fuzz run -O --target x86_64-unknown-linux-gnu graph_structured corpus/graph_structured -- -max_total_time={{seconds}} -jobs={{workers}} -workers={{workers}}
+
 # The light zentrain tool tests — same file list as the CI `zentrain-pytests`
 # job (numpy / sklearn / pyarrow only, no torch). Run from zentrain/tools so
 # the sibling modules import by name.

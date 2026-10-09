@@ -2,6 +2,8 @@
 
 **Status:** unreleased; lives on `zenanalyze/main`. The crates.io `zenpredict 0.1.0` is v2-only and does NOT decode v3. Consumers (zensim, zenavif, zenwebp, zenpicker) still link the published 0.1.0; cutting them over to v3 is gated on publishing zenpredict 0.2.0 (per `~/work/zen/RECOVERY_PLAN_2026-05-08.md` Phase 4).
 
+> **v4 (2026-10):** static op graphs extend this format — same header and sections, node table instead of layer table. See [`ZNPR_V4_GRAPH.md`](ZNPR_V4_GRAPH.md). v3 files load unchanged.
+
 > Source of truth: `zenpredict/src/{model,bake/{mod,v2},output_spec,feature_transform,metadata}.rs`. This doc curates the user-visible contract; for byte-level layout consult the source.
 
 ## Why v3

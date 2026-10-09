@@ -1,7 +1,7 @@
 //! # zenpredict — zero-copy MLP runtime
 //!
-//! Parse a packed binary model (ZNPR v3 format), run scaler +
-//! layer-by-layer forward pass, surface typed metadata, run masked
+//! Parse a packed binary model (ZNPR v3 layer chain or v4 op graph),
+//! run scaler + forward pass, surface typed metadata, run masked
 //! argmin for codec-config selection.
 //!
 //! Two consumer shapes:
@@ -77,18 +77,30 @@
 //! assert_eq!(out, &[3.0, 4.0, 5.0]);
 //! ```
 //!
-//! ## Depth and size are unconstrained
+//! ## Depth and size
 //!
-//! The format puts no fixed limits on the network's shape. Number
-//! of layers, layer widths, and input / output dimensions are all
-//! `u32` in the binary header — the practical limit is whatever the
-//! `n_inputs * out_dim` multiplications in `usize` can handle. Tests
-//! exercise single-layer, ten-layer, 1024-wide-hidden, and
-//! mixed-dtype-per-layer (i8 → f16 → f32) shapes.
+//! Shape fields are `u32` in the binary, bounded at load by
+//! [`limits`]: widths by `MAX_DIM` (65,536), layers by `MAX_LAYERS`,
+//! graph nodes by `MAX_NODES`, compute by `MAX_TOTAL_WEIGHTS` (2^24
+//! multiply-adds per forward pass) and scratch by `MAX_SCRATCH_ELEMS`
+//! — each 100×–1000× above any shipped bake. Tests exercise
+//! single-layer, ten-layer, 1024-wide-hidden, mixed-dtype-per-layer
+//! (i8 → f16 → f32) and random-DAG shapes.
 //!
-//! Scratch buffers are sized to `max(n_inputs, max_layer_out_dim) *
-//! sizeof(f32)`, computed by [`Model::scratch_len`]. A 64-input
-//! 1024-hidden model needs 4 KB of scratch — trivially small.
+//! Scratch is one f32 arena per [`Predictor`], packed by liveness at
+//! load: a chain needs about `n_inputs + 2 × max_hidden` floats (a
+//! 64-input 1024-hidden model, ~8 KB). [`Model::scratch_len`] reports the
+//! widest vector in the network.
+//!
+//! ## Op graphs (ZNPR v4)
+//!
+//! A v4 bake replaces the layer chain with a static op graph —
+//! [`NodeView`] lists the ops (`Input`, `Dense`, `Activation`, `Gather`,
+//! `Add`, `Mul`, `Concat`) — so new head shapes need no runtime change.
+//! Every model, v3 included, runs on one graph executor (a v3 chain is
+//! `Input → Dense → …`). Walk a model's graph with [`Model::nodes`];
+//! [`Model::is_layer_chain`] says whether [`Model::layers`] describes the
+//! whole network. Spec: `docs/ZNPR_V4_GRAPH.md`.
 //!
 //! ## Format stability
 //!
