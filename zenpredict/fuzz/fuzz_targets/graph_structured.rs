@@ -231,5 +231,6 @@ fn build(g: &FuzzGraph) -> Vec<u8> {
 // Differential: every graph that loads must give the same outputs as the
 // per-node reference evaluator (bits, or NaN for NaN).
 fuzz_target!(|g: FuzzGraph| {
-    exercise_model_bytes(&build(&g), true);
+    // The fuzz crate builds zenpredict with `std`: fused multiply-add.
+    exercise_model_bytes(&build(&g), Some(true));
 });

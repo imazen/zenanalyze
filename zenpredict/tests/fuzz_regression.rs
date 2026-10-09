@@ -40,8 +40,10 @@ fn graph_seeds_load_and_run() {
         let model = zenpredict::Model::from_bytes(&bytes)
             .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         assert_eq!(model.version(), zenpredict::GRAPH_FORMAT_VERSION);
-        // Differential, as the graph_structured target runs.
-        exercise_model_bytes(&bytes, true);
+        // Differential, as the graph_structured target runs. The
+        // reference follows this build's multiply-add rule (fused with
+        // `std`, `a * b + c` without).
+        exercise_model_bytes(&bytes, Some(cfg!(feature = "std")));
     }
 }
 

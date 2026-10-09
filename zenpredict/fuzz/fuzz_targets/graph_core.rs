@@ -38,10 +38,12 @@ fn ref_act(v: f32, a: zenpredict::Activation) -> f32 {
 }
 
 /// `act(b + x·W)` element by element, accumulating inputs in index order
-/// with fused multiply-add and skipping exact-zero inputs — the order the
-/// spec fixes for Dense.
+/// and skipping exact-zero inputs — the order the spec fixes for Dense.
+/// `fused`: a `std` zenpredict build accumulates with fused multiply-add
+/// (`f32::mul_add`); a `no_std` build uses `a * b + c` (two roundings, see
+/// `inference::fma`). The reference models whichever build it checks.
 #[allow(dead_code)]
-fn ref_dense(l: &zenpredict::LayerView<'_>, x: &[f32]) -> Vec<f32> {
+fn ref_dense(l: &zenpredict::LayerView<'_>, x: &[f32], fused: bool) -> Vec<f32> {
     use zenpredict::WeightStorage;
     let out = l.out_dim;
     let is_i8 = matches!(l.weights, WeightStorage::I8 { .. });
@@ -60,7 +62,7 @@ fn ref_dense(l: &zenpredict::LayerView<'_>, x: &[f32]) -> Vec<f32> {
                 WeightStorage::F16(w) => zenpredict::f16_bits_to_f32(w[i * out + o]),
                 WeightStorage::I8 { weights, .. } => weights[i * out + o] as f32,
             };
-            *a = s.mul_add(w, *a);
+            *a = if fused { s.mul_add(w, *a) } else { s * w + *a };
         }
     }
     if let WeightStorage::I8 { scales, .. } = &l.weights {
@@ -77,9 +79,17 @@ fn ref_dense(l: &zenpredict::LayerView<'_>, x: &[f32]) -> Vec<f32> {
 }
 
 /// Evaluate every node into its own vector — no arena, no slot reuse, no
-/// SIMD dispatch. `features` must be `n_inputs` long.
+/// SIMD dispatch — modelling a `std` (fused multiply-add) zenpredict build.
+/// `features` must be `n_inputs` long.
 #[allow(dead_code)]
 fn reference_eval(model: &zenpredict::Model, features: &[f32]) -> Vec<f32> {
+    reference_eval_with(model, features, true)
+}
+
+/// [`reference_eval`] with the multiply-add rule chosen explicitly
+/// (`fused = false` models a `no_std` zenpredict build).
+#[allow(dead_code)]
+fn reference_eval_with(model: &zenpredict::Model, features: &[f32], fused: bool) -> Vec<f32> {
     use zenpredict::NodeView;
     let mut vals: Vec<Vec<f32>> = Vec::new();
     for node in model.nodes() {
@@ -89,7 +99,9 @@ fn reference_eval(model: &zenpredict::Model, features: &[f32]) -> Vec<f32> {
                 .zip(model.scaler_mean().iter().zip(model.scaler_scale()))
                 .map(|(&x, (&m, &s))| (x - m) / if s == 0.0 { 1.0 } else { s })
                 .collect(),
-            NodeView::Dense { input, layer, .. } => ref_dense(&layer, &vals[input as usize]),
+            NodeView::Dense { input, layer, .. } => {
+                ref_dense(&layer, &vals[input as usize], fused)
+            }
             NodeView::Activation {
                 input, activation, ..
             } => vals[input as usize]
@@ -142,11 +154,13 @@ fn probe_vectors(n_in: usize) -> [Vec<f32>; 3] {
 }
 
 /// Load `bytes`; on success walk every node view, build a predictor and
-/// run the forward pass on the probe vectors. With `differential`, also
-/// require every output to equal [`reference_eval`] (panics otherwise,
-/// which a fuzzer reports as a finding).
+/// run the forward pass on the probe vectors. With `differential:
+/// Some(fused)`, also require every output to equal
+/// [`reference_eval_with`]`(.., fused)` (panics otherwise, which a fuzzer
+/// reports as a finding). `fused` must match the zenpredict build under
+/// test: `true` with `std`, `false` without.
 #[allow(dead_code)]
-fn exercise_model_bytes(bytes: &[u8], differential: bool) {
+fn exercise_model_bytes(bytes: &[u8], differential: Option<bool>) {
     let Ok(model) = zenpredict::Model::from_bytes(bytes) else {
         return;
     };
@@ -169,8 +183,8 @@ fn exercise_model_bytes(bytes: &[u8], differential: bool) {
         let Ok(got) = p.predict(&x) else {
             continue;
         };
-        if differential {
-            let want = reference_eval(&model, &x);
+        if let Some(fused) = differential {
+            let want = reference_eval_with(&model, &x, fused);
             assert_eq!(got.len(), want.len(), "output width");
             for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
                 assert!(
@@ -191,5 +205,5 @@ fn exercise_model_bytes(bytes: &[u8], differential: bool) {
 /// Crash-only exercise (the `graph_from_bytes` contract).
 #[allow(dead_code)]
 fn run_model_bytes(bytes: &[u8]) {
-    exercise_model_bytes(bytes, false);
+    exercise_model_bytes(bytes, None);
 }
