@@ -1,0 +1,29 @@
+[package]
+name = "zenpredict-graph-parity"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Cross-version gate for the ZNPR v4 graph runtime: links the pre-graph zenpredict (git) and this tree's zenpredict side by side and checks bit-identical outputs, identical errors, byte-identical v3 bakes, and paired forward-pass speed."
+
+# Standalone: links two copies of zenpredict (git + path), which must not
+# leak into the zenanalyze workspace or its CI.
+[workspace]
+
+[dependencies]
+# Pre-graph runtime + composer: zenanalyze main at e6c72f99 (2026-10-06),
+# the last commit before ZNPR v4.
+zp_old = { package = "zenpredict", git = "https://github.com/imazen/zenanalyze", rev = "e6c72f99390c190c102275c3b0e4d41fe0a734a4", features = ["advanced"] }
+zpb_old = { package = "zenpredict-bake", git = "https://github.com/imazen/zenanalyze", rev = "e6c72f99390c190c102275c3b0e4d41fe0a734a4" }
+# This tree.
+zp_new = { package = "zenpredict", path = "../..", features = ["advanced"] }
+zpb_new = { package = "zenpredict-bake", path = "../../../zenpredict-bake" }
+
+[dev-dependencies]
+zenbench = "0.1.10"
+
+[[bench]]
+name = "forward"
+harness = false
+
+[profile.release]
+debug = true
