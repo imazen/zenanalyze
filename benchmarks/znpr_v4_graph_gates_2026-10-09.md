@@ -72,6 +72,10 @@ no bias, Dense+Exp no bias, Mul, Dense).
 
 ## 4. Speed (old chain vs graph executor, same bytes)
 
+Summary: the production bake is 1.7 % faster (2.2–2.5 % in the round-1 rerun); synthetic
+shapes land within −7 % … +2 % across runs on this shared box, so the wall-clock rows below
+for them are noise-limited and the `perf stat` counters are the stable comparison.
+
 zenbench, paired and interleaved, `just graph-parity-bench '<production bake>'`. 95% CI
 vs old:
 
@@ -126,3 +130,22 @@ Logs:
 - `RUSTDOCFLAGS=-D warnings cargo doc` fails on 14 pre-existing private-item / HTML-tag
   links (feature_transform, knob_veto, picker_safety, rescue, unachievable_zone, cli
   repack docs). None of them are in v4 code.
+
+## Fix round 1 (review FIX-FIRST, same day)
+
+Changes: zenpredict-viz refuses v4 (`load_chain_model`; P1); `limits::MAX_TOTAL_ELEMS`
+op-weighted compute budget (P2); `NodeView` per-variant `#[non_exhaustive]` + `Clone` + `u32`
+indices + `width()`, public `NodeEntry`, `BakeNode` constructors, `GraphBakeRequest`,
+`deny_unknown_fields` on graph JSON (P2 API shapes); refusal tests, golden Exp/Softplus bits,
+differential `graph_structured` fuzz target (P3). The production bake uses 53,888 of
+`MAX_TOTAL_WEIGHTS` and 678 of `MAX_TOTAL_ELEMS`.
+
+| gate | result |
+|---|---|
+| parity | 0 mismatches: 260 fixtures (list rebuilt by sha256 — 79 representative paths had vanished with another lane's removed workspace; all 260 contents found elsewhere), production bake 50k vectors, 504 rev4 bakes, synth 2,000 / 27,170,156 values. Logs `a8c392c7` / `afa20959` / `92e25d45` / `f1a040ae` |
+| zensim | zensim `main` `713d2d73` + `--config <patch.toml>`: `cargo test -p zensim --all-features` 912 passed / 0 failed / 27 ignored (`ef49cf7c`); BakeScorer (production bake) and profile-B scores on 164 pairs bit-identical to the unpatched build (hashes `ff6d712e…`, `df324959…`, unchanged from round 0) |
+| tests | 703 pass across zenpredict / zenpredict-bake (all features, no_std, no_std+std) and zenpredict-viz (`onnx-export`); wasm32 builds for zenpredict (no_std) and zenpredict-viz |
+| semver | `cargo semver-checks` vs main: both crates "no semver update required" (adding `Copy` to `LayerView` was flagged major, so `Copy` is queued instead) |
+| bench | zenbench (`9682a7eb`): production 44.5 → 43.8 µs, CI [−2.5 %, −2.2 %]; 944×128 f32 [−1.0 %, +2.0 %]; 228×384 i8 [−1.2 %, +0.2 %]; 51×64×24 f16 [+0.2 %, +0.4 %]. `perf stat -r 10` per predict (`81487b14`): cycles 944×128 −2.5 %, 228×384 −0.2 %, 51×64×24 +0.04 %, production −0.6 %; instructions −1.2 % … −0.0 % |
+| fuzz smoke | 8 workers × 120 s per target: `graph_from_bytes` 1,039,574 runs, `graph_structured` (now differential vs the reference evaluator, replaying the 22,016-file corpus first) 1,608,567 runs; 0 crashes, 0 mismatches. Corpus mirrored to `/mnt/v/fuzzes/zenpredict` (26,763 files) |
+| found and fixed | the differential seed replay failed under `--no-default-features`: a no_std zenpredict accumulates Dense with `a * b + c` (documented); the reference now takes the build's rule explicitly |
