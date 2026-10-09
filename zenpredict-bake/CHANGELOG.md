@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-### QUEUED BREAKING CHANGES
-
-- `ActivationJson` gains `Exp` and `Softplus`; exhaustive matches on it
-  need the two arms (`ea8f3fb0`).
-
 ### Added
 
 - **ZNPR v4 graph baking** (`ea8f3fb0`): `bake_graph(&BakeRequest, &[BakeNode])`
@@ -16,7 +11,9 @@
   rules; a rejection is `BakeError::GraphRejected`). JSON: a non-empty
   `graph` array (`BakeNodeJson`, tagged by `"op"`) bakes a graph;
   `layers` is now optional; `zerobias_tau` and `compressed` apply,
-  `optimize` is refused for graphs. New `BakeError::{GraphInvalid,
+  `optimize` is refused for graphs. Graph nodes name activations with the
+  new `GraphActivationJson` (adds `exp`, `softplus`); `ActivationJson`
+  for v3 layers is unchanged. New `BakeError::{GraphInvalid,
   GraphRejected, ChainActivationUnsupported}`.
 - `examples/gated_head.{json,rs}`: the hand-built E33 arm-B gated head
   (`026b4f48`).

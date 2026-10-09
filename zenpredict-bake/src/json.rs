@@ -332,10 +332,6 @@ pub enum ActivationJson {
     Identity,
     Relu,
     LeakyRelu,
-    /// v4 graphs only (a chain layer with it is a bake error).
-    Exp,
-    /// v4 graphs only (a chain layer with it is a bake error).
-    Softplus,
 }
 
 impl From<ActivationJson> for Activation {
@@ -344,8 +340,33 @@ impl From<ActivationJson> for Activation {
             ActivationJson::Identity => Activation::Identity,
             ActivationJson::Relu => Activation::Relu,
             ActivationJson::LeakyRelu => Activation::LeakyRelu,
-            ActivationJson::Exp => Activation::Exp,
-            ActivationJson::Softplus => Activation::Softplus,
+        }
+    }
+}
+
+/// Activation names accepted by v4 graph nodes ([`BakeNodeJson`]): the
+/// three chain activations plus the graph-only `exp` and `softplus`.
+/// Separate from [`ActivationJson`] (v3 layers) so chain specs can't name
+/// an activation a v3 file can't carry.
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum GraphActivationJson {
+    Identity,
+    Relu,
+    LeakyRelu,
+    Exp,
+    Softplus,
+}
+
+impl From<GraphActivationJson> for Activation {
+    fn from(a: GraphActivationJson) -> Self {
+        match a {
+            GraphActivationJson::Identity => Activation::Identity,
+            GraphActivationJson::Relu => Activation::Relu,
+            GraphActivationJson::LeakyRelu => Activation::LeakyRelu,
+            GraphActivationJson::Exp => Activation::Exp,
+            GraphActivationJson::Softplus => Activation::Softplus,
         }
     }
 }
@@ -373,7 +394,7 @@ pub enum BakeNodeJson {
     Dense {
         input: u32,
         out_dim: usize,
-        activation: ActivationJson,
+        activation: GraphActivationJson,
         dtype: DtypeJson,
         weights: Vec<f32>,
         #[serde(default)]
@@ -381,7 +402,7 @@ pub enum BakeNodeJson {
     },
     Activation {
         input: u32,
-        activation: ActivationJson,
+        activation: GraphActivationJson,
     },
     Gather {
         input: u32,

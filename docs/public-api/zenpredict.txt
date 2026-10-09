@@ -6,29 +6,29 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict.txt 423 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
+# files: zenpredict.txt 489 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        39
-#   pub consts/statics                         54
+#   pub types (struct/enum/trait/alias)        40
+#   pub consts/statics                         73
 #   free functions                             24
-#   inherent methods                           95
-#   struct fields                             102
-#   enum variants                              83
-#   trait roster entries (type × trait)       145
-#   auto-trait-complete types                  33
+#   inherent methods                          100
+#   struct fields                             128
+#   enum variants                              97
+#   trait roster entries (type × trait)       146
+#   auto-trait-complete types                  34
 #
 # per-module pub lines:
-#   (root)                          305
+#   (root)                          354
 #   argmin                           26
 #   keys                             19
-#   limits                            3
+#   limits                            7
 #   output_spec                      33
-#   wire                             17
+#   wire                             29
 
-## items (390 lines)
+## items (455 lines)
 
 pub mod zenpredict
 pub mod argmin
@@ -67,6 +67,10 @@ pub mod limits
 pub const limits::MAX_BAKE_BYTES: usize
 pub const limits::MAX_DIM: usize
 pub const limits::MAX_LAYERS: usize
+pub const limits::MAX_NODES: usize
+pub const limits::MAX_NODE_INPUTS: usize
+pub const limits::MAX_SCRATCH_ELEMS: usize
+pub const limits::MAX_TOTAL_WEIGHTS: usize
 pub mod output_spec
 pub output_spec::OutputTransform::Exp = 3
 pub output_spec::OutputTransform::Identity = 0
@@ -101,7 +105,19 @@ pub const wire::FLAGS_COMPRESSION_ALGO_MASK: u16
 pub const wire::FLAG_COMPRESSED: u16
 pub const wire::HEADER_SIZE: usize
 pub const wire::LAYER_ENTRY_SIZE: usize
+pub const wire::NODE_ENTRY_SIZE: usize
+pub const wire::NODE_OFF_DATA0: usize
+pub const wire::NODE_OFF_DATA1: usize
+pub const wire::NODE_OFF_DATA2: usize
+pub const wire::NODE_OFF_INPUTS: usize
 pub const wire::OFF_DECOMPRESSED_PAYLOAD_LEN: usize
+pub const wire::OP_ACTIVATION: u8
+pub const wire::OP_ADD: u8
+pub const wire::OP_CONCAT: u8
+pub const wire::OP_DENSE: u8
+pub const wire::OP_GATHER: u8
+pub const wire::OP_INPUT: u8
+pub const wire::OP_MUL: u8
 pub const wire::SECTION_OFF_DISCRETE_SETS: usize
 pub const wire::SECTION_OFF_FEATURE_BOUNDS: usize
 pub const wire::SECTION_OFF_FEATURE_ORDER: usize
@@ -113,9 +129,11 @@ pub const wire::SECTION_OFF_SCALER_MEAN: usize
 pub const wire::SECTION_OFF_SCALER_SCALE: usize
 pub const wire::SECTION_OFF_SPARSE_OVERRIDES: usize
 #[non_exhaustive] pub enum Activation
+pub Activation::Exp = 3
 pub Activation::Identity = 0
 pub Activation::LeakyRelu = 2
 pub Activation::Relu = 1
+pub Activation::Softplus = 4
 pub enum EncodeMode
 pub EncodeMode::QueuedAggressive
 pub EncodeMode::QueuedBalanced
@@ -157,6 +175,30 @@ pub MetadataType::Bytes
 pub MetadataType::Numeric
 pub MetadataType::Reserved(u8)
 pub MetadataType::Utf8
+#[non_exhaustive] pub enum NodeView<'a>
+pub NodeView::Activation
+pub NodeView::Activation::activation: Activation
+pub NodeView::Activation::input: usize
+pub NodeView::Activation::width: usize
+pub NodeView::Add
+pub NodeView::Add::a: usize
+pub NodeView::Add::b: usize
+pub NodeView::Add::width: usize
+pub NodeView::Concat
+pub NodeView::Concat::inputs: &'a [u32]
+pub NodeView::Concat::width: usize
+pub NodeView::Dense
+pub NodeView::Dense::input: usize
+pub NodeView::Dense::layer: LayerView<'a>
+pub NodeView::Gather
+pub NodeView::Gather::indices: &'a [u32]
+pub NodeView::Gather::input: usize
+pub NodeView::Input
+pub NodeView::Input::width: usize
+pub NodeView::Mul
+pub NodeView::Mul::a: usize
+pub NodeView::Mul::b: usize
+pub NodeView::Mul::width: usize
 #[non_exhaustive] #[repr(u8)] pub enum OutputTransform [also: output_spec]
 pub OutputTransform::Exp = 3
 pub OutputTransform::Identity = 0
@@ -173,6 +215,8 @@ pub enum PreArgminDecision
 pub PreArgminDecision::Argmin
 pub PreArgminDecision::ZoneFallback(ZoneFallback)
 #[non_exhaustive] pub enum PredictError
+pub PredictError::AllocFailed
+pub PredictError::AllocFailed::bytes: usize
 pub PredictError::BadMagic
 pub PredictError::BadMagic::found: [u8; 4]
 pub PredictError::DimensionOverflow
@@ -183,6 +227,16 @@ pub PredictError::FeatureLenMismatch::got: usize
 pub PredictError::FeatureTransformsLenMismatch
 pub PredictError::FeatureTransformsLenMismatch::expected: usize
 pub PredictError::FeatureTransformsLenMismatch::got: usize
+pub PredictError::GraphInputRef
+pub PredictError::GraphInputRef::input: usize
+pub PredictError::GraphInputRef::node: usize
+pub PredictError::GraphMalformed
+pub PredictError::GraphMalformed::node: usize
+pub PredictError::GraphMalformed::what: &'static str
+pub PredictError::GraphShapeMismatch
+pub PredictError::GraphShapeMismatch::expected: usize
+pub PredictError::GraphShapeMismatch::got: usize
+pub PredictError::GraphShapeMismatch::node: usize
 pub PredictError::LayerDimMismatch
 pub PredictError::LayerDimMismatch::expected_in: usize
 pub PredictError::LayerDimMismatch::got_in: usize
@@ -222,6 +276,9 @@ pub PredictError::UnexpectedExpanderInScalarPipeline::feature_index: usize
 pub PredictError::UnknownActivation
 pub PredictError::UnknownActivation::byte: u8
 pub PredictError::UnknownFeatureTransform
+pub PredictError::UnknownGraphOp
+pub PredictError::UnknownGraphOp::byte: u8
+pub PredictError::UnknownGraphOp::node: usize
 pub PredictError::UnknownVetoOp
 pub PredictError::UnknownVetoOp::byte: u8
 pub PredictError::UnknownWeightDtype
@@ -332,13 +389,17 @@ pub fn Model::has_expander_feature_transforms(&self) -> bool
 pub fn Model::has_nontrivial_feature_transforms(&self) -> bool
 pub fn Model::has_output_specs(&self) -> bool
 pub fn Model::header(&self) -> &Header
+pub fn Model::is_layer_chain(&self) -> bool
 pub fn Model::knob_vetoes(&self) -> core::result::Result<alloc::vec::Vec<KnobVeto<'_>>, PredictError>
 pub fn Model::layer(&self, usize) -> LayerView<'_>
 pub fn Model::layers(&self) -> model::LayerIter<'_>
 pub fn Model::metadata(&self) -> Metadata<'_>
 pub fn Model::n_inputs(&self) -> usize
 pub fn Model::n_layers(&self) -> usize
+pub fn Model::n_nodes(&self) -> usize
 pub fn Model::n_outputs(&self) -> usize
+pub fn Model::node(&self, usize) -> NodeView<'_>
+pub fn Model::nodes(&self) -> impl core::iter::traits::exact_size::ExactSizeIterator<Item = NodeView<'_>>
 pub fn Model::output_specs(&self) -> &[output_spec::OutputSpec]
 pub fn Model::raw_bytes(&self) -> &[u8]
 pub fn Model::scaler_mean(&self) -> &[f32]
@@ -372,6 +433,7 @@ pub fn Predictor<'a>::new(&'a Model) -> Self
 pub fn Predictor<'a>::predict(&mut self, &[f32]) -> core::result::Result<&[f32], PredictError>
 pub fn Predictor<'a>::predict_transformed(&mut self, &[f32]) -> core::result::Result<&[f32], PredictError>
 pub fn Predictor<'a>::schema_hash(&self) -> u64
+pub fn Predictor<'a>::try_new(&'a Model) -> core::result::Result<Self, PredictError>
 #[repr(C)] pub struct Section
 pub const fn Section::empty() -> Self
 pub const fn Section::is_empty(self) -> bool
@@ -399,9 +461,12 @@ pub fn UnachievableZones::resolve(&self, &[f32], f32) -> core::option::Option<Zo
 pub struct ZoneFallback
 pub ZoneFallback::cell: usize
 pub ZoneFallback::scalar: core::option::Option<f32>
+pub const EXP_INPUT_CLAMP: f32
 pub const FORMAT_VERSION: u16
+pub const GRAPH_FORMAT_VERSION: u16
 pub const KNOB_VETOES_KEY: &str
 pub const LEAKY_RELU_ALPHA: f32
+pub const SOFTPLUS_THRESHOLD: f32
 pub const UNACHIEVABLE_ZONES_KEY: &str
 pub fn apply_feature_transforms(&[FeatureTransform], &[f32], &mut [f32]) -> core::result::Result<(), PredictError>
 pub fn apply_knob_vetoes(&[f32], &[KnobVeto<'_>], &mut [bool])
@@ -421,7 +486,7 @@ pub fn parse_unachievable_zones(&[u8]) -> core::result::Result<UnachievableZones
 pub fn resolve_pre_argmin(&[f32], f32, &UnachievableZones, &[KnobVeto<'_>], &mut [bool]) -> PreArgminDecision
 pub fn unachievable_zones_from_metadata(&Metadata<'_>) -> core::result::Result<UnachievableZones, PredictError>
 
-## trait impls (32 types)
+## trait impls (33 types)
 
 Activation: Clone, Copy, Debug, Eq, PartialEq
 EncodeBudget: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -436,6 +501,7 @@ Metadata<'a>: Clone, Debug, Default
 MetadataEntry<'a>: Clone, Copy, Debug
 MetadataType: Clone, Copy, Debug, Eq, PartialEq
 Model: Debug
+NodeView<'a>: Debug
 PickerStrategy: Clone, Copy, Debug, Eq, PartialEq
 PreArgminDecision: Clone, Copy, Debug, PartialEq
 PredictError: Clone, Debug, Display, Eq, Error, PartialEq
@@ -458,4 +524,4 @@ output_spec::SparseOverride: Clone, Copy, Debug, Default, bytemuck::pod::Pod, by
 
 ## auto traits
 
-33 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

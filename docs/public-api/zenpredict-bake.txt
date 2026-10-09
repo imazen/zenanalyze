@@ -6,29 +6,30 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict-bake.txt 430 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 9 lines (9 hidden + 0 excluded-feature)
+# files: zenpredict-bake.txt 554 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 11 lines (11 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 7
-#   pub types (struct/enum/trait/alias)        34
-#   free functions                             23
+#   pub modules                                 8
+#   pub types (struct/enum/trait/alias)        40
+#   free functions                             25
 #   inherent methods                           24
-#   struct fields                             242
-#   enum variants                             105
-#   trait roster entries (type × trait)        59
-#   auto-trait-complete types                  18
+#   struct fields                             314
+#   enum variants                             149
+#   trait roster entries (type × trait)        69
+#   auto-trait-complete types                  21
 #
 # per-module pub lines:
-#   (root)                          201
+#   (root)                          264
 #   append                           29
 #   cli                               3
-#   composer                        117
-#   json                             72
+#   composer                        123
+#   graph                            25
+#   json                            103
 #   optimize                          9
 #   zero_bias                         4
 
-## items (410 lines)
+## items (531 lines)
 
 pub mod zenpredict_bake
 pub mod append
@@ -68,6 +69,8 @@ pub composer::BakeError::BiasLengthMismatch
 pub composer::BakeError::BiasLengthMismatch::expected: usize
 pub composer::BakeError::BiasLengthMismatch::got: usize
 pub composer::BakeError::BiasLengthMismatch::layer: usize
+pub composer::BakeError::ChainActivationUnsupported
+pub composer::BakeError::ChainActivationUnsupported::layer: usize
 pub composer::BakeError::EmptyLayers
 pub composer::BakeError::FeatureBoundsLengthMismatch
 pub composer::BakeError::FeatureBoundsLengthMismatch::expected: usize
@@ -87,6 +90,10 @@ pub composer::BakeError::FeatureTransformParamInvalid::transform: &'static str
 pub composer::BakeError::FeatureTransformsLenMismatch
 pub composer::BakeError::FeatureTransformsLenMismatch::expected: usize
 pub composer::BakeError::FeatureTransformsLenMismatch::got: usize
+pub composer::BakeError::GraphInvalid
+pub composer::BakeError::GraphInvalid::node: usize
+pub composer::BakeError::GraphInvalid::what: &'static str
+pub composer::BakeError::GraphRejected(zenpredict::error::PredictError)
 pub composer::BakeError::InvalidPermutation
 pub composer::BakeError::InvalidPermutation::what: &'static str
 pub composer::BakeError::LayerDimMismatch
@@ -163,6 +170,30 @@ pub fn composer::BakeRequestBuilder<'a>::output_order(self, &'a [u32]) -> Self
 pub fn composer::BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self
 pub fn composer::BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
 pub fn composer::f32_to_f16_bits(f32) -> u16
+pub mod graph
+pub graph::BakeNode::Activation
+pub graph::BakeNode::Activation::activation: zenpredict::model::Activation
+pub graph::BakeNode::Activation::input: u32
+pub graph::BakeNode::Add
+pub graph::BakeNode::Add::a: u32
+pub graph::BakeNode::Add::b: u32
+pub graph::BakeNode::Concat
+pub graph::BakeNode::Concat::inputs: &'a [u32]
+pub graph::BakeNode::Dense
+pub graph::BakeNode::Dense::activation: zenpredict::model::Activation
+pub graph::BakeNode::Dense::biases: core::option::Option<&'a [f32]>
+pub graph::BakeNode::Dense::dtype: zenpredict::model::WeightDtype
+pub graph::BakeNode::Dense::input: u32
+pub graph::BakeNode::Dense::out_dim: usize
+pub graph::BakeNode::Dense::weights: &'a [f32]
+pub graph::BakeNode::Gather
+pub graph::BakeNode::Gather::indices: &'a [u32]
+pub graph::BakeNode::Gather::input: u32
+pub graph::BakeNode::Input
+pub graph::BakeNode::Input::width: usize
+pub graph::BakeNode::Mul
+pub graph::BakeNode::Mul::a: u32
+pub graph::BakeNode::Mul::b: u32
 pub mod json
 pub json::ActivationJson::Identity
 pub json::ActivationJson::LeakyRelu
@@ -177,9 +208,37 @@ pub json::BakeJsonError::MetadataValueWrongType
 pub json::BakeJsonError::MetadataValueWrongType::key: alloc::string::String
 pub json::BakeJsonError::MetadataValueWrongType::repr: &'static str
 pub json::BakeJsonError::MetadataValueWrongType::wire: zenpredict::metadata::MetadataType
+pub json::BakeNodeJson::Activation
+pub json::BakeNodeJson::Activation::activation: json::GraphActivationJson
+pub json::BakeNodeJson::Activation::input: u32
+pub json::BakeNodeJson::Add
+pub json::BakeNodeJson::Add::a: u32
+pub json::BakeNodeJson::Add::b: u32
+pub json::BakeNodeJson::Concat
+pub json::BakeNodeJson::Concat::inputs: alloc::vec::Vec<u32>
+pub json::BakeNodeJson::Dense
+pub json::BakeNodeJson::Dense::activation: json::GraphActivationJson
+pub json::BakeNodeJson::Dense::biases: core::option::Option<alloc::vec::Vec<f32>>
+pub json::BakeNodeJson::Dense::dtype: json::DtypeJson
+pub json::BakeNodeJson::Dense::input: u32
+pub json::BakeNodeJson::Dense::out_dim: usize
+pub json::BakeNodeJson::Dense::weights: alloc::vec::Vec<f32>
+pub json::BakeNodeJson::Gather
+pub json::BakeNodeJson::Gather::indices: alloc::vec::Vec<u32>
+pub json::BakeNodeJson::Gather::input: u32
+pub json::BakeNodeJson::Input
+pub json::BakeNodeJson::Input::width: usize
+pub json::BakeNodeJson::Mul
+pub json::BakeNodeJson::Mul::a: u32
+pub json::BakeNodeJson::Mul::b: u32
 pub json::DtypeJson::F16
 pub json::DtypeJson::F32
 pub json::DtypeJson::I8
+pub json::GraphActivationJson::Exp
+pub json::GraphActivationJson::Identity
+pub json::GraphActivationJson::LeakyRelu
+pub json::GraphActivationJson::Relu
+pub json::GraphActivationJson::Softplus
 pub enum json::MetadataKindJson
 pub json::MetadataKindJson::Bytes
 pub json::MetadataKindJson::Numeric
@@ -201,6 +260,7 @@ pub json::BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJso
 pub json::BakeRequestJson::feature_config_hash: core::option::Option<u64>
 pub json::BakeRequestJson::feature_defs_version: core::option::Option<u32>
 pub json::BakeRequestJson::flags: u16
+pub json::BakeRequestJson::graph: alloc::vec::Vec<json::BakeNodeJson>
 pub json::BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
 pub json::BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
 pub json::BakeRequestJson::optimize: bool
@@ -271,6 +331,8 @@ pub BakeError::BiasLengthMismatch
 pub BakeError::BiasLengthMismatch::expected: usize
 pub BakeError::BiasLengthMismatch::got: usize
 pub BakeError::BiasLengthMismatch::layer: usize
+pub BakeError::ChainActivationUnsupported
+pub BakeError::ChainActivationUnsupported::layer: usize
 pub BakeError::EmptyLayers
 pub BakeError::FeatureBoundsLengthMismatch
 pub BakeError::FeatureBoundsLengthMismatch::expected: usize
@@ -290,6 +352,10 @@ pub BakeError::FeatureTransformParamInvalid::transform: &'static str
 pub BakeError::FeatureTransformsLenMismatch
 pub BakeError::FeatureTransformsLenMismatch::expected: usize
 pub BakeError::FeatureTransformsLenMismatch::got: usize
+pub BakeError::GraphInvalid
+pub BakeError::GraphInvalid::node: usize
+pub BakeError::GraphInvalid::what: &'static str
+pub BakeError::GraphRejected(zenpredict::error::PredictError)
 pub BakeError::InvalidPermutation
 pub BakeError::InvalidPermutation::what: &'static str
 pub BakeError::LayerDimMismatch
@@ -341,10 +407,64 @@ pub BakeJsonError::MetadataValueWrongType
 pub BakeJsonError::MetadataValueWrongType::key: alloc::string::String
 pub BakeJsonError::MetadataValueWrongType::repr: &'static str
 pub BakeJsonError::MetadataValueWrongType::wire: zenpredict::metadata::MetadataType
+#[non_exhaustive] pub enum BakeNode<'a> [also: graph]
+pub BakeNode::Activation
+pub BakeNode::Activation::activation: zenpredict::model::Activation
+pub BakeNode::Activation::input: u32
+pub BakeNode::Add
+pub BakeNode::Add::a: u32
+pub BakeNode::Add::b: u32
+pub BakeNode::Concat
+pub BakeNode::Concat::inputs: &'a [u32]
+pub BakeNode::Dense
+pub BakeNode::Dense::activation: zenpredict::model::Activation
+pub BakeNode::Dense::biases: core::option::Option<&'a [f32]>
+pub BakeNode::Dense::dtype: zenpredict::model::WeightDtype
+pub BakeNode::Dense::input: u32
+pub BakeNode::Dense::out_dim: usize
+pub BakeNode::Dense::weights: &'a [f32]
+pub BakeNode::Gather
+pub BakeNode::Gather::indices: &'a [u32]
+pub BakeNode::Gather::input: u32
+pub BakeNode::Input
+pub BakeNode::Input::width: usize
+pub BakeNode::Mul
+pub BakeNode::Mul::a: u32
+pub BakeNode::Mul::b: u32
+#[non_exhaustive] pub enum BakeNodeJson [also: json]
+pub BakeNodeJson::Activation
+pub BakeNodeJson::Activation::activation: json::GraphActivationJson
+pub BakeNodeJson::Activation::input: u32
+pub BakeNodeJson::Add
+pub BakeNodeJson::Add::a: u32
+pub BakeNodeJson::Add::b: u32
+pub BakeNodeJson::Concat
+pub BakeNodeJson::Concat::inputs: alloc::vec::Vec<u32>
+pub BakeNodeJson::Dense
+pub BakeNodeJson::Dense::activation: json::GraphActivationJson
+pub BakeNodeJson::Dense::biases: core::option::Option<alloc::vec::Vec<f32>>
+pub BakeNodeJson::Dense::dtype: json::DtypeJson
+pub BakeNodeJson::Dense::input: u32
+pub BakeNodeJson::Dense::out_dim: usize
+pub BakeNodeJson::Dense::weights: alloc::vec::Vec<f32>
+pub BakeNodeJson::Gather
+pub BakeNodeJson::Gather::indices: alloc::vec::Vec<u32>
+pub BakeNodeJson::Gather::input: u32
+pub BakeNodeJson::Input
+pub BakeNodeJson::Input::width: usize
+pub BakeNodeJson::Mul
+pub BakeNodeJson::Mul::a: u32
+pub BakeNodeJson::Mul::b: u32
 pub enum DtypeJson [also: json]
 pub DtypeJson::F16
 pub DtypeJson::F32
 pub DtypeJson::I8
+#[non_exhaustive] pub enum GraphActivationJson [also: json]
+pub GraphActivationJson::Exp
+pub GraphActivationJson::Identity
+pub GraphActivationJson::LeakyRelu
+pub GraphActivationJson::Relu
+pub GraphActivationJson::Softplus
 pub enum OutputTransformJson [also: json]
 pub OutputTransformJson::Exp
 pub OutputTransformJson::Identity
@@ -404,6 +524,7 @@ pub BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJson>
 pub BakeRequestJson::feature_config_hash: core::option::Option<u64>
 pub BakeRequestJson::feature_defs_version: core::option::Option<u32>
 pub BakeRequestJson::flags: u16
+pub BakeRequestJson::graph: alloc::vec::Vec<json::BakeNodeJson>
 pub BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
 pub BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
 pub BakeRequestJson::optimize: bool
@@ -439,18 +560,22 @@ pub fn apply_zero_bias_per_layer_in_place(&mut [f32], f32) [also: zero_bias]
 pub fn bake(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: composer]
 pub fn bake_from_json(&json::BakeRequestJson) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
 pub fn bake_from_json_str(&str) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
+pub fn bake_graph(&composer::BakeRequest<'_>, &[graph::BakeNode<'_>]) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: graph]
 pub fn bake_optimized(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: optimize]
 
-## trait impls (19 types)
+## trait impls (22 types)
 
 append::AppendError: Clone, Debug, Display, Eq, Error, PartialEq
 composer::BakeError: Clone, Debug, Display, Eq, Error, PartialEq
+graph::BakeNode<'a>: Clone, Copy, Debug
 json::ActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::BakeJsonError: Debug, Display, Error, From<composer::BakeError>
 json::BakeLayerJson: Debug, serde_core::de::Deserialize<'de>
+json::BakeNodeJson: Debug, serde_core::de::Deserialize<'de>
 json::BakeRequestJson: Debug, serde_core::de::Deserialize<'de>
 json::DtypeJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::FeatureBoundJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
+json::GraphActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::MetadataEntryJson: Debug, serde_core::de::Deserialize<'de>
 json::MetadataKindJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::OutputSpecJson: Clone, Debug, serde_core::de::Deserialize<'de>
@@ -459,10 +584,10 @@ json::SparseOverrideJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 optimize::OptimizeConfig: Clone, Copy, Debug, Default
 zenpredict::bounds::FeatureBound: From<json::FeatureBoundJson>
 zenpredict::metadata::MetadataType: From<json::MetadataKindJson>
-zenpredict::model::Activation: From<json::ActivationJson>
+zenpredict::model::Activation: From<json::ActivationJson>, From<json::GraphActivationJson>
 zenpredict::model::WeightDtype: From<json::DtypeJson>
 zenpredict::output_spec::OutputTransform: From<json::OutputTransformJson>
 
 ## auto traits
 
-18 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

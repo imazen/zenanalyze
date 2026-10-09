@@ -51,8 +51,8 @@ pub use composer::{
 pub use graph::{BakeNode, bake_graph};
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeNodeJson, BakeRequestJson, DtypeJson,
-    FeatureBoundJson, MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson,
-    bake_from_json, bake_from_json_str,
+    FeatureBoundJson, GraphActivationJson, MetadataEntryJson, OutputSpecJson, OutputTransformJson,
+    SparseOverrideJson, bake_from_json, bake_from_json_str,
 };
 pub use optimize::bake_optimized;
 pub use zero_bias::{

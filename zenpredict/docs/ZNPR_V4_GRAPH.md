@@ -269,9 +269,12 @@ pub fn bake_graph(req: &BakeRequest<'_>, nodes: &[BakeNode<'_>]) -> Result<Vec<u
 // BakeError (#[non_exhaustive]) gains
 GraphInvalid { node: usize, what: &'static str },
 ChainActivationUnsupported { layer: usize },   // Exp/Softplus in a v3 chain
+GraphRejected(zenpredict::PredictError),       // the parser rejected the composed graph
 
 // JSON: BakeRequestJson gains `graph: Vec<BakeNodeJson>` (serde default empty);
-// `layers` becomes serde-default. ActivationJson gains Exp, Softplus.
+// `layers` becomes serde-default. Graph nodes take the new #[non_exhaustive]
+// GraphActivationJson (identity, relu, leakyrelu, exp, softplus); ActivationJson
+// (v3 layers) is unchanged, so the bake crate stays semver-additive.
 ```
 
 Tools that rewrite a bake in place stay v3-only for now and refuse v4
