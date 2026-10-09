@@ -92,9 +92,27 @@ pub fn parse_bake(bytes: &[u8]) -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&summary).map_err(|e| JsError::new(&format!("{e}")))
 }
 
+/// Load `bytes` for the visualizer, which walks `Model::layers()` as a
+/// feature-reading layer chain with full biases. A ZNPR v4 graph bake is
+/// not that shape (gathers, branches, bias-free Dense, Exp/Softplus), so
+/// it is refused with an error instead of being rendered or run wrongly.
+/// Graph support in the viz can come later.
+pub fn load_chain_model(bytes: &[u8]) -> Result<Model, String> {
+    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    if model.version() != zenpredict::FORMAT_VERSION {
+        return Err(format!(
+            "ZNPR v{} op-graph bakes are not supported by zenpredict-viz yet \
+             (layer-chain v{} bakes only)",
+            model.version(),
+            zenpredict::FORMAT_VERSION
+        ));
+    }
+    Ok(model)
+}
+
 /// Native entry point used by tests + native callers.
 pub fn parse_bake_native(bytes: &[u8]) -> Result<BakeSummary, String> {
-    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    let model = load_chain_model(bytes)?;
     Ok(build_summary(&model, bytes.len()))
 }
 
@@ -358,7 +376,7 @@ pub fn forward_with_taps(bytes: &[u8], features: Vec<f32>) -> Result<JsValue, Js
 /// `features` is the CALLER-width vector (`Model::caller_input_width`),
 /// exactly what a codec hands to `Predictor::predict_transformed`.
 pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<ForwardTaps, String> {
-    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    let model = load_chain_model(bytes)?;
     let n_inputs = model.n_inputs();
     let caller_width = model.caller_input_width();
     if features.len() != caller_width {
@@ -596,7 +614,7 @@ pub fn layer_weights(bytes: &[u8], layer_idx: usize) -> Result<Vec<f32>, JsError
 
 /// Native entry point used by tests + native callers.
 pub fn layer_weights_native(bytes: &[u8], layer_idx: usize) -> Result<Vec<f32>, String> {
-    let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    let model = load_chain_model(bytes)?;
     if layer_idx >= model.n_layers() {
         return Err(format!(
             "layer index {layer_idx} out of range (n_layers={})",

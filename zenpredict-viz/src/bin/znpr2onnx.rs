@@ -96,7 +96,9 @@ fn main() -> ExitCode {
         }
     };
 
-    let model = match Model::from_bytes(&bytes) {
+    // Chain-only: the exporter emits Standardize → Gemm chain, which can't
+    // represent a ZNPR v4 graph (Gather / Mul / Exp / bias-free Dense).
+    let model = match zenpredict_viz::load_chain_model(&bytes) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("parse {input_path}: {e}");
