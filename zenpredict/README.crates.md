@@ -173,7 +173,7 @@ A v4 file keeps the v3 header, scaler, metadata and output sections and replaces
 | `Add`, `Mul` | elementwise, equal widths |
 | `Concat` | inputs end to end |
 
-Everything is validated at load (op bytes, topological order, arity, widths, section sizes, gather ranges, dead nodes, `limits::{MAX_NODES, MAX_TOTAL_WEIGHTS, MAX_SCRATCH_ELEMS}`), scratch is planned once by liveness, and `predict` allocates nothing. v3 files load unchanged and run on the same executor as `Input → Dense → …`, bit-identical to the pre-graph runtime. Inspect a graph with `Model::nodes()` / `NodeView`; bake one with `zenpredict_bake::bake_graph` or a JSON `"graph"` spec ([`zenpredict-bake/examples/gated_head.json`](https://github.com/imazen/zenanalyze/blob/main/zenpredict-bake/examples/gated_head.json) is the gated head `Σ v·ReLU(w·d)·exp(u·r)`). Spec: [`docs/ZNPR_V4_GRAPH.md`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/docs/ZNPR_V4_GRAPH.md).
+Everything is validated at load (op bytes, topological order, arity, widths, section sizes, gather ranges, dead nodes, `limits::{MAX_NODES, MAX_TOTAL_WEIGHTS, MAX_TOTAL_ELEMS, MAX_SCRATCH_ELEMS}`), scratch is planned once by liveness, and `predict` allocates nothing. v3 files load unchanged and run on the same executor as `Input → Dense → …`, bit-identical to the pre-graph runtime. Inspect a graph with `Model::nodes()` / `NodeView`; bake one with `zenpredict_bake::bake_graph` or a JSON `"graph"` spec ([`zenpredict-bake/examples/gated_head.json`](https://github.com/imazen/zenanalyze/blob/main/zenpredict-bake/examples/gated_head.json) is the gated head `Σ v·ReLU(w·d)·exp(u·r)`). Spec: [`docs/ZNPR_V4_GRAPH.md`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/docs/ZNPR_V4_GRAPH.md).
 
 ## Metadata
 

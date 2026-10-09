@@ -1,4 +1,5 @@
-//! Fuzz target: structured ZNPR v4 graphs. `arbitrary` picks the node
+//! Fuzz target: structured ZNPR v4 graphs, differential against the
+//! per-node reference evaluator in `graph_core.rs`. `arbitrary` picks the node
 //! list (op, activation, dtype, width, input indices, payload bytes) and
 //! the builder lays out a well-formed file around it — sections in range,
 //! sizes either exact for the declared op or deliberately off — then
@@ -59,6 +60,8 @@ fn blob(buf: &mut Vec<u8>, src: &[u8], len: usize) -> usize {
 }
 
 fn build(g: &FuzzGraph) -> Vec<u8> {
+    use core::mem::offset_of;
+    use zenpredict::NodeEntry;
     use zenpredict::wire::*;
     let n_in = g.n_inputs as usize % 16 + 1;
     let nodes = &g.nodes[..g.nodes.len().min(40)];
@@ -208,10 +211,10 @@ fn build(g: &FuzzGraph) -> Vec<u8> {
             dtype
         };
         e[4..8].copy_from_slice(&(out as u32).to_le_bytes());
-        sec(e, NODE_OFF_INPUTS, in_off, in_list.len() * 4);
-        sec(e, NODE_OFF_DATA0, d0.0, d0.1);
-        sec(e, NODE_OFF_DATA1, d1.0, d1.1);
-        sec(e, NODE_OFF_DATA2, d2.0, d2.1);
+        sec(e, offset_of!(NodeEntry, inputs), in_off, in_list.len() * 4);
+        sec(e, offset_of!(NodeEntry, data0), d0.0, d0.1);
+        sec(e, offset_of!(NodeEntry, data1), d1.0, d1.1);
+        sec(e, offset_of!(NodeEntry, data2), d2.0, d2.1);
     }
     let n_out = match g.n_outputs_override {
         Some(o) => o as usize % 32 + 1,
@@ -225,6 +228,8 @@ fn build(g: &FuzzGraph) -> Vec<u8> {
     buf
 }
 
+// Differential: every graph that loads must give the same outputs as the
+// per-node reference evaluator (bits, or NaN for NaN).
 fuzz_target!(|g: FuzzGraph| {
-    run_model_bytes(&build(&g));
+    exercise_model_bytes(&build(&g), true);
 });

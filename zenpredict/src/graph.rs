@@ -21,7 +21,9 @@ use alloc::vec::Vec;
 use bytemuck::{Pod, Zeroable};
 
 use crate::error::PredictError;
-use crate::limits::{MAX_DIM, MAX_NODE_INPUTS, MAX_NODES, MAX_SCRATCH_ELEMS, MAX_TOTAL_WEIGHTS};
+use crate::limits::{
+    MAX_DIM, MAX_NODE_INPUTS, MAX_NODES, MAX_SCRATCH_ELEMS, MAX_TOTAL_ELEMS, MAX_TOTAL_WEIGHTS,
+};
 use crate::model::{
     Activation, LayerOffsets, LayerView, Section, WeightDtype, cast_f32_section, cast_i8_section,
     cast_u16_section, cast_u32_section, try_vec_with_capacity,
@@ -30,20 +32,49 @@ use crate::wire::{
     NODE_ENTRY_SIZE, OP_ACTIVATION, OP_ADD, OP_CONCAT, OP_DENSE, OP_GATHER, OP_INPUT, OP_MUL,
 };
 
-/// On-disk v4 node-table entry. See [`crate::wire::NODE_ENTRY_SIZE`].
+/// One ZNPR v4 node-table entry (48 bytes, little-endian, `#[repr(C)]`
+/// `Pod`) — the graph counterpart of [`crate::LayerEntry`]. The v4 header's
+/// `layer_table` Section addresses `n_nodes` of these.
+///
+/// Composers build one with `bytemuck::Zeroable::zeroed()` and set the
+/// fields an op uses; everything else must stay zero (the loader refuses
+/// nonzero unused fields). Field meaning by op — `op` is one of
+/// `wire::OP_*`:
+///
+/// | field | Dense | Gather | Activation | others |
+/// |---|---|---|---|---|
+/// | `activation` | fused activation byte | 0 | activation byte | 0 |
+/// | `weight_dtype` | 0=F32 1=F16 2=I8 | 0 | 0 | 0 |
+/// | `inputs` | one u32 node index | one | one | Add/Mul two, Concat 1..=64, Input none |
+/// | `data0` | weights (v3 layout) | u32 source indices | empty | empty |
+/// | `data1` | I8 per-output scales | empty | empty | empty |
+/// | `data2` | f32 biases or empty | empty | empty | empty |
+///
+/// Full spec: `docs/ZNPR_V4_GRAPH.md`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(crate) struct NodeEntry {
-    pub(crate) op: u8,
-    pub(crate) activation: u8,
-    pub(crate) weight_dtype: u8,
-    pub(crate) flags: u8,
-    pub(crate) out_dim: u32,
-    pub(crate) inputs: Section,
-    pub(crate) data0: Section,
-    pub(crate) data1: Section,
-    pub(crate) data2: Section,
-    pub(crate) reserved: [u32; 2],
+#[non_exhaustive]
+pub struct NodeEntry {
+    /// Graph op, one of `wire::OP_*`.
+    pub op: u8,
+    /// Activation byte (Dense, Activation), else 0.
+    pub activation: u8,
+    /// Weight dtype byte (Dense), else 0.
+    pub weight_dtype: u8,
+    /// Reserved, must be 0.
+    pub flags: u8,
+    /// Output width of the node.
+    pub out_dim: u32,
+    /// u32 LE input node indices, `arity * 4` bytes.
+    pub inputs: Section,
+    /// Dense weights / Gather indices.
+    pub data0: Section,
+    /// Dense I8 scales.
+    pub data1: Section,
+    /// Dense biases (empty = no bias).
+    pub data2: Section,
+    /// Reserved, must be 0.
+    pub reserved: [u32; 2],
 }
 
 const _: () = assert!(core::mem::size_of::<NodeEntry>() == NODE_ENTRY_SIZE);
@@ -108,30 +139,57 @@ pub(crate) struct Graph {
 
 /// Typed view of one graph node, from [`crate::Model::node`].
 ///
-/// Node indices (`input`, `a`, `b`, entries of `inputs`) always refer to
-/// earlier nodes. The last node of a model is its output.
-#[derive(Debug)]
+/// Node indices (`input`, `a`, `b`, entries of `inputs`) are `u32`, like
+/// the wire format, and always name earlier nodes; the last node of a
+/// model is its output. [`Self::width`] is the output width of any node.
+/// Every variant is `#[non_exhaustive]` so fields can be added (match
+/// with `..`), and the enum is too, so ops can be added. `Clone`, not yet
+/// `Copy`: `Copy` on the existing `LayerView` it contains is a semver
+/// break, queued for the next minor.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum NodeView<'a> {
     /// The scaled feature vector, `(x - mean) / scale`. Always node 0.
+    #[non_exhaustive]
     Input { width: usize },
     /// `act(b + x·W)` over node `input`. `layer.in_dim` is `input`'s
     /// width; `layer.biases` is empty when the node has no bias.
-    Dense { input: usize, layer: LayerView<'a> },
+    #[non_exhaustive]
+    Dense { input: u32, layer: LayerView<'a> },
     /// Elementwise activation of node `input`.
+    #[non_exhaustive]
     Activation {
-        input: usize,
+        input: u32,
         activation: Activation,
         width: usize,
     },
     /// `y[j] = x[indices[j]]` over node `input`.
-    Gather { input: usize, indices: &'a [u32] },
+    #[non_exhaustive]
+    Gather { input: u32, indices: &'a [u32] },
     /// Elementwise `a + b`.
-    Add { a: usize, b: usize, width: usize },
+    #[non_exhaustive]
+    Add { a: u32, b: u32, width: usize },
     /// Elementwise `a * b`.
-    Mul { a: usize, b: usize, width: usize },
+    #[non_exhaustive]
+    Mul { a: u32, b: u32, width: usize },
     /// `inputs` laid end to end.
+    #[non_exhaustive]
     Concat { inputs: &'a [u32], width: usize },
+}
+
+impl NodeView<'_> {
+    /// Output width of this node.
+    pub fn width(&self) -> usize {
+        match self {
+            Self::Input { width }
+            | Self::Activation { width, .. }
+            | Self::Add { width, .. }
+            | Self::Mul { width, .. }
+            | Self::Concat { width, .. } => *width,
+            Self::Dense { layer, .. } => layer.out_dim,
+            Self::Gather { indices, .. } => indices.len(),
+        }
+    }
 }
 
 fn malformed(node: usize, what: &'static str) -> PredictError {
@@ -144,6 +202,35 @@ fn require_empty(node: usize, s: Section, what: &'static str) -> Result<(), Pred
     } else {
         Err(malformed(node, what))
     }
+}
+
+/// Per-element cost of an activation in the `MAX_TOTAL_ELEMS` budget.
+fn activation_cost(a: Activation) -> usize {
+    match a {
+        Activation::Exp => 32,
+        Activation::Softplus => 64,
+        _ => 1,
+    }
+}
+
+/// Op-weighted element work of one node (see [`MAX_TOTAL_ELEMS`]).
+fn node_cost(kind: &NodeKind, width: usize) -> usize {
+    let per_elem = match kind {
+        NodeKind::Dense { layer, .. } => 1 + activation_cost(layer.activation),
+        NodeKind::Activation { activation, .. } => activation_cost(*activation),
+        _ => 1,
+    };
+    width.saturating_mul(per_elem)
+}
+
+fn add_elems(total: &mut usize, n: usize) -> Result<(), PredictError> {
+    *total = total
+        .checked_add(n)
+        .filter(|&t| t <= MAX_TOTAL_ELEMS)
+        .ok_or(PredictError::DimensionOverflow {
+            what: "op-weighted elements (limits::MAX_TOTAL_ELEMS)",
+        })?;
+    Ok(())
 }
 
 fn add_weights(total: &mut usize, n: usize) -> Result<(), PredictError> {
@@ -237,6 +324,7 @@ pub(crate) fn parse_v4(
     let mut nodes: Vec<GraphNode> = try_vec_with_capacity(n_nodes)?;
     let mut dense_nodes: Vec<u32> = try_vec_with_capacity(n_nodes)?;
     let mut total_weights = 0usize;
+    let mut total_elems = 0usize;
 
     for (i, e) in entries.iter().enumerate() {
         let op = e.op;
@@ -408,6 +496,7 @@ pub(crate) fn parse_v4(
                 NodeKind::Concat { inputs: e.inputs }
             }
         };
+        add_elems(&mut total_elems, node_cost(&kind, width))?;
         nodes.push(GraphNode {
             kind,
             width: e.out_dim,
@@ -452,10 +541,21 @@ pub(crate) fn lower_chain(
         slot: 0,
     });
     let mut total_weights = 0usize;
+    let mut total_elems = node_cost(&NodeKind::Input, n_inputs);
     for (k, layer) in layers.iter().enumerate() {
         add_weights(
             &mut total_weights,
             layer.in_dim as usize * layer.out_dim as usize,
+        )?;
+        add_elems(
+            &mut total_elems,
+            node_cost(
+                &NodeKind::Dense {
+                    input: k as u32,
+                    layer: *layer,
+                },
+                layer.out_dim as usize,
+            ),
         )?;
         dense_nodes.push(k as u32 + 1);
         nodes.push(GraphNode {

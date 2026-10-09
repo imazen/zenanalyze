@@ -349,7 +349,7 @@ impl WeightDtype {
 }
 
 /// Layered weight + bias view, borrowed from the file bytes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LayerView<'a> {
     pub in_dim: usize,
     pub out_dim: usize,
@@ -360,7 +360,7 @@ pub struct LayerView<'a> {
     pub biases: &'a [f32],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WeightStorage<'a> {
     F32(&'a [f32]),
     F16(&'a [u16]),
@@ -864,28 +864,20 @@ impl Model {
         match n.kind {
             NodeKind::Input => crate::NodeView::Input { width },
             NodeKind::Dense { input, ref layer } => crate::NodeView::Dense {
-                input: input as usize,
+                input,
                 layer: self.materialize_offsets(layer),
             },
             NodeKind::Activation { input, activation } => crate::NodeView::Activation {
-                input: input as usize,
+                input,
                 activation,
                 width,
             },
             NodeKind::Gather { input, indices, .. } => crate::NodeView::Gather {
-                input: input as usize,
+                input,
                 indices: crate::graph::gather_indices(indices, width, &self.bytes),
             },
-            NodeKind::Add { a, b } => crate::NodeView::Add {
-                a: a as usize,
-                b: b as usize,
-                width,
-            },
-            NodeKind::Mul { a, b } => crate::NodeView::Mul {
-                a: a as usize,
-                b: b as usize,
-                width,
-            },
+            NodeKind::Add { a, b } => crate::NodeView::Add { a, b, width },
+            NodeKind::Mul { a, b } => crate::NodeView::Mul { a, b, width },
             NodeKind::Concat { inputs } => crate::NodeView::Concat {
                 inputs: crate::graph::concat_inputs(inputs, &self.bytes),
                 width,

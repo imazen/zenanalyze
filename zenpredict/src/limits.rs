@@ -51,7 +51,8 @@ pub const MAX_NODE_INPUTS: usize = 64;
 
 /// Maximum total multiply-adds per forward pass: the sum of
 /// `in_dim * out_dim` over every Dense node (v4) or layer (v3, after
-/// lowering). 2^24 — production zensim is 944 × 128 = 120,832.
+/// lowering). 2^24 — the rev4 production zensim bake (420 → 128 → 1) is
+/// 53,888 and the SOTA-944 shape (944 → 128 → 1) is 120,960.
 ///
 /// File size does not bound compute on its own: sections may alias, so
 /// a crafted file can point many nodes at one weight blob. This limit
@@ -62,3 +63,21 @@ pub const MAX_TOTAL_WEIGHTS: usize = 1 << 24;
 /// [`crate::Predictor`] allocates (2^22 = 16 MiB). Computed and checked
 /// at load, before anything is allocated against it.
 pub const MAX_SCRATCH_ELEMS: usize = 1 << 22;
+
+/// Maximum op-weighted element work per forward pass, summed over every
+/// node: `width × cost`, where the cost per output element is
+///
+/// | node | cost |
+/// |---|---|
+/// | `Input` (scaler), `Gather`, `Add`, `Mul`, `Concat` | 1 |
+/// | `Activation` / Dense fused activation: Identity, ReLU, LeakyReLU | 1 |
+/// | `Activation` / Dense fused activation: `Exp` | 32 |
+/// | `Activation` / Dense fused activation: `Softplus` | 64 |
+///
+/// plus 1 per Dense output for its bias / accumulator init (its
+/// multiply-adds count against [`MAX_TOTAL_WEIGHTS`]). 2^22 — the rev4
+/// production zensim bake (420 → ReLU 128 → 1) uses 678. The weights reflect measured cost:
+/// scalar `libm` `expf` is ~30× a vectorized add, `Softplus` is two
+/// transcendentals. Together with `MAX_TOTAL_WEIGHTS` this bounds a
+/// forward pass to a few milliseconds whatever a file's size.
+pub const MAX_TOTAL_ELEMS: usize = 1 << 22;

@@ -40,7 +40,8 @@ fn graph_seeds_load_and_run() {
         let model = zenpredict::Model::from_bytes(&bytes)
             .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         assert_eq!(model.version(), zenpredict::GRAPH_FORMAT_VERSION);
-        run_model_bytes(&bytes);
+        // Differential, as the graph_structured target runs.
+        exercise_model_bytes(&bytes, true);
     }
 }
 

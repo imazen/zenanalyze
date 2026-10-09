@@ -834,6 +834,51 @@ mod activation_tests {
         assert!(softplus(f32::NAN).is_nan());
     }
 
+    /// Hash of the output bits of `f` over a fixed input grid.
+    fn grid_hash(f: fn(f32) -> f32) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut push = |x: f32| {
+            h = (h ^ f(x).to_bits() as u64).wrapping_mul(0x100_0000_01b3);
+        };
+        // -40..40 in steps of 1/64, plus the clamp/threshold edges and
+        // special values.
+        for k in -2560i32..=2560 {
+            push(k as f32 / 64.0);
+        }
+        for x in [
+            -30.0f32,
+            30.0,
+            20.0,
+            20.000002,
+            f32::MIN_POSITIVE,
+            -f32::MIN_POSITIVE,
+            1.0e-40,
+            f32::MAX,
+            -f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            push(x);
+        }
+        h
+    }
+
+    /// Exp and Softplus go through `libm` on every build so every platform
+    /// returns the same bits. Asserted as fixed hashes, so each CI target
+    /// (x86-64, aarch64, i686, macOS, windows-11-arm, wasm) checks it.
+    #[test]
+    fn exp_and_softplus_golden_bits() {
+        assert_eq!(grid_hash(exp_clamped), EXP_GOLDEN, "Exp grid bits changed");
+        assert_eq!(
+            grid_hash(softplus),
+            SOFTPLUS_GOLDEN,
+            "Softplus grid bits changed"
+        );
+    }
+
+    const EXP_GOLDEN: u64 = 2890466850989418080;
+    const SOFTPLUS_GOLDEN: u64 = 703659192208372239;
+
     #[test]
     fn apply_activation_covers_every_variant() {
         let src = [-2.0f32, -0.0, 0.0, 0.5, 30.5];

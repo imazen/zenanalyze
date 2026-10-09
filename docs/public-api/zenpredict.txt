@@ -6,29 +6,29 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict.txt 489 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
+# files: zenpredict.txt 499 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 49 lines (49 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        40
-#   pub consts/statics                         73
+#   pub types (struct/enum/trait/alias)        41
+#   pub consts/statics                         70
 #   free functions                             24
-#   inherent methods                          100
-#   struct fields                             128
+#   inherent methods                          101
+#   struct fields                             138
 #   enum variants                              97
-#   trait roster entries (type × trait)       146
-#   auto-trait-complete types                  34
+#   trait roster entries (type × trait)       154
+#   auto-trait-complete types                  35
 #
 # per-module pub lines:
-#   (root)                          354
+#   (root)                          366
 #   argmin                           26
 #   keys                             19
-#   limits                            7
+#   limits                            8
 #   output_spec                      33
-#   wire                             29
+#   wire                             25
 
-## items (455 lines)
+## items (464 lines)
 
 pub mod zenpredict
 pub mod argmin
@@ -70,6 +70,7 @@ pub const limits::MAX_LAYERS: usize
 pub const limits::MAX_NODES: usize
 pub const limits::MAX_NODE_INPUTS: usize
 pub const limits::MAX_SCRATCH_ELEMS: usize
+pub const limits::MAX_TOTAL_ELEMS: usize
 pub const limits::MAX_TOTAL_WEIGHTS: usize
 pub mod output_spec
 pub output_spec::OutputTransform::Exp = 3
@@ -106,10 +107,6 @@ pub const wire::FLAG_COMPRESSED: u16
 pub const wire::HEADER_SIZE: usize
 pub const wire::LAYER_ENTRY_SIZE: usize
 pub const wire::NODE_ENTRY_SIZE: usize
-pub const wire::NODE_OFF_DATA0: usize
-pub const wire::NODE_OFF_DATA1: usize
-pub const wire::NODE_OFF_DATA2: usize
-pub const wire::NODE_OFF_INPUTS: usize
 pub const wire::OFF_DECOMPRESSED_PAYLOAD_LEN: usize
 pub const wire::OP_ACTIVATION: u8
 pub const wire::OP_ADD: u8
@@ -176,29 +173,30 @@ pub MetadataType::Numeric
 pub MetadataType::Reserved(u8)
 pub MetadataType::Utf8
 #[non_exhaustive] pub enum NodeView<'a>
-pub NodeView::Activation
+#[non_exhaustive] pub NodeView::Activation
 pub NodeView::Activation::activation: Activation
-pub NodeView::Activation::input: usize
+pub NodeView::Activation::input: u32
 pub NodeView::Activation::width: usize
-pub NodeView::Add
-pub NodeView::Add::a: usize
-pub NodeView::Add::b: usize
+#[non_exhaustive] pub NodeView::Add
+pub NodeView::Add::a: u32
+pub NodeView::Add::b: u32
 pub NodeView::Add::width: usize
-pub NodeView::Concat
+#[non_exhaustive] pub NodeView::Concat
 pub NodeView::Concat::inputs: &'a [u32]
 pub NodeView::Concat::width: usize
-pub NodeView::Dense
-pub NodeView::Dense::input: usize
+#[non_exhaustive] pub NodeView::Dense
+pub NodeView::Dense::input: u32
 pub NodeView::Dense::layer: LayerView<'a>
-pub NodeView::Gather
+#[non_exhaustive] pub NodeView::Gather
 pub NodeView::Gather::indices: &'a [u32]
-pub NodeView::Gather::input: usize
-pub NodeView::Input
+pub NodeView::Gather::input: u32
+#[non_exhaustive] pub NodeView::Input
 pub NodeView::Input::width: usize
-pub NodeView::Mul
-pub NodeView::Mul::a: usize
-pub NodeView::Mul::b: usize
+#[non_exhaustive] pub NodeView::Mul
+pub NodeView::Mul::a: u32
+pub NodeView::Mul::b: u32
 pub NodeView::Mul::width: usize
+pub fn NodeView<'_>::width(&self) -> usize
 #[non_exhaustive] #[repr(u8)] pub enum OutputTransform [also: output_spec]
 pub OutputTransform::Exp = 3
 pub OutputTransform::Identity = 0
@@ -409,6 +407,17 @@ pub fn Model::scratch_len(&self) -> usize
 pub fn Model::sparse_overrides(&self) -> &[output_spec::SparseOverride]
 pub fn Model::unachievable_zones(&self) -> core::result::Result<UnachievableZones, PredictError>
 pub fn Model::version(&self) -> u16
+#[non_exhaustive] #[repr(C)] pub struct NodeEntry
+pub NodeEntry::activation: u8
+pub NodeEntry::data0: Section
+pub NodeEntry::data1: Section
+pub NodeEntry::data2: Section
+pub NodeEntry::flags: u8
+pub NodeEntry::inputs: Section
+pub NodeEntry::op: u8
+pub NodeEntry::out_dim: u32
+pub NodeEntry::reserved: [u32; 2]
+pub NodeEntry::weight_dtype: u8
 #[repr(C)] pub struct OutputSpec [also: output_spec]
 pub OutputSpec::_pad: [u8; 3]
 pub OutputSpec::bounds: FeatureBound
@@ -486,7 +495,7 @@ pub fn parse_unachievable_zones(&[u8]) -> core::result::Result<UnachievableZones
 pub fn resolve_pre_argmin(&[f32], f32, &UnachievableZones, &[KnobVeto<'_>], &mut [bool]) -> PreArgminDecision
 pub fn unachievable_zones_from_metadata(&Metadata<'_>) -> core::result::Result<UnachievableZones, PredictError>
 
-## trait impls (33 types)
+## trait impls (34 types)
 
 Activation: Clone, Copy, Debug, Eq, PartialEq
 EncodeBudget: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -496,12 +505,13 @@ FeatureTransform: Clone, Copy, Debug, Default, Eq, PartialEq
 Header: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 KnobVeto<'a>: Clone, Copy, Debug, PartialEq
 LayerEntry: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
-LayerView<'a>: Debug
+LayerView<'a>: Clone, Debug
 Metadata<'a>: Clone, Debug, Default
 MetadataEntry<'a>: Clone, Copy, Debug
 MetadataType: Clone, Copy, Debug, Eq, PartialEq
 Model: Debug
-NodeView<'a>: Debug
+NodeEntry: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+NodeView<'a>: Clone, Debug
 PickerStrategy: Clone, Copy, Debug, Eq, PartialEq
 PreArgminDecision: Clone, Copy, Debug, PartialEq
 PredictError: Clone, Debug, Display, Eq, Error, PartialEq
@@ -512,7 +522,7 @@ UnachievableZone: Clone, Copy, Debug, PartialEq
 UnachievableZones: Clone, Debug, Default, PartialEq
 VetoOp: Clone, Copy, Debug, Eq, PartialEq
 WeightDtype: Clone, Copy, Debug, Eq, PartialEq
-WeightStorage<'a>: Debug
+WeightStorage<'a>: Clone, Debug
 ZoneFallback: Clone, Copy, Debug, PartialEq
 argmin::AllowedMask<'a>: Clone, Copy, Debug
 argmin::ArgminOffsets<'a>: Clone, Copy, Debug, Default
@@ -524,4 +534,4 @@ output_spec::SparseOverride: Clone, Copy, Debug, Default, bytemuck::pod::Pod, by
 
 ## auto traits
 
-34 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+35 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

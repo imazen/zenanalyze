@@ -7,53 +7,54 @@
      bumps stay non-breaking). Persist across patch releases. Only
      clear when the breaking release ships. -->
 
+- `Copy` on `LayerView`, `WeightStorage` and `NodeView` (they are
+  borrowed views; `cargo semver-checks` counts adding `Copy` to an existing
+  type as major, so 0.2.x ships `Clone` only).
 - `LayerEntry.*` and `LayerView.*` field tightening may follow once
   `WeightStorage` variant pattern-matching has a stable accessor
   pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
 
 ### Added
 
-- **ZNPR v4: static op graphs** (`docs/ZNPR_V4_GRAPH.md`; `ea8f3fb0`). The
-  fixed `scaler → [Dense]×N` chain becomes a topologically ordered node
-  graph — `Input`, `Dense` (f32/f16/i8, optional bias, fused activation),
+- **ZNPR v4: static op graphs** (`docs/ZNPR_V4_GRAPH.md`). The fixed
+  `scaler → [Dense]×N` chain becomes a topologically ordered node graph —
+  `Input`, `Dense` (f32/f16/i8, optional bias, fused activation),
   `Activation`, `Gather`, `Add`, `Mul`, `Concat` — so new heads (e.g.
   zensim E33's gated `Σ v·ReLU(w·d)·exp(u·r)`) are export work, not
-  runtime work. v3 files still parse exactly as before and are lowered
-  to `Input → Dense → …`; one executor runs both, with a
-  liveness-packed scratch arena planned at load (no per-call
-  allocation). Load-time validation: known op/activation/dtype bytes,
-  strict topological order, arity, per-op widths, Dense section sizes,
-  Gather ranges, no dead nodes, zero reserved fields. Measured
-  bit-identical to the pre-graph runtime (`tools/graph-parity`, `b3a63a06`)
-  on 260 unique repo/consumer ZNPR files, the rev4 production bake
-  (50,000 vectors), 504 sampled rev4 bakes, and 2,000 synthetic chains
-  (27.2 M outputs, composer bytes identical too); forward pass on the
-  production bake 1.7–1.8 % faster (zenbench paired CI [-1.8 %,
-  -1.7 %]); per-predict `perf stat` cycles move -4.4 % … +0.3 % across
-  four shapes. Record: `benchmarks/znpr_v4_graph_gates_2026-10-09.md`.
-  New public items: `Activation::{Exp, Softplus}` (v4-only; libm on
-  every build, `Exp` input clamped to ±`EXP_INPUT_CLAMP` = 30,
-  `Softplus` identity above `SOFTPLUS_THRESHOLD` = 20),
-  `GRAPH_FORMAT_VERSION`, `NodeView`, `Model::{n_nodes, node, nodes,
-  is_layer_chain}`, `Predictor::try_new`, `limits::{MAX_NODES,
-  MAX_NODE_INPUTS, MAX_TOTAL_WEIGHTS, MAX_SCRATCH_ELEMS}`,
-  `wire::{NODE_ENTRY_SIZE, NODE_OFF_*, OP_*}`, and `PredictError::
-  {UnknownGraphOp, GraphInputRef, GraphShapeMismatch, GraphMalformed,
-  AllocFailed}`. Tests: `zenpredict-bake/tests/graph.rs` (`026b4f48`);
-  fuzz targets `graph_from_bytes` / `graph_structured` with curated
-  seeds and `tests/fuzz_regression.rs` (`7a190081`).
+  runtime work. v3 files still parse exactly as before and are lowered to
+  `Input → Dense → …`; one executor runs both, with a liveness-packed
+  scratch arena planned at load (no per-call allocation). Load-time
+  validation: known op/activation/dtype bytes, strict topological order,
+  arity, per-op widths, Dense section sizes, Gather ranges, no dead
+  nodes, zero reserved fields, and the compute limits below. Measured
+  bit-identical to the pre-graph runtime (`tools/graph-parity`) on 260
+  unique repo/consumer ZNPR files, the rev4 production bake, 504
+  sampled rev4 bakes and 2,000 synthetic chains (composer bytes
+  identical too). Forward pass: the rev4 production bake 1.7 % faster
+  (zenbench paired CI [-1.8 %, -1.7 %]); synthetic shapes within -7 %
+  … +2 % across runs on a shared box, with `perf stat` cycles -4.4 % …
+  +0.3 %. Record: `benchmarks/znpr_v4_graph_gates_2026-10-09.md`.
+  New public items:
+  - `Activation::{Exp, Softplus}` (v4-only; libm on every build, `Exp`
+    input clamped to ±`EXP_INPUT_CLAMP` = 30, `Softplus` identity above
+    `SOFTPLUS_THRESHOLD` = 20; output bits pinned by a golden-hash test on
+    every CI target), `GRAPH_FORMAT_VERSION`;
+  - `NodeView` (Debug/Clone, every variant `#[non_exhaustive]`, `u32`
+    node indices, `width()`), the wire entry `NodeEntry` (public `Pod`,
+    like `LayerEntry`), `Model::{n_nodes, node, nodes, is_layer_chain}`,
+    `Predictor::try_new`;
+  - `limits::{MAX_NODES, MAX_NODE_INPUTS, MAX_TOTAL_WEIGHTS,
+    MAX_TOTAL_ELEMS, MAX_SCRATCH_ELEMS}`, `wire::{NODE_ENTRY_SIZE, OP_*}`;
+  - `PredictError::{UnknownGraphOp, GraphInputRef, GraphShapeMismatch,
+    GraphMalformed, AllocFailed}`;
+  - `Clone` on `LayerView` and `WeightStorage` (`Copy` queued, see
+    QUEUED BREAKING CHANGES).
 
-### Changed
-
-- `Model::from_bytes*` allocate the owned bake buffer fallibly
-  (`PredictError::AllocFailed` instead of an abort), and every model —
-  v3 included — is checked against `limits::MAX_TOTAL_WEIGHTS` (2^24
-  multiply-adds per forward pass) and `limits::MAX_SCRATCH_ELEMS` at
-  load. Sections may alias, so file size alone never bounded compute.
-  No shipped or plausible v3 bake comes near either limit (`ea8f3fb0`).
-- `Model::layers()` / `n_layers()` on a v4 graph walk its Dense nodes;
-  check `is_layer_chain()` before treating `layer(0)` as the layer that
-  reads the features. v3 behaviour is unchanged (`ea8f3fb0`).
+  Tests: `zenpredict-bake/tests/graph.rs` (gated-head zero property,
+  executor vs a per-node reference evaluator on random DAGs, every
+  rejection rule); fuzz targets `graph_from_bytes` (seeded) and
+  `graph_structured` (differential against the same reference
+  evaluator) with `tests/fuzz_regression.rs`.
 
 - **`simd` feature (default-on): runtime FMA dispatch for the forward pass —
   17-26× on `Predictor::predict`, bit-identical output.** Baseline x86-64 has
@@ -142,6 +143,29 @@
   analysis config (e.g. gamma vs linear-light) before reusing it. The two numeric
   keys decode LE-explicit (i686/any-endian). All keys are `Option`/empty on bakes
   predating them (additive, non-breaking). Bakers (zentrain) populate them.
+
+
+### Changed
+
+- `Model::from_bytes*` allocate the owned bake buffer fallibly
+  (`PredictError::AllocFailed` instead of an abort), and every model —
+  v3 included — is checked at load against `limits::MAX_TOTAL_WEIGHTS`
+  (2^24 multiply-adds per forward pass), `limits::MAX_TOTAL_ELEMS` (2^22
+  op-weighted elementwise work: 1 per element, Exp 32, Softplus 64) and
+  `limits::MAX_SCRATCH_ELEMS`. Sections may alias and non-Dense ops carry
+  no payload, so file size alone never bounded compute (a 577 KB file of
+  1,023 Exp nodes took ~210 ms per predict before `MAX_TOTAL_ELEMS`). The
+  rev4 production bake uses 53,888 / 678 of the first two budgets.
+- **`Model::layers()` / `layer()` / `n_layers()` on a v4 graph walk its
+  Dense nodes.** For a v4 file a `LayerView` may have **empty `biases`**
+  (bias-free Dense) and an **`Exp` / `Softplus` activation**, and the
+  Dense nodes need not form a chain starting at the features — check
+  `is_layer_chain()` (or refuse v4, as zenpredict-viz and `zenpredict
+  repack` do) before treating `layer(0)` as the layer that reads the
+  features. v3 behaviour is unchanged. (Whether v4 loading should be
+  opt-in instead is an open owner decision.)
+- `UnsupportedVersion`'s message now says the build reads v3 chains and
+  v4 graphs; its fields are unchanged.
 
 ### Fixed
 

@@ -5,122 +5,20 @@
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
-use zenpredict::{
-    Activation, LayerView, Model, NodeView, PredictError, Predictor, WeightDtype, WeightStorage,
-    f16_bits_to_f32,
-};
+use zenpredict::{Activation, Model, NodeEntry, NodeView, PredictError, Predictor, WeightDtype};
 use zenpredict_bake::{
-    BakeError, BakeJsonError, BakeLayer, BakeNode, BakeRequest, bake, bake_from_json_str,
-    bake_graph,
+    BakeError, BakeJsonError, BakeLayer, BakeNode, BakeRequest, GraphBakeRequest, bake,
+    bake_from_json_str, bake_graph,
 };
 
 const GATED: &str = include_str!("../examples/gated_head.json");
 
 // ───────────────────────── reference evaluator ─────────────────────────
 
-/// Activation math as the spec states it (`docs/ZNPR_V4_GRAPH.md`).
-fn ref_act(v: f32, a: Activation) -> f32 {
-    match a {
-        Activation::Identity => v,
-        Activation::Relu => {
-            if v < 0.0 {
-                0.0
-            } else {
-                v
-            }
-        }
-        Activation::LeakyRelu => {
-            if v < 0.0 {
-                v * 0.01
-            } else {
-                v
-            }
-        }
-        Activation::Exp => libm::expf(v.clamp(-30.0, 30.0)),
-        Activation::Softplus => {
-            if v > 20.0 {
-                v
-            } else {
-                libm::log1pf(libm::expf(v))
-            }
-        }
-        other => panic!("unknown activation {other:?}"),
-    }
-}
-
-/// `act(b + x·W)` element by element, accumulating inputs in index order
-/// with fused multiply-add and skipping exact-zero inputs — the order the
-/// spec fixes for Dense.
-fn ref_dense(l: &LayerView<'_>, x: &[f32]) -> Vec<f32> {
-    let out = l.out_dim;
-    let is_i8 = matches!(l.weights, WeightStorage::I8 { .. });
-    let mut acc = if is_i8 || l.biases.is_empty() {
-        vec![0.0f32; out]
-    } else {
-        l.biases.to_vec()
-    };
-    for (i, &s) in x.iter().enumerate() {
-        if s == 0.0 {
-            continue;
-        }
-        for (o, a) in acc.iter_mut().enumerate() {
-            let w = match &l.weights {
-                WeightStorage::F32(w) => w[i * out + o],
-                WeightStorage::F16(w) => f16_bits_to_f32(w[i * out + o]),
-                WeightStorage::I8 { weights, .. } => weights[i * out + o] as f32,
-            };
-            *a = s.mul_add(w, *a);
-        }
-    }
-    if let WeightStorage::I8 { scales, .. } = &l.weights {
-        for o in 0..out {
-            let b = if l.biases.is_empty() {
-                0.0
-            } else {
-                l.biases[o]
-            };
-            acc[o] = b + scales[o] * acc[o];
-        }
-    }
-    acc.iter().map(|&v| ref_act(v, l.activation)).collect()
-}
-
-/// Evaluate every node into its own vector — no arena, no slot reuse.
-fn reference(model: &Model, features: &[f32]) -> Vec<f32> {
-    let mut vals: Vec<Vec<f32>> = Vec::new();
-    for node in model.nodes() {
-        let v = match node {
-            NodeView::Input { .. } => features
-                .iter()
-                .zip(model.scaler_mean().iter().zip(model.scaler_scale()))
-                .map(|(&x, (&m, &s))| (x - m) / if s == 0.0 { 1.0 } else { s })
-                .collect(),
-            NodeView::Dense { input, layer } => ref_dense(&layer, &vals[input]),
-            NodeView::Activation {
-                input, activation, ..
-            } => vals[input]
-                .iter()
-                .map(|&v| ref_act(v, activation))
-                .collect(),
-            NodeView::Gather { input, indices } => {
-                indices.iter().map(|&k| vals[input][k as usize]).collect()
-            }
-            NodeView::Add { a, b, .. } => {
-                vals[a].iter().zip(&vals[b]).map(|(x, y)| x + y).collect()
-            }
-            NodeView::Mul { a, b, .. } => {
-                vals[a].iter().zip(&vals[b]).map(|(x, y)| x * y).collect()
-            }
-            NodeView::Concat { inputs, .. } => inputs
-                .iter()
-                .flat_map(|&j| vals[j as usize].iter().copied())
-                .collect(),
-            other => panic!("unknown node {other:?}"),
-        };
-        vals.push(v);
-    }
-    vals.pop().unwrap()
-}
+// The per-node reference evaluator (`reference_eval`) is shared with the
+// differential fuzz target, so tests and fuzzing check the executor
+// against one definition of the spec.
+include!("../../zenpredict/fuzz/fuzz_targets/graph_core.rs");
 
 fn bits(v: &[f32]) -> Vec<u32> {
     v.iter().map(|x| x.to_bits()).collect()
@@ -184,7 +82,7 @@ fn gated_head_matches_reference() {
     for _ in 0..5_000 {
         let x: [f32; 6] = core::array::from_fn(|_| rng.random_range(-4.0f32..4.0));
         let got = p.predict(&x).unwrap()[0];
-        let want = reference(&model, &x)[0];
+        let want = reference_eval(&model, &x)[0];
         assert_eq!(got.to_bits(), want.to_bits(), "x={x:?}");
         nonzero += usize::from(got != 0.0);
     }
@@ -202,16 +100,16 @@ fn gated_head_node_views() {
     let kinds: Vec<String> = model
         .nodes()
         .map(|n| match n {
-            NodeView::Input { width } => format!("in{width}"),
-            NodeView::Gather { input, indices } => format!("g{input}{indices:?}"),
-            NodeView::Dense { input, layer } => format!(
+            NodeView::Input { width, .. } => format!("in{width}"),
+            NodeView::Gather { input, indices, .. } => format!("g{input}{indices:?}"),
+            NodeView::Dense { input, layer, .. } => format!(
                 "d{input}:{}x{}:{:?}:{}",
                 layer.in_dim,
                 layer.out_dim,
                 layer.activation,
                 layer.biases.len()
             ),
-            NodeView::Mul { a, b, width } => format!("m{a},{b}:{width}"),
+            NodeView::Mul { a, b, width, .. } => format!("m{a},{b}:{width}"),
             other => format!("{other:?}"),
         })
         .collect();
@@ -271,34 +169,20 @@ impl OwnedNode {
     }
     fn borrow(&self) -> BakeNode<'_> {
         match self.kind {
-            0 => BakeNode::Input {
-                width: self.out_dim,
-            },
-            1 => BakeNode::Dense {
-                input: self.a,
-                out_dim: self.out_dim,
-                activation: self.act,
-                dtype: self.dtype,
-                weights: &self.weights,
-                biases: self.biases.as_deref(),
-            },
-            2 => BakeNode::Activation {
-                input: self.a,
-                activation: self.act,
-            },
-            3 => BakeNode::Gather {
-                input: self.a,
-                indices: &self.list,
-            },
-            4 => BakeNode::Add {
-                a: self.a,
-                b: self.b,
-            },
-            5 => BakeNode::Mul {
-                a: self.a,
-                b: self.b,
-            },
-            _ => BakeNode::Concat { inputs: &self.list },
+            0 => BakeNode::input(self.out_dim),
+            1 => BakeNode::dense(
+                self.a,
+                self.out_dim,
+                self.act,
+                self.dtype,
+                &self.weights,
+                self.biases.as_deref(),
+            ),
+            2 => BakeNode::activation(self.a, self.act),
+            3 => BakeNode::gather(self.a, &self.list),
+            4 => BakeNode::add(self.a, self.b),
+            5 => BakeNode::mul(self.a, self.b),
+            _ => BakeNode::concat(&self.list),
         }
     }
 }
@@ -448,8 +332,8 @@ fn random_graphs_match_reference_evaluator() {
     for g in 0..400 {
         let (nodes, mean, scale) = random_graph(&mut rng);
         let borrowed: Vec<BakeNode<'_>> = nodes.iter().map(OwnedNode::borrow).collect();
-        let req = BakeRequest::new(g, 0, &mean, &scale, &[]);
-        let bytes = bake_graph(&req, &borrowed).unwrap_or_else(|e| panic!("graph {g}: {e}"));
+        let req = GraphBakeRequest::new(g, &mean, &scale, &borrowed);
+        let bytes = bake_graph(&req).unwrap_or_else(|e| panic!("graph {g}: {e}"));
         let model = Model::from_bytes(&bytes).unwrap();
         let mut p = Predictor::new(&model);
         for _ in 0..40 {
@@ -463,7 +347,7 @@ fn random_graphs_match_reference_evaluator() {
                 })
                 .collect();
             let got = bits(p.predict(&x).unwrap());
-            let want = bits(&reference(&model, &x));
+            let want = bits(&reference_eval(&model, &x));
             assert_eq!(got, want, "graph {g}, x={x:?}");
             values += got.len();
         }
@@ -480,10 +364,9 @@ fn compressed_graph_matches_uncompressed() {
     for g in 0..40 {
         let (nodes, mean, scale) = random_graph(&mut rng);
         let borrowed: Vec<BakeNode<'_>> = nodes.iter().map(OwnedNode::borrow).collect();
-        let mut req = BakeRequest::new(g, 0, &mean, &scale, &[]);
-        let plain = bake_graph(&req, &borrowed).unwrap();
-        req.compressed = true;
-        let packed = bake_graph(&req, &borrowed).unwrap();
+        let req = GraphBakeRequest::new(g, &mean, &scale, &borrowed);
+        let plain = bake_graph(&req).unwrap();
+        let packed = req.compressed(true).bake().unwrap();
         let (a, b) = (
             Model::from_bytes(&plain).unwrap(),
             Model::from_bytes(&packed).unwrap(),
@@ -550,18 +433,18 @@ fn chain_and_equivalent_graph_agree() {
         chain_req.hu_permutations = Some(&ident_refs);
         let chain = bake(&chain_req).unwrap();
 
-        let mut nodes = vec![BakeNode::Input { width: dims[0] }];
+        let mut nodes = vec![BakeNode::input(dims[0])];
         for k in 0..n_layers {
-            nodes.push(BakeNode::Dense {
-                input: k as u32,
-                out_dim: dims[k + 1],
-                activation: acts[k],
-                dtype: dts[k],
-                weights: &ws[k],
-                biases: Some(&bs[k]),
-            });
+            nodes.push(BakeNode::dense(
+                k as u32,
+                dims[k + 1],
+                acts[k],
+                dts[k],
+                &ws[k],
+                Some(&bs[k]),
+            ));
         }
-        let graph = bake_graph(&BakeRequest::new(case, 0, &mean, &scale, &[]), &nodes).unwrap();
+        let graph = bake_graph(&GraphBakeRequest::new(case, &mean, &scale, &nodes)).unwrap();
 
         let (mc, mg) = (
             Model::from_bytes(&chain).unwrap(),
@@ -642,56 +525,42 @@ fn json_graph_rules() {
 fn bake_graph_reports_composition_errors() {
     let mean = [0.0f32; 2];
     let scale = [1.0f32; 2];
-    let req = BakeRequest::new(0, 0, &mean, &scale, &[]);
+    let req = |nodes: &[BakeNode<'_>]| -> Result<Vec<u8>, BakeError> {
+        GraphBakeRequest::new(0, &mean, &scale, nodes).bake()
+    };
     let w = [0.5f32; 2];
     // Forward reference.
     let nodes = [
-        BakeNode::Input { width: 2 },
-        BakeNode::Activation {
-            input: 1,
-            activation: Activation::Relu,
-        },
+        BakeNode::input(2),
+        BakeNode::activation(1, Activation::Relu),
     ];
     assert!(matches!(
-        bake_graph(&req, &nodes),
+        req(&nodes),
         Err(BakeError::GraphInvalid { node: 1, .. })
     ));
     // Node 0 not Input.
-    let nodes = [BakeNode::Add { a: 0, b: 0 }];
+    let nodes = [BakeNode::add(0, 0)];
     assert!(matches!(
-        bake_graph(&req, &nodes),
+        req(&nodes),
         Err(BakeError::GraphInvalid { node: 0, .. })
     ));
     // Wrong Dense weight length.
     let nodes = [
-        BakeNode::Input { width: 2 },
-        BakeNode::Dense {
-            input: 0,
-            out_dim: 3,
-            activation: Activation::Identity,
-            dtype: WeightDtype::F32,
-            weights: &w,
-            biases: None,
-        },
+        BakeNode::input(2),
+        BakeNode::dense(0, 3, Activation::Identity, WeightDtype::F32, &w, None),
     ];
     assert!(matches!(
-        bake_graph(&req, &nodes),
+        req(&nodes),
         Err(BakeError::GraphInvalid { node: 1, .. })
     ));
     // Dead node: the parser's verdict comes back as GraphRejected.
     let nodes = [
-        BakeNode::Input { width: 2 },
-        BakeNode::Gather {
-            input: 0,
-            indices: &[1],
-        },
-        BakeNode::Activation {
-            input: 0,
-            activation: Activation::Softplus,
-        },
+        BakeNode::input(2),
+        BakeNode::gather(0, &[1]),
+        BakeNode::activation(0, Activation::Softplus),
     ];
     assert!(matches!(
-        bake_graph(&req, &nodes),
+        req(&nodes),
         Err(BakeError::GraphRejected(PredictError::GraphMalformed {
             node: 1,
             ..
@@ -699,34 +568,16 @@ fn bake_graph_reports_composition_errors() {
     ));
     // Width mismatch on Add.
     let nodes = [
-        BakeNode::Input { width: 2 },
-        BakeNode::Gather {
-            input: 0,
-            indices: &[1],
-        },
-        BakeNode::Add { a: 0, b: 1 },
+        BakeNode::input(2),
+        BakeNode::gather(0, &[1]),
+        BakeNode::add(0, 1),
     ];
     assert!(matches!(
-        bake_graph(&req, &nodes),
+        req(&nodes),
         Err(BakeError::GraphRejected(PredictError::GraphShapeMismatch {
             node: 2,
             ..
         }))
-    ));
-    // Layers set on a graph request.
-    let b = [0.0f32];
-    let layers = [BakeLayer {
-        in_dim: 2,
-        out_dim: 1,
-        activation: Activation::Identity,
-        dtype: WeightDtype::F32,
-        weights: &w,
-        biases: &b,
-    }];
-    let nodes = [BakeNode::Input { width: 2 }, BakeNode::Add { a: 0, b: 0 }];
-    assert!(matches!(
-        bake_graph(&BakeRequest::new(0, 0, &mean, &scale, &layers), &nodes),
-        Err(BakeError::GraphInvalid { node: 0, .. })
     ));
 }
 
@@ -743,7 +594,7 @@ fn put_u32(b: &mut [u8], at: usize, v: u32) {
 }
 /// Byte offset of the first input index of node `i`.
 fn first_input_at(b: &[u8], i: usize) -> usize {
-    u32_at(b, HDR + i * NE + zenpredict::wire::NODE_OFF_INPUTS) as usize
+    u32_at(b, HDR + i * NE + core::mem::offset_of!(NodeEntry, inputs)) as usize
 }
 
 fn load_err(mutate: impl FnOnce(&mut Vec<u8>)) -> PredictError {
@@ -827,7 +678,13 @@ fn rejects_wrong_arity_and_misplaced_input() {
     };
     // Mul with one input (inputs len 8 → 4).
     malformed(
-        load_err(|b| put_u32(b, HDR + 5 * NE + zenpredict::wire::NODE_OFF_INPUTS + 4, 4)),
+        load_err(|b| {
+            put_u32(
+                b,
+                HDR + 5 * NE + core::mem::offset_of!(NodeEntry, inputs) + 4,
+                4,
+            )
+        }),
         5,
     );
     // Node 0 is not Input.
@@ -870,7 +727,7 @@ fn rejects_shape_mismatches() {
 #[test]
 fn rejects_gather_index_out_of_range() {
     let e = load_err(|b| {
-        let at = u32_at(b, HDR + NE + zenpredict::wire::NODE_OFF_DATA0) as usize;
+        let at = u32_at(b, HDR + NE + core::mem::offset_of!(NodeEntry, data0)) as usize;
         put_u32(b, at + 4, 6);
     });
     assert!(
@@ -960,17 +817,10 @@ fn rejects_total_weights_over_limit() {
     let mean = vec![0.0f32; n_in];
     let scale = vec![1.0f32; n_in];
     let nodes = [
-        BakeNode::Input { width: n_in },
-        BakeNode::Dense {
-            input: 0,
-            out_dim: out,
-            activation: Activation::Identity,
-            dtype: WeightDtype::I8,
-            weights: &w,
-            biases: None,
-        },
+        BakeNode::input(n_in),
+        BakeNode::dense(0, out, Activation::Identity, WeightDtype::I8, &w, None),
     ];
-    let err = bake_graph(&BakeRequest::new(0, 0, &mean, &scale, &[]), &nodes).unwrap_err();
+    let err = bake_graph(&GraphBakeRequest::new(0, &mean, &scale, &nodes)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -989,27 +839,21 @@ fn rejects_scratch_over_limit() {
     let idx: Vec<u32> = (0..w as u32).collect();
     let mean = vec![0.0f32; w];
     let scale = vec![1.0f32; w];
-    let mut nodes = vec![BakeNode::Input { width: w }];
+    let mut nodes = vec![BakeNode::input(w)];
     for _ in 0..k {
-        nodes.push(BakeNode::Gather {
-            input: 0,
-            indices: &idx,
-        });
+        nodes.push(BakeNode::gather(0, &idx));
     }
     // Pairwise Add tree down to one node.
     let mut level: Vec<u32> = (1..=k as u32).collect();
     while level.len() > 1 {
         let mut next = Vec::new();
         for pair in level.chunks(2) {
-            nodes.push(BakeNode::Add {
-                a: pair[0],
-                b: pair[1],
-            });
+            nodes.push(BakeNode::add(pair[0], pair[1]));
             next.push(nodes.len() as u32 - 1);
         }
         level = next;
     }
-    let err = bake_graph(&BakeRequest::new(0, 0, &mean, &scale, &[]), &nodes).unwrap_err();
+    let err = bake_graph(&GraphBakeRequest::new(0, &mean, &scale, &nodes)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -1017,4 +861,174 @@ fn rejects_scratch_over_limit() {
         ),
         "{err}"
     );
+}
+
+// ───────────────────────── compute budget ─────────────────────────
+
+/// Review case: a ~577 KB bake of Input(65,536) followed by 1,023 Exp
+/// activations passed every v4 check and took ~210 ms per predict.
+/// `MAX_TOTAL_ELEMS` (op-weighted width, Exp = 32 per element) refuses it.
+#[test]
+fn rejects_elementwise_work_over_limit() {
+    let w = zenpredict::limits::MAX_DIM;
+    let mean = vec![0.0f32; w];
+    let scale = vec![1.0f32; w];
+    let mut nodes = vec![BakeNode::input(w)];
+    for i in 0..zenpredict::limits::MAX_NODES - 1 {
+        nodes.push(BakeNode::activation(i as u32, Activation::Exp));
+    }
+    let err = bake_graph(&GraphBakeRequest::new(0, &mean, &scale, &nodes)).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            BakeError::GraphRejected(PredictError::DimensionOverflow { what })
+                if what.contains("MAX_TOTAL_ELEMS")
+        ),
+        "{err}"
+    );
+}
+
+/// The same shape under the budget loads and runs:
+/// 1,024 + 100 × 1,024 × 32 = 3,277,824 ≤ 2^22.
+#[test]
+fn elementwise_work_under_limit_loads() {
+    let w = 1024usize;
+    let mean = vec![0.0f32; w];
+    let scale = vec![1.0f32; w];
+    let mut nodes = vec![BakeNode::input(w)];
+    for i in 0..100u32 {
+        nodes.push(BakeNode::activation(i, Activation::Exp));
+    }
+    let bytes = bake_graph(&GraphBakeRequest::new(0, &mean, &scale, &nodes)).unwrap();
+    let model = Model::from_bytes(&bytes).unwrap();
+    let x = vec![0.25f32; w];
+    let got = Predictor::new(&model).predict(&x).unwrap().to_vec();
+    assert_eq!(bits(&got), bits(&reference_eval(&model, &x)));
+}
+
+// ───────────────────── more load-time rejections ─────────────────────
+
+const OFF_INPUTS: usize = core::mem::offset_of!(NodeEntry, inputs);
+const OFF_DATA0: usize = core::mem::offset_of!(NodeEntry, data0);
+const OFF_DATA1: usize = core::mem::offset_of!(NodeEntry, data1);
+const OFF_DATA2: usize = core::mem::offset_of!(NodeEntry, data2);
+
+/// Input(4) → Gather[0,1] → Gather[2,3] → Concat(1,2) → Dense(I8, 4→2).
+fn concat_i8_bytes() -> Vec<u8> {
+    let w = [0.5f32, -0.25, 0.75, 0.1, -0.6, 0.3, 0.2, -0.9];
+    let b = [0.0f32, 0.125];
+    let nodes = [
+        BakeNode::input(4),
+        BakeNode::gather(0, &[0, 1]),
+        BakeNode::gather(0, &[2, 3]),
+        BakeNode::concat(&[1, 2]),
+        BakeNode::dense(3, 2, Activation::Identity, WeightDtype::I8, &w, Some(&b)),
+    ];
+    bake_graph(&GraphBakeRequest::new(0, &[0.0; 4], &[1.0; 4], &nodes)).unwrap()
+}
+
+fn load_err_on(mut b: Vec<u8>, mutate: impl FnOnce(&mut Vec<u8>)) -> PredictError {
+    mutate(&mut b);
+    Model::from_bytes(&b).unwrap_err()
+}
+
+fn assert_malformed(e: PredictError, node: usize) {
+    assert!(
+        matches!(e, PredictError::GraphMalformed { node: n, .. } if n == node),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn concat_i8_fixture_loads() {
+    Model::from_bytes(&concat_i8_bytes()).unwrap();
+}
+
+#[test]
+fn rejects_inputs_length_not_multiple_of_four() {
+    let e = load_err_on(gated_bytes(), |b| {
+        put_u32(b, HDR + 3 * NE + OFF_INPUTS + 4, 6)
+    });
+    assert_malformed(e, 3);
+}
+
+#[test]
+fn rejects_scales_on_non_i8_dense() {
+    let e = load_err_on(gated_bytes(), |b| {
+        let w = u32_at(b, HDR + 3 * NE + OFF_DATA0);
+        put_u32(b, HDR + 3 * NE + OFF_DATA1, w);
+        put_u32(b, HDR + 3 * NE + OFF_DATA1 + 4, 16);
+    });
+    assert_malformed(e, 3);
+}
+
+#[test]
+fn rejects_wrong_bias_and_scale_lengths() {
+    // Bias section of 2 floats on a 4-wide Dense (gated node 3).
+    let e = load_err_on(gated_bytes(), |b| {
+        let w = u32_at(b, HDR + 3 * NE + OFF_DATA0);
+        put_u32(b, HDR + 3 * NE + OFF_DATA2, w);
+        put_u32(b, HDR + 3 * NE + OFF_DATA2 + 4, 8);
+    });
+    assert!(matches!(e, PredictError::SectionOutOfRange { .. }), "{e:?}");
+    // I8 scales one float short (concat fixture node 4, out_dim 2).
+    let e = load_err_on(concat_i8_bytes(), |b| {
+        put_u32(b, HDR + 4 * NE + OFF_DATA1 + 4, 4);
+    });
+    assert!(matches!(e, PredictError::SectionOutOfRange { .. }), "{e:?}");
+}
+
+#[test]
+fn rejects_misaligned_or_short_node_table() {
+    let e = load_err_on(gated_bytes(), |b| put_u32(b, 48, HDR as u32 + 1));
+    assert!(
+        matches!(
+            e,
+            PredictError::SectionMisaligned {
+                what: "node_table",
+                ..
+            }
+        ),
+        "{e:?}"
+    );
+    let e = load_err_on(gated_bytes(), |b| put_u32(b, 52, (6 * NE) as u32));
+    assert!(matches!(e, PredictError::SectionOutOfRange { .. }), "{e:?}");
+}
+
+#[test]
+fn rejects_concat_arity_zero_or_over_limit() {
+    let e = load_err_on(concat_i8_bytes(), |b| {
+        put_u32(b, HDR + 3 * NE + OFF_INPUTS + 4, 0)
+    });
+    assert_malformed(e, 3);
+    let over = (zenpredict::limits::MAX_NODE_INPUTS + 1) * 4;
+    let e = load_err_on(concat_i8_bytes(), |b| {
+        put_u32(b, HDR + 3 * NE + OFF_INPUTS + 4, over as u32)
+    });
+    assert_malformed(e, 3);
+}
+
+#[test]
+fn rejects_concat_width_sum_mismatch() {
+    assert_eq!(
+        load_err_on(concat_i8_bytes(), |b| put_u32(b, HDR + 3 * NE + 4, 5)),
+        PredictError::GraphShapeMismatch {
+            node: 3,
+            expected: 4,
+            got: 5
+        }
+    );
+}
+
+#[test]
+fn json_graph_nodes_reject_unknown_keys() {
+    // `"bias"` (typo for `"biases"`) must not silently bake a bias-free Dense.
+    let bad = GATED.replacen(
+        r#""weights": [1.5, -0.75, 2.0, 0.5] }"#,
+        r#""weights": [1.5, -0.75, 2.0, 0.5], "bias": [0.0] }"#,
+        1,
+    );
+    assert_ne!(bad, GATED, "fixture text changed; update the splice");
+    let err = bake_from_json_str(&bad).unwrap_err();
+    assert!(err.to_string().contains("bias"), "{err}");
 }

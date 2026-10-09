@@ -15,34 +15,11 @@ pub const HEADER_SIZE: usize = 128;
 /// Size of one [`crate::LayerEntry`] in bytes.
 pub const LAYER_ENTRY_SIZE: usize = 48;
 
-/// Size of one ZNPR v4 graph node-table entry in bytes. The v4 header
-/// reuses the v3 `layer_table` Section (offset 48) for the node table and
-/// the `n_layers` field (offset 16) for the node count. Layout:
-///
-/// ```text
-/// 0       op: u8            OP_* below
-/// 1       activation: u8    Dense: fused activation. Activation: the function. Else 0.
-/// 2       weight_dtype: u8  Dense: 0=F32 1=F16 2=I8. Else 0.
-/// 3       flags: u8         reserved, must be 0
-/// 4..8    out_dim: u32
-/// 8..16   inputs: Section   u32 LE node indices
-/// 16..24  data0: Section    Dense: weights. Gather: u32 LE source indices.
-/// 24..32  data1: Section    Dense I8: per-output f32 scales
-/// 32..40  data2: Section    Dense: f32 biases, or empty = no bias
-/// 40..48  reserved: [u32; 2], must be 0
-/// ```
-///
-/// Full spec: `docs/ZNPR_V4_GRAPH.md`.
+/// Size of one [`crate::NodeEntry`] (ZNPR v4 graph node-table entry) in
+/// bytes. The v4 header reuses the v3 `layer_table` Section (offset 48)
+/// for the node table and the `n_layers` field (offset 16) for the node
+/// count. Spec: `docs/ZNPR_V4_GRAPH.md`.
 pub const NODE_ENTRY_SIZE: usize = 48;
-
-/// Node-entry byte offset of the `inputs` Section.
-pub const NODE_OFF_INPUTS: usize = 8;
-/// Node-entry byte offset of the `data0` Section (Dense weights / Gather indices).
-pub const NODE_OFF_DATA0: usize = 16;
-/// Node-entry byte offset of the `data1` Section (Dense I8 scales).
-pub const NODE_OFF_DATA1: usize = 24;
-/// Node-entry byte offset of the `data2` Section (Dense biases).
-pub const NODE_OFF_DATA2: usize = 32;
 
 /// Graph op: the scaled feature vector. Exactly one, at node 0.
 pub const OP_INPUT: u8 = 0;

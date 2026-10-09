@@ -48,7 +48,7 @@ pub use append::{AppendError, append_metadata_utf8};
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
-pub use graph::{BakeNode, bake_graph};
+pub use graph::{BakeNode, GraphBakeRequest, bake_graph};
 pub use json::{
     ActivationJson, BakeJsonError, BakeLayerJson, BakeNodeJson, BakeRequestJson, DtypeJson,
     FeatureBoundJson, GraphActivationJson, MetadataEntryJson, OutputSpecJson, OutputTransformJson,

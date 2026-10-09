@@ -2,21 +2,31 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+- Merge `GraphActivationJson` into `ActivationJson` (one activation-name
+  enum for chains and graphs). Kept separate in 0.1.x only so adding
+  `exp` / `softplus` stayed semver-additive.
+
 ### Added
 
-- **ZNPR v4 graph baking** (`ea8f3fb0`): `bake_graph(&BakeRequest, &[BakeNode])`
-  and the `BakeNode` enum write a v4 op graph around the same scaler /
-  metadata / output-spec sections `bake` writes, then load the result
-  once with `zenpredict::Model::from_bytes` (the parser owns the graph
-  rules; a rejection is `BakeError::GraphRejected`). JSON: a non-empty
-  `graph` array (`BakeNodeJson`, tagged by `"op"`) bakes a graph;
-  `layers` is now optional; `zerobias_tau` and `compressed` apply,
-  `optimize` is refused for graphs. Graph nodes name activations with the
-  new `GraphActivationJson` (adds `exp`, `softplus`); `ActivationJson`
-  for v3 layers is unchanged. New `BakeError::{GraphInvalid,
-  GraphRejected, ChainActivationUnsupported}`.
-- `examples/gated_head.{json,rs}`: the hand-built E33 arm-B gated head
-  (`026b4f48`).
+- **ZNPR v4 graph baking**: `bake_graph(&GraphBakeRequest)` writes a v4
+  op graph around the same scaler / metadata / output-spec sections
+  `bake` writes, then loads the result once with
+  `zenpredict::Model::from_bytes` (the parser owns the graph rules; a
+  rejection is `BakeError::GraphRejected`). `GraphBakeRequest` (built
+  with `new(schema_hash, mean, scale, nodes)` and chained setters) holds
+  only what a graph bake uses — no `layers`, no permutations.
+  `BakeNode` (every variant `#[non_exhaustive]`) is built with `const fn`
+  constructors `input`, `dense`, `activation`, `gather`, `add`, `mul`,
+  `concat`, so fields can be added later. JSON: a non-empty `graph` array
+  (`BakeNodeJson`, tagged by `"op"`, unknown keys rejected) bakes a graph;
+  `layers` is now optional, and `graph` with `layers` or with `optimize`
+  is refused; `zerobias_tau` and `compressed` apply. Graph nodes name
+  activations with the new `GraphActivationJson` (adds `exp`,
+  `softplus`); `ActivationJson` for v3 layers is unchanged. New
+  `BakeError::{GraphInvalid, GraphRejected, ChainActivationUnsupported}`.
+- `examples/gated_head.{json,rs}`: the hand-built E33 arm-B gated head.
 
 ### Changed
 
@@ -25,8 +35,8 @@
   (`zenpredict/tools/graph-parity`). Its section writers were factored
   out for `bake_graph`. It now refuses `Exp` / `Softplus` layers
   (`ChainActivationUnsupported`): a v3 reader would reject the file.
-- CLI (`7a190081`): `zenpredict-bake` reports version / outputs / layers /
-  nodes from the written bake; `zenpredict-inspect` adds `n_nodes`,
+- CLI: `zenpredict-bake` reports version / outputs / layers / nodes from
+  the written bake; `zenpredict-inspect` adds `n_nodes`,
   `is_layer_chain` and a `nodes` list and names `exp` / `softplus`;
   `zenpredict repack` refuses v4 graphs rather than flattening them.
 

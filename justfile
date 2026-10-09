@@ -24,8 +24,10 @@ graph-parity *files:
     cd zenpredict/tools/graph-parity && cargo run --release -- check {{files}}
 
 # Paired old-vs-new forward-pass bench (zenbench). BAKES is ';'-separated.
+# TMPDIR keeps zenbench's result files out of /tmp (its default).
 graph-parity-bench bakes="":
-    cd zenpredict/tools/graph-parity && ZPGRAPH_BENCH_BAKES='{{bakes}}' cargo bench --bench forward
+    mkdir -p "$HOME/tmp"
+    cd zenpredict/tools/graph-parity && TMPDIR="$HOME/tmp" ZPGRAPH_BENCH_BAKES='{{bakes}}' cargo bench --bench forward
 
 # Bounded fuzz of the v4 graph parser/executor (nightly + cargo-fuzz).
 fuzz-graph seconds="900" workers="8":

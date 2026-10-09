@@ -29,16 +29,16 @@ fn main() {
     );
     for (i, node) in model.nodes().enumerate() {
         let desc = match node {
-            NodeView::Input { width } => format!("Input width={width}"),
-            NodeView::Dense { input, layer } => format!(
+            NodeView::Input { width, .. } => format!("Input width={width}"),
+            NodeView::Dense { input, layer, .. } => format!(
                 "Dense(node {input}) {}x{} {:?} bias={}",
                 layer.in_dim,
                 layer.out_dim,
                 layer.activation,
                 !layer.biases.is_empty()
             ),
-            NodeView::Gather { input, indices } => format!("Gather(node {input}) {indices:?}"),
-            NodeView::Mul { a, b, width } => format!("Mul(node {a}, node {b}) width={width}"),
+            NodeView::Gather { input, indices, .. } => format!("Gather(node {input}) {indices:?}"),
+            NodeView::Mul { a, b, width, .. } => format!("Mul(node {a}, node {b}) width={width}"),
             other => format!("{other:?}"),
         };
         println!("  node {i}: {desc}");

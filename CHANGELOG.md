@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **zenpredict-viz refuses ZNPR v4 graph bakes.** zenpredict now loads
+  v4 op graphs, and the viz walks `layers()` as a feature-reading chain
+  with full biases, so a v4 bake panicked (`parse_bake`,
+  `forward_with_taps`), returned wrong numbers (Exp passed through,
+  Gather ignored) or made `znpr2onnx` write a wrong ONNX with exit 0.
+  `parse_bake`, `forward_with_taps`, `layer_weights` and `znpr2onnx` now
+  go through `zenpredict_viz::load_chain_model` and return/print a clean
+  "not supported by zenpredict-viz yet" error (`tests/graph_refusal.rs`).
+  Graph rendering can come later.
 - The library no longer enables `archmage/testable_dispatch` for its consumers. Cargo unifies features, so it reached every downstream build and turned each archmage `summon()` there into a cache read, even for the x86-64 baseline token. The tier benches get it from the new dev-only `_dev` feature: `cargo bench --bench tier_isolation --features _dev`.
 
 ### Added

@@ -14,6 +14,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4.13"
 arbitrary = { version = "1.4.2", features = ["derive"] }
+# graph_core.rs reference evaluator: same libm Exp/Softplus the runtime uses.
+libm = { version = "0.2.16", default-features = false }
 # `advanced` pulls in the typed multi-output / scorer API exercised by
 # predictor_predict. The lz4 whole-bake decompression path is no longer
 # feature-gated (lz4_flex is an unconditional dep; the compressed flag is

@@ -125,7 +125,8 @@ impl fmt::Display for PredictError {
             }
             Self::UnsupportedVersion { version, expected } => write!(
                 f,
-                "zenpredict: format version {version} not supported (expected {expected})"
+                "zenpredict: format version {version} not supported \
+                 (this build reads v{expected} layer chains and v4 op graphs)"
             ),
             Self::Truncated { offset, want, have } => write!(
                 f,

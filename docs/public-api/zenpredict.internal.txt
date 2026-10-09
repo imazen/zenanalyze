@@ -10,7 +10,7 @@
 ## summary
 #
 #   inherent methods                           15
-#   trait roster entries (type × trait)        33
+#   trait roster entries (type × trait)        34
 #
 # per-module pub lines:
 #   (root)                           11
@@ -36,7 +36,7 @@ pub fn output_spec::OutputTransform::assert_fields_are_eq(&self)
 pub fn rescue::RescueDecision::assert_fields_are_eq(&self)
 pub fn rescue::RescueStrategy::assert_fields_are_eq(&self)
 
-## trait impls (33 types)
+## trait impls (34 types)
 
 Activation: TrivialClone
 CellHint: TrivialClone
@@ -50,6 +50,7 @@ KnobVeto<'a>: TrivialClone
 LayerEntry: TrivialClone
 MetadataEntry<'a>: TrivialClone
 MetadataType: TrivialClone
+NodeEntry: TrivialClone
 PickerStrategy: TrivialClone
 PreArgminDecision: TrivialClone
 QualityTarget: TrivialClone

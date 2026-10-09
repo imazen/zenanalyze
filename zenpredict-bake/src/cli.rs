@@ -227,8 +227,8 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
     let nodes: Vec<Value> = model
         .nodes()
         .map(|node| match node {
-            NodeView::Input { width } => json!({ "op": "input", "width": width }),
-            NodeView::Dense { input, layer } => json!({
+            NodeView::Input { width, .. } => json!({ "op": "input", "width": width }),
+            NodeView::Dense { input, layer, .. } => json!({
                 "op": "dense",
                 "input": input,
                 "out_dim": layer.out_dim,
@@ -238,7 +238,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
             NodeView::Activation {
                 input, activation, ..
             } => json!({ "op": "activation", "input": input, "activation": activation_name(activation) }),
-            NodeView::Gather { input, indices } => {
+            NodeView::Gather { input, indices, .. } => {
                 json!({ "op": "gather", "input": input, "indices": indices })
             }
             NodeView::Add { a, b, .. } => json!({ "op": "add", "a": a, "b": b }),

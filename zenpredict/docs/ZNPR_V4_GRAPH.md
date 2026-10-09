@@ -116,8 +116,11 @@ The trainer must apply the same clamp and threshold (constants
 7. Per-op shapes from the table above; Gather indices `< width(input)`; Dense
    section lengths match `in_dim * out_dim` in its dtype, `out_dim` scales (I8
    only), and `out_dim` biases or none.
-8. `Σ_dense in_dim * out_dim <= MAX_TOTAL_WEIGHTS`. Sections may legally alias, so
-   file size does not bound compute; this limit does.
+8. `Σ_dense in_dim * out_dim <= MAX_TOTAL_WEIGHTS`, and the op-weighted element
+   work `Σ_nodes width × cost <= MAX_TOTAL_ELEMS` (costs below). Sections may
+   legally alias and non-Dense ops carry no payload, so file size does not bound
+   compute; these two limits do. (Fix round 1: before it, a 577 KB file of
+   Input(65,536) + 1,023 Exp nodes loaded and took ~210 ms per predict.)
 9. The liveness-packed scratch arena (below) is `<= MAX_SCRATCH_ELEMS` f32s.
 
 All arithmetic on untrusted sizes is checked (`checked_add` / `checked_mul`);
@@ -129,11 +132,20 @@ overflow is `DimensionOverflow`.
 |---------------------|------------|-----|
 | `MAX_NODES`         | 1024       | the E33 head is 7 nodes, a lowered 4-layer chain is 5 |
 | `MAX_NODE_INPUTS`   | 64         | Concat arity |
-| `MAX_TOTAL_WEIGHTS` | 16,777,216 | 2^24 multiply-adds per predict; production zensim is 944×128 = 120,832 |
+| `MAX_TOTAL_WEIGHTS` | 16,777,216 | 2^24 multiply-adds per predict; the rev4 production bake (420→128→1) is 53,888, SOTA-944 is 120,960 |
+| `MAX_TOTAL_ELEMS`   | 4,194,304  | op-weighted element work per predict (below); the rev4 production bake uses 678 |
 | `MAX_SCRATCH_ELEMS` | 4,194,304  | 16 MiB of f32 scratch, checked before allocation |
 | `MAX_DIM`, `MAX_BAKE_BYTES` | unchanged | |
 
-`MAX_TOTAL_WEIGHTS` and `MAX_SCRATCH_ELEMS` also apply to v3 files after lowering.
+`MAX_TOTAL_ELEMS` costs per output element: 1 for `Input` (scaler), `Gather`,
+`Add`, `Mul`, `Concat` and the Identity/ReLU/LeakyReLU activations; 32 for `Exp`;
+64 for `Softplus` (two transcendentals); a Dense node is charged `1 + activation
+cost` per output (its multiply-adds count against `MAX_TOTAL_WEIGHTS`). The
+weights follow measured cost: scalar `libm` `expf` is ~30× a vectorized add. Under
+both limits a predict is bounded at a few milliseconds whatever the file size.
+
+`MAX_TOTAL_WEIGHTS`, `MAX_TOTAL_ELEMS` and `MAX_SCRATCH_ELEMS` also apply to v3
+files after lowering.
 No shipped or plausible v3 bake comes near them (a v3 file could previously alias
 one weight section across 256 layers); only crafted inputs see a new error.
 
@@ -183,7 +195,7 @@ once` — at most `n_inputs + 2·max_hidden`, the same order as v3's two
 
 ## Public API (diff)
 
-zenpredict (all additive):
+zenpredict (all additive vs `main`):
 
 ```rust
 // model.rs
@@ -192,15 +204,25 @@ pub const GRAPH_FORMAT_VERSION: u16 = 4;
 pub const EXP_INPUT_CLAMP: f32 = 30.0;
 pub const SOFTPLUS_THRESHOLD: f32 = 20.0;
 
-#[non_exhaustive]
+#[derive(Debug, Clone)]
+#[non_exhaustive]                       // and every variant is #[non_exhaustive]
 pub enum NodeView<'a> {
     Input { width: usize },
-    Dense { input: usize, layer: LayerView<'a> },
-    Activation { input: usize, activation: Activation, width: usize },
-    Gather { input: usize, indices: &'a [u32] },
-    Add { a: usize, b: usize, width: usize },
-    Mul { a: usize, b: usize, width: usize },
+    Dense { input: u32, layer: LayerView<'a> },
+    Activation { input: u32, activation: Activation, width: usize },
+    Gather { input: u32, indices: &'a [u32] },
+    Add { a: u32, b: u32, width: usize },
+    Mul { a: u32, b: u32, width: usize },
     Concat { inputs: &'a [u32], width: usize },
+}
+impl NodeView<'_> { pub fn width(&self) -> usize; }
+
+#[repr(C)] #[derive(Clone, Copy, Debug, Pod, Zeroable)] #[non_exhaustive]
+pub struct NodeEntry {                  // the wire entry, like LayerEntry
+    pub op: u8, pub activation: u8, pub weight_dtype: u8, pub flags: u8,
+    pub out_dim: u32,
+    pub inputs: Section, pub data0: Section, pub data1: Section, pub data2: Section,
+    pub reserved: [u32; 2],
 }
 
 impl Model {
@@ -209,17 +231,18 @@ impl Model {
     pub fn nodes(&self) -> impl ExactSizeIterator<Item = NodeView<'_>>;
     pub fn is_layer_chain(&self) -> bool;                    // true for every v3 file
 }
+// LayerView and WeightStorage gain Clone (Copy is queued: adding Copy to an
+// existing type is a semver break).
 
 // limits.rs
 pub const MAX_NODES: usize = 1024;
 pub const MAX_NODE_INPUTS: usize = 64;
 pub const MAX_TOTAL_WEIGHTS: usize = 1 << 24;
+pub const MAX_TOTAL_ELEMS: usize = 1 << 22;
 pub const MAX_SCRATCH_ELEMS: usize = 1 << 22;
 
 // wire.rs
 pub const NODE_ENTRY_SIZE: usize = 48;
-pub const NODE_OFF_INPUTS: usize = 8; pub const NODE_OFF_DATA0: usize = 16;
-pub const NODE_OFF_DATA1: usize = 24; pub const NODE_OFF_DATA2: usize = 32;
 pub const OP_INPUT: u8 = 0; pub const OP_DENSE: u8 = 1; pub const OP_ACTIVATION: u8 = 2;
 pub const OP_GATHER: u8 = 3; pub const OP_ADD: u8 = 4; pub const OP_MUL: u8 = 5;
 pub const OP_CONCAT: u8 = 6;
@@ -238,20 +261,26 @@ impl<'a> Predictor<'a> {
 ```
 
 Unchanged: `Model::from_bytes*`, `Predictor` and every predict / argmin entry
-(same inputs, outputs and errors), `LayerView`, `WeightStorage` (no new variants —
-consumers match it exhaustively), `LayerEntry`, `Header`, `FORMAT_VERSION` (still 3:
-the chain composer writes it), `Model::scratch_len` (same formula: max of
-`n_inputs` and every node width).
+(same inputs, outputs and errors), `WeightStorage` variants (consumers match it
+exhaustively), `LayerEntry`, `Header`, `FORMAT_VERSION` (still 3: the chain
+composer writes it), `Model::scratch_len` (same formula: max of `n_inputs` and
+every node width). `UnsupportedVersion`'s message now says the build reads v3
+chains and v4 graphs; its fields are unchanged (`expected` stays 3).
 
 `layers()` / `layer()` / `n_layers()` on a v4 file walk its Dense nodes in node
-order. That is the whole network only when `is_layer_chain()` is true; tools that
-treat `layer(0)` as "the layer that reads the features" must check it. A Dense node
-without bias yields an empty `biases` slice.
+order. For a v4 file a `LayerView` may have **empty `biases`** (bias-free Dense) and
+an **`Exp` / `Softplus` activation**, and the Dense nodes need not form a chain from
+the features: it is the whole network only when `is_layer_chain()` is true. Tools
+that treat `layer(0)` as "the layer that reads the features" must check it, or
+refuse v4 as the in-repo tools do. **Open owner decision** (review P2, options:
+(a) opt-in v4 loading, (b) loud chain-only accessors, (c) keep and document): this
+PR keeps (c)'s behaviour until told.
 
-zenpredict-bake (all additive; the crate is unpublished):
+zenpredict-bake (all additive vs `main`; the crate is unpublished):
 
 ```rust
-#[non_exhaustive]
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]                       // and every variant is #[non_exhaustive]
 pub enum BakeNode<'a> {
     Input { width: usize },
     Dense { input: u32, out_dim: usize, activation: Activation, dtype: WeightDtype,
@@ -262,9 +291,34 @@ pub enum BakeNode<'a> {
     Mul { a: u32, b: u32 },
     Concat { inputs: &'a [u32] },
 }
-/// `req.layers` must be empty; `feature_order`, `output_order`, `hu_permutations`
-/// must be None. Every other BakeRequest field means what it means for `bake`.
-pub fn bake_graph(req: &BakeRequest<'_>, nodes: &[BakeNode<'_>]) -> Result<Vec<u8>, BakeError>;
+impl<'a> BakeNode<'a> {
+    pub const fn input(width: usize) -> Self;
+    pub const fn dense(input: u32, out_dim: usize, activation: Activation, dtype: WeightDtype,
+                       weights: &'a [f32], biases: Option<&'a [f32]>) -> Self;
+    pub const fn activation(input: u32, activation: Activation) -> Self;
+    pub const fn gather(input: u32, indices: &'a [u32]) -> Self;
+    pub const fn add(a: u32, b: u32) -> Self;
+    pub const fn mul(a: u32, b: u32) -> Self;
+    pub const fn concat(inputs: &'a [u32]) -> Self;
+}
+
+#[derive(Clone, Copy)] #[non_exhaustive]
+pub struct GraphBakeRequest<'a> {
+    pub schema_hash: u64, pub flags: u16,
+    pub scaler_mean: &'a [f32], pub scaler_scale: &'a [f32],
+    pub nodes: &'a [BakeNode<'a>],
+    pub feature_bounds: &'a [FeatureBound], pub metadata: &'a [BakeMetadataEntry<'a>],
+    pub output_specs: &'a [OutputSpec], pub discrete_sets: &'a [f32],
+    pub sparse_overrides: &'a [SparseOverride], pub compressed: bool,
+}
+impl<'a> GraphBakeRequest<'a> {
+    pub const fn new(schema_hash: u64, scaler_mean: &'a [f32], scaler_scale: &'a [f32],
+                     nodes: &'a [BakeNode<'a>]) -> Self;
+    // chained setters: flags, feature_bounds, metadata, output_specs, discrete_sets,
+    // sparse_overrides, compressed
+    pub fn bake(&self) -> Result<Vec<u8>, BakeError>;
+}
+pub fn bake_graph(req: &GraphBakeRequest<'_>) -> Result<Vec<u8>, BakeError>;
 
 // BakeError (#[non_exhaustive]) gains
 GraphInvalid { node: usize, what: &'static str },
@@ -272,20 +326,41 @@ ChainActivationUnsupported { layer: usize },   // Exp/Softplus in a v3 chain
 GraphRejected(zenpredict::PredictError),       // the parser rejected the composed graph
 
 // JSON: BakeRequestJson gains `graph: Vec<BakeNodeJson>` (serde default empty);
-// `layers` becomes serde-default. Graph nodes take the new #[non_exhaustive]
+// `layers` becomes serde-default. BakeNodeJson is #[non_exhaustive], tagged by "op",
+// and denies unknown keys. Graph nodes take the new #[non_exhaustive]
 // GraphActivationJson (identity, relu, leakyrelu, exp, softplus); ActivationJson
 // (v3 layers) is unchanged, so the bake crate stays semver-additive.
 ```
 
-Tools that rewrite a bake in place stay v3-only for now and refuse v4
-cleanly: `append_metadata_utf8` returns `AppendError::UnsupportedVersion`, and
-`zenpredict repack` (which rebuilds from `layers()`) exits with an error
-instead of flattening a graph.
+### API shape choices (fix round 1, from review P2)
+
+Each was free to change before the first publish and breaking after:
+
+| question | choice | why |
+|---|---|---|
+| fields added to a `NodeView` variant later | every variant `#[non_exhaustive]` (and the enum) | matchers must write `..`, so a future LeakyReLU slope or Gather mode is additive |
+| `NodeView` traits | `Debug, Clone` now; `Copy` queued for the next minor | `Copy` would cost nothing, but it needs `Copy` on the existing `LayerView` / `WeightStorage`, which `cargo semver-checks` counts as major (`copy_impl_added`); they gain `Clone` now |
+| node index type | `u32` everywhere (`input`, `a`, `b`, `inputs`, `indices`) | matches the wire format and lets lists stay zero-copy `&[u32]` |
+| width | `NodeView::width()` | one accessor for every op; fields stay where the op needs them |
+| wire entries | public `Pod` `NodeEntry`, like `LayerEntry`; the `NODE_OFF_*` constants are gone | one model for both tables; composers build entries with `Zeroable::zeroed()` + field writes, tests use `offset_of!` |
+| `BakeNode` growth | `const fn` constructors, every variant `#[non_exhaustive]` | callers outside the crate must use constructors, so new fields are additive |
+| graph bake input | dedicated `GraphBakeRequest` (no `layers`, no permutation fields) | the type only admits what a graph bake uses; internally it reuses `bake`'s section validators/writers |
+| JSON typos | `deny_unknown_fields` on `BakeNodeJson` | `"bias"` for `"biases"` errors instead of baking a bias-free Dense |
+
+Queued for the next minor (CHANGELOG): merge `GraphActivationJson` into
+`ActivationJson`.
+
+Tools that read structure stay chain-only and refuse v4 cleanly:
+`append_metadata_utf8` returns `AppendError::UnsupportedVersion`; `zenpredict
+repack` exits 1; zenpredict-viz's `parse_bake`, `forward_with_taps`,
+`layer_weights` and `znpr2onnx` return/print "ZNPR v4 op-graph bakes are not
+supported by zenpredict-viz yet" (`zenpredict_viz::load_chain_model`; review P1:
+before the fix they panicked, ran wrong, or exported a wrong ONNX with exit 0).
 
 `bake()` keeps writing v3 chains byte-identically; it now refuses `Exp` /
 `Softplus` layers (they would produce a file v3 readers reject). The JSON baker
-writes a graph when `graph` is non-empty and `layers` is empty, else a v3 chain as
-before. `optimize: true` is refused for graphs.
+writes a graph when `graph` is non-empty, else a v3 chain as before; `graph` with
+non-empty `layers`, or with `optimize: true`, is refused.
 
 ### JSON node spec
 
@@ -306,10 +381,12 @@ before. `optimize: true` is refused for graphs.
 ```
 
 That is the E33 arm-B gated head. Its output is exactly `+0.0` whenever the `d`
-slice is zero: the bias-free ReLU branch is `0`, `0 · exp(clamped) = 0`, and the
-bias-free final Dense skips zero inputs. The `d` features must be zero *after* the
-scaler, so a gated head is baked with `mean = 0` on the `d` columns (or the trainer
-folds the mean into the branch).
+slice is zero and every `r` is finite: the bias-free ReLU branch is `0`,
+`0 · exp(clamped) = 0`, and the bias-free final Dense skips zero inputs. An infinite
+`r` can make `u·r` NaN (∞ · 0 weight, or +∞ − ∞), and NaN propagates. The `d`
+features must be zero *after* any feature transform and the scaler, so a gated
+head is baked with `mean = 0` on the `d` columns (or the trainer folds the mean
+into the branch) and transforms that map 0 to 0 there.
 
 ## Migration
 
@@ -333,5 +410,11 @@ folds the mean into the branch).
   to load. The same crate runs the paired zenbench old-vs-new forward benchmark.
 - Unit and integration tests: graph validation (every rule above), lowering, the
   gated-head zero test, Exp/Softplus math, bake → load round trips.
-- Fuzz: `graph_from_bytes` builds a v4 header around fuzzer-chosen node tables so
-  mutations reach graph validation and the executor.
+- Fuzz: `graph_from_bytes` (raw bytes, seeded with real v4 bakes) and
+  `graph_structured` (an `arbitrary`-built node table). `graph_structured` is
+  differential: every graph that loads must match the per-node reference
+  evaluator in `fuzz/fuzz_targets/graph_core.rs` (bits, or NaN for NaN), the same
+  evaluator `zenpredict-bake/tests/graph.rs` uses.
+- Exp / Softplus golden bits: `inference::activation_tests::exp_and_softplus_golden_bits`
+  asserts fixed hashes of the output bits over a 5,121-point grid plus edges, on
+  every CI target.

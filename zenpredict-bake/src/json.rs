@@ -124,7 +124,7 @@ use alloc::vec::Vec;
 use serde::Deserialize;
 
 use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake};
-use crate::graph::{BakeNode, bake_graph};
+use crate::graph::{BakeNode, GraphBakeRequest, bake_graph};
 use crate::optimize::bake_optimized;
 use crate::zero_bias::apply_zero_bias_per_layer_in_place;
 use zenpredict::{
@@ -385,7 +385,7 @@ impl From<GraphActivationJson> for Activation {
 /// { "op": "concat", "inputs": [3, 4] }
 /// ```
 #[derive(Deserialize, Debug)]
-#[serde(tag = "op", rename_all = "lowercase")]
+#[serde(tag = "op", rename_all = "lowercase", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum BakeNodeJson {
     Input {
@@ -812,6 +812,13 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         hu_permutations: None,
     };
     if !req.graph.is_empty() {
+        if !req.layers.is_empty() {
+            return Err(BakeError::GraphInvalid {
+                node: 0,
+                what: "json: set either `layers` (v3 chain) or `graph` (v4), not both",
+            }
+            .into());
+        }
         if req.optimize {
             return Err(BakeError::GraphInvalid {
                 node: 0,
@@ -866,7 +873,16 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
                 BakeNodeJson::Concat { inputs } => BakeNode::Concat { inputs },
             })
             .collect();
-        return Ok(bake_graph(&request, &nodes)?);
+        let graph =
+            GraphBakeRequest::new(req.schema_hash, &req.scaler_mean, &req.scaler_scale, &nodes)
+                .flags(req.flags)
+                .feature_bounds(&feature_bounds)
+                .metadata(&metadata)
+                .output_specs(&output_specs)
+                .discrete_sets(&discrete_sets_pool)
+                .sparse_overrides(&sparse_overrides)
+                .compressed(req.compressed);
+        return Ok(bake_graph(&graph)?);
     }
     let bytes = if req.optimize {
         bake_optimized(&request)?

@@ -10,7 +10,7 @@
 ## summary
 #
 #   inherent methods                            2
-#   trait roster entries (type × trait)         9
+#   trait roster entries (type × trait)        10
 #
 # per-module pub lines:
 #   append                            1
@@ -21,9 +21,10 @@
 pub fn append::AppendError::assert_fields_are_eq(&self)
 pub fn composer::BakeError::assert_fields_are_eq(&self)
 
-## trait impls (9 types)
+## trait impls (10 types)
 
 graph::BakeNode<'a>: TrivialClone
+graph::GraphBakeRequest<'a>: TrivialClone
 json::ActivationJson: TrivialClone
 json::DtypeJson: TrivialClone
 json::FeatureBoundJson: TrivialClone

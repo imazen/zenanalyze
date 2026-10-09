@@ -82,8 +82,9 @@
 //! Shape fields are `u32` in the binary, bounded at load by
 //! [`limits`]: widths by `MAX_DIM` (65,536), layers by `MAX_LAYERS`,
 //! graph nodes by `MAX_NODES`, compute by `MAX_TOTAL_WEIGHTS` (2^24
-//! multiply-adds per forward pass) and scratch by `MAX_SCRATCH_ELEMS`
-//! — each 100×–1000× above any shipped bake. Tests exercise
+//! multiply-adds per forward pass) plus `MAX_TOTAL_ELEMS` (op-weighted
+//! elementwise work), and scratch by `MAX_SCRATCH_ELEMS` — each far above
+//! any shipped bake. Tests exercise
 //! single-layer, ten-layer, 1024-wide-hidden, mixed-dtype-per-layer
 //! (i8 → f16 → f32) and random-DAG shapes.
 //!
@@ -204,7 +205,7 @@ pub use unachievable_zone::{
 // full 4-step pipeline tying them together.
 pub use directed_search::{QualityTarget, Trial, best_trial, next_trial};
 pub use encode_strategy::{EncodeBudget, EncodeMode, PickerStrategy};
-pub use graph::NodeView;
+pub use graph::{NodeEntry, NodeView};
 pub use model::{
     Activation, EXP_INPUT_CLAMP, FORMAT_VERSION, GRAPH_FORMAT_VERSION, Header, LEAKY_RELU_ALPHA,
     LayerEntry, LayerView, Model, SOFTPLUS_THRESHOLD, Section, WeightDtype, WeightStorage,

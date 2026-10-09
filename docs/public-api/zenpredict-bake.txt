@@ -6,30 +6,31 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict-bake.txt 554 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 11 lines (11 hidden + 0 excluded-feature)
+# files: zenpredict-bake.txt 595 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 12 lines (12 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 8
-#   pub types (struct/enum/trait/alias)        40
+#   pub types (struct/enum/trait/alias)        42
+#   pub consts/statics                         30
 #   free functions                             25
-#   inherent methods                           24
-#   struct fields                             314
+#   inherent methods                           26
+#   struct fields                             336
 #   enum variants                             149
-#   trait roster entries (type × trait)        69
-#   auto-trait-complete types                  21
+#   trait roster entries (type × trait)        71
+#   auto-trait-complete types                  22
 #
 # per-module pub lines:
-#   (root)                          264
+#   (root)                          306
 #   append                           29
 #   cli                               3
 #   composer                        123
-#   graph                            25
+#   graph                            39
 #   json                            103
 #   optimize                          9
 #   zero_bias                         4
 
-## items (531 lines)
+## items (571 lines)
 
 pub mod zenpredict_bake
 pub mod append
@@ -171,29 +172,56 @@ pub fn composer::BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::out
 pub fn composer::BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
 pub fn composer::f32_to_f16_bits(f32) -> u16
 pub mod graph
-pub graph::BakeNode::Activation
+#[non_exhaustive] pub graph::BakeNode::Activation
 pub graph::BakeNode::Activation::activation: zenpredict::model::Activation
 pub graph::BakeNode::Activation::input: u32
-pub graph::BakeNode::Add
+#[non_exhaustive] pub graph::BakeNode::Add
 pub graph::BakeNode::Add::a: u32
 pub graph::BakeNode::Add::b: u32
-pub graph::BakeNode::Concat
+#[non_exhaustive] pub graph::BakeNode::Concat
 pub graph::BakeNode::Concat::inputs: &'a [u32]
-pub graph::BakeNode::Dense
+#[non_exhaustive] pub graph::BakeNode::Dense
 pub graph::BakeNode::Dense::activation: zenpredict::model::Activation
 pub graph::BakeNode::Dense::biases: core::option::Option<&'a [f32]>
 pub graph::BakeNode::Dense::dtype: zenpredict::model::WeightDtype
 pub graph::BakeNode::Dense::input: u32
 pub graph::BakeNode::Dense::out_dim: usize
 pub graph::BakeNode::Dense::weights: &'a [f32]
-pub graph::BakeNode::Gather
+#[non_exhaustive] pub graph::BakeNode::Gather
 pub graph::BakeNode::Gather::indices: &'a [u32]
 pub graph::BakeNode::Gather::input: u32
-pub graph::BakeNode::Input
+#[non_exhaustive] pub graph::BakeNode::Input
 pub graph::BakeNode::Input::width: usize
-pub graph::BakeNode::Mul
+#[non_exhaustive] pub graph::BakeNode::Mul
 pub graph::BakeNode::Mul::a: u32
 pub graph::BakeNode::Mul::b: u32
+pub const fn graph::BakeNode<'a>::activation(u32, zenpredict::model::Activation) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::add(u32, u32) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::concat(&'a [u32]) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::dense(u32, usize, zenpredict::model::Activation, zenpredict::model::WeightDtype, &'a [f32], core::option::Option<&'a [f32]>) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::gather(u32, &'a [u32]) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::input(usize) -> Self [also: (root)]
+pub const fn graph::BakeNode<'a>::mul(u32, u32) -> Self [also: (root)]
+pub graph::GraphBakeRequest::compressed: bool
+pub graph::GraphBakeRequest::discrete_sets: &'a [f32]
+pub graph::GraphBakeRequest::feature_bounds: &'a [zenpredict::bounds::FeatureBound]
+pub graph::GraphBakeRequest::flags: u16
+pub graph::GraphBakeRequest::metadata: &'a [composer::BakeMetadataEntry<'a>]
+pub graph::GraphBakeRequest::nodes: &'a [graph::BakeNode<'a>]
+pub graph::GraphBakeRequest::output_specs: &'a [zenpredict::output_spec::OutputSpec]
+pub graph::GraphBakeRequest::scaler_mean: &'a [f32]
+pub graph::GraphBakeRequest::scaler_scale: &'a [f32]
+pub graph::GraphBakeRequest::schema_hash: u64
+pub graph::GraphBakeRequest::sparse_overrides: &'a [zenpredict::output_spec::SparseOverride]
+pub fn graph::GraphBakeRequest<'a>::bake(&self) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError>
+pub const fn graph::GraphBakeRequest<'a>::compressed(self, bool) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::discrete_sets(self, &'a [f32]) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::feature_bounds(self, &'a [zenpredict::bounds::FeatureBound]) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::flags(self, u16) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::metadata(self, &'a [composer::BakeMetadataEntry<'a>]) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::new(u64, &'a [f32], &'a [f32], &'a [graph::BakeNode<'a>]) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self [also: (root)]
+pub const fn graph::GraphBakeRequest<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self [also: (root)]
 pub mod json
 pub json::ActivationJson::Identity
 pub json::ActivationJson::LeakyRelu
@@ -408,27 +436,27 @@ pub BakeJsonError::MetadataValueWrongType::key: alloc::string::String
 pub BakeJsonError::MetadataValueWrongType::repr: &'static str
 pub BakeJsonError::MetadataValueWrongType::wire: zenpredict::metadata::MetadataType
 #[non_exhaustive] pub enum BakeNode<'a> [also: graph]
-pub BakeNode::Activation
+#[non_exhaustive] pub BakeNode::Activation
 pub BakeNode::Activation::activation: zenpredict::model::Activation
 pub BakeNode::Activation::input: u32
-pub BakeNode::Add
+#[non_exhaustive] pub BakeNode::Add
 pub BakeNode::Add::a: u32
 pub BakeNode::Add::b: u32
-pub BakeNode::Concat
+#[non_exhaustive] pub BakeNode::Concat
 pub BakeNode::Concat::inputs: &'a [u32]
-pub BakeNode::Dense
+#[non_exhaustive] pub BakeNode::Dense
 pub BakeNode::Dense::activation: zenpredict::model::Activation
 pub BakeNode::Dense::biases: core::option::Option<&'a [f32]>
 pub BakeNode::Dense::dtype: zenpredict::model::WeightDtype
 pub BakeNode::Dense::input: u32
 pub BakeNode::Dense::out_dim: usize
 pub BakeNode::Dense::weights: &'a [f32]
-pub BakeNode::Gather
+#[non_exhaustive] pub BakeNode::Gather
 pub BakeNode::Gather::indices: &'a [u32]
 pub BakeNode::Gather::input: u32
-pub BakeNode::Input
+#[non_exhaustive] pub BakeNode::Input
 pub BakeNode::Input::width: usize
-pub BakeNode::Mul
+#[non_exhaustive] pub BakeNode::Mul
 pub BakeNode::Mul::a: u32
 pub BakeNode::Mul::b: u32
 #[non_exhaustive] pub enum BakeNodeJson [also: json]
@@ -537,6 +565,19 @@ pub BakeRequestJson::zerobias_tau: f32
 pub struct FeatureBoundJson [also: json]
 pub FeatureBoundJson::high: f32
 pub FeatureBoundJson::low: f32
+#[non_exhaustive] pub struct GraphBakeRequest<'a> [also: graph]
+pub GraphBakeRequest::compressed: bool
+pub GraphBakeRequest::discrete_sets: &'a [f32]
+pub GraphBakeRequest::feature_bounds: &'a [zenpredict::bounds::FeatureBound]
+pub GraphBakeRequest::flags: u16
+pub GraphBakeRequest::metadata: &'a [composer::BakeMetadataEntry<'a>]
+pub GraphBakeRequest::nodes: &'a [graph::BakeNode<'a>]
+pub GraphBakeRequest::output_specs: &'a [zenpredict::output_spec::OutputSpec]
+pub GraphBakeRequest::scaler_mean: &'a [f32]
+pub GraphBakeRequest::scaler_scale: &'a [f32]
+pub GraphBakeRequest::schema_hash: u64
+pub GraphBakeRequest::sparse_overrides: &'a [zenpredict::output_spec::SparseOverride]
+pub fn graph::GraphBakeRequest<'a>::bake(&self) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError>
 pub struct MetadataEntryJson [also: json]
 pub MetadataEntryJson::f32_values: core::option::Option<alloc::vec::Vec<f32>>
 pub MetadataEntryJson::hex: core::option::Option<alloc::string::String>
@@ -560,14 +601,15 @@ pub fn apply_zero_bias_per_layer_in_place(&mut [f32], f32) [also: zero_bias]
 pub fn bake(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: composer]
 pub fn bake_from_json(&json::BakeRequestJson) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
 pub fn bake_from_json_str(&str) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
-pub fn bake_graph(&composer::BakeRequest<'_>, &[graph::BakeNode<'_>]) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: graph]
+pub fn bake_graph(&graph::GraphBakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: graph]
 pub fn bake_optimized(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: optimize]
 
-## trait impls (22 types)
+## trait impls (23 types)
 
 append::AppendError: Clone, Debug, Display, Eq, Error, PartialEq
 composer::BakeError: Clone, Debug, Display, Eq, Error, PartialEq
 graph::BakeNode<'a>: Clone, Copy, Debug
+graph::GraphBakeRequest<'a>: Clone, Copy
 json::ActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
 json::BakeJsonError: Debug, Display, Error, From<composer::BakeError>
 json::BakeLayerJson: Debug, serde_core::de::Deserialize<'de>
@@ -590,4 +632,4 @@ zenpredict::output_spec::OutputTransform: From<json::OutputTransformJson>
 
 ## auto traits
 
-21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+22 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
