@@ -17,6 +17,10 @@ exclude = [
   "docs/v0_2_review_2026-05-13.md",
   # Fuzz crate — not useful to crates.io consumers
   "fuzz/**",
+  # Replays fuzz/ seeds via include!, so it can't build without fuzz/
+  "tests/fuzz_regression.rs",
+  # Cross-version parity harness (links a git copy of zenpredict)
+  "tools/**",
 ]
 
 [package.metadata.docs.rs]

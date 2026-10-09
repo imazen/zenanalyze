@@ -32,3 +32,15 @@ name = "predictor_predict"
 path = "fuzz_targets/predictor_predict.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "graph_from_bytes"
+path = "fuzz_targets/graph_from_bytes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "graph_structured"
+path = "fuzz_targets/graph_structured.rs"
+test = false
+doc = false

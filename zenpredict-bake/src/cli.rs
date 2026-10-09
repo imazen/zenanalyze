@@ -17,8 +17,8 @@ use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
 use zenpredict::{
-    Activation, FeatureBound, MetadataType, Model, OutputSpec, SparseOverride, WeightDtype,
-    WeightStorage, f16_bits_to_f32,
+    Activation, FeatureBound, MetadataType, Model, NodeView, OutputSpec, SparseOverride,
+    WeightDtype, WeightStorage, f16_bits_to_f32,
 };
 
 use crate::{
@@ -91,13 +91,20 @@ pub fn run_bake_cli(argv: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
 
+    // Report from the written bake itself (both composers verify it loads),
+    // so chain and graph bakes print the same, true numbers.
+    let (version, n_outputs, n_layers, n_nodes) = match Model::from_bytes(&bytes) {
+        Ok(m) => (m.version(), m.n_outputs(), m.n_layers(), m.n_nodes()),
+        Err(e) => {
+            eprintln!("zenpredict-bake: written bake does not load: {e}");
+            return ExitCode::from(3);
+        }
+    };
     eprintln!(
-        "zenpredict-bake: wrote {} ({} bytes) — n_inputs={} n_outputs={} n_layers={} schema_hash=0x{:016x} metadata_entries={}",
+        "zenpredict-bake: wrote {} ({} bytes) — ZNPR v{version} n_inputs={} n_outputs={n_outputs} n_layers={n_layers} n_nodes={n_nodes} schema_hash=0x{:016x} metadata_entries={}",
         output.display(),
         bytes.len(),
         req.scaler_mean.len(),
-        req.layers.last().map(|l| l.out_dim).unwrap_or(0),
-        req.layers.len(),
         req.schema_hash,
         req.metadata.len(),
     );
@@ -171,12 +178,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
     let layers: Vec<Value> = model
         .layers()
         .map(|layer| {
-            let activation = match layer.activation {
-                Activation::Identity => "identity",
-                Activation::Relu => "relu",
-                Activation::LeakyRelu => "leakyrelu",
-                _ => "unknown",
-            };
+            let activation = activation_name(layer.activation);
             let (dtype, n_weights, scales): (&str, usize, Option<&[f32]>) = match &layer.weights {
                 WeightStorage::F32(w) => ("f32", w.len(), None),
                 WeightStorage::F16(w) => ("f16", w.len(), None),
@@ -218,6 +220,34 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
         })
         .collect();
     out.insert("layers".into(), json!(layers));
+    out.insert("n_nodes".into(), json!(model.n_nodes()));
+    out.insert("is_layer_chain".into(), json!(model.is_layer_chain()));
+    // The op graph (v4; a v3 chain shows as Input + one Dense per layer).
+    // Dense payloads are summarized under "layers" above, in the same order.
+    let nodes: Vec<Value> = model
+        .nodes()
+        .map(|node| match node {
+            NodeView::Input { width } => json!({ "op": "input", "width": width }),
+            NodeView::Dense { input, layer } => json!({
+                "op": "dense",
+                "input": input,
+                "out_dim": layer.out_dim,
+                "activation": activation_name(layer.activation),
+                "bias": !layer.biases.is_empty(),
+            }),
+            NodeView::Activation {
+                input, activation, ..
+            } => json!({ "op": "activation", "input": input, "activation": activation_name(activation) }),
+            NodeView::Gather { input, indices } => {
+                json!({ "op": "gather", "input": input, "indices": indices })
+            }
+            NodeView::Add { a, b, .. } => json!({ "op": "add", "a": a, "b": b }),
+            NodeView::Mul { a, b, .. } => json!({ "op": "mul", "a": a, "b": b }),
+            NodeView::Concat { inputs, .. } => json!({ "op": "concat", "inputs": inputs }),
+            other => json!({ "op": format!("{other:?}") }),
+        })
+        .collect();
+    out.insert("nodes".into(), json!(nodes));
 
     let md = model.metadata();
     out.insert("metadata".into(), metadata_to_json(&md));
@@ -354,6 +384,15 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // repack rebuilds the network from `layers()` as a v3 chain; a v4 graph
+    // would lose its non-Dense nodes. Re-bake graphs from their JSON spec.
+    if model.version() != zenpredict::FORMAT_VERSION {
+        eprintln!(
+            "zenpredict repack: ZNPR v{} graph bakes are not supported; re-bake from the JSON graph spec",
+            model.version()
+        );
+        return ExitCode::from(1);
+    }
 
     let n_inputs = model.n_inputs();
     let n_outputs = model.n_outputs();
@@ -664,6 +703,17 @@ fn metadata_to_json(md: &zenpredict::Metadata<'_>) -> Value {
         })
         .collect();
     json!(entries)
+}
+
+fn activation_name(a: Activation) -> &'static str {
+    match a {
+        Activation::Identity => "identity",
+        Activation::Relu => "relu",
+        Activation::LeakyRelu => "leakyrelu",
+        Activation::Exp => "exp",
+        Activation::Softplus => "softplus",
+        _ => "unknown",
+    }
 }
 
 fn hex_of(b: &[u8]) -> String {
