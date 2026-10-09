@@ -28,8 +28,9 @@
   on 260 unique repo/consumer ZNPR files, the rev4 production bake
   (50,000 vectors), 504 sampled rev4 bakes, and 2,000 synthetic chains
   (27.2 M outputs, composer bytes identical too); forward pass on the
-  production bake measured 2.2 % faster (zenbench paired CI
-  [-2.3 %, -2.1 %]).
+  production bake 1.7–1.8 % faster (zenbench paired CI [-1.8 %,
+  -1.7 %]); per-predict `perf stat` cycles move -4.4 % … +0.3 % across
+  four shapes. Record: `benchmarks/znpr_v4_graph_gates_2026-10-09.md`.
   New public items: `Activation::{Exp, Softplus}` (v4-only; libm on
   every build, `Exp` input clamped to ±`EXP_INPUT_CLAMP` = 30,
   `Softplus` identity above `SOFTPLUS_THRESHOLD` = 20),
