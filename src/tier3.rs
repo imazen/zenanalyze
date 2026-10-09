@@ -532,18 +532,18 @@ fn quant_survival(coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
 /// are a measure-zero set on real DCT outputs).
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn quant_survival_simd(token: Token, coeffs: &[[f32; 8]; 8], qtable: &[f32; 64]) -> f32 {
-    let half = f32x8::splat(token, 0.5);
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let mut sum_v = f32x8::zero(token);
+    let half = f32x8::splat_t(token, 0.5);
+    let one = f32x8::splat_t(token, 1.0);
+    let zero = f32x8::zero_t(token);
+    let mut sum_v = f32x8::zero_t(token);
 
     // 8 row-chunks × 8 lanes = 64 coefficients, fully covering the
     // block. coeffs is `[[f32; 8]; 8]` — each row is exactly one
     // `f32x8::load` source.
     for (v, row) in coeffs.iter().enumerate() {
         let q_chunk: &[f32; 8] = qtable[v * 8..v * 8 + 8].try_into().unwrap();
-        let c_v = f32x8::load(token, row);
-        let q_v = f32x8::load(token, q_chunk);
+        let c_v = f32x8::load_t(token, row);
+        let q_v = f32x8::load_t(token, q_chunk);
         // |c| >= q * 0.5 → survives quantization at zero-bias 0.5.
         // (Numerically equivalent to round(c/q) != 0 within f32
         // precision except on the half-quant boundary, which doesn't
@@ -1722,14 +1722,14 @@ fn dct2d_8_three_planes_simd(
     // [D[0][n], …, D[7][n]] across lanes — reused for both passes
     // (the column pass uses the same matrix D, just along the v axis).
     let d_col = [
-        f32x8::load(token, &DCT_COEF_T[0]),
-        f32x8::load(token, &DCT_COEF_T[1]),
-        f32x8::load(token, &DCT_COEF_T[2]),
-        f32x8::load(token, &DCT_COEF_T[3]),
-        f32x8::load(token, &DCT_COEF_T[4]),
-        f32x8::load(token, &DCT_COEF_T[5]),
-        f32x8::load(token, &DCT_COEF_T[6]),
-        f32x8::load(token, &DCT_COEF_T[7]),
+        f32x8::load_t(token, &DCT_COEF_T[0]),
+        f32x8::load_t(token, &DCT_COEF_T[1]),
+        f32x8::load_t(token, &DCT_COEF_T[2]),
+        f32x8::load_t(token, &DCT_COEF_T[3]),
+        f32x8::load_t(token, &DCT_COEF_T[4]),
+        f32x8::load_t(token, &DCT_COEF_T[5]),
+        f32x8::load_t(token, &DCT_COEF_T[6]),
+        f32x8::load_t(token, &DCT_COEF_T[7]),
     ];
 
     // The body is identical across the three planes; macro keeps the
@@ -1741,26 +1741,26 @@ fn dct2d_8_three_planes_simd(
             // Row pass: Y_row[v] (lane k = Y[v][k]) =
             // Σ_n splat(X[v][n]) * d_col[n]. 8 fmas per row.
             let mut y_row: [f32x8; 8] = [
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
-                f32x8::zero(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
+                f32x8::zero_t(token),
             ];
             let mut v = 0;
             while v < 8 {
                 let r = &$blk[v];
-                let mut acc = d_col[0] * f32x8::splat(token, r[0]);
-                acc = d_col[1].mul_add(f32x8::splat(token, r[1]), acc);
-                acc = d_col[2].mul_add(f32x8::splat(token, r[2]), acc);
-                acc = d_col[3].mul_add(f32x8::splat(token, r[3]), acc);
-                acc = d_col[4].mul_add(f32x8::splat(token, r[4]), acc);
-                acc = d_col[5].mul_add(f32x8::splat(token, r[5]), acc);
-                acc = d_col[6].mul_add(f32x8::splat(token, r[6]), acc);
-                acc = d_col[7].mul_add(f32x8::splat(token, r[7]), acc);
+                let mut acc = d_col[0] * f32x8::splat_t(token, r[0]);
+                acc = d_col[1].mul_add(f32x8::splat_t(token, r[1]), acc);
+                acc = d_col[2].mul_add(f32x8::splat_t(token, r[2]), acc);
+                acc = d_col[3].mul_add(f32x8::splat_t(token, r[3]), acc);
+                acc = d_col[4].mul_add(f32x8::splat_t(token, r[4]), acc);
+                acc = d_col[5].mul_add(f32x8::splat_t(token, r[5]), acc);
+                acc = d_col[6].mul_add(f32x8::splat_t(token, r[6]), acc);
+                acc = d_col[7].mul_add(f32x8::splat_t(token, r[7]), acc);
                 y_row[v] = acc;
                 v += 1;
             }
@@ -1773,14 +1773,14 @@ fn dct2d_8_three_planes_simd(
             let mut v = 0;
             while v < 8 {
                 let d_row = &DCT_COEF[v];
-                let mut acc = y_row[0] * f32x8::splat(token, d_row[0]);
-                acc = y_row[1].mul_add(f32x8::splat(token, d_row[1]), acc);
-                acc = y_row[2].mul_add(f32x8::splat(token, d_row[2]), acc);
-                acc = y_row[3].mul_add(f32x8::splat(token, d_row[3]), acc);
-                acc = y_row[4].mul_add(f32x8::splat(token, d_row[4]), acc);
-                acc = y_row[5].mul_add(f32x8::splat(token, d_row[5]), acc);
-                acc = y_row[6].mul_add(f32x8::splat(token, d_row[6]), acc);
-                acc = y_row[7].mul_add(f32x8::splat(token, d_row[7]), acc);
+                let mut acc = y_row[0] * f32x8::splat_t(token, d_row[0]);
+                acc = y_row[1].mul_add(f32x8::splat_t(token, d_row[1]), acc);
+                acc = y_row[2].mul_add(f32x8::splat_t(token, d_row[2]), acc);
+                acc = y_row[3].mul_add(f32x8::splat_t(token, d_row[3]), acc);
+                acc = y_row[4].mul_add(f32x8::splat_t(token, d_row[4]), acc);
+                acc = y_row[5].mul_add(f32x8::splat_t(token, d_row[5]), acc);
+                acc = y_row[6].mul_add(f32x8::splat_t(token, d_row[6]), acc);
+                acc = y_row[7].mul_add(f32x8::splat_t(token, d_row[7]), acc);
                 acc.store(&mut $out[v]);
                 v += 1;
             }
@@ -1873,9 +1873,9 @@ fn log10_sum_and_sq_sum_dispatch(block_acs: &[f32]) -> (f64, f64) {
 /// call from the hot Tier 3 DCT loop.
 #[magetypes(define(f32x8), v4, v3, neon, wasm128, scalar)]
 fn log10_sum_and_sq_sum_simd(token: Token, block_acs: &[f32]) -> (f64, f64) {
-    let one_v = f32x8::splat(token, 1.0);
-    let mut sum_v = f32x8::zero(token);
-    let mut sq_sum_v = f32x8::zero(token);
+    let one_v = f32x8::splat_t(token, 1.0);
+    let mut sum_v = f32x8::zero_t(token);
+    let mut sq_sum_v = f32x8::zero_t(token);
     let mut sum_f64: f64 = 0.0;
     let mut sq_sum_f64: f64 = 0.0;
     // FLUSH cadence — same `f32`-mantissa argument as the row-stats
@@ -1888,7 +1888,7 @@ fn log10_sum_and_sq_sum_simd(token: Token, block_acs: &[f32]) -> (f64, f64) {
     let remainder = chunks.remainder();
     for chunk in chunks {
         let arr: &[f32; 8] = chunk.try_into().unwrap();
-        let ac_v = f32x8::load(token, arr);
+        let ac_v = f32x8::load_t(token, arr);
         let log_v = (ac_v + one_v).log10_lowp();
         sum_v += log_v;
         sq_sum_v = log_v.mul_add(log_v, sq_sum_v);
@@ -1896,8 +1896,8 @@ fn log10_sum_and_sq_sum_simd(token: Token, block_acs: &[f32]) -> (f64, f64) {
         if iters_since_flush >= FLUSH {
             sum_f64 += sum_v.reduce_add() as f64;
             sq_sum_f64 += sq_sum_v.reduce_add() as f64;
-            sum_v = f32x8::zero(token);
-            sq_sum_v = f32x8::zero(token);
+            sum_v = f32x8::zero_t(token);
+            sq_sum_v = f32x8::zero_t(token);
             iters_since_flush = 0;
         }
     }

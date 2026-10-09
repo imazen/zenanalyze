@@ -1170,20 +1170,20 @@ fn stripe_block_stats_simd<R: ChunkInput>(
     // and the block is 8×rows. Same luma definition for every stripe — there is
     // no separate floored scalar tail anymore.
     let block_n = (STRIPE_H * rows) as f32;
-    let inv_256_v = f32x8::splat(token, 1.0 / 256.0);
-    let coef_r_v = f32x8::splat(token, 77.0);
-    let coef_g_v = f32x8::splat(token, 150.0);
-    let coef_b_v = f32x8::splat(token, 29.0);
+    let inv_256_v = f32x8::splat_t(token, 1.0 / 256.0);
+    let coef_r_v = f32x8::splat_t(token, 77.0);
+    let coef_g_v = f32x8::splat_t(token, 150.0);
+    let coef_b_v = f32x8::splat_t(token, 29.0);
 
     for bx in 0..blocks_x {
-        let mut sum_v = f32x8::zero(token);
-        let mut sq_sum_v = f32x8::zero(token);
-        let mut r_min_v = f32x8::splat(token, 255.0);
-        let mut r_max_v = f32x8::zero(token);
-        let mut g_min_v = f32x8::splat(token, 255.0);
-        let mut g_max_v = f32x8::zero(token);
-        let mut b_min_v = f32x8::splat(token, 255.0);
-        let mut b_max_v = f32x8::zero(token);
+        let mut sum_v = f32x8::zero_t(token);
+        let mut sq_sum_v = f32x8::zero_t(token);
+        let mut r_min_v = f32x8::splat_t(token, 255.0);
+        let mut r_max_v = f32x8::zero_t(token);
+        let mut g_min_v = f32x8::splat_t(token, 255.0);
+        let mut g_max_v = f32x8::zero_t(token);
+        let mut b_min_v = f32x8::splat_t(token, 255.0);
+        let mut b_max_v = f32x8::zero_t(token);
 
         for dy in 0..rows {
             let base = dy * row_bytes + bx * STRIPE_H * 3;
@@ -1194,9 +1194,9 @@ fn stripe_block_stats_simd<R: ChunkInput>(
             // 21×vpinsrb scatter the autovectorizer used to produce.
             let chunk: &[R; 24] = (&stripe_rows[base..base + 24]).try_into().unwrap();
             let (r_arr, g_arr, b_arr) = R::load_chunk8(chunk, token);
-            let r_v = f32x8::load(token, &r_arr);
-            let g_v = f32x8::load(token, &g_arr);
-            let b_v = f32x8::load(token, &b_arr);
+            let r_v = f32x8::load_t(token, &r_arr);
+            let g_v = f32x8::load_t(token, &g_arr);
+            let b_v = f32x8::load_t(token, &b_arr);
 
             // Luma in same units the scalar uses: (77R + 150G + 29B) >> 8.
             // We compute (77R + 150G + 29B) / 256 in f32; the f32 truncates
@@ -1327,52 +1327,52 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
     let mut edge_grad_count: u64 = 0;
 
     // ---- f32x8 stats pass: 8 pixels (24 bytes) per chunk ----
-    let kr_v = f32x8::splat(token, kr);
-    let kg_v = f32x8::splat(token, kg);
-    let kb_v = f32x8::splat(token, kb);
-    let inv_255_v = f32x8::splat(token, 1.0 / 255.0);
-    let half_v = f32x8::splat(token, 0.5);
+    let kr_v = f32x8::splat_t(token, kr);
+    let kg_v = f32x8::splat_t(token, kg);
+    let kb_v = f32x8::splat_t(token, kb);
+    let inv_255_v = f32x8::splat_t(token, 1.0 / 255.0);
+    let half_v = f32x8::splat_t(token, 0.5);
 
     // BT.601 chroma encoding constants. These are FIXED (independent
     // of source primaries) — they define the encoder's YCbCr space,
     // which is what the Chai-Ngan skin-tone classifier was calibrated
     // against. The per-primaries `kr/kg/kb` only affect luma.
-    let cb_kr_v = f32x8::splat(token, -0.168736);
-    let cb_kg_v = f32x8::splat(token, -0.331264);
-    let cb_kb_v = f32x8::splat(token, 0.500000);
-    let cr_kr_v = f32x8::splat(token, 0.500000);
-    let cr_kg_v = f32x8::splat(token, -0.418688);
-    let cr_kb_v = f32x8::splat(token, -0.081312);
-    let off_128_v = f32x8::splat(token, 128.0);
+    let cb_kr_v = f32x8::splat_t(token, -0.168736);
+    let cb_kg_v = f32x8::splat_t(token, -0.331264);
+    let cb_kb_v = f32x8::splat_t(token, 0.500000);
+    let cr_kr_v = f32x8::splat_t(token, 0.500000);
+    let cr_kg_v = f32x8::splat_t(token, -0.418688);
+    let cr_kb_v = f32x8::splat_t(token, -0.081312);
+    let off_128_v = f32x8::splat_t(token, 128.0);
     // Chai-Ngan (1999) gates: Y in [40, 240], Cb in [77, 127],
     // Cr in [133, 173]. All compared in float-domain u8 space —
     // the gate margins (≥ 5 units) absorb any 1-LSB rounding drift
     // between the float SIMD path and the integer scalar tail.
-    let y_lo_v = f32x8::splat(token, 40.0);
-    let y_hi_v = f32x8::splat(token, 240.0);
-    let cb_lo_v = f32x8::splat(token, 77.0);
-    let cb_hi_v = f32x8::splat(token, 127.0);
-    let cr_lo_v = f32x8::splat(token, 133.0);
-    let cr_hi_v = f32x8::splat(token, 173.0);
-    let one_v = f32x8::splat(token, 1.0);
-    let zero_v = f32x8::zero(token);
+    let y_lo_v = f32x8::splat_t(token, 40.0);
+    let y_hi_v = f32x8::splat_t(token, 240.0);
+    let cb_lo_v = f32x8::splat_t(token, 77.0);
+    let cb_hi_v = f32x8::splat_t(token, 127.0);
+    let cr_lo_v = f32x8::splat_t(token, 133.0);
+    let cr_hi_v = f32x8::splat_t(token, 173.0);
+    let one_v = f32x8::splat_t(token, 1.0);
+    let zero_v = f32x8::zero_t(token);
 
-    let mut luma_sum_v = f32x8::zero(token);
-    let mut luma_sq_v = f32x8::zero(token);
-    let mut cb_sum_v = f32x8::zero(token);
-    let mut cb_sq_v = f32x8::zero(token);
-    let mut cr_sum_v = f32x8::zero(token);
-    let mut cr_sq_v = f32x8::zero(token);
-    let mut rg_sum_v = f32x8::zero(token);
-    let mut rg_sq_v = f32x8::zero(token);
-    let mut yb_sum_v = f32x8::zero(token);
-    let mut yb_sq_v = f32x8::zero(token);
-    let mut skin_count_v = f32x8::zero(token);
+    let mut luma_sum_v = f32x8::zero_t(token);
+    let mut luma_sq_v = f32x8::zero_t(token);
+    let mut cb_sum_v = f32x8::zero_t(token);
+    let mut cb_sq_v = f32x8::zero_t(token);
+    let mut cr_sum_v = f32x8::zero_t(token);
+    let mut cr_sq_v = f32x8::zero_t(token);
+    let mut rg_sum_v = f32x8::zero_t(token);
+    let mut rg_sq_v = f32x8::zero_t(token);
+    let mut yb_sum_v = f32x8::zero_t(token);
+    let mut yb_sq_v = f32x8::zero_t(token);
+    let mut skin_count_v = f32x8::zero_t(token);
     // HVS cross-product lane accumulators (FULL-gated): `Σ l·cb` /
     // `Σ l·cr` per chunk. One FMA each per 8-pixel chunk on top of
     // the FULL kernel.
-    let mut y_cb_sum_v = f32x8::zero(token);
-    let mut y_cr_sum_v = f32x8::zero(token);
+    let mut y_cb_sum_v = f32x8::zero_t(token);
+    let mut y_cr_sum_v = f32x8::zero_t(token);
 
     const FLUSH: usize = 32;
     let mut iters_since_flush = 0usize;
@@ -1384,9 +1384,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         // Deinterleave via ChunkInput (u8 → garb's tier-specialized vpshufb
         // primitive, the SDR fast path; f32 → gather of an already-linear row).
         let (r_arr, g_arr, b_arr) = R::load_chunk8(c, token);
-        let r = f32x8::load(token, &r_arr);
-        let g = f32x8::load(token, &g_arr);
-        let b = f32x8::load(token, &b_arr);
+        let r = f32x8::load_t(token, &r_arr);
+        let g = f32x8::load_t(token, &g_arr);
+        let b = f32x8::load_t(token, &b_arr);
 
         // BT.601 luma: l = 0.299·r + 0.587·g + 0.114·b
         let l = r.mul_add(kr_v, g.mul_add(kg_v, b * kb_v));
@@ -1444,10 +1444,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
             cb_sq_sum += fixed_reduce8(cb_sq_v.to_array());
             cr_sum += fixed_reduce8(cr_sum_v.to_array());
             cr_sq_sum += fixed_reduce8(cr_sq_v.to_array());
-            cb_sum_v = f32x8::zero(token);
-            cb_sq_v = f32x8::zero(token);
-            cr_sum_v = f32x8::zero(token);
-            cr_sq_v = f32x8::zero(token);
+            cb_sum_v = f32x8::zero_t(token);
+            cb_sq_v = f32x8::zero_t(token);
+            cr_sum_v = f32x8::zero_t(token);
+            cr_sq_v = f32x8::zero_t(token);
             if FULL {
                 luma_sum += fixed_reduce8(luma_sum_v.to_array());
                 luma_sq_sum += fixed_reduce8(luma_sq_v.to_array());
@@ -1457,18 +1457,18 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
                 yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
                 y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
                 y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
-                luma_sum_v = f32x8::zero(token);
-                luma_sq_v = f32x8::zero(token);
-                rg_sum_v = f32x8::zero(token);
-                rg_sq_v = f32x8::zero(token);
-                yb_sum_v = f32x8::zero(token);
-                yb_sq_v = f32x8::zero(token);
-                y_cb_sum_v = f32x8::zero(token);
-                y_cr_sum_v = f32x8::zero(token);
+                luma_sum_v = f32x8::zero_t(token);
+                luma_sq_v = f32x8::zero_t(token);
+                rg_sum_v = f32x8::zero_t(token);
+                rg_sq_v = f32x8::zero_t(token);
+                yb_sum_v = f32x8::zero_t(token);
+                yb_sq_v = f32x8::zero_t(token);
+                y_cb_sum_v = f32x8::zero_t(token);
+                y_cr_sum_v = f32x8::zero_t(token);
             }
             if SKIN {
                 skin_count += skin_count_v.reduce_add() as u64;
-                skin_count_v = f32x8::zero(token);
+                skin_count_v = f32x8::zero_t(token);
             }
             iters_since_flush = 0;
         }
@@ -1641,9 +1641,9 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
                 // speed and reverted: its measured gain was ~0.02 ns/px — below the
                 // per-tier noise floor — not worth losing cross-arch determinism.)
                 // Clamp to [1.0, ∞) so non-edge lanes (mask=0) stay finite.
-                let grad_sq_v = f32x8::load(token, &grad_sq_arr);
-                let mask_v = f32x8::load(token, &mask_arr);
-                let one_v = f32x8::splat(token, 1.0);
+                let grad_sq_v = f32x8::load_t(token, &grad_sq_arr);
+                let mask_v = f32x8::load_t(token, &mask_arr);
+                let one_v = f32x8::splat_t(token, 1.0);
                 let safe_grad_sq = grad_sq_v.max(one_v);
                 let inv_sqrt = rsqrt_stable!(f32x8, token, safe_grad_sq);
                 let g_mag_v = grad_sq_v * inv_sqrt * mask_v;
@@ -1805,9 +1805,9 @@ fn accumulate_laplacian_simd<const BT601: bool, R: ChunkInput>(
     // SIMD iter using f32x8 lanes; tail handled scalar.
     let mut lap_sum: f64 = 0.0;
     let mut lap_sq_sum: f64 = 0.0;
-    let four_v = f32x8::splat(token, 4.0);
-    let mut sum_v = f32x8::zero(token);
-    let mut sq_v = f32x8::zero(token);
+    let four_v = f32x8::splat_t(token, 4.0);
+    let mut sum_v = f32x8::zero_t(token);
+    let mut sq_v = f32x8::zero_t(token);
     let mut count: u64 = 0;
 
     let interior_end = width - 1;
@@ -1818,11 +1818,11 @@ fn accumulate_laplacian_simd<const BT601: bool, R: ChunkInput>(
         let start = 1 + ci * 8;
         // Overlapping loads from contiguous f32 row arrays — same
         // pattern Tier 2 uses. fixed-size [..; 8] proves length to LLVM.
-        let lc_v = f32x8::load(token, (&cur_l[start..start + 8]).try_into().unwrap());
-        let ll_v = f32x8::load(token, (&cur_l[start - 1..start + 7]).try_into().unwrap());
-        let lr_v = f32x8::load(token, (&cur_l[start + 1..start + 9]).try_into().unwrap());
-        let lu_v = f32x8::load(token, (&prev_l[start..start + 8]).try_into().unwrap());
-        let ld_v = f32x8::load(token, (&next_l[start..start + 8]).try_into().unwrap());
+        let lc_v = f32x8::load_t(token, (&cur_l[start..start + 8]).try_into().unwrap());
+        let ll_v = f32x8::load_t(token, (&cur_l[start - 1..start + 7]).try_into().unwrap());
+        let lr_v = f32x8::load_t(token, (&cur_l[start + 1..start + 9]).try_into().unwrap());
+        let lu_v = f32x8::load_t(token, (&prev_l[start..start + 8]).try_into().unwrap());
+        let ld_v = f32x8::load_t(token, (&next_l[start..start + 8]).try_into().unwrap());
         let lap = ll_v + lr_v + lu_v + ld_v - four_v * lc_v;
         sum_v += lap;
         sq_v = lap.mul_add(lap, sq_v);
@@ -1840,8 +1840,8 @@ fn accumulate_laplacian_simd<const BT601: bool, R: ChunkInput>(
         if iters_since_flush >= FLUSH {
             lap_sum += sum_v.reduce_add() as f64;
             lap_sq_sum += sq_v.reduce_add() as f64;
-            sum_v = f32x8::zero(token);
-            sq_v = f32x8::zero(token);
+            sum_v = f32x8::zero_t(token);
+            sq_v = f32x8::zero_t(token);
             iters_since_flush = 0;
         }
     }

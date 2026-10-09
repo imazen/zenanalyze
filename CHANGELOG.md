@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Migrate analyzer and SIMD-example constructors to magetypes 0.9.30 token-taking `_t` forms, preserving feature bits at v4/v3/scalar. See [the qualification record](benchmarks/magetypes030_2026-10-09.md).
+
 - The library no longer enables `archmage/testable_dispatch` for its consumers. Cargo unifies features, so it reached every downstream build and turned each archmage `summon()` there into a cache read, even for the x86-64 baseline token. The tier benches get it from the new dev-only `_dev` feature: `cargo bench --bench tier_isolation --features _dev`.
 
 ### Added

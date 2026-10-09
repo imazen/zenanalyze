@@ -860,7 +860,56 @@ mod tests {
     /// `ZENANALYZE_BLESS_GOLDEN=1` and review. Never relax the tolerance to pass.
     #[test]
     fn golden_is_stable() {
+        // Caller-controlled exact dumps reuse this test's corpus and extraction.
+        // Run only this test in a fresh process when forcing a dispatch ceiling.
+        let dump = std::env::var_os("ZENANALYZE_FEATURE_DUMP");
+        if dump.is_some() {
+            let tier = std::env::var("ZENANALYZE_FEATURE_DUMP_TIER")
+                .expect("feature dump requires an explicit tier");
+            #[cfg(all(feature = "_dev", target_arch = "x86_64"))]
+            {
+                use archmage::{SimdToken, X64V3Token, X64V4Token};
+                match tier.as_str() {
+                    "v4" => assert!(X64V4Token::summon().is_some(), "v4 unavailable"),
+                    "v3" => {
+                        X64V4Token::dangerously_disable_token_process_wide(true)
+                            .expect("disable v4");
+                        assert!(X64V4Token::summon().is_none());
+                        assert!(X64V3Token::summon().is_some(), "v3 unavailable");
+                    }
+                    "scalar" => {
+                        X64V3Token::dangerously_disable_token_process_wide(true)
+                            .expect("disable v3 and higher tiers");
+                        assert!(X64V3Token::summon().is_none());
+                        assert!(X64V4Token::summon().is_none());
+                    }
+                    _ => panic!("unsupported feature dump tier: {tier}"),
+                }
+            }
+            #[cfg(not(all(feature = "_dev", target_arch = "x86_64")))]
+            panic!("forced feature dump tier {tier} requires _dev on x86_64");
+        }
         let matrix = extract_matrix();
+        if let Some(path) = dump {
+            let mut out = String::new();
+            for (name, values) in &matrix {
+                for (sample, &value) in values.iter().enumerate() {
+                    let bits = match value {
+                        FeatureValue::F32(x) => format!("f32:{:08x}", x.to_bits()),
+                        FeatureValue::U32(x) => format!("u32:{x}"),
+                        FeatureValue::U64(x) => format!("u64:{x}"),
+                        FeatureValue::Bool(x) => format!("bool:{}", u8::from(x)),
+                    };
+                    out.push_str(&format!("{name}\t{sample}\t{bits}\n"));
+                }
+            }
+            std::fs::write(path, out).expect("write exact feature dump");
+            eprintln!(
+                "feature dump: {} features, {} corpus images, both light modes",
+                matrix.len(),
+                corpus().len()
+            );
+        }
 
         if std::env::var_os("ZENANALYZE_BLESS_GOLDEN").is_some() {
             let mut out = String::new();
