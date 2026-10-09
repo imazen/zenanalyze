@@ -7,9 +7,10 @@ use core::fmt;
 pub enum PredictError {
     /// Header magic bytes don't match `ZNPR`.
     BadMagic { found: [u8; 4] },
-    /// Format version not supported by this build. v3 is the only
-    /// version this crate parses; older bakes must be migrated via
-    /// `zentrain/tools/migrate_znpr_v2_to_v3.py`.
+    /// Format version not supported by this build. This crate parses
+    /// v3 (layer chains) and v4 (op graphs, see `docs/ZNPR_V4_GRAPH.md`);
+    /// `expected` reports the chain version, 3. Older bakes must be
+    /// migrated via `zentrain/tools/migrate_znpr_v2_to_v3.py`.
     UnsupportedVersion { version: u16, expected: u16 },
     /// Bytes ran out before a section completed parsing.
     Truncated {
@@ -93,6 +94,27 @@ pub enum PredictError {
     /// `0` (LessThan) or `1` (GreaterThan). Reject rather than silently
     /// mis-apply a safety bound.
     UnknownVetoOp { byte: u8 },
+    /// A ZNPR v4 graph node carried an op byte this build doesn't know
+    /// (see `zenpredict::wire::OP_*`). Unknown ops refuse at load.
+    UnknownGraphOp { node: usize, byte: u8 },
+    /// Graph node `node` referenced node `input`, which is not an
+    /// earlier node (a forward or self reference). v4 graphs are stored
+    /// in strict topological order, so this also rules out cycles.
+    GraphInputRef { node: usize, input: usize },
+    /// Graph node `node` declared or received a width that doesn't
+    /// match what its op requires.
+    GraphShapeMismatch {
+        node: usize,
+        expected: usize,
+        got: usize,
+    },
+    /// Graph node `node` violated a structural rule (wrong arity,
+    /// nonzero reserved field, misplaced `Input`, dead node, …). `what`
+    /// names the rule.
+    GraphMalformed { node: usize, what: &'static str },
+    /// A fallible allocation of `bytes` bytes failed (model load or
+    /// [`Predictor::try_new`](crate::Predictor::try_new)).
+    AllocFailed { bytes: usize },
 }
 
 impl fmt::Display for PredictError {
@@ -197,6 +219,30 @@ impl fmt::Display for PredictError {
                 f,
                 "zenpredict: knob_vetoes op byte {byte:#x} not recognized (expected 0=< or 1=>)"
             ),
+            Self::UnknownGraphOp { node, byte } => {
+                write!(
+                    f,
+                    "zenpredict: graph node {node} has unknown op byte {byte:#x}"
+                )
+            }
+            Self::GraphInputRef { node, input } => write!(
+                f,
+                "zenpredict: graph node {node} references node {input}, which is not an earlier node"
+            ),
+            Self::GraphShapeMismatch {
+                node,
+                expected,
+                got,
+            } => write!(
+                f,
+                "zenpredict: graph node {node} width mismatch: expected {expected}, got {got}"
+            ),
+            Self::GraphMalformed { node, what } => {
+                write!(f, "zenpredict: graph node {node} malformed: {what}")
+            }
+            Self::AllocFailed { bytes } => {
+                write!(f, "zenpredict: allocation of {bytes} bytes failed")
+            }
         }
     }
 }

@@ -1,6 +1,9 @@
-//! Forward-pass kernel.
+//! Forward-pass executor.
 //!
-//! For each layer:
+//! Runs a model's op graph (see [`crate::graph`]) node by node in file
+//! order. A v3 layer chain arrives lowered to `Input → Dense → … →
+//! Dense`; each Dense node runs [`layer_forward`], the v3 per-layer code:
+//!
 //! 1. Initialize the accumulator with the layer's biases (broadcast).
 //! 2. For each input element `x[i]`, add `x[i] * W[i, :]` to the
 //!    accumulator. Embarrassingly parallel across the output dim.
@@ -10,23 +13,28 @@
 //! SIMD dispatch lands. The fixed-size `[f32; 8]` chunk loads let
 //! LLVM auto-vectorize this to one `f32x8` FMA per iteration on
 //! AVX2/AVX-512 and 2× `f32x4` on NEON/WASM today.
+//!
+//! Every node except the last writes into its load-planned slot of one
+//! f32 arena; the last node writes straight into the caller's output.
 
 use crate::error::PredictError;
-use crate::model::{Activation, LEAKY_RELU_ALPHA, LayerView, Model, WeightStorage};
+use crate::graph::{GraphNode, NodeKind, concat_inputs, gather_indices};
+use crate::model::{
+    Activation, EXP_INPUT_CLAMP, LEAKY_RELU_ALPHA, LayerView, Model, SOFTPLUS_THRESHOLD,
+    WeightStorage,
+};
 
 #[cfg(feature = "simd")]
 use archmage::autoversion;
 
-/// Run the full forward pass: scale inputs, then layer-by-layer.
+/// Run the full forward pass: scale inputs, then every graph node.
 ///
-/// `scratch_a` and `scratch_b` are reused across layers. They must
-/// each be at least [`Model::scratch_len`](crate::Model::scratch_len)
-/// long. `output` must be exactly `n_outputs` long.
-pub fn forward(
+/// `arena` must be at least `model.arena_len()` long and `output`
+/// exactly `n_outputs` long. Nothing is allocated.
+pub(crate) fn forward(
     model: &Model,
     features: &[f32],
-    scratch_a: &mut [f32],
-    scratch_b: &mut [f32],
+    arena: &mut [f32],
     output: &mut [f32],
 ) -> Result<(), PredictError> {
     let n_inputs = model.n_inputs();
@@ -43,45 +51,123 @@ pub fn forward(
             got: output.len(),
         });
     }
-    let need = model.scratch_len();
-    if scratch_a.len() < need || scratch_b.len() < need {
+    let need = model.arena_len();
+    if arena.len() < need {
         return Err(PredictError::FeatureLenMismatch {
             expected: need,
-            got: scratch_a.len().min(scratch_b.len()),
+            got: arena.len(),
         });
     }
 
-    // Scale inputs: x' = (x - mean) / scale.
-    //
-    // Zero-variance columns: sklearn's `_handle_zeros_in_scale`
-    // replaces `scale=0` with `1.0` so the column passes through as
-    // `(x - mean)`. Mirror that defensively.
-    let mean = model.scaler_mean();
-    let scale = model.scaler_scale();
-    for i in 0..n_inputs {
-        let s = scale[i];
-        let safe_s = if s == 0.0 { 1.0 } else { s };
-        scratch_a[i] = (features[i] - mean[i]) / safe_s;
-    }
-
-    let mut input_buf: &mut [f32] = scratch_a;
-    let mut output_buf: &mut [f32] = scratch_b;
-
-    let n_layers = model.n_layers();
-    let last_idx = n_layers - 1;
-
-    for (idx, layer) in model.layers().enumerate() {
-        let in_dim = layer.in_dim;
-        let out_dim = layer.out_dim;
-        let dst: &mut [f32] = if idx == last_idx {
-            &mut output[..out_dim]
+    let nodes = &model.graph().nodes;
+    let last = nodes.len() - 1;
+    for (i, node) in nodes.iter().enumerate() {
+        let width = node.width as usize;
+        if i == last {
+            let io = Inputs {
+                left: arena,
+                right: &[],
+                right_base: usize::MAX,
+            };
+            run_node(model, nodes, node, &io, features, &mut output[..width])?;
         } else {
-            &mut output_buf[..out_dim]
-        };
-        let src = &input_buf[..in_dim];
-        layer_forward(&layer, src, dst)?;
-        if idx != last_idx {
-            core::mem::swap(&mut input_buf, &mut output_buf);
+            // Planned slots never overlap a live input, so the node's own
+            // slot splits the arena into a writable middle and two
+            // readable sides.
+            let start = node.slot as usize;
+            let (left, rest) = arena.split_at_mut(start);
+            let (dst, right) = rest.split_at_mut(width);
+            let io = Inputs {
+                left,
+                right,
+                right_base: start + width,
+            };
+            run_node(model, nodes, node, &io, features, dst)?;
+        }
+    }
+    Ok(())
+}
+
+/// Read-only view of the arena around the slot being written.
+struct Inputs<'x> {
+    left: &'x [f32],
+    right: &'x [f32],
+    right_base: usize,
+}
+
+impl Inputs<'_> {
+    #[inline]
+    fn get<'n>(&'n self, nodes: &[GraphNode], j: u32) -> &'n [f32] {
+        let n = &nodes[j as usize];
+        let (off, len) = (n.slot as usize, n.width as usize);
+        if off < self.right_base {
+            &self.left[off..off + len]
+        } else {
+            let o = off - self.right_base;
+            &self.right[o..o + len]
+        }
+    }
+}
+
+fn run_node(
+    model: &Model,
+    nodes: &[GraphNode],
+    node: &GraphNode,
+    io: &Inputs<'_>,
+    features: &[f32],
+    dst: &mut [f32],
+) -> Result<(), PredictError> {
+    match node.kind {
+        NodeKind::Input => {
+            // Scale inputs: x' = (x - mean) / scale.
+            //
+            // Zero-variance columns: sklearn's `_handle_zeros_in_scale`
+            // replaces `scale=0` with `1.0` so the column passes through as
+            // `(x - mean)`. Mirror that defensively.
+            let mean = model.scaler_mean();
+            let scale = model.scaler_scale();
+            for i in 0..dst.len() {
+                let s = scale[i];
+                let safe_s = if s == 0.0 { 1.0 } else { s };
+                dst[i] = (features[i] - mean[i]) / safe_s;
+            }
+        }
+        NodeKind::Dense { input, ref layer } => {
+            let view = model.materialize_offsets(layer);
+            layer_forward(&view, io.get(nodes, input), dst)?;
+        }
+        NodeKind::Activation { input, activation } => {
+            dst.copy_from_slice(io.get(nodes, input));
+            apply_activation(dst, activation);
+        }
+        NodeKind::Gather {
+            input,
+            indices,
+            contiguous_start,
+        } => {
+            let src = io.get(nodes, input);
+            match contiguous_start {
+                Some(start) => {
+                    let start = start as usize;
+                    dst.copy_from_slice(&src[start..start + dst.len()]);
+                }
+                None => {
+                    let idx = gather_indices(indices, dst.len(), model.raw_bytes());
+                    for (d, &k) in dst.iter_mut().zip(idx) {
+                        *d = src[k as usize];
+                    }
+                }
+            }
+        }
+        NodeKind::Add { a, b } => add_elementwise(io.get(nodes, a), io.get(nodes, b), dst),
+        NodeKind::Mul { a, b } => mul_elementwise(io.get(nodes, a), io.get(nodes, b), dst),
+        NodeKind::Concat { inputs } => {
+            let mut at = 0;
+            for &j in concat_inputs(inputs, model.raw_bytes()) {
+                let src = io.get(nodes, j);
+                dst[at..at + src.len()].copy_from_slice(src);
+                at += src.len();
+            }
         }
     }
     Ok(())
@@ -92,15 +178,18 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) -> Result<
     let in_dim = layer.in_dim;
     debug_assert_eq!(src.len(), in_dim);
     debug_assert_eq!(dst.len(), out_dim);
-    debug_assert_eq!(layer.biases.len(), out_dim);
+    debug_assert!(layer.biases.is_empty() || layer.biases.len() == out_dim);
 
+    // A v4 Dense node may omit its bias; that computes exactly as if every
+    // bias were `+0.0` (same fill, same `0.0 + s * acc` I8 post-scale).
+    let has_bias = !layer.biases.is_empty();
     match &layer.weights {
         WeightStorage::F32(w) => {
-            dst.copy_from_slice(layer.biases);
+            init_bias(dst, layer.biases, has_bias);
             saxpy_matmul_f32(src, w, dst, in_dim, out_dim);
         }
         WeightStorage::F16(w) => {
-            dst.copy_from_slice(layer.biases);
+            init_bias(dst, layer.biases, has_bias);
             saxpy_matmul_f16(src, w, dst, in_dim, out_dim);
         }
         WeightStorage::I8 { weights, scales } => {
@@ -112,14 +201,47 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) -> Result<
             }
             saxpy_matmul_i8(src, weights, dst, in_dim, out_dim);
             debug_assert_eq!(scales.len(), out_dim);
-            for o in 0..out_dim {
-                dst[o] = layer.biases[o] + scales[o] * dst[o];
+            if has_bias {
+                for o in 0..out_dim {
+                    dst[o] = layer.biases[o] + scales[o] * dst[o];
+                }
+            } else {
+                for o in 0..out_dim {
+                    dst[o] = 0.0 + scales[o] * dst[o];
+                }
             }
         }
     }
 
     apply_activation(dst, layer.activation);
     Ok(())
+}
+
+#[inline]
+fn init_bias(dst: &mut [f32], biases: &[f32], has_bias: bool) {
+    if has_bias {
+        dst.copy_from_slice(biases);
+    } else {
+        dst.fill(0.0);
+    }
+}
+
+// Elementwise binary ops. IEEE-754 add and multiply are correctly
+// rounded per lane at any vector width, so the `#[autoversion]` variant
+// (vectorized under `+avx2`) is bit-identical to the scalar one; no
+// reduction, no reassociation. Gated by `simd_parity_tests`.
+#[cfg_attr(feature = "simd", autoversion(v3))]
+fn add_elementwise(a: &[f32], b: &[f32], dst: &mut [f32]) {
+    for ((d, &x), &y) in dst.iter_mut().zip(a).zip(b) {
+        *d = x + y;
+    }
+}
+
+#[cfg_attr(feature = "simd", autoversion(v3))]
+fn mul_elementwise(a: &[f32], b: &[f32], dst: &mut [f32]) {
+    for ((d, &x), &y) in dst.iter_mut().zip(a).zip(b) {
+        *d = x * y;
+    }
 }
 
 // The three `saxpy_matmul_*` kernels carry `#[autoversion]` under the
@@ -309,6 +431,35 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 }
             }
         }
+        Activation::Exp => {
+            for v in buf.iter_mut() {
+                *v = exp_clamped(*v);
+            }
+        }
+        Activation::Softplus => {
+            for v in buf.iter_mut() {
+                *v = softplus(*v);
+            }
+        }
+    }
+}
+
+/// [`Activation::Exp`]. `libm` on every build (std too): a platform
+/// `expf` is not guaranteed to return the same bits everywhere. NaN stays
+/// NaN; ±inf clamp to `exp(±EXP_INPUT_CLAMP)`.
+#[inline]
+pub(crate) fn exp_clamped(x: f32) -> f32 {
+    libm::expf(x.clamp(-EXP_INPUT_CLAMP, EXP_INPUT_CLAMP))
+}
+
+/// [`Activation::Softplus`], PyTorch `Softplus(beta=1, threshold=20)`.
+/// `libm` on every build.
+#[inline]
+pub(crate) fn softplus(x: f32) -> f32 {
+    if x > SOFTPLUS_THRESHOLD {
+        x
+    } else {
+        libm::log1pf(libm::expf(x))
     }
 }
 

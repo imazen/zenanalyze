@@ -107,8 +107,20 @@ use crate::feature_transform::{
 use crate::metadata::Metadata;
 use crate::output_spec::{OutputSpec, SparseOverride};
 
+/// ZNPR version of a layer-chain bake (what `zenpredict-bake`'s chain
+/// composer writes). Graph bakes carry [`GRAPH_FORMAT_VERSION`].
 pub const FORMAT_VERSION: u16 = 3;
+/// ZNPR version of a static op-graph bake (`docs/ZNPR_V4_GRAPH.md`).
+pub const GRAPH_FORMAT_VERSION: u16 = 4;
 pub const LEAKY_RELU_ALPHA: f32 = 0.01;
+/// [`Activation::Exp`] clamps its input to `[-EXP_INPUT_CLAMP,
+/// EXP_INPUT_CLAMP]` (the same bound as `ScoreTransform::Exp`), so its
+/// output is always finite and a gated product `0 · exp(x)` stays `0`.
+/// Trainers must apply the same clamp.
+pub const EXP_INPUT_CLAMP: f32 = 30.0;
+/// [`Activation::Softplus`] returns `x` unchanged above this input
+/// (PyTorch `nn.Softplus(beta=1, threshold=20)`). Trainers must match.
+pub const SOFTPLUS_THRESHOLD: f32 = 20.0;
 const MAGIC: [u8; 4] = *b"ZNPR";
 use crate::wire::{HEADER_SIZE, LAYER_ENTRY_SIZE};
 
@@ -275,10 +287,31 @@ pub enum Activation {
     /// `nn.LeakyReLU` default and what `train_hybrid.py
     /// --activation leakyrelu` emits.
     LeakyRelu = 2,
+    /// `expf(clamp(x, -EXP_INPUT_CLAMP, EXP_INPUT_CLAMP))`, via `libm` on
+    /// every build so every platform returns the same bits. ZNPR v4 graphs
+    /// only; a v3 layer with this byte is rejected.
+    Exp = 3,
+    /// `if x > SOFTPLUS_THRESHOLD { x } else { log1pf(expf(x)) }`, via
+    /// `libm` on every build. ZNPR v4 graphs only.
+    Softplus = 4,
 }
 
 impl Activation {
+    /// Every activation byte a v4 graph accepts.
     pub(crate) fn from_byte(b: u8) -> Result<Self, PredictError> {
+        match b {
+            0 => Ok(Self::Identity),
+            1 => Ok(Self::Relu),
+            2 => Ok(Self::LeakyRelu),
+            3 => Ok(Self::Exp),
+            4 => Ok(Self::Softplus),
+            other => Err(PredictError::UnknownActivation { byte: other }),
+        }
+    }
+
+    /// The v3 `LayerEntry` subset. `Exp` / `Softplus` stay v4-only so a v3
+    /// reader's verdict on any file is unchanged.
+    pub(crate) fn from_byte_v3(b: u8) -> Result<Self, PredictError> {
         match b {
             0 => Ok(Self::Identity),
             1 => Ok(Self::Relu),
@@ -322,6 +355,8 @@ pub struct LayerView<'a> {
     pub out_dim: usize,
     pub activation: Activation,
     pub weights: WeightStorage<'a>,
+    /// `out_dim` biases. Empty for a v4 Dense node without bias (its
+    /// output is computed as if every bias were `+0.0`).
     pub biases: &'a [f32],
 }
 
@@ -375,10 +410,10 @@ pub(crate) struct LayerOffsets {
 pub struct Model {
     bytes: alloc::boxed::Box<[u8]>,
     header: Header,
-    /// Per-layer offsets + dims, cached at parse time. The
-    /// [`LayerView`] materialized via [`Self::layer`] is constructed
-    /// from these offsets on demand.
-    layer_offsets: alloc::vec::Vec<LayerOffsets>,
+    /// The validated op graph (a v3 chain is lowered to one at load).
+    /// [`LayerView`]s from [`Self::layer`] / [`Self::layers`] are built
+    /// from its Dense nodes' offsets on demand.
+    graph: crate::graph::Graph,
     /// Owned cache of parsed `zentrain.feature_transforms`. `None`
     /// when the bake omitted the key (consumer treats every feature
     /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
@@ -444,12 +479,13 @@ impl Model {
                 found: header.magic,
             });
         }
-        if header.version != FORMAT_VERSION {
+        if header.version != FORMAT_VERSION && header.version != GRAPH_FORMAT_VERSION {
             return Err(PredictError::UnsupportedVersion {
                 version: header.version,
                 expected: FORMAT_VERSION,
             });
         }
+        let is_graph = header.version == GRAPH_FORMAT_VERSION;
         // Schema hash is checked BEFORE any layer-table allocation
         // so adversarial bakes with mismatched schema + huge n_layers
         // don't allocate before failing.
@@ -472,7 +508,9 @@ impl Model {
             return Err(PredictError::ZeroDimension { what: "n_outputs" });
         }
         if n_layers == 0 {
-            return Err(PredictError::ZeroDimension { what: "n_layers" });
+            return Err(PredictError::ZeroDimension {
+                what: if is_graph { "n_nodes" } else { "n_layers" },
+            });
         }
         if n_inputs > crate::limits::MAX_DIM {
             return Err(PredictError::DimensionOverflow { what: "n_inputs" });
@@ -480,7 +518,21 @@ impl Model {
         if n_outputs > crate::limits::MAX_DIM {
             return Err(PredictError::DimensionOverflow { what: "n_outputs" });
         }
-        if n_layers > crate::limits::MAX_LAYERS {
+        if is_graph {
+            if n_layers > crate::limits::MAX_NODES {
+                return Err(PredictError::DimensionOverflow {
+                    what: "n_nodes (limits::MAX_NODES)",
+                });
+            }
+            // feature_order / output_order are defined against layer[0]
+            // rows and layer[last] columns, which a graph doesn't have.
+            if !header.feature_order.is_empty() || !header.output_order.is_empty() {
+                return Err(PredictError::GraphMalformed {
+                    node: 0,
+                    what: "v4 header: feature_order and output_order must be empty",
+                });
+            }
+        } else if n_layers > crate::limits::MAX_LAYERS {
             return Err(PredictError::DimensionOverflow { what: "n_layers" });
         }
 
@@ -517,7 +569,7 @@ impl Model {
                     have: total_len,
                 });
             }
-            let mut owned = alloc::vec![0u8; total_len].into_boxed_slice();
+            let mut owned = try_zeroed_bytes(total_len)?;
             owned[..HEADER_SIZE].copy_from_slice(&input[..HEADER_SIZE]);
             // Decompress payload into owned[HEADER_SIZE..]. Only LZ4
             // is supported right now.
@@ -546,8 +598,14 @@ impl Model {
         } else {
             // Uncompressed: copy verbatim. We always own the bake,
             // so load-time permutations can mutate freely.
-            input.to_vec().into_boxed_slice()
+            let mut owned: alloc::vec::Vec<u8> = try_vec_with_capacity(input.len())?;
+            owned.extend_from_slice(input);
+            owned.into_boxed_slice()
         };
+
+        if is_graph {
+            return Self::finish_v4(bytes, header);
+        }
 
         // ── Stage 2: parse + validate layer table from owned bytes. ──
         let layer_bytes = header.layer_table.slice("layer_table", &bytes)?;
@@ -594,7 +652,7 @@ impl Model {
                     got_in: in_dim,
                 });
             }
-            let activation = Activation::from_byte(entry.activation)?;
+            let activation = Activation::from_byte_v3(entry.activation)?;
             let weight_dtype = WeightDtype::from_byte(entry.weight_dtype)?;
             let n_weights = in_dim
                 .checked_mul(out_dim)
@@ -673,6 +731,38 @@ impl Model {
             apply_output_order_inverse(&mut bytes, &header, &layer_offsets, n_outputs)?;
         }
 
+        let graph = crate::graph::lower_chain(&layer_offsets, n_inputs, &bytes)?;
+        Self::finish(bytes, header, graph)
+    }
+
+    /// v4: validate the node table, then the sections shared with v3.
+    fn finish_v4(bytes: alloc::boxed::Box<[u8]>, header: Header) -> Result<Self, PredictError> {
+        let n_inputs = header.n_inputs as usize;
+        let n_outputs = header.n_outputs as usize;
+        let graph = crate::graph::parse_v4(
+            &bytes,
+            header.layer_table,
+            header.n_layers as usize,
+            n_inputs,
+            n_outputs,
+        )?;
+        validate_scaler_section("scaler_mean", header.scaler_mean, &bytes, n_inputs)?;
+        validate_scaler_section("scaler_scale", header.scaler_scale, &bytes, n_inputs)?;
+        validate_feature_bounds(header.feature_bounds, &bytes, n_inputs)?;
+        validate_output_specs(header.output_specs, &bytes, n_outputs)?;
+        validate_discrete_sets(header.discrete_sets, &bytes)?;
+        validate_sparse_overrides(header.sparse_overrides, &bytes, n_outputs)?;
+        Self::finish(bytes, header, graph)
+    }
+
+    /// Stages shared by v3 and v4: feature-transform metadata and its
+    /// cross-check against `n_inputs`.
+    fn finish(
+        bytes: alloc::boxed::Box<[u8]>,
+        header: Header,
+        graph: crate::graph::Graph,
+    ) -> Result<Self, PredictError> {
+        let n_inputs = header.n_inputs as usize;
         // ── Stage 5: parse feature_transforms + transform_params metadata. ──
         let metadata_bytes = header.metadata.slice("metadata", &bytes)?;
         let metadata = Metadata::parse(metadata_bytes)?;
@@ -714,7 +804,7 @@ impl Model {
         Ok(Self {
             bytes,
             header,
-            layer_offsets,
+            graph,
             feature_transforms,
             feature_transform_params,
         })
@@ -744,8 +834,72 @@ impl Model {
     /// Always equals `self.layers().len()`; exposed as a separate
     /// accessor so consumers can size buffers / log diagnostics
     /// without holding a `&[LayerView]`.
+    ///
+    /// For a v4 graph this counts its Dense nodes, which describe the
+    /// whole network only when [`Self::is_layer_chain`] is true.
     pub fn n_layers(&self) -> usize {
-        self.header.n_layers as usize
+        self.graph.dense_nodes.len()
+    }
+
+    /// Number of nodes in the model's op graph. A v3 chain of `N`
+    /// layers is `N + 1` nodes (`Input` plus one Dense per layer).
+    pub fn n_nodes(&self) -> usize {
+        self.graph.nodes.len()
+    }
+
+    /// True when the network is `Input → Dense → … → Dense`, each Dense
+    /// reading the node before it — always for v3 bakes. When false,
+    /// [`Self::layers`] lists the Dense nodes but not how they connect;
+    /// walk [`Self::nodes`] instead.
+    pub fn is_layer_chain(&self) -> bool {
+        self.graph.is_chain
+    }
+
+    /// Typed view of graph node `idx`. Panics if `idx >= n_nodes()`.
+    /// The last node is the model's output.
+    pub fn node(&self, idx: usize) -> crate::NodeView<'_> {
+        use crate::graph::NodeKind;
+        let n = &self.graph.nodes[idx];
+        let width = n.width as usize;
+        match n.kind {
+            NodeKind::Input => crate::NodeView::Input { width },
+            NodeKind::Dense { input, ref layer } => crate::NodeView::Dense {
+                input: input as usize,
+                layer: self.materialize_offsets(layer),
+            },
+            NodeKind::Activation { input, activation } => crate::NodeView::Activation {
+                input: input as usize,
+                activation,
+                width,
+            },
+            NodeKind::Gather { input, indices, .. } => crate::NodeView::Gather {
+                input: input as usize,
+                indices: crate::graph::gather_indices(indices, width, &self.bytes),
+            },
+            NodeKind::Add { a, b } => crate::NodeView::Add {
+                a: a as usize,
+                b: b as usize,
+                width,
+            },
+            NodeKind::Mul { a, b } => crate::NodeView::Mul {
+                a: a as usize,
+                b: b as usize,
+                width,
+            },
+            NodeKind::Concat { inputs } => crate::NodeView::Concat {
+                inputs: crate::graph::concat_inputs(inputs, &self.bytes),
+                width,
+            },
+        }
+    }
+
+    /// Every graph node in execution order (see [`Self::node`]).
+    pub fn nodes(&self) -> impl ExactSizeIterator<Item = crate::NodeView<'_>> {
+        (0..self.n_nodes()).map(move |i| self.node(i))
+    }
+
+    pub(crate) fn graph(&self) -> &crate::graph::Graph {
+        &self.graph
     }
 
     pub fn schema_hash(&self) -> u64 {
@@ -772,7 +926,7 @@ impl Model {
         LayerIter {
             model: self,
             idx: 0,
-            end: self.layer_offsets.len(),
+            end: self.graph.dense_nodes.len(),
         }
     }
 
@@ -782,7 +936,15 @@ impl Model {
     }
 
     fn materialize_layer(&self, idx: usize) -> LayerView<'_> {
-        let off = &self.layer_offsets[idx];
+        let node = self.graph.dense_nodes[idx] as usize;
+        match &self.graph.nodes[node].kind {
+            crate::graph::NodeKind::Dense { layer, .. } => self.materialize_offsets(layer),
+            _ => unreachable!("dense_nodes lists only Dense nodes"),
+        }
+    }
+
+    /// Build a [`LayerView`] from load-validated offsets.
+    pub(crate) fn materialize_offsets(&self, off: &LayerOffsets) -> LayerView<'_> {
         let in_dim = off.in_dim as usize;
         let out_dim = off.out_dim as usize;
         let n_weights = in_dim * out_dim;
@@ -806,8 +968,12 @@ impl Model {
                 }
             }
         };
-        let biases = cast_f32_section("layer.biases", off.biases, &self.bytes, out_dim)
-            .expect("layer biases validated at parse time");
+        let biases = if off.biases.is_empty() {
+            &[]
+        } else {
+            cast_f32_section("layer.biases", off.biases, &self.bytes, out_dim)
+                .expect("layer biases validated at parse time")
+        };
         LayerView {
             in_dim,
             out_dim,
@@ -1128,14 +1294,23 @@ impl Model {
         }
     }
 
+    /// Widest vector in the network: the max of `n_inputs` and every
+    /// node's (for v3: every layer's) output width.
     pub fn scratch_len(&self) -> usize {
         let max_out = self
-            .layer_offsets
+            .graph
+            .nodes
             .iter()
-            .map(|l| l.out_dim as usize)
+            .map(|n| n.width as usize)
             .max()
             .unwrap_or(0);
         max_out.max(self.n_inputs())
+    }
+
+    /// f32 elements of the liveness-packed scratch arena the executor
+    /// needs. Fixed at load.
+    pub(crate) fn arena_len(&self) -> usize {
+        self.graph.arena_len
     }
 
     pub fn raw_bytes(&self) -> &[u8] {
@@ -1178,7 +1353,7 @@ impl<'a> DoubleEndedIterator for LayerIter<'a> {
     }
 }
 
-fn cast_f32_section<'a>(
+pub(crate) fn cast_f32_section<'a>(
     what: &'static str,
     section: Section,
     bytes: &'a [u8],
@@ -1206,7 +1381,7 @@ fn cast_f32_section<'a>(
     })
 }
 
-fn cast_u16_section<'a>(
+pub(crate) fn cast_u16_section<'a>(
     what: &'static str,
     section: Section,
     bytes: &'a [u8],
@@ -1234,7 +1409,7 @@ fn cast_u16_section<'a>(
     })
 }
 
-fn cast_i8_section<'a>(
+pub(crate) fn cast_i8_section<'a>(
     what: &'static str,
     section: Section,
     bytes: &'a [u8],
@@ -1257,6 +1432,51 @@ fn cast_i8_section<'a>(
         offset: section.offset,
         required_align: 1,
     })
+}
+
+pub(crate) fn cast_u32_section<'a>(
+    what: &'static str,
+    section: Section,
+    bytes: &'a [u8],
+    expected_count: usize,
+) -> Result<&'a [u32], PredictError> {
+    let raw = section.slice(what, bytes)?;
+    let expected_bytes = expected_count
+        .checked_mul(4)
+        .ok_or(PredictError::DimensionOverflow { what })?;
+    if raw.len() != expected_bytes {
+        return Err(PredictError::SectionOutOfRange {
+            what,
+            offset: section.offset,
+            len: section.len,
+            file_len: bytes.len(),
+        });
+    }
+    if expected_count == 0 {
+        return Ok(&[]);
+    }
+    bytemuck::try_cast_slice::<u8, u32>(raw).map_err(|_| PredictError::SectionMisaligned {
+        what,
+        offset: section.offset,
+        required_align: core::mem::align_of::<u32>(),
+    })
+}
+
+/// `Vec::with_capacity` that reports allocation failure instead of
+/// aborting.
+pub(crate) fn try_vec_with_capacity<T>(n: usize) -> Result<alloc::vec::Vec<T>, PredictError> {
+    let mut v = alloc::vec::Vec::new();
+    v.try_reserve_exact(n)
+        .map_err(|_| PredictError::AllocFailed {
+            bytes: n.saturating_mul(core::mem::size_of::<T>()),
+        })?;
+    Ok(v)
+}
+
+fn try_zeroed_bytes(n: usize) -> Result<alloc::boxed::Box<[u8]>, PredictError> {
+    let mut v: alloc::vec::Vec<u8> = try_vec_with_capacity(n)?;
+    v.resize(n, 0);
+    Ok(v.into_boxed_slice())
 }
 
 // ─────────────────────────────────────────────────────────────────

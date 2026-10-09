@@ -1,4 +1,4 @@
-//! ZNPR v3 bake-side composer.
+//! ZNPR v3 (layer chain) and v4 (op graph) bake-side composer.
 //!
 //! Produces a `Vec<u8>` that round-trips through [`zenpredict::Model::from_bytes`].
 //! Used by:
@@ -38,6 +38,7 @@ pub mod append;
 #[cfg(feature = "std")]
 pub mod cli;
 pub mod composer;
+pub mod graph;
 pub(crate) mod hu_reorder;
 pub mod json;
 pub mod optimize;
@@ -47,10 +48,11 @@ pub use append::{AppendError, append_metadata_utf8};
 pub use composer::{
     BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, BakeRequestBuilder, bake,
 };
+pub use graph::{BakeNode, bake_graph};
 pub use json::{
-    ActivationJson, BakeJsonError, BakeLayerJson, BakeRequestJson, DtypeJson, FeatureBoundJson,
-    MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson, bake_from_json,
-    bake_from_json_str,
+    ActivationJson, BakeJsonError, BakeLayerJson, BakeNodeJson, BakeRequestJson, DtypeJson,
+    FeatureBoundJson, MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson,
+    bake_from_json, bake_from_json_str,
 };
 pub use optimize::bake_optimized;
 pub use zero_bias::{

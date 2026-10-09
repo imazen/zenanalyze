@@ -39,3 +39,26 @@ pub const MAX_DIM: usize = 65_536;
 /// Maximum layer count. 256 — every shipped bake has ≤ 4 layers;
 /// the limit exists so that `layer_table` allocations are bounded.
 pub const MAX_LAYERS: usize = 256;
+
+/// Maximum node count of a ZNPR v4 op graph. 1024 — the E33 gated head
+/// is 7 nodes and a lowered 4-layer chain is 5; the limit bounds the
+/// node-table allocation and the per-node validation loop.
+pub const MAX_NODES: usize = 1024;
+
+/// Maximum arity of one graph node (only `Concat` takes more than two
+/// inputs). Bounds the per-node input walk.
+pub const MAX_NODE_INPUTS: usize = 64;
+
+/// Maximum total multiply-adds per forward pass: the sum of
+/// `in_dim * out_dim` over every Dense node (v4) or layer (v3, after
+/// lowering). 2^24 — production zensim is 944 × 128 = 120,832.
+///
+/// File size does not bound compute on its own: sections may alias, so
+/// a crafted file can point many nodes at one weight blob. This limit
+/// does.
+pub const MAX_TOTAL_WEIGHTS: usize = 1 << 24;
+
+/// Maximum f32 elements of the liveness-packed scratch arena a
+/// [`crate::Predictor`] allocates (2^22 = 16 MiB). Computed and checked
+/// at load, before anything is allocated against it.
+pub const MAX_SCRATCH_ELEMS: usize = 1 << 22;

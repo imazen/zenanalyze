@@ -31,8 +31,11 @@ use crate::output_spec::{OutputValue, apply_spec};
 /// `static OnceLock<Model>` it's `'static`.
 pub struct Predictor<'a> {
     model: &'a Model,
-    scratch_a: alloc::vec::Vec<f32>,
-    scratch_b: alloc::vec::Vec<f32>,
+    /// Liveness-packed scratch for every graph node's output except the
+    /// last (which lands in `output`). Sized once from
+    /// `Model::arena_len`, which load bounded by
+    /// [`crate::limits::MAX_SCRATCH_ELEMS`].
+    arena: alloc::vec::Vec<f32>,
     output: alloc::vec::Vec<f32>,
     /// Post-processed output buffer for [`Self::predict_with_specs`].
     /// Sized to `n_outputs` at construction; reused across calls.
@@ -78,7 +81,28 @@ impl<'a> Predictor<'a> {
     /// }
     /// ```
     pub fn new(model: &'a Model) -> Self {
-        let need = model.scratch_len();
+        let arena = alloc::vec![0.0; model.arena_len()];
+        Self::with_arena(model, arena)
+    }
+
+    /// Like [`Self::new`], but reports a failed scratch allocation as
+    /// [`PredictError::AllocFailed`] instead of aborting. The scratch
+    /// arena is bounded at load by
+    /// [`limits::MAX_SCRATCH_ELEMS`](crate::limits::MAX_SCRATCH_ELEMS);
+    /// the small per-output buffers allocate as in `new`.
+    pub fn try_new(model: &'a Model) -> Result<Self, PredictError> {
+        let n = model.arena_len();
+        let mut arena = alloc::vec::Vec::new();
+        arena
+            .try_reserve_exact(n)
+            .map_err(|_| PredictError::AllocFailed {
+                bytes: n.saturating_mul(core::mem::size_of::<f32>()),
+            })?;
+        arena.resize(n, 0.0);
+        Ok(Self::with_arena(model, arena))
+    }
+
+    fn with_arena(model: &'a Model, arena: alloc::vec::Vec<f32>) -> Self {
         let n_out = model.n_outputs();
         let n_in = model.n_inputs();
         let feat_scratch_len = if model.has_expander_feature_transforms() {
@@ -95,8 +119,7 @@ impl<'a> Predictor<'a> {
         };
         Self {
             model,
-            scratch_a: alloc::vec![0.0; need],
-            scratch_b: alloc::vec![0.0; need],
+            arena,
             output: alloc::vec![0.0; n_out],
             #[cfg(feature = "advanced")]
             spec_output: alloc::vec![OutputValue::Default; n_out],
@@ -125,19 +148,13 @@ impl<'a> Predictor<'a> {
     /// regressors, this is `n_outputs` log-bytes-per-config; for
     /// zensim's V0_4 scorer, this is `[distance]`.
     ///
-    /// Scratch buffers (`scratch_a`, `scratch_b`) are reused across
-    /// calls without zeroing — every layer's matmul writes biases
-    /// into the destination buffer **before** accumulating, so stale
+    /// The scratch arena is reused across calls without zeroing — every
+    /// node overwrites its whole slot before any later node reads it
+    /// (Dense writes biases, or zeros, before accumulating), so stale
     /// data from a prior call never leaks into the result. Calling
     /// `predict` twice with the same `features` is deterministic.
     pub fn predict(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
-        forward(
-            self.model,
-            features,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
+        forward(self.model, features, &mut self.arena, &mut self.output)?;
         Ok(&self.output)
     }
 
@@ -169,13 +186,7 @@ impl<'a> Predictor<'a> {
     /// pairs were rejected at load time.
     #[cfg(feature = "advanced")]
     pub fn predict_with_specs(&mut self, features: &[f32]) -> Result<&[OutputValue], PredictError> {
-        forward(
-            self.model,
-            features,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
+        forward(self.model, features, &mut self.arena, &mut self.output)?;
         let specs = self.model.output_specs();
         let pool = self.model.discrete_sets();
         // Two paths: with-specs (apply per-output pipeline) vs.
@@ -222,7 +233,7 @@ impl<'a> Predictor<'a> {
     /// copying — same allocation profile as [`Self::predict`].
     pub fn predict_transformed(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
         // Apply transforms inline so the forward call can borrow
-        // `scratch_a`/`scratch_b`/`output` mutably without aliasing
+        // `arena`/`output` mutably without aliasing
         // through a helper that also borrows `self`.
         //
         // Three cases, in priority order:
@@ -244,13 +255,7 @@ impl<'a> Predictor<'a> {
         //    is enforced at bake time by the composer, so the
         //    runtime can trust it.
         let Some(transforms) = self.model.feature_transforms() else {
-            forward(
-                self.model,
-                features,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
+            forward(self.model, features, &mut self.arena, &mut self.output)?;
             return Ok(&self.output);
         };
         if features.len() != transforms.len() {
@@ -280,13 +285,7 @@ impl<'a> Predictor<'a> {
             self.feat_param_refs
                 .extend(params.iter().map(|v| v.as_slice()));
             apply_feature_pipeline_expanding(transforms, &self.feat_param_refs, features, dst)?;
-            forward(
-                self.model,
-                dst,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
+            forward(self.model, dst, &mut self.arena, &mut self.output)?;
             return Ok(&self.output);
         }
 
@@ -307,13 +306,7 @@ impl<'a> Predictor<'a> {
             }
             None => apply_feature_transforms(transforms, features, dst)?,
         }
-        forward(
-            self.model,
-            dst,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
+        forward(self.model, dst, &mut self.arena, &mut self.output)?;
         Ok(&self.output)
     }
 
@@ -354,13 +347,7 @@ impl<'a> Predictor<'a> {
                 self.feat_param_refs
                     .extend(params.iter().map(|v| v.as_slice()));
                 apply_feature_pipeline_expanding(transforms, &self.feat_param_refs, features, dst)?;
-                forward(
-                    self.model,
-                    dst,
-                    &mut self.scratch_a,
-                    &mut self.scratch_b,
-                    &mut self.output,
-                )?;
+                forward(self.model, dst, &mut self.arena, &mut self.output)?;
             } else {
                 if self.feat_scratch.len() < features.len() {
                     self.feat_scratch.resize(features.len(), 0.0);
@@ -375,22 +362,10 @@ impl<'a> Predictor<'a> {
                     }
                     None => apply_feature_transforms(transforms, features, dst)?,
                 }
-                forward(
-                    self.model,
-                    dst,
-                    &mut self.scratch_a,
-                    &mut self.scratch_b,
-                    &mut self.output,
-                )?;
+                forward(self.model, dst, &mut self.arena, &mut self.output)?;
             }
         } else {
-            forward(
-                self.model,
-                features,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
+            forward(self.model, features, &mut self.arena, &mut self.output)?;
         }
         let specs = self.model.output_specs();
         let pool = self.model.discrete_sets();

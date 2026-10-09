@@ -132,6 +132,7 @@ mod directed_search;
 mod encode_strategy;
 mod error;
 mod feature_transform;
+mod graph;
 mod inference;
 mod knob_veto;
 pub mod limits;
@@ -191,9 +192,10 @@ pub use unachievable_zone::{
 // full 4-step pipeline tying them together.
 pub use directed_search::{QualityTarget, Trial, best_trial, next_trial};
 pub use encode_strategy::{EncodeBudget, EncodeMode, PickerStrategy};
+pub use graph::NodeView;
 pub use model::{
-    Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
-    WeightDtype, WeightStorage,
+    Activation, EXP_INPUT_CLAMP, FORMAT_VERSION, GRAPH_FORMAT_VERSION, Header, LEAKY_RELU_ALPHA,
+    LayerEntry, LayerView, Model, SOFTPLUS_THRESHOLD, Section, WeightDtype, WeightStorage,
 };
 pub use output_spec::{OutputSpec, OutputTransform, SparseOverride};
 #[cfg(feature = "advanced")]

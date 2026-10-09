@@ -125,6 +125,22 @@ pub enum BakeError {
         transform: &'static str,
         reason: &'static str,
     },
+    /// A v3 chain layer used an activation only ZNPR v4 graphs support
+    /// ([`Activation::Exp`], [`Activation::Softplus`]); a v3 reader would
+    /// reject the file. Bake it as a graph with [`crate::bake_graph`].
+    ChainActivationUnsupported {
+        layer: usize,
+    },
+    /// [`crate::bake_graph`] could not compose node `node`: `what` names
+    /// the problem (bad input reference, wrong payload length, …).
+    GraphInvalid {
+        node: usize,
+        what: &'static str,
+    },
+    /// The composed graph failed zenpredict's own load-time validation —
+    /// the parser is the single owner of the v4 graph rules, so the
+    /// composer defers to it rather than re-implementing them.
+    GraphRejected(zenpredict::PredictError),
 }
 
 impl fmt::Display for BakeError {
@@ -237,6 +253,12 @@ impl fmt::Display for BakeError {
                 f,
                 "bake: feature_transform_params[{feature_index}] for {transform}: {reason}"
             ),
+            Self::ChainActivationUnsupported { layer } => write!(
+                f,
+                "bake: layer {layer} uses a v4-only activation (exp/softplus); bake a graph instead"
+            ),
+            Self::GraphInvalid { node, what } => write!(f, "bake: graph node {node}: {what}"),
+            Self::GraphRejected(e) => write!(f, "bake: composed graph rejected by zenpredict: {e}"),
         }
     }
 }
@@ -488,69 +510,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     let n_outputs = req.layers.last().unwrap().out_dim;
     let n_layers = req.layers.len();
 
-    if req.scaler_mean.len() != n_inputs {
-        return Err(BakeError::ScalerLengthMismatch {
-            what: "scaler_mean",
-            expected: n_inputs,
-            got: req.scaler_mean.len(),
-        });
-    }
-    if req.scaler_scale.len() != n_inputs {
-        return Err(BakeError::ScalerLengthMismatch {
-            what: "scaler_scale",
-            expected: n_inputs,
-            got: req.scaler_scale.len(),
-        });
-    }
-    if !req.feature_bounds.is_empty() && req.feature_bounds.len() != n_inputs {
-        return Err(BakeError::FeatureBoundsLengthMismatch {
-            expected: n_inputs,
-            got: req.feature_bounds.len(),
-        });
-    }
-
-    if !req.output_specs.is_empty() && req.output_specs.len() != n_outputs {
-        return Err(BakeError::OutputSpecsLengthMismatch {
-            expected: n_outputs,
-            got: req.output_specs.len(),
-        });
-    }
-    for (output_index, spec) in req.output_specs.iter().enumerate() {
-        if OutputTransform::from_byte(spec.transform).is_none() {
-            return Err(BakeError::UnknownOutputTransform {
-                output_index,
-                byte: spec.transform,
-            });
-        }
-        if spec.discrete_set_len > 0 {
-            let off = spec.discrete_set_offset as usize;
-            let len = spec.discrete_set_len as usize;
-            let end = off
-                .checked_add(len)
-                .ok_or(BakeError::OutputSpecDiscreteOutOfRange {
-                    output_index,
-                    offset: spec.discrete_set_offset,
-                    len: spec.discrete_set_len,
-                    pool_len: req.discrete_sets.len(),
-                })?;
-            if end > req.discrete_sets.len() {
-                return Err(BakeError::OutputSpecDiscreteOutOfRange {
-                    output_index,
-                    offset: spec.discrete_set_offset,
-                    len: spec.discrete_set_len,
-                    pool_len: req.discrete_sets.len(),
-                });
-            }
-        }
-    }
-    for entry in req.sparse_overrides {
-        if (entry.idx as usize) >= n_outputs {
-            return Err(BakeError::SparseOverrideIndexOutOfRange {
-                idx: entry.idx,
-                n_outputs,
-            });
-        }
-    }
+    validate_common_pre(req, n_inputs, n_outputs)?;
 
     // Validate layer chain.
     let mut prev_out = n_inputs;
@@ -577,6 +537,12 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 got: layer.biases.len(),
             });
         }
+        if !matches!(
+            layer.activation,
+            Activation::Identity | Activation::Relu | Activation::LeakyRelu
+        ) {
+            return Err(BakeError::ChainActivationUnsupported { layer: i });
+        }
         prev_out = layer.out_dim;
     }
     let _ = n_outputs;
@@ -597,24 +563,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         .collect();
     let layers: &[BakeLayer<'_>] = &permuted_layers;
 
-    // Validate metadata keys up front.
-    for entry in req.metadata {
-        if entry.key.is_empty() {
-            return Err(BakeError::MetadataKeyEmpty);
-        }
-        if entry.key.len() > 255 {
-            return Err(BakeError::MetadataKeyTooLong {
-                len: entry.key.len(),
-            });
-        }
-    }
-
-    // Validate `zentrain.feature_transforms` + `feature_transform_params`
-    // pair (if present). Catches misspelled tokens and per-variant
-    // arity / domain errors at bake time so they never ship in a
-    // wire bake. See `validate_feature_transforms` for the full set
-    // of checks.
-    validate_feature_transforms(req.metadata, n_inputs)?;
+    validate_common_post(req, n_inputs)?;
 
     // Layout: Header at 0, LayerEntry table at HEADER_SIZE, then
     // aligned data sections in this order:
@@ -661,48 +610,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     for (i, layer) in layers.iter().enumerate() {
         let layer_entry_off = HEADER_SIZE + i * LAYER_ENTRY_SIZE;
 
-        let weights_section = match layer.dtype {
-            WeightDtype::F32 => {
-                pad_to(&mut buf, 4);
-                append_f32(&mut buf, layer.weights)
-            }
-            WeightDtype::F16 => {
-                pad_to(&mut buf, 2);
-                let start = buf.len() as u32;
-                for &w in layer.weights {
-                    let bits = f32_to_f16_bits(w);
-                    buf.extend_from_slice(&bits.to_le_bytes());
-                }
-                Section::new(start, (layer.weights.len() * 2) as u32)
-            }
-            WeightDtype::I8 => {
-                let start = buf.len() as u32;
-                let scales = compute_i8_scales_per_output(layer);
-                for (idx, &w) in layer.weights.iter().enumerate() {
-                    let o = idx % layer.out_dim;
-                    let q = if scales[o] == 0.0 {
-                        0
-                    } else {
-                        (w / scales[o]).round().clamp(-128.0, 127.0) as i8
-                    };
-                    buf.push(q as u8);
-                }
-                Section::new(start, layer.weights.len() as u32)
-            }
-            _ => unreachable!(
-                "zenpredict-bake composer cannot serialize WeightDtype {:?}; \
-                 rebuild zenpredict-bake against the matching zenpredict",
-                layer.dtype
-            ),
-        };
-
-        let scales_section = match layer.dtype {
-            WeightDtype::I8 => {
-                pad_to(&mut buf, 4);
-                append_f32(&mut buf, &compute_i8_scales_per_output(layer))
-            }
-            _ => Section::empty(),
-        };
+        let (weights_section, scales_section) = append_layer_weights(&mut buf, layer);
 
         pad_to(&mut buf, 4);
         let biases_section = append_f32(&mut buf, layer.biases);
@@ -720,89 +628,11 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         // [36..48] reserved, zero.
     }
 
-    // Feature bounds (optional).
-    let feature_bounds_section = if req.feature_bounds.is_empty() {
-        Section::empty()
-    } else {
-        pad_to(&mut buf, 4);
-        let start = buf.len() as u32;
-        for fb in req.feature_bounds {
-            buf.extend_from_slice(&fb.low.to_le_bytes());
-            buf.extend_from_slice(&fb.high.to_le_bytes());
-        }
-        Section::new(start, (req.feature_bounds.len() * 8) as u32)
-    };
-    write_section(&mut buf, SECTION_OFF_FEATURE_BOUNDS, feature_bounds_section);
-
-    // Metadata blob (optional).
-    let metadata_section = if req.metadata.is_empty() {
-        Section::empty()
-    } else {
-        let start = buf.len() as u32;
-        for entry in req.metadata {
-            // [1] key_len
-            buf.push(entry.key.len() as u8);
-            // [...] key bytes
-            buf.extend_from_slice(entry.key.as_bytes());
-            // [1] value_type
-            let type_byte = match entry.kind {
-                MetadataType::Bytes => 0u8,
-                MetadataType::Utf8 => 1,
-                MetadataType::Numeric => 2,
-                MetadataType::Reserved(b) => b,
-                _ => unreachable!(
-                    "zenpredict-bake composer cannot serialize MetadataType {:?}; \
-                     rebuild zenpredict-bake against the matching zenpredict",
-                    entry.kind
-                ),
-            };
-            buf.push(type_byte);
-            // [4] value_len LE
-            buf.extend_from_slice(&(entry.value.len() as u32).to_le_bytes());
-            // [...] value
-            buf.extend_from_slice(entry.value);
-        }
-        Section::new(start, (buf.len() as u32) - start)
-    };
-    write_section(&mut buf, SECTION_OFF_METADATA, metadata_section);
-
-    // Output specs (optional). 32 bytes per entry, must align to 4
-    // (largest f32 field).
-    let output_specs_section = if req.output_specs.is_empty() {
-        Section::empty()
-    } else {
-        pad_to(&mut buf, 4);
-        let start = buf.len() as u32;
-        let bytes: &[u8] = bytemuck::cast_slice(req.output_specs);
-        buf.extend_from_slice(bytes);
-        Section::new(start, bytes.len() as u32)
-    };
-    write_section(&mut buf, SECTION_OFF_OUTPUT_SPECS, output_specs_section);
-
-    // Discrete-sets pool (optional). f32 array.
-    let discrete_sets_section = if req.discrete_sets.is_empty() {
-        Section::empty()
-    } else {
-        pad_to(&mut buf, 4);
-        append_f32(&mut buf, req.discrete_sets)
-    };
-    write_section(&mut buf, SECTION_OFF_DISCRETE_SETS, discrete_sets_section);
-
-    // Sparse overrides (optional). 8 bytes per entry; align to 4.
-    let sparse_overrides_section = if req.sparse_overrides.is_empty() {
-        Section::empty()
-    } else {
-        pad_to(&mut buf, 4);
-        let start = buf.len() as u32;
-        let bytes: &[u8] = bytemuck::cast_slice(req.sparse_overrides);
-        buf.extend_from_slice(bytes);
-        Section::new(start, bytes.len() as u32)
-    };
-    write_section(
-        &mut buf,
-        SECTION_OFF_SPARSE_OVERRIDES,
-        sparse_overrides_section,
-    );
+    let TailSections {
+        feature_bounds: feature_bounds_section,
+        output_specs: output_specs_section,
+        sparse_overrides: sparse_overrides_section,
+    } = write_tail_sections(&mut buf, req);
 
     // ─── Forward permutation + permutation-table emission ──────────
     //
@@ -882,25 +712,285 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     // Compress bytes [128..end] in place. Set the header's
     // compressed flag, algo nibble, and decompressed_payload_len.
     if req.compressed {
-        let payload_len = (buf.len() - HEADER_SIZE) as u32;
-        let compressed = lz4_flex::block::compress(&buf[HEADER_SIZE..]);
-        // Replace bytes [HEADER_SIZE..] with the compressed blob.
-        buf.truncate(HEADER_SIZE);
-        buf.extend_from_slice(&compressed);
-        // Set flags: bit 0 (compressed) + algo nibble (LZ4 = 1).
-        let mut flags = u16::from_le_bytes([buf[6], buf[7]]);
-        flags |= zenpredict::wire::FLAG_COMPRESSED;
-        // Clear algo nibble first, then set LZ4 (1 << 1 == 0x02).
-        flags &= !zenpredict::wire::FLAGS_COMPRESSION_ALGO_MASK;
-        flags |= (zenpredict::wire::COMPRESSION_ALGO_LZ4 as u16) << 1;
-        buf[6..8].copy_from_slice(&flags.to_le_bytes());
-        // Write decompressed_payload_len.
-        buf[zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN
-            ..zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN + 4]
-            .copy_from_slice(&payload_len.to_le_bytes());
+        compress_payload(&mut buf);
     }
 
     Ok(buf)
+}
+
+/// Append one layer's weights in its storage dtype (and, for I8, its
+/// per-output scales). Returns `(weights, scales)`; `scales` is empty
+/// unless the dtype is I8.
+pub(crate) fn append_layer_weights(
+    buf: &mut alloc::vec::Vec<u8>,
+    layer: &BakeLayer<'_>,
+) -> (Section, Section) {
+    let weights_section = match layer.dtype {
+        WeightDtype::F32 => {
+            pad_to(buf, 4);
+            append_f32(buf, layer.weights)
+        }
+        WeightDtype::F16 => {
+            pad_to(buf, 2);
+            let start = buf.len() as u32;
+            for &w in layer.weights {
+                let bits = f32_to_f16_bits(w);
+                buf.extend_from_slice(&bits.to_le_bytes());
+            }
+            Section::new(start, (layer.weights.len() * 2) as u32)
+        }
+        WeightDtype::I8 => {
+            let start = buf.len() as u32;
+            let scales = compute_i8_scales_per_output(layer);
+            for (idx, &w) in layer.weights.iter().enumerate() {
+                let o = idx % layer.out_dim;
+                let q = if scales[o] == 0.0 {
+                    0
+                } else {
+                    (w / scales[o]).round().clamp(-128.0, 127.0) as i8
+                };
+                buf.push(q as u8);
+            }
+            Section::new(start, layer.weights.len() as u32)
+        }
+        _ => unreachable!(
+            "zenpredict-bake composer cannot serialize WeightDtype {:?}; \
+             rebuild zenpredict-bake against the matching zenpredict",
+            layer.dtype
+        ),
+    };
+
+    let scales_section = match layer.dtype {
+        WeightDtype::I8 => {
+            pad_to(buf, 4);
+            append_f32(buf, &compute_i8_scales_per_output(layer))
+        }
+        _ => Section::empty(),
+    };
+    (weights_section, scales_section)
+}
+
+// ───── Sections shared by the v3 chain and v4 graph composers ─────
+
+/// Scaler, feature-bound, output-spec and sparse-override checks, in the
+/// order `bake` has always run them.
+pub(crate) fn validate_common_pre(
+    req: &BakeRequest<'_>,
+    n_inputs: usize,
+    n_outputs: usize,
+) -> Result<(), BakeError> {
+    if req.scaler_mean.len() != n_inputs {
+        return Err(BakeError::ScalerLengthMismatch {
+            what: "scaler_mean",
+            expected: n_inputs,
+            got: req.scaler_mean.len(),
+        });
+    }
+    if req.scaler_scale.len() != n_inputs {
+        return Err(BakeError::ScalerLengthMismatch {
+            what: "scaler_scale",
+            expected: n_inputs,
+            got: req.scaler_scale.len(),
+        });
+    }
+    if !req.feature_bounds.is_empty() && req.feature_bounds.len() != n_inputs {
+        return Err(BakeError::FeatureBoundsLengthMismatch {
+            expected: n_inputs,
+            got: req.feature_bounds.len(),
+        });
+    }
+
+    if !req.output_specs.is_empty() && req.output_specs.len() != n_outputs {
+        return Err(BakeError::OutputSpecsLengthMismatch {
+            expected: n_outputs,
+            got: req.output_specs.len(),
+        });
+    }
+    for (output_index, spec) in req.output_specs.iter().enumerate() {
+        if OutputTransform::from_byte(spec.transform).is_none() {
+            return Err(BakeError::UnknownOutputTransform {
+                output_index,
+                byte: spec.transform,
+            });
+        }
+        if spec.discrete_set_len > 0 {
+            let off = spec.discrete_set_offset as usize;
+            let len = spec.discrete_set_len as usize;
+            let end = off
+                .checked_add(len)
+                .ok_or(BakeError::OutputSpecDiscreteOutOfRange {
+                    output_index,
+                    offset: spec.discrete_set_offset,
+                    len: spec.discrete_set_len,
+                    pool_len: req.discrete_sets.len(),
+                })?;
+            if end > req.discrete_sets.len() {
+                return Err(BakeError::OutputSpecDiscreteOutOfRange {
+                    output_index,
+                    offset: spec.discrete_set_offset,
+                    len: spec.discrete_set_len,
+                    pool_len: req.discrete_sets.len(),
+                });
+            }
+        }
+    }
+    for entry in req.sparse_overrides {
+        if (entry.idx as usize) >= n_outputs {
+            return Err(BakeError::SparseOverrideIndexOutOfRange {
+                idx: entry.idx,
+                n_outputs,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Metadata-key and feature-transform checks (run after the network's
+/// own checks, as `bake` always has).
+pub(crate) fn validate_common_post(
+    req: &BakeRequest<'_>,
+    n_inputs: usize,
+) -> Result<(), BakeError> {
+    // Validate metadata keys up front.
+    for entry in req.metadata {
+        if entry.key.is_empty() {
+            return Err(BakeError::MetadataKeyEmpty);
+        }
+        if entry.key.len() > 255 {
+            return Err(BakeError::MetadataKeyTooLong {
+                len: entry.key.len(),
+            });
+        }
+    }
+
+    // Validate `zentrain.feature_transforms` + `feature_transform_params`
+    // pair (if present). Catches misspelled tokens and per-variant
+    // arity / domain errors at bake time so they never ship in a
+    // wire bake. See `validate_feature_transforms` for the full set
+    // of checks.
+    validate_feature_transforms(req.metadata, n_inputs)?;
+    Ok(())
+}
+
+/// Sections written after the network payload, needed again by the
+/// output-permutation pass.
+pub(crate) struct TailSections {
+    pub(crate) feature_bounds: Section,
+    pub(crate) output_specs: Section,
+    pub(crate) sparse_overrides: Section,
+}
+
+/// Append feature_bounds, metadata, output_specs, discrete_sets and
+/// sparse_overrides (each optional) and patch their header Sections.
+pub(crate) fn write_tail_sections(
+    buf: &mut alloc::vec::Vec<u8>,
+    req: &BakeRequest<'_>,
+) -> TailSections {
+    // Feature bounds (optional).
+    let feature_bounds_section = if req.feature_bounds.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(buf, 4);
+        let start = buf.len() as u32;
+        for fb in req.feature_bounds {
+            buf.extend_from_slice(&fb.low.to_le_bytes());
+            buf.extend_from_slice(&fb.high.to_le_bytes());
+        }
+        Section::new(start, (req.feature_bounds.len() * 8) as u32)
+    };
+    write_section(buf, SECTION_OFF_FEATURE_BOUNDS, feature_bounds_section);
+
+    // Metadata blob (optional).
+    let metadata_section = if req.metadata.is_empty() {
+        Section::empty()
+    } else {
+        let start = buf.len() as u32;
+        for entry in req.metadata {
+            // [1] key_len
+            buf.push(entry.key.len() as u8);
+            // [...] key bytes
+            buf.extend_from_slice(entry.key.as_bytes());
+            // [1] value_type
+            let type_byte = match entry.kind {
+                MetadataType::Bytes => 0u8,
+                MetadataType::Utf8 => 1,
+                MetadataType::Numeric => 2,
+                MetadataType::Reserved(b) => b,
+                _ => unreachable!(
+                    "zenpredict-bake composer cannot serialize MetadataType {:?}; \
+                     rebuild zenpredict-bake against the matching zenpredict",
+                    entry.kind
+                ),
+            };
+            buf.push(type_byte);
+            // [4] value_len LE
+            buf.extend_from_slice(&(entry.value.len() as u32).to_le_bytes());
+            // [...] value
+            buf.extend_from_slice(entry.value);
+        }
+        Section::new(start, (buf.len() as u32) - start)
+    };
+    write_section(buf, SECTION_OFF_METADATA, metadata_section);
+
+    // Output specs (optional). 32 bytes per entry, must align to 4
+    // (largest f32 field).
+    let output_specs_section = if req.output_specs.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(buf, 4);
+        let start = buf.len() as u32;
+        let bytes: &[u8] = bytemuck::cast_slice(req.output_specs);
+        buf.extend_from_slice(bytes);
+        Section::new(start, bytes.len() as u32)
+    };
+    write_section(buf, SECTION_OFF_OUTPUT_SPECS, output_specs_section);
+
+    // Discrete-sets pool (optional). f32 array.
+    let discrete_sets_section = if req.discrete_sets.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(buf, 4);
+        append_f32(buf, req.discrete_sets)
+    };
+    write_section(buf, SECTION_OFF_DISCRETE_SETS, discrete_sets_section);
+
+    // Sparse overrides (optional). 8 bytes per entry; align to 4.
+    let sparse_overrides_section = if req.sparse_overrides.is_empty() {
+        Section::empty()
+    } else {
+        pad_to(buf, 4);
+        let start = buf.len() as u32;
+        let bytes: &[u8] = bytemuck::cast_slice(req.sparse_overrides);
+        buf.extend_from_slice(bytes);
+        Section::new(start, bytes.len() as u32)
+    };
+    write_section(buf, SECTION_OFF_SPARSE_OVERRIDES, sparse_overrides_section);
+    TailSections {
+        feature_bounds: feature_bounds_section,
+        output_specs: output_specs_section,
+        sparse_overrides: sparse_overrides_section,
+    }
+}
+
+/// LZ4-compress bytes `[HEADER_SIZE..]` in place and set the header's
+/// compressed flag, algo nibble and `decompressed_payload_len`.
+pub(crate) fn compress_payload(buf: &mut alloc::vec::Vec<u8>) {
+    let payload_len = (buf.len() - HEADER_SIZE) as u32;
+    let compressed = lz4_flex::block::compress(&buf[HEADER_SIZE..]);
+    // Replace bytes [HEADER_SIZE..] with the compressed blob.
+    buf.truncate(HEADER_SIZE);
+    buf.extend_from_slice(&compressed);
+    // Set flags: bit 0 (compressed) + algo nibble (LZ4 = 1).
+    let mut flags = u16::from_le_bytes([buf[6], buf[7]]);
+    flags |= zenpredict::wire::FLAG_COMPRESSED;
+    // Clear algo nibble first, then set LZ4 (1 << 1 == 0x02).
+    flags &= !zenpredict::wire::FLAGS_COMPRESSION_ALGO_MASK;
+    flags |= (zenpredict::wire::COMPRESSION_ALGO_LZ4 as u16) << 1;
+    buf[6..8].copy_from_slice(&flags.to_le_bytes());
+    // Write decompressed_payload_len.
+    buf[zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN
+        ..zenpredict::wire::OFF_DECOMPRESSED_PAYLOAD_LEN + 4]
+        .copy_from_slice(&payload_len.to_le_bytes());
 }
 
 // ───── Permutation + compression helpers ─────────────────────────
@@ -1097,7 +1187,7 @@ fn forward_remap_sparse_indices(buf: &mut [u8], section: Section, inv: &[u32]) {
     }
 }
 
-fn pad_to(buf: &mut alloc::vec::Vec<u8>, alignment: usize) {
+pub(crate) fn pad_to(buf: &mut alloc::vec::Vec<u8>, alignment: usize) {
     let rem = buf.len() % alignment;
     if rem != 0 {
         let pad = alignment - rem;
@@ -1107,7 +1197,7 @@ fn pad_to(buf: &mut alloc::vec::Vec<u8>, alignment: usize) {
     }
 }
 
-fn append_f32(buf: &mut alloc::vec::Vec<u8>, values: &[f32]) -> Section {
+pub(crate) fn append_f32(buf: &mut alloc::vec::Vec<u8>, values: &[f32]) -> Section {
     let start = buf.len() as u32;
     for &v in values {
         buf.extend_from_slice(&v.to_le_bytes());
@@ -1115,12 +1205,12 @@ fn append_f32(buf: &mut alloc::vec::Vec<u8>, values: &[f32]) -> Section {
     Section::new(start, (values.len() * 4) as u32)
 }
 
-fn write_section(buf: &mut [u8], at: usize, s: Section) {
+pub(crate) fn write_section(buf: &mut [u8], at: usize, s: Section) {
     buf[at..at + 4].copy_from_slice(&s.offset().to_le_bytes());
     buf[at + 4..at + 8].copy_from_slice(&s.len_bytes().to_le_bytes());
 }
 
-fn write_section_inline(entry: &mut [u8], at: usize, s: Section) {
+pub(crate) fn write_section_inline(entry: &mut [u8], at: usize, s: Section) {
     entry[at..at + 4].copy_from_slice(&s.offset().to_le_bytes());
     entry[at + 4..at + 8].copy_from_slice(&s.len_bytes().to_le_bytes());
 }
@@ -1427,7 +1517,7 @@ fn required_param_arity(t: zenpredict::FeatureTransform) -> Option<usize> {
 }
 
 /// Per-output max-abs scale: `scales[o] = max_i |W[i, o]| / 127.0`.
-fn compute_i8_scales_per_output(layer: &BakeLayer<'_>) -> alloc::vec::Vec<f32> {
+pub(crate) fn compute_i8_scales_per_output(layer: &BakeLayer<'_>) -> alloc::vec::Vec<f32> {
     let mut scales = alloc::vec![0.0f32; layer.out_dim];
     for (idx, &w) in layer.weights.iter().enumerate() {
         let o = idx % layer.out_dim;

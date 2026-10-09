@@ -15,7 +15,8 @@
 //!   "flags": 0,                                  // u16, optional (default 0)
 //!   "scaler_mean":  [0.0, 0.0, ...],             // f32[n_inputs]
 //!   "scaler_scale": [1.0, 1.0, ...],             // f32[n_inputs]
-//!   "layers": [ /* BakeLayerJson, see below */ ],
+//!   "layers": [ /* BakeLayerJson, see below */ ],   // v3 chain, or
+//!   "graph":  [ /* BakeNodeJson — a v4 op graph */ ],
 //!   "feature_bounds": [ {"low": -1.0, "high": 1.0}, ... ],  // optional
 //!   "metadata": [ /* MetadataEntryJson, see below */ ],     // optional
 //!   "zerobias_tau": 0.005,                       // optional, default 0.0
@@ -123,6 +124,7 @@ use alloc::vec::Vec;
 use serde::Deserialize;
 
 use crate::composer::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake};
+use crate::graph::{BakeNode, bake_graph};
 use crate::optimize::bake_optimized;
 use crate::zero_bias::apply_zero_bias_per_layer_in_place;
 use zenpredict::{
@@ -201,7 +203,16 @@ pub struct BakeRequestJson {
     pub flags: u16,
     pub scaler_mean: Vec<f32>,
     pub scaler_scale: Vec<f32>,
+    /// v3 layer chain. Leave empty (or omit) when `graph` is set.
+    #[serde(default)]
     pub layers: Vec<BakeLayerJson>,
+    /// ZNPR v4 op graph (see [`BakeNodeJson`]). When non-empty the
+    /// baker writes a v4 graph via [`bake_graph`] instead of a v3 chain;
+    /// `layers` must then be empty and `optimize` false. `zerobias_tau`
+    /// and `compressed` apply as for chains (zero-bias runs per Dense
+    /// node). Default empty: chain bakes are unchanged.
+    #[serde(default)]
+    pub graph: Vec<BakeNodeJson>,
     #[serde(default)]
     pub feature_bounds: Vec<FeatureBoundJson>,
     #[serde(default)]
@@ -321,6 +332,10 @@ pub enum ActivationJson {
     Identity,
     Relu,
     LeakyRelu,
+    /// v4 graphs only (a chain layer with it is a bake error).
+    Exp,
+    /// v4 graphs only (a chain layer with it is a bake error).
+    Softplus,
 }
 
 impl From<ActivationJson> for Activation {
@@ -329,8 +344,60 @@ impl From<ActivationJson> for Activation {
             ActivationJson::Identity => Activation::Identity,
             ActivationJson::Relu => Activation::Relu,
             ActivationJson::LeakyRelu => Activation::LeakyRelu,
+            ActivationJson::Exp => Activation::Exp,
+            ActivationJson::Softplus => Activation::Softplus,
         }
     }
+}
+
+/// One node of a v4 graph, JSON-side. Tagged by `"op"`; mirrors
+/// [`BakeNode`]. Input indices name earlier nodes.
+///
+/// ```json
+/// { "op": "input", "width": 4 }
+/// { "op": "dense", "input": 1, "out_dim": 3, "activation": "relu",
+///   "dtype": "f16", "weights": [...], "biases": [...] }   // biases optional
+/// { "op": "activation", "input": 3, "activation": "exp" }
+/// { "op": "gather", "input": 0, "indices": [2, 3] }
+/// { "op": "add", "a": 3, "b": 4 }
+/// { "op": "mul", "a": 3, "b": 4 }
+/// { "op": "concat", "inputs": [3, 4] }
+/// ```
+#[derive(Deserialize, Debug)]
+#[serde(tag = "op", rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum BakeNodeJson {
+    Input {
+        width: usize,
+    },
+    Dense {
+        input: u32,
+        out_dim: usize,
+        activation: ActivationJson,
+        dtype: DtypeJson,
+        weights: Vec<f32>,
+        #[serde(default)]
+        biases: Option<Vec<f32>>,
+    },
+    Activation {
+        input: u32,
+        activation: ActivationJson,
+    },
+    Gather {
+        input: u32,
+        indices: Vec<u32>,
+    },
+    Add {
+        a: u32,
+        b: u32,
+    },
+    Mul {
+        a: u32,
+        b: u32,
+    },
+    Concat {
+        inputs: Vec<u32>,
+    },
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -723,6 +790,63 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         compressed: req.compressed,
         hu_permutations: None,
     };
+    if !req.graph.is_empty() {
+        if req.optimize {
+            return Err(BakeError::GraphInvalid {
+                node: 0,
+                what: "json: optimize applies to layer chains only",
+            }
+            .into());
+        }
+        // Owned zero-biased Dense weights, indexed by node.
+        let graph_weights: Vec<Option<Vec<f32>>> = req
+            .graph
+            .iter()
+            .map(|n| match n {
+                BakeNodeJson::Dense { weights, .. } if req.zerobias_tau > 0.0 => {
+                    let mut w = weights.clone();
+                    apply_zero_bias_per_layer_in_place(&mut w, req.zerobias_tau);
+                    Some(w)
+                }
+                _ => None,
+            })
+            .collect();
+        let nodes: Vec<BakeNode<'_>> = req
+            .graph
+            .iter()
+            .zip(&graph_weights)
+            .map(|(n, zb)| match n {
+                BakeNodeJson::Input { width } => BakeNode::Input { width: *width },
+                BakeNodeJson::Dense {
+                    input,
+                    out_dim,
+                    activation,
+                    dtype,
+                    weights,
+                    biases,
+                } => BakeNode::Dense {
+                    input: *input,
+                    out_dim: *out_dim,
+                    activation: (*activation).into(),
+                    dtype: (*dtype).into(),
+                    weights: zb.as_deref().unwrap_or(weights),
+                    biases: biases.as_deref(),
+                },
+                BakeNodeJson::Activation { input, activation } => BakeNode::Activation {
+                    input: *input,
+                    activation: (*activation).into(),
+                },
+                BakeNodeJson::Gather { input, indices } => BakeNode::Gather {
+                    input: *input,
+                    indices,
+                },
+                BakeNodeJson::Add { a, b } => BakeNode::Add { a: *a, b: *b },
+                BakeNodeJson::Mul { a, b } => BakeNode::Mul { a: *a, b: *b },
+                BakeNodeJson::Concat { inputs } => BakeNode::Concat { inputs },
+            })
+            .collect();
+        return Ok(bake_graph(&request, &nodes)?);
+    }
     let bytes = if req.optimize {
         bake_optimized(&request)?
     } else {
