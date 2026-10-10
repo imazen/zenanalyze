@@ -393,10 +393,21 @@ Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
   `versioning` golden tripwire surfaced that 9 SIMD-reduced statistical features
   have per-SIMD-tier value divergence (6 at <0.3 % from f64 reduction order; 3
   cancellation-prone outliers up to ~11 %). The version *hash* is text-derived
-  (platform-independent); `golden_is_stable` (live re-extraction) is therefore a
-  **reference-platform (x86-64) tripwire** — asserted by the `golden-reference` CI
-  job, `--skip`ped in the portable matrix. `REL_TOLERANCE`=0.5 % + 3 per-feature
-  overrides are sized from the measured CI spread, not guessed.
+  (platform-independent). **Current state (2026-10-09, ZANFIX `b542886c`):**
+  `golden_is_stable` (live re-extraction) is enforced on every CI platform, not
+  only the x86-64 reference. The generic Test step `--skip`s it, but the
+  dedicated "Golden tolerance check" step runs it on all four Test OSes
+  (`experimental,hdr`); the `cross` jobs (i686, aarch64) run it unskipped; and
+  the `golden-reference` job runs it in reference mode, once natively and once
+  with the scalar tier forced. Every platform uses the global
+  `REL_TOLERANCE` = 0.5 % with **no per-feature overrides**:
+  `F32_TOLERANCE_OVERRIDES`, `XPLAT_STRUCTURAL_EXEMPT` and
+  `I686_TOLERANCE_OVERRIDES` are all empty. The SIMD tiers became bit-identical
+  through `simd_math::fixed_reduce8`; the scalar tier (and so i686) through
+  `simd_math::TierMulAdd` in `b542886c`. Measured worst spread vs the golden:
+  forced-scalar x86-64 and native i686 ≤ 0.0001 %, aarch64 NEON 0.0000 %
+  ([record](benchmarks/zanfix_2026-10-09.md)). The original 2026-06-20 setup
+  (reference-only assertion, 3 per-feature overrides) is superseded.
 
 Resolved 2026-06-19 (P0 CI-integrity pass):
 - The `fit_yeo_johnson` golden-section test "failure" was a **wrong test
