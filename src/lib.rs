@@ -1178,7 +1178,7 @@ pub fn feature_id_by_name(name: &str) -> Option<u16> {
 }
 
 /// Bump on ANY feature numeric-definition change (see [`feature_defs_version`]).
-const FEATURE_DEFS_VERSION: u32 = 1;
+const FEATURE_DEFS_VERSION: u32 = 2;
 
 /// Monotonic version of the feature **definitions** — the numeric algorithms,
 /// thresholds, and normalization scales that decide a feature's computed VALUE.
@@ -1403,7 +1403,7 @@ mod feature_vector_tests {
         assert!(feature_vector(slice, &ids, &mut feats)); // PixelSlice in, &[f32] out
 
         // defs version is a plain u32 to bake next to the model
-        assert_eq!(feature_defs_version(), 1);
+        assert_eq!(feature_defs_version(), 2);
 
         // an unknown column => None (caller falls back), never a silent zero
         assert!(resolve_feature_ids(&["feat_variance", "feat_does_not_exist"]).is_none());

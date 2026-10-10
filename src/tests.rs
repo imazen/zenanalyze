@@ -3817,6 +3817,78 @@ mod hvs {
         );
     }
 
+    /// Covariances of a grayscale image are exactly `+0.0` (the documented
+    /// degenerate case) — not just ~0 — for a gray GRADIENT and gray noise,
+    /// in both the gamma and the linear-light config. A gray gradient used to
+    /// read −0.166 (gamma) / +0.081 (linear): chroma was `(B − Y)/255` with
+    /// the rounded luma, a value-dependent residue whose Pearson against the
+    /// large luma variance passed the old absolute floor.
+    #[test]
+    fn gray_images_chroma_luma_covariance_is_exactly_zero() {
+        let (w, h) = (64u32, 48u32);
+        let mut noise_state = 0x2545_f491u32;
+        let mut images: Vec<(&str, Vec<u8>)> = Vec::new();
+        let gradient: Vec<u8> = (0..w * h)
+            .flat_map(|i| {
+                let v = ((i % w) * 255 / (w - 1)) as u8;
+                [v, v, v]
+            })
+            .collect();
+        images.push(("gray gradient", gradient));
+        let noise: Vec<u8> = (0..w * h)
+            .flat_map(|_| {
+                noise_state ^= noise_state << 13;
+                noise_state ^= noise_state >> 17;
+                noise_state ^= noise_state << 5;
+                let v = (noise_state >> 24) as u8;
+                [v, v, v]
+            })
+            .collect();
+        images.push(("gray noise", noise));
+        for (what, rgb) in &images {
+            for linear in [false, true] {
+                let q = rgb_query(&[
+                    AnalysisFeature::ChromaLumaCovarianceCb,
+                    AnalysisFeature::ChromaLumaCovarianceCr,
+                ])
+                .with_linear_light(linear);
+                let r = crate::analyze_features(make_slice(rgb, w, h), &q).unwrap();
+                for f in [
+                    AnalysisFeature::ChromaLumaCovarianceCb,
+                    AnalysisFeature::ChromaLumaCovarianceCr,
+                ] {
+                    let v = r.get_f32(f).expect("requested");
+                    assert_eq!(
+                        v.to_bits(),
+                        0.0f32.to_bits(),
+                        "{what} (linear={linear}) {f:?} = {v}, want exactly +0.0"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A constant non-gray colour has zero luma and chroma variance up to f32
+    /// accumulation noise; the scale-free degeneracy test must return 0.0
+    /// rather than a Pearson of rounding noise (the old floor let Cr through
+    /// at −0.65 for a constant (200, 100, 50) patch).
+    #[test]
+    fn constant_colour_chroma_luma_covariance_is_zero() {
+        let (w, h) = (96u32, 64u32);
+        let rgb: Vec<u8> = (0..w * h).flat_map(|_| [200u8, 100, 50]).collect();
+        let q = rgb_query(&[
+            AnalysisFeature::ChromaLumaCovarianceCb,
+            AnalysisFeature::ChromaLumaCovarianceCr,
+        ]);
+        let r = crate::analyze_features(make_slice(&rgb, w, h), &q).unwrap();
+        for f in [
+            AnalysisFeature::ChromaLumaCovarianceCb,
+            AnalysisFeature::ChromaLumaCovarianceCr,
+        ] {
+            assert_eq!(r.get_f32(f).expect("requested"), 0.0, "{f:?}");
+        }
+    }
+
     /// Linear luma↔Cb ramp: every column has the SAME luma but the B
     /// channel varies (so Cb = (B − Y)/255 covaries perfectly with x).
     /// Construction: R = G = 128 constant; B varies 0..255 across x.

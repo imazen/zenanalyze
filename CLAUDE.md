@@ -344,14 +344,21 @@ runtime branch).
   modes and v4/v3/scalar match exactly; workspace tests and CI clippy pass.
   See [the migration gate record](benchmarks/magetypes030_2026-10-09.md).
 
-- **2026-10-09 — forced-scalar golden tolerance: OPEN, pre-existing.**
-  On the unchanged main kernels with magetypes 0.9.30, forced scalar fails
-  `patch_fraction[16]`, `chroma_luma_covariance_cb[3]`,
-  `chroma_luma_covariance_cr[3]` and `spectral_slope_y[9]` against the
-  existing x86 golden. The identical failure remains after the name-only
-  migration, while v4/v3 and ordinary workspace tests pass. No expectation
-  was relaxed or golden re-blessed. This is separate from the within-tier
-  before/after bit-identity gate; ARM/WASM were not measured in this lane.
+- **2026-10-09 — forced-scalar golden failure: FIXED (ZANFIX).** Cause: magetypes'
+  scalar `mul_add` is `a * b + c` (two roundings) while v3/v4/NEON fuse, so the
+  scalar tier — CPUs without AVX2+FMA and every i686 build — drifted on
+  `patch_fraction`, `spectral_slope_y` and the covariances (it never passed the
+  golden on 64-bit, since `3c998fe`; i686 hid it behind budgets wrongly blamed
+  on x87). Fix: `simd_math::TierMulAdd` (software `fmaf` on scalar only);
+  forced-scalar x86-64 and native i686 now match the golden to ≤ 1e-6, the i686
+  overrides are gone, and CI's golden-reference job runs the golden with scalar
+  forced. Separately, **`chroma_luma_covariance_{cb,cr}` were wrong on every
+  tier for grayscale input** (a gray gradient gave −0.166; the contract says
+  0.0): chroma is now computed from channel differences (exactly 0 for
+  R = G = B) with a scale-free degeneracy test. Their golden rows and qualified
+  names changed by design and `feature_defs_version` is 2. Residual: the HDR /
+  linear input conversion in `linear-srgb` / `zenpixels-convert` has the same
+  scalar `mul_add` gap at ≤ 2e-5 relative (outside this crate).
 
 
 Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):

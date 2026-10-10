@@ -9,6 +9,7 @@
 use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use super::tier1::ChunkInput;
+use crate::simd_math::TierMulAdd;
 use archmage::{incant, magetypes};
 
 /// Cap on sampled 8×8 luma blocks for the Tier 3 DCT pass
@@ -1754,13 +1755,13 @@ fn dct2d_8_three_planes_simd(
             while v < 8 {
                 let r = &$blk[v];
                 let mut acc = d_col[0] * f32x8::splat_t(token, r[0]);
-                acc = d_col[1].mul_add(f32x8::splat_t(token, r[1]), acc);
-                acc = d_col[2].mul_add(f32x8::splat_t(token, r[2]), acc);
-                acc = d_col[3].mul_add(f32x8::splat_t(token, r[3]), acc);
-                acc = d_col[4].mul_add(f32x8::splat_t(token, r[4]), acc);
-                acc = d_col[5].mul_add(f32x8::splat_t(token, r[5]), acc);
-                acc = d_col[6].mul_add(f32x8::splat_t(token, r[6]), acc);
-                acc = d_col[7].mul_add(f32x8::splat_t(token, r[7]), acc);
+                acc = d_col[1].tier_mul_add(f32x8::splat_t(token, r[1]), acc);
+                acc = d_col[2].tier_mul_add(f32x8::splat_t(token, r[2]), acc);
+                acc = d_col[3].tier_mul_add(f32x8::splat_t(token, r[3]), acc);
+                acc = d_col[4].tier_mul_add(f32x8::splat_t(token, r[4]), acc);
+                acc = d_col[5].tier_mul_add(f32x8::splat_t(token, r[5]), acc);
+                acc = d_col[6].tier_mul_add(f32x8::splat_t(token, r[6]), acc);
+                acc = d_col[7].tier_mul_add(f32x8::splat_t(token, r[7]), acc);
                 y_row[v] = acc;
                 v += 1;
             }
@@ -1774,13 +1775,13 @@ fn dct2d_8_three_planes_simd(
             while v < 8 {
                 let d_row = &DCT_COEF[v];
                 let mut acc = y_row[0] * f32x8::splat_t(token, d_row[0]);
-                acc = y_row[1].mul_add(f32x8::splat_t(token, d_row[1]), acc);
-                acc = y_row[2].mul_add(f32x8::splat_t(token, d_row[2]), acc);
-                acc = y_row[3].mul_add(f32x8::splat_t(token, d_row[3]), acc);
-                acc = y_row[4].mul_add(f32x8::splat_t(token, d_row[4]), acc);
-                acc = y_row[5].mul_add(f32x8::splat_t(token, d_row[5]), acc);
-                acc = y_row[6].mul_add(f32x8::splat_t(token, d_row[6]), acc);
-                acc = y_row[7].mul_add(f32x8::splat_t(token, d_row[7]), acc);
+                acc = y_row[1].tier_mul_add(f32x8::splat_t(token, d_row[1]), acc);
+                acc = y_row[2].tier_mul_add(f32x8::splat_t(token, d_row[2]), acc);
+                acc = y_row[3].tier_mul_add(f32x8::splat_t(token, d_row[3]), acc);
+                acc = y_row[4].tier_mul_add(f32x8::splat_t(token, d_row[4]), acc);
+                acc = y_row[5].tier_mul_add(f32x8::splat_t(token, d_row[5]), acc);
+                acc = y_row[6].tier_mul_add(f32x8::splat_t(token, d_row[6]), acc);
+                acc = y_row[7].tier_mul_add(f32x8::splat_t(token, d_row[7]), acc);
                 acc.store(&mut $out[v]);
                 v += 1;
             }
@@ -1891,7 +1892,7 @@ fn log10_sum_and_sq_sum_simd(token: Token, block_acs: &[f32]) -> (f64, f64) {
         let ac_v = f32x8::load_t(token, arr);
         let log_v = (ac_v + one_v).log10_lowp();
         sum_v += log_v;
-        sq_sum_v = log_v.mul_add(log_v, sq_sum_v);
+        sq_sum_v = log_v.tier_mul_add(log_v, sq_sum_v);
         iters_since_flush += 1;
         if iters_since_flush >= FLUSH {
             sum_f64 += sum_v.reduce_add() as f64;

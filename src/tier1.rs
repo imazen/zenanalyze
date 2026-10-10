@@ -18,7 +18,7 @@ use super::feature::RawAnalysis;
 use super::row_stream::RowStream;
 use archmage::{incant, magetypes};
 
-use crate::simd_math::{fixed_reduce8, rsqrt_stable, rsqrt_stable_scalar};
+use crate::simd_math::{TierMulAdd, fixed_reduce8, rsqrt_stable, rsqrt_stable_scalar};
 
 // ---------------------------------------------------------------------------
 // Tier-aware RGB24 chunk-8 deinterleave dispatch
@@ -254,16 +254,22 @@ struct PixelStats {
     edge_grad_sum: f64,
     edge_grad_sq_sum: f64,
     edge_grad_count: u64,
-    /// Cross-product sums `Σ Y·Cb` and `Σ Y·Cr` for HVS feature
-    /// `ChromaLumaCovariance{Cb,Cr}` (proposal 2026-05-17, ids 132/133).
-    /// Y is BT.601 luma in `[0, 255]`; Cb / Cr are the normalized
-    /// `(B−Y)/255` and `(R−Y)/255` already accumulated lane-wise.
-    /// Combined with `luma_sum/sq` and `cb_sum/sq`, `cr_sum/sq` to
-    /// form Pearson coefficients at row close. Always-on accumulators
-    /// — the SIMD path const-folds away on `!FULL` builds via the
-    /// outer dispatcher, but they ride the same flush as `cb_sum`.
+    /// Sums for HVS feature `ChromaLumaCovariance{Cb,Cr}` (ids 132/133):
+    /// `Σ Y·Cb`, `Σ Y·Cr` and the marginal `Σ Cb`, `Σ Cb²`, `Σ Cr`, `Σ Cr²`
+    /// of a **gray-exact** chroma — `Cb = (kr·(B−R) + kg·(B−G))/255`,
+    /// `Cr = (kg·(R−G) + kb·(R−B))/255`, algebraically `(B−Y)/255` and
+    /// `(R−Y)/255` (the luma weights sum to 1) but computed from channel
+    /// differences so `R = G = B` gives exactly `0.0`. The always-on
+    /// `cb_sum`/`cr_sum` above use `(B − Y)/255` with the rounded luma and
+    /// drive `chroma_complexity` unchanged; on gray input those are a
+    /// rounding residue, which made the Pearson of a gray gradient nonzero.
+    /// FULL-gated (the SIMD path const-folds them away on `!FULL`).
     y_cb_sum: f64,
     y_cr_sum: f64,
+    cov_cb_sum: f64,
+    cov_cb_sq_sum: f64,
+    cov_cr_sum: f64,
+    cov_cr_sq_sum: f64,
     /// Per-orientation absolute-gradient sums for HVS feature
     /// `OrientationEnergyRatio` (proposal 2026-05-17, id 136). Each
     /// holds `Σ |G_θ|` over interior stripe pixels for one of the four
@@ -306,6 +312,10 @@ impl Default for PixelStats {
             edge_grad_count: 0,
             y_cb_sum: 0.0,
             y_cr_sum: 0.0,
+            cov_cb_sum: 0.0,
+            cov_cb_sq_sum: 0.0,
+            cov_cr_sum: 0.0,
+            cov_cr_sq_sum: 0.0,
             orient_sum_0: 0.0,
             orient_sum_45: 0.0,
             orient_sum_90: 0.0,
@@ -343,6 +353,10 @@ impl PixelStats {
         self.edge_grad_count += o.edge_grad_count;
         self.y_cb_sum += o.y_cb_sum;
         self.y_cr_sum += o.y_cr_sum;
+        self.cov_cb_sum += o.cov_cb_sum;
+        self.cov_cb_sq_sum += o.cov_cb_sq_sum;
+        self.cov_cr_sum += o.cov_cr_sum;
+        self.cov_cr_sq_sum += o.cov_cr_sq_sum;
         self.orient_sum_0 += o.orient_sum_0;
         self.orient_sum_45 += o.orient_sum_45;
         self.orient_sum_90 += o.orient_sum_90;
@@ -868,46 +882,51 @@ pub(crate) fn extract_tier1_into_dispatch<R: ChunkInput>(
         };
     }
     // HVS chroma-luma covariance: Pearson(Y, Cb) and Pearson(Y, Cr)
-    // over Tier-1 stripe samples. Uses the FULL-gated `luma_sum/sq`
-    // accumulators that drive `Variance`, plus the cross-products
-    // `y_cb_sum` / `y_cr_sum` folded into the FULL SIMD path.
+    // over Tier-1 stripe samples, from the FULL-gated `luma_sum/sq`
+    // accumulators that drive `Variance` and the gray-exact chroma sums
+    // (`cov_cb_*`, `cov_cr_*`, `y_cb_sum`, `y_cr_sum`).
     //
     // Pearson(X, Y) = (n·ΣXY − ΣX·ΣY) / sqrt((n·ΣX² − (ΣX)²) · (n·ΣY² − (ΣY)²))
     //
-    // Returns 0.0 when either marginal variance is degenerate
-    // (grayscale → Cb=Cr=0 → zero Cb variance → undefined Pearson;
-    // 0.0 is the right fallback for the picker — "no exploitable
-    // chroma-luma signal").
+    // Returns 0.0 when either marginal variance is degenerate: grayscale
+    // input (chroma is exactly 0.0 there, so its variance term is exactly
+    // 0.0 — including a gray *gradient*, which the old absolute floor on
+    // the product let through), and constant patches of any colour. 0.0 is
+    // the right fallback for the picker — "no exploitable chroma-luma
+    // signal".
     {
         if n >= 2.0 && dispatch.wants_full_kernel {
             let lc = stats.luma_sum;
             let lsq = stats.luma_sq_sum;
             let l_var_term = (n * lsq - lc * lc).max(0.0);
-            let cb_term = stats.cb_sum;
-            let cb_sq_term = stats.cb_sq_sum;
+            let cb_term = stats.cov_cb_sum;
+            let cb_sq_term = stats.cov_cb_sq_sum;
             let cb_var_term = (n * cb_sq_term - cb_term * cb_term).max(0.0);
-            let cr_term = stats.cr_sum;
-            let cr_sq_term = stats.cr_sq_sum;
+            let cr_term = stats.cov_cr_sum;
+            let cr_sq_term = stats.cov_cr_sq_sum;
             let cr_var_term = (n * cr_sq_term - cr_term * cr_term).max(0.0);
             let cov_cb_num = n * stats.y_cb_sum - lc * cb_term;
             let cov_cr_num = n * stats.y_cr_sum - lc * cr_term;
-            let denom_cb = (l_var_term * cb_var_term).sqrt();
-            let denom_cr = (l_var_term * cr_var_term).sqrt();
-            // Threshold below which the denominator is numerically
-            // indistinguishable from zero — protects against the
-            // catastrophic-cancellation case on constant-colour
-            // patches. Picked so a `Pearson` value emitted here is
-            // accurate to ≥ 3 decimal digits.
-            const PEARSON_DENOM_FLOOR: f64 = 1e-6;
-            out.chroma_luma_covariance_cb = if denom_cb > PEARSON_DENOM_FLOOR {
-                (cov_cb_num / denom_cb).clamp(-1.0, 1.0) as f32
-            } else {
+            // A marginal is degenerate when its variance term is at most a
+            // tiny fraction of its own power `n·Σx²` — i.e. the signal is
+            // constant up to f32 accumulation noise (relative ~1e-7). The
+            // test is scale-free, so it doesn't depend on image size or on
+            // the other marginal (the old floor was absolute and on the
+            // product `l_var · cb_var`, so a gray gradient's large luma
+            // variance carried noise-level chroma variance past it). Exact
+            // zero chroma (gray input) gives `0 <= 0` and trips it.
+            const REL_VAR_FLOOR: f64 = 1e-6;
+            let degenerate = |var_term: f64, sq_term: f64| var_term <= REL_VAR_FLOOR * n * sq_term;
+            let l_degenerate = degenerate(l_var_term, lsq);
+            out.chroma_luma_covariance_cb = if l_degenerate || degenerate(cb_var_term, cb_sq_term) {
                 0.0
+            } else {
+                (cov_cb_num / (l_var_term * cb_var_term).sqrt()).clamp(-1.0, 1.0) as f32
             };
-            out.chroma_luma_covariance_cr = if denom_cr > PEARSON_DENOM_FLOOR {
-                (cov_cr_num / denom_cr).clamp(-1.0, 1.0) as f32
-            } else {
+            out.chroma_luma_covariance_cr = if l_degenerate || degenerate(cr_var_term, cr_sq_term) {
                 0.0
+            } else {
+                (cov_cr_num / (l_var_term * cr_var_term).sqrt()).clamp(-1.0, 1.0) as f32
             };
         } else {
             out.chroma_luma_covariance_cb = 0.0;
@@ -1211,7 +1230,7 @@ fn stripe_block_stats_simd<R: ChunkInput>(
             // For this metric the 1-LSB drift is below the threshold's
             // sensitivity, so we skip the floor and use the f32 directly.
             sum_v += luma_v;
-            sq_sum_v = luma_v.mul_add(luma_v, sq_sum_v);
+            sq_sum_v = luma_v.tier_mul_add(luma_v, sq_sum_v);
 
             r_min_v = r_min_v.min(r_v);
             r_max_v = r_max_v.max(r_v);
@@ -1314,6 +1333,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
     // and sums-of-squares to form Pearson at row close.
     let mut y_cb_sum: f64 = 0.0;
     let mut y_cr_sum: f64 = 0.0;
+    let mut cov_cb_sum: f64 = 0.0;
+    let mut cov_cb_sq_sum: f64 = 0.0;
+    let mut cov_cr_sum: f64 = 0.0;
+    let mut cov_cr_sq_sum: f64 = 0.0;
 
     let row = &rgb[row_off..row_off + width * 3];
     let next_row = next_row_off.map(|nr| &rgb[nr..nr + width * 3]);
@@ -1373,6 +1396,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
     // the FULL kernel.
     let mut y_cb_sum_v = f32x8::zero_t(token);
     let mut y_cr_sum_v = f32x8::zero_t(token);
+    let mut cov_cb_sum_v = f32x8::zero_t(token);
+    let mut cov_cb_sq_v = f32x8::zero_t(token);
+    let mut cov_cr_sum_v = f32x8::zero_t(token);
+    let mut cov_cr_sq_v = f32x8::zero_t(token);
 
     const FLUSH: usize = 32;
     let mut iters_since_flush = 0usize;
@@ -1389,7 +1416,7 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         let b = f32x8::load_t(token, &b_arr);
 
         // BT.601 luma: l = 0.299·r + 0.587·g + 0.114·b
-        let l = r.mul_add(kr_v, g.mul_add(kg_v, b * kb_v));
+        let l = r.tier_mul_add(kr_v, g.tier_mul_add(kg_v, b * kb_v));
         // Chroma stats (simplified): cb_stat = (b − l) / 255;
         // cr_stat = (r − l) / 255. Always-on (drives chroma_complexity
         // and Cb/Cr sharpness shape signals).
@@ -1397,27 +1424,34 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         let cr = (r - l) * inv_255_v;
 
         cb_sum_v += cb;
-        cb_sq_v = cb.mul_add(cb, cb_sq_v);
+        cb_sq_v = cb.tier_mul_add(cb, cb_sq_v);
         cr_sum_v += cr;
-        cr_sq_v = cr.mul_add(cr, cr_sq_v);
+        cr_sq_v = cr.tier_mul_add(cr, cr_sq_v);
 
         // FULL-only accumulators: luma stats (Variance), Hasler M3
         // (Colourfulness). Const-folds away on `!FULL`.
         if FULL {
             // Hasler M3: rg = r − g; yb = 0.5·(r + g) − b
             let rg = r - g;
-            let yb = (r + g).mul_add(half_v, -b);
+            let yb = (r + g).tier_mul_add(half_v, -b);
             luma_sum_v += l;
-            luma_sq_v = l.mul_add(l, luma_sq_v);
+            luma_sq_v = l.tier_mul_add(l, luma_sq_v);
             rg_sum_v += rg;
-            rg_sq_v = rg.mul_add(rg, rg_sq_v);
+            rg_sq_v = rg.tier_mul_add(rg, rg_sq_v);
             yb_sum_v += yb;
-            yb_sq_v = yb.mul_add(yb, yb_sq_v);
-            // HVS chroma-luma cross-products: `l·cb`, `l·cr`. Two
-            // additional FMAs per chunk; cb/cr are already in lane
-            // registers from the always-on chroma path above.
-            y_cb_sum_v = l.mul_add(cb, y_cb_sum_v);
-            y_cr_sum_v = l.mul_add(cr, y_cr_sum_v);
+            yb_sq_v = yb.tier_mul_add(yb, yb_sq_v);
+            // HVS chroma-luma covariance on gray-exact chroma (see
+            // `PixelStats::y_cb_sum`): from channel differences, so
+            // r = g = b gives exactly 0.0 instead of the `b − l`
+            // rounding residue.
+            let cov_cb = (b - r).tier_mul_add(kr_v, (b - g) * kg_v) * inv_255_v;
+            let cov_cr = (r - g).tier_mul_add(kg_v, (r - b) * kb_v) * inv_255_v;
+            cov_cb_sum_v += cov_cb;
+            cov_cb_sq_v = cov_cb.tier_mul_add(cov_cb, cov_cb_sq_v);
+            cov_cr_sum_v += cov_cr;
+            cov_cr_sq_v = cov_cr.tier_mul_add(cov_cr, cov_cr_sq_v);
+            y_cb_sum_v = l.tier_mul_add(cov_cb, y_cb_sum_v);
+            y_cr_sum_v = l.tier_mul_add(cov_cr, y_cr_sum_v);
         }
         // SKIN-only accumulators: BT.601 chroma matrix in [0, 255]
         // for the Chai-Ngan skin-tone gate. Const-folds away on
@@ -1426,8 +1460,14 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         // because all accumulators were live; peeling SKIN off FULL
         // shrinks the AVX2 register pressure for both halves.
         if SKIN {
-            let cb_u8 = r.mul_add(cb_kr_v, g.mul_add(cb_kg_v, b.mul_add(cb_kb_v, off_128_v)));
-            let cr_u8 = r.mul_add(cr_kr_v, g.mul_add(cr_kg_v, b.mul_add(cr_kb_v, off_128_v)));
+            let cb_u8 = r.tier_mul_add(
+                cb_kr_v,
+                g.tier_mul_add(cb_kg_v, b.tier_mul_add(cb_kb_v, off_128_v)),
+            );
+            let cr_u8 = r.tier_mul_add(
+                cr_kr_v,
+                g.tier_mul_add(cr_kg_v, b.tier_mul_add(cr_kb_v, off_128_v)),
+            );
             let m_y_lo = l.simd_ge(y_lo_v);
             let m_y_hi = l.simd_le(y_hi_v);
             let m_cb_lo = cb_u8.simd_ge(cb_lo_v);
@@ -1457,6 +1497,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
                 yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
                 y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
                 y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
+                cov_cb_sum += fixed_reduce8(cov_cb_sum_v.to_array());
+                cov_cb_sq_sum += fixed_reduce8(cov_cb_sq_v.to_array());
+                cov_cr_sum += fixed_reduce8(cov_cr_sum_v.to_array());
+                cov_cr_sq_sum += fixed_reduce8(cov_cr_sq_v.to_array());
                 luma_sum_v = f32x8::zero_t(token);
                 luma_sq_v = f32x8::zero_t(token);
                 rg_sum_v = f32x8::zero_t(token);
@@ -1465,6 +1509,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
                 yb_sq_v = f32x8::zero_t(token);
                 y_cb_sum_v = f32x8::zero_t(token);
                 y_cr_sum_v = f32x8::zero_t(token);
+                cov_cb_sum_v = f32x8::zero_t(token);
+                cov_cb_sq_v = f32x8::zero_t(token);
+                cov_cr_sum_v = f32x8::zero_t(token);
+                cov_cr_sq_v = f32x8::zero_t(token);
             }
             if SKIN {
                 skin_count += skin_count_v.reduce_add() as u64;
@@ -1489,6 +1537,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
         y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
         y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
+        cov_cb_sum += fixed_reduce8(cov_cb_sum_v.to_array());
+        cov_cb_sq_sum += fixed_reduce8(cov_cb_sq_v.to_array());
+        cov_cr_sum += fixed_reduce8(cov_cr_sum_v.to_array());
+        cov_cr_sq_sum += fixed_reduce8(cov_cr_sq_v.to_array());
     }
     if SKIN {
         skin_count += skin_count_v.reduce_add() as u64;
@@ -1517,8 +1569,14 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
             rg_sq_sum += (rg * rg) as f64;
             yb_sum += yb as f64;
             yb_sq_sum += (yb * yb) as f64;
-            y_cb_sum += (l * cb) as f64;
-            y_cr_sum += (l * cr) as f64;
+            let cov_cb = (kr * (b - r) + kg * (b - g)) * (1.0 / 255.0);
+            let cov_cr = (kg * (r - g) + kb * (r - b)) * (1.0 / 255.0);
+            cov_cb_sum += cov_cb as f64;
+            cov_cb_sq_sum += (cov_cb * cov_cb) as f64;
+            cov_cr_sum += cov_cr as f64;
+            cov_cr_sq_sum += (cov_cr * cov_cr) as f64;
+            y_cb_sum += (l * cov_cb) as f64;
+            y_cr_sum += (l * cov_cr) as f64;
         }
         if SKIN {
             // BT.601 chroma in u8 representation for the skin gate.
@@ -1738,6 +1796,10 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         yb_sq_sum,
         y_cb_sum,
         y_cr_sum,
+        cov_cb_sum,
+        cov_cb_sq_sum,
+        cov_cr_sum,
+        cov_cr_sq_sum,
         orient_sum_0,
         orient_sum_45,
         orient_sum_90,
@@ -1825,7 +1887,7 @@ fn accumulate_laplacian_simd<const BT601: bool, R: ChunkInput>(
         let ld_v = f32x8::load_t(token, (&next_l[start..start + 8]).try_into().unwrap());
         let lap = ll_v + lr_v + lu_v + ld_v - four_v * lc_v;
         sum_v += lap;
-        sq_v = lap.mul_add(lap, sq_v);
+        sq_v = lap.tier_mul_add(lap, sq_v);
         // Bin |lap| → histogram[0..256]. Lanes are scattered scalar
         // (no efficient SIMD scatter for this shape on x86 / NEON).
         // 8 scalar adds per SIMD iter — well under the FMA cost

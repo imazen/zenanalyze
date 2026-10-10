@@ -9,16 +9,16 @@
 //!
 //! [`rsqrt_stable!`] is a drop-in that is **bit-identical on every backend**: a
 //! **software** bit-trick seed (integer ops on the float bits) refined by Newton-
-//! Raphson. The determinism comes from the *software seed* replacing the hardware
-//! `rsqrt_approx` — NOT from avoiding `mul_add`. `mul_add` is the IEEE
-//! correctly-rounded fused-multiply-add (magetypes lowers it to hardware FMA where
-//! present, else a correctly-rounded `fmaf`), so it is itself deterministic; the
-//! Newton steps here happen to use explicit `*`/`-` but `mul_add` would be equally
-//! portable (and the `log2_lowp`/`log2_midp` probes confirm magetypes' `mul_add`
-//! polynomials are byte-identical across arches). The only non-deterministic
-//! primitives are the hardware *approximations* (`rsqrt_approx`, `rcp_approx`).
-//! `rsqrt_stable!` keeps approximation speed (no hardware `sqrt` latency) while
-//! removing the cross-platform divergence.
+//! Raphson, with explicit `*`/`-` only. The determinism comes from the *software
+//! seed* replacing the hardware `rsqrt_approx`, and from not using `mul_add`:
+//! magetypes' `mul_add` is a hardware FMA (one rounding) on x86 v3/v4 and NEON,
+//! but `a * b + c` (two roundings) on the **scalar** backend and possibly on
+//! wasm (the engine's madd). Only `mul_add_portable` rounds once everywhere (in
+//! software where needed). The analyzer kernels route their multiply-adds
+//! through [`TierMulAdd`] so the scalar tier matches the FMA tiers bit for bit.
+//! The other non-deterministic primitives are the hardware *approximations*
+//! (`rsqrt_approx`, `rcp_approx`). `rsqrt_stable!` keeps approximation speed (no
+//! hardware `sqrt` latency) while removing the cross-platform divergence.
 //!
 //! It is a `macro_rules!` rather than a `fn` so it expands inside a `#[magetypes]`
 //! body against that body's per-tier `f32x8` (which the macro re-types to
@@ -60,6 +60,69 @@ pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
     y1 * (1.5 - 0.5 * x * y1 * y1)
 }
 
+/// `self * a + b` rounded the way the x86 v3/v4 and NEON tiers round it.
+///
+/// magetypes' `mul_add` is a hardware FMA (one rounding) on x86 v3/v4 and NEON,
+/// but on the **scalar** backend it is `a * b + c` (two roundings) — so every
+/// `mul_add` in a kernel rounded differently on the scalar tier, and the
+/// cancellation-prone statistics (`spectral_slope_y`, `patch_fraction`, the
+/// Pearson covariances) drifted up to ~11 % from the SIMD-tier values that the
+/// golden and every stored feature vector were produced on. `tier_mul_add`
+/// keeps `mul_add` (identical instruction, identical bits) on the SIMD tiers and
+/// uses a correctly rounded software FMA (magetypes' `fmaf_soft`, what
+/// `mul_add_portable` uses there) on the scalar tier, so scalar is
+/// **bit-identical** to v3/v4/NEON. The scalar tier is slower for it; it only
+/// runs on CPUs without AVX2+FMA / NEON and on 32-bit x86.
+///
+/// The **wasm128** tier deliberately keeps `mul_add` (the engine's madd, which
+/// may round twice) — unchanged values and speed; making it single-rounding too
+/// would cost ~8× on these ops (`mul_add_portable` fuses in software there).
+pub(crate) trait TierMulAdd: Sized {
+    /// `self * a + b` with the tier's rounding (see the trait docs).
+    fn tier_mul_add(self, a: Self, b: Self) -> Self;
+}
+
+/// Tiers whose `mul_add` already rounds once (hardware FMA) or whose current
+/// rounding is kept (wasm128): plain `mul_add`. (32-bit x86 dispatches to the
+/// scalar tier only, so it has no native impl.)
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "wasm32"
+))]
+macro_rules! tier_mul_add_native {
+    ($($token:ty),* $(,)?) => {$(
+        impl TierMulAdd for magetypes::simd::generic::f32x8<$token> {
+            #[inline(always)]
+            fn tier_mul_add(self, a: Self, b: Self) -> Self {
+                self.mul_add(a, b)
+            }
+        }
+    )*};
+}
+#[cfg(target_arch = "x86_64")]
+tier_mul_add_native!(archmage::X64V3Token, archmage::X64V4Token);
+#[cfg(target_arch = "aarch64")]
+tier_mul_add_native!(archmage::NeonToken);
+#[cfg(target_arch = "wasm32")]
+tier_mul_add_native!(archmage::Wasm128Token);
+
+/// Scalar tier: magetypes' correctly rounded software FMA (`fmaf_soft`: exact
+/// f64 product, TwoSum, round-to-odd, narrow) per lane. Same bits as
+/// `mul_add_portable`, which wraps the same routine, but without re-probing the
+/// CPU tier on every lane (`nostd_math::fmaf` checks for an FMA instruction per
+/// call) — the scalar tier only runs when that probe already said no.
+impl TierMulAdd for magetypes::simd::generic::f32x8<archmage::ScalarToken> {
+    #[inline(always)]
+    fn tier_mul_add(self, a: Self, b: Self) -> Self {
+        let (x, y, z) = (self.to_array(), a.to_array(), b.to_array());
+        Self::from_array_t(
+            archmage::ScalarToken,
+            core::array::from_fn(|i| magetypes::nostd_math::fmaf_soft(x[i], y[i], z[i])),
+        )
+    }
+}
+
 /// Deterministic horizontal sum of 8 SIMD lanes into f64 — widen each lane to f64
 /// (exact) and sum in fixed lane order `0..8`. Unlike a hardware `reduce_add()`,
 /// whose add-tree shape is arch-specific (hadd pairs / `vaddvq` / scalar), this is
@@ -68,9 +131,9 @@ pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
 /// chroma–luma covariances) bit-identical across SIMD tiers. It runs once per
 /// flush (every `FLUSH` iters), not per element, so it adds no per-pixel cost.
 ///
-/// (i686 still diverges here: its `f64` is x87 80-bit, a precision axis orthogonal
-/// to lane order, which only `-Z build-std`-with-sse2 or accepting it can address —
-/// see the i686-relaxed budgets in `versioning`.)
+/// (i686 runs the scalar tier, which reduces through this same function; its
+/// former divergence came from the scalar tier's double-rounded `mul_add`, now
+/// fixed by [`TierMulAdd`] — not from this reduction.)
 #[inline]
 pub(crate) fn fixed_reduce8(lanes: [f32; 8]) -> f64 {
     let mut s = 0.0f64;
@@ -282,14 +345,59 @@ mod tests {
         }
     }
 
+    /// `TierMulAdd` on the scalar tier is a correctly rounded fused
+    /// multiply-add, lane by lane — the same bits `f32::mul_add` (and the x86
+    /// v3/v4 / NEON hardware FMA) gives — including the cancellation cases
+    /// where an unfused `a * b + c` differs.
+    #[test]
+    fn scalar_tier_mul_add_is_fused() {
+        use super::TierMulAdd;
+        use archmage::{ScalarToken, SimdToken};
+        use magetypes::simd::generic::f32x8;
+        let t = ScalarToken::summon().expect("scalar token");
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let m = (state >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0;
+            m * 2f32.powi(((state >> 8) % 20) as i32 - 10)
+        };
+        let mut unfused_differs = 0;
+        for _ in 0..2_000 {
+            let a: [f32; 8] = core::array::from_fn(|_| next());
+            let b: [f32; 8] = core::array::from_fn(|_| next());
+            // c = -a*b (rounded) makes the fused result the exact rounding error.
+            let c: [f32; 8] =
+                core::array::from_fn(|i| if i % 2 == 0 { -(a[i] * b[i]) } else { next() });
+            let got = f32x8::from_array_t(t, a)
+                .tier_mul_add(f32x8::from_array_t(t, b), f32x8::from_array_t(t, c))
+                .to_array();
+            for i in 0..8 {
+                let want = a[i].mul_add(b[i], c[i]);
+                assert_eq!(
+                    got[i].to_bits(),
+                    want.to_bits(),
+                    "lane {i}: {a:?} {b:?} {c:?}"
+                );
+                unfused_differs += usize::from((a[i] * b[i] + c[i]).to_bits() != want.to_bits());
+            }
+        }
+        assert!(
+            unfused_differs > 1_000,
+            "test inputs must exercise fused vs unfused"
+        );
+    }
+
     /// Measures magetypes `log2_lowp` / `log2_midp` cross-platform determinism +
     /// accuracy. Both are bit-ops + a `mul_add` polynomial (no hardware approx), so
     /// they're byte-identical on every **FMA-capable** arch — CI-confirmed on x86-64,
     /// macOS-ARM, and Windows-ARM, asserted here against the x86-blessed hash. The
-    /// one exception is **i686** (no hardware FMA → magetypes' `mul_add` uses the
-    /// software `fmaf` fallback, which doesn't match hardware FMA bit-for-bit), so
-    /// the CI cross job `--skip`s this assert there; `rsqrt_stable` (mul_add-free)
-    /// stays identical even on i686. The `LOGPROBE` line surfaces the hashes in CI.
+    /// one exception is **i686**, which runs magetypes' scalar backend, where
+    /// `mul_add` is the unfused `a * b + c` (two roundings) inside magetypes' own
+    /// polynomial, so the CI cross job `--skip`s this assert there; `rsqrt_stable`
+    /// (mul_add-free) stays identical even on i686. The `LOGPROBE` line surfaces the
+    /// hashes in CI.
     #[test]
     fn log2_lowp_midp_determinism_and_accuracy() {
         const LOWP_GOLDEN_HASH: u64 = 0x67c2_346b_644a_0119;

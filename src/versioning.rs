@@ -30,18 +30,21 @@
 //! noise; that tolerance is precisely "platforms close enough to share a
 //! serialized vector."
 //!
-//! That noise is **not** uniform, and the golden tripwire measures it directly on
-//! every platform (each prints its per-feature spread vs the x86 golden). For
-//! well-conditioned features the lane-order f64-reduction divergence stays ≤ 0.07 %
-//! (hence the 0.5 % global budget). The exceptions: the chroma–luma Pearson
-//! covariances have a degeneracy guard that flips `0.0`-vs-nonzero per SIMD tier
-//! (`XPLAT_STRUCTURAL_EXEMPT` — enforced only on the reference), and
-//! `spectral_slope_y` / `patch_fraction` diverge several percent **on i686 only**
-//! from x87 excess precision in `std`/libm (a relaxed-but-finite i686 budget keeps
-//! them bounded there; tight everywhere else). All budgets are sized from observed
-//! CI spread, not guessed. (The cleaner long game is bit-exact determinism — fixed
-//! reduction order, done without speed loss via a fixed-lane-count f64 accumulator
-//! — which would retire the covariance exemption.)
+//! The golden tripwire measures that noise directly on every platform (each
+//! prints its per-feature spread vs the x86 golden). Two determinism fixes keep
+//! it small. Cancellation-prone sums flush lanes through a fixed-order f64
+//! reduction (`simd_math::fixed_reduce8`), so the SIMD tiers agree bit for bit.
+//! And the analyzer kernels' multiply-adds go through `simd_math::TierMulAdd`,
+//! which makes the **scalar** tier (CPUs without AVX2+FMA / NEON, and every
+//! 32-bit x86 build, which dispatches to scalar only) round like the FMA tiers:
+//! before 2026-10-09 magetypes' scalar `mul_add` rounded twice, and
+//! `spectral_slope_y`, `patch_fraction` and the chroma–luma covariances drifted
+//! up to ~11 % on scalar (up to ~27 % on i686) — previously misattributed to
+//! x87. What remains is ulp-level noise from the HDR/linear input conversion in
+//! `linear-srgb` / `zenpixels-convert`, whose own SIMD has the same scalar
+//! `mul_add` gap (≤ 1e-6 relative on the checked columns), so the 0.5 % global
+//! budget is generous and no feature needs an override. CI enforces the golden
+//! with the scalar tier forced on x86-64 as well as on every SIMD tier.
 //!
 //! # Coverage
 //!
@@ -84,12 +87,13 @@ const GOLDEN: &str = include_str!("versioning_golden.tsv");
 /// features that f64-reduction divergence stays ≤ 0.07 % across every tier
 /// (`variance` 0.01 %, `quant_survival_y` 0.03 %, `aq_map_std` 0.04 %,
 /// `dct_compressibility_y` 0.07 %). The original `1e-4` was tighter than the
-/// hardware can reproduce — a false-failure on every non-AVX-512 runner. A
-/// *behaviour* change moves a feature far more than 0.5 %, so the tripwire still
-/// fires. The covariances (structural guard flip) get a 15 % override + xplat
-/// exemption; `spectral_slope_y` / `patch_fraction` get a relaxed budget on i686
-/// only ([`I686_TOLERANCE_OVERRIDES`]). (The clean long game is bit-exact
-/// determinism — fixed reduction order — which collapses this back toward `1e-4`.)
+/// hardware could reproduce at the time — a false-failure on every non-AVX-512
+/// runner. A *behaviour* change moves a feature far more than 0.5 %, so the
+/// tripwire still fires. No feature carries an override today: the covariance
+/// exemption and its 15 % budget were retired by the fixed-order reduction
+/// (`6cb86df`), and the i686 budgets by making the scalar tier round like the
+/// FMA tiers (2026-10-09) — with both, the measured worst spread on any checked
+/// column, forced-scalar x86-64 and i686 included, is ≤ 1e-6 relative.
 pub const REL_TOLERANCE: f32 = 5.0e-3;
 
 /// The caret-compatibility root of a semver string: `"0.2"` for `0.2.7`, `"1"`
@@ -695,13 +699,12 @@ mod tests {
     /// Per-feature `f32` relative-tolerance overrides that apply on **every**
     /// platform (the i686-only relaxations live in [`I686_TOLERANCE_OVERRIDES`]).
     ///
-    /// **Currently empty** — and that's the win. Both former occupants are retired:
+    /// **Currently empty.** Both former occupants are retired:
     /// `edge_slope_stdev` (was 10 %, for the old hardware-`rsqrt_approx` 5.3 %
     /// per-arch spread) is deterministic again on `rsqrt_stable`; and the
-    /// `chroma_luma_covariance_{cb,cr}` (was 15 %) are now deterministic on every
-    /// 64-bit platform via the fixed-order f64 reduction (`fixed_reduce8`), so they
-    /// ride the tight global tolerance on 64-bit and only carry a relaxed *i686*
-    /// budget for x87. Nothing needs an all-platform override anymore.
+    /// `chroma_luma_covariance_{cb,cr}` (was 15 %) are bit-identical across the
+    /// SIMD tiers via the fixed-order f64 reduction (`fixed_reduce8`) and, since
+    /// 2026-10-09, on the scalar tier too (`simd_math::TierMulAdd`).
     const F32_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
 
     /// Features asserted ONLY on the x86-64 reference (reported-not-enforced
@@ -709,43 +712,27 @@ mod tests {
     /// `0.0`-vs-nonzero that no float tolerance can bridge.
     ///
     /// **Currently empty.** The chroma–luma covariances used to live here (their
-    /// Pearson degeneracy guard flipped per SIMD tier), but the fixed-order f64
+    /// Pearson degeneracy guard flipped per SIMD tier). The fixed-order f64
     /// reduction (`simd_math::fixed_reduce8`) made their inputs bit-identical across
-    /// SIMD tiers, so the guard no longer flips and they're enforced on every
-    /// 64-bit platform — only i686's x87 *scalar* finalization still diverges, and
-    /// that's handled by a relaxed [`I686_TOLERANCE_OVERRIDES`] budget, not an
-    /// exemption. The mechanism (and the `golden-reference` job's
-    /// `ZENANALYZE_GOLDEN_REFERENCE`) stays in place for any future structural
-    /// feature.
+    /// the SIMD tiers, `TierMulAdd` did the same for the scalar tier, and since
+    /// 2026-10-09 the guard is a scale-free variance test on gray-exact chroma, so
+    /// they are enforced everywhere. The mechanism (and the `golden-reference`
+    /// job's `ZENANALYZE_GOLDEN_REFERENCE`) stays in place for any future
+    /// structural feature.
     const XPLAT_STRUCTURAL_EXEMPT: &[&str] = &[];
 
-    /// Features that diverge **only on 32-bit x86 (i686)** — beyond the global
-    /// tolerance — from x87 80-bit excess precision in precompiled `std`/`libm`
-    /// paths (the product-then-ln's `.ln()`; a DCT-energy threshold count). Forcing
-    /// `+sse2` on this crate does NOT fix it (verified in CI: byte-identical spread)
-    /// because `std` stays x87 and isn't rebuilt without `-Z build-std`; no
-    /// reduction-order change touches `libm` either (aarch64/NEON passes these at
-    /// the tight global tolerance). Rather than EXEMPT them on i686, give them a
-    /// **relaxed but finite** i686 tolerance — so the divergence stays *bounded*
-    /// (a real behaviour change beyond the x87 spread still trips it) instead of
-    /// unchecked. Budgets are the measured i686 spread (`spectral_slope_y` 7.2 %,
-    /// `patch_fraction` 6.25 %) rounded up for margin. `cfg`-gated to 32-bit x86 so
-    /// every other target enforces the tight global tolerance. i686 is carried as a
-    /// 32-bit / pointer-width stand-in for WASM, whose float model is SSE2-like (no
-    /// x87), so this x87 spread is not representative of what i686 tests for.
-    #[cfg(target_arch = "x86")]
-    const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[
-        ("feat_spectral_slope_y", 1.0e-1),
-        ("feat_patch_fraction", 1.0e-1),
-        // The covariances are now deterministic on every 64-bit platform
-        // (fixed_reduce8 made their SIMD-reduced inputs bit-identical across tiers),
-        // but i686's x87 80-bit *scalar* finalization (`n·ΣXY − ΣX·ΣY`, the sqrt,
-        // the divide at tier1.rs:~770) still swings the ill-conditioned near-gray
-        // Pearson value ~26 %. Relaxed-but-finite here; tight (global) elsewhere.
-        ("feat_chroma_luma_covariance_cb", 3.0e-1),
-        ("feat_chroma_luma_covariance_cr", 3.0e-1),
-    ];
-    #[cfg(not(target_arch = "x86"))]
+    /// Per-feature relaxations for **32-bit x86 (i686)** only. **Currently empty.**
+    ///
+    /// It used to relax `spectral_slope_y` / `patch_fraction` (10 %) and the
+    /// chroma–luma covariances (30 %), on the theory that x87 excess precision in
+    /// `std`/libm caused the i686 spread. That was wrong: archmage compiles out
+    /// every v3/v4 dispatch arm on `target_arch = "x86"`, so i686 always runs the
+    /// **scalar** tier, and the spread came from magetypes' scalar `mul_add`
+    /// rounding twice (x86-64 with the scalar tier forced reproduced the same
+    /// deviations). With `simd_math::TierMulAdd` the i686 worst spread is
+    /// ≤ 1e-6 relative (measured 2026-10-09), so i686 enforces the global
+    /// tolerance like every other target. Kept as an empty table so a future
+    /// 32-bit-only divergence gets a bounded budget, not an exemption.
     const I686_TOLERANCE_OVERRIDES: &[(&str, f32)] = &[];
 
     /// The bless / reference platform sets this so the structural-exempt features
@@ -860,12 +847,22 @@ mod tests {
     /// `ZENANALYZE_BLESS_GOLDEN=1` and review. Never relax the tolerance to pass.
     #[test]
     fn golden_is_stable() {
+        // Caller-controlled dispatch ceiling (`ZENANALYZE_GOLDEN_TIER`, or the
+        // dump's `ZENANALYZE_FEATURE_DUMP_TIER`): `v4` / `v3` / `scalar`. CI runs
+        // the golden with `scalar` forced on x86-64 so the scalar tier — what
+        // CPUs without AVX2+FMA and every 32-bit x86 build run — is held to the
+        // same golden as the SIMD tiers. Needs `_dev` on x86-64; run only this
+        // test in a fresh process (the disable is process-wide).
         // Caller-controlled exact dumps reuse this test's corpus and extraction.
-        // Run only this test in a fresh process when forcing a dispatch ceiling.
         let dump = std::env::var_os("ZENANALYZE_FEATURE_DUMP");
-        if dump.is_some() {
-            let tier = std::env::var("ZENANALYZE_FEATURE_DUMP_TIER")
-                .expect("feature dump requires an explicit tier");
+        let forced_tier = std::env::var("ZENANALYZE_GOLDEN_TIER")
+            .or_else(|_| std::env::var("ZENANALYZE_FEATURE_DUMP_TIER"))
+            .ok();
+        assert!(
+            dump.is_none() || forced_tier.is_some(),
+            "feature dump requires an explicit tier"
+        );
+        if let Some(tier) = forced_tier {
             #[cfg(all(feature = "_dev", target_arch = "x86_64"))]
             {
                 use archmage::{SimdToken, X64V3Token, X64V4Token};
@@ -950,9 +947,8 @@ mod tests {
                 continue;
             }
             let tol = f32_tolerance(name);
-            // Only the structural-flip features are exempt off the reference; the
-            // i686-divergent features are now ENFORCED with a relaxed i686 budget
-            // (see I686_TOLERANCE_OVERRIDES), so their divergence stays bounded.
+            // Only the structural-flip features are exempt off the reference (none
+            // today); everything else is enforced on every platform.
             let enforce = reference || !XPLAT_STRUCTURAL_EXEMPT.contains(&name.as_str());
             // The golden carries two config passes per feature: gamma (cases 0..N)
             // then linear-light (N..2N). The linear-light path runs the sRGB OETF

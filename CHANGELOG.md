@@ -15,6 +15,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`chroma_luma_covariance_cb` / `_cr` are exactly 0.0 for grayscale input
+  (feature value change, `feature_defs_version` 1 → 2).** Chroma was
+  `(B − Y)/255` with the rounded f32 luma, so gray pixels carried a
+  value-dependent rounding residue, and the degeneracy guard (an absolute floor
+  on `sqrt(var_Y · var_C)`) let a gray *gradient's* large luma variance carry
+  that noise through: the golden's gray gradient read −0.166 (gamma) / +0.081
+  (linear) instead of the documented 0.0, and constant-colour or gray HDR
+  inputs read noise Pearsons up to −0.65. The covariance now uses gray-exact
+  chroma from channel differences (`kr·(B−R) + kg·(B−G)`, exactly 0 when
+  R = G = B) and a scale-free test (a marginal is degenerate when its variance
+  is ≤ 1e-6 of its own power). Changed golden values: 0.0 now for the gray
+  gradient, the gray HDR PQ cases and the constant-colour RGBA case; last-digit
+  shifts (≤ 1.3e-4) on the other coloured cases. Only these two rows of the
+  golden and their qualified names (`cb@3e5ca2e1→@733d0d14`,
+  `cr@ca45d43f→@256868ee`) change; every other feature is bit-identical on
+  v3/v4. `chroma_complexity` keeps its `(B − Y)/255` chroma, unchanged. Stored
+  vectors and models trained on these two columns need a refresh.
+- **The scalar SIMD tier now matches v3/v4/NEON bit for bit in the analyzer
+  kernels.** magetypes' scalar `mul_add` rounds twice (`a * b + c`) where the
+  FMA tiers round once, so CPUs without AVX2+FMA and every i686 build drifted
+  up to ~11 % (x86-64 scalar) / ~27 % (i686) on `spectral_slope_y`,
+  `patch_fraction` and the covariances — the i686 spread had been attributed to
+  x87. `simd_math::TierMulAdd` uses `mul_add_portable` (software `fmaf`) on the
+  scalar tier only; v3/v4/NEON/wasm128 keep `mul_add` (same instruction, same
+  values). Forced-scalar x86-64 and native i686 now match the golden to ≤ 1e-6
+  relative; the i686 tolerance overrides are removed (tightened to the global
+  0.5 %), and the golden-reference CI job also runs with the scalar tier forced.
+- Docs: corrected claims that `fixed_reduce8` made the covariances
+  deterministic on every 64-bit platform, that the i686 spread came from x87,
+  that scalar `mul_add` uses `fmaf`, the stale covariance-exemption / 15 %
+  override text, and (zenpredict) that `std` and `no_std` compute identically
+  — `no_std` Dense rounds twice and its transforms use the `libm` crate.
+
 - Migrate analyzer and SIMD-example constructors to magetypes 0.9.30 token-taking `_t` forms, preserving feature bits at v4/v3/scalar. See [the qualification record](benchmarks/magetypes030_2026-10-09.md).
 
 - The library no longer enables `archmage/testable_dispatch` for its consumers. Cargo unifies features, so it reached every downstream build and turned each archmage `summon()` there into a cache read, even for the x86-64 baseline token. The tier benches get it from the new dev-only `_dev` feature: `cargo bench --bench tier_isolation --features _dev`.

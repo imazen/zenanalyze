@@ -215,15 +215,15 @@ jobs:
           # `CROSS_RUNTIME` automatically (passthrough is the default for
           # uppercase env vars set in the calling shell).
           CROSS_RUNTIME: "1"
-        # Skip the reference-platform value tripwire on cross targets (i686 x87 /
-        # aarch64 NEON diverge per SIMD tier) — see the Test job + golden-reference.
-        # Also skip the log2 determinism assert: i686 has no hardware FMA, so
-        # magetypes' mul_add takes the software fmaf fallback, which doesn't match
-        # hardware-FMA platforms bit-for-bit (rsqrt_stable, being mul_add-free, stays
-        # identical and is NOT skipped). The FMA-platform determinism is asserted by
-        # the Test matrix + rsqrt-probe job. The perf test still runs.
-        # golden_is_stable now runs here too (xplat tolerance check vs the x86
-        # golden); only log2_…_determinism stays skipped on i686 (no hardware FMA).
+        # golden_is_stable runs here too (portable tolerance check vs the x86
+        # golden). i686 dispatches to the scalar tier only; the analyzer kernels
+        # make that tier bit-identical to v3/v4/NEON (`simd_math::TierMulAdd`).
+        # Skip only the log2 determinism assert: magetypes' log2 polynomials call
+        # `mul_add`, which on the scalar backend is the unfused `a * b + c` (two
+        # roundings — only `mul_add_portable` uses software fmaf), so they don't
+        # match hardware-FMA platforms bit-for-bit (rsqrt_stable, being
+        # mul_add-free, stays identical and is NOT skipped). The FMA-platform
+        # determinism is asserted by the Test matrix + rsqrt-probe job.
         run: cross test --target ${{ matrix.target }} --features "experimental,hdr" --lib -- --skip log2_lowp_midp_determinism_and_accuracy
       # zenpredict — 32-bit and big-endian-adjacent coverage. Critical
       # because Model::from_bytes does u32 / usize arithmetic that wraps
@@ -294,6 +294,16 @@ jobs:
         env:
           ZENANALYZE_GOLDEN_REFERENCE: "1"
         run: cargo test --features "experimental,hdr" versioning::tests::golden_is_stable -- --exact --nocapture
+      - name: Golden tripwire with the SCALAR tier forced (64-bit x86)
+        # The scalar tier is what CPUs without AVX2+FMA (and every 32-bit x86
+        # build) run. It never had a 64-bit check, so its divergence (magetypes'
+        # scalar `mul_add` rounds twice) hid behind i686's relaxed budgets until
+        # 2026-10-09. `_dev` lets the test disable the v3/v4 tokens process-wide;
+        # it must run alone in its process. Reference mode: every column.
+        env:
+          ZENANALYZE_GOLDEN_REFERENCE: "1"
+          ZENANALYZE_GOLDEN_TIER: scalar
+        run: cargo test --features "experimental,hdr,_dev" --lib versioning::tests::golden_is_stable -- --exact --nocapture --test-threads=1
 
   rsqrt-probe:
     # Measures the cross-platform divergence of the four √ methods (exact /
