@@ -4,7 +4,10 @@
 #![cfg(feature = "api")]
 
 use zenanalyze_api::{FeatureResult, NamedFeature, Offer, Provenance};
-use zenpicker::MetaPicker;
+use zenpicker::{
+    AllowedFamilies, CodecFamily, FallbackReason, MetaPicker, QualityTarget, RouteSource,
+    RouterKind, family_rule,
+};
 use zenpredict::Model;
 use zenpredict_bake::bake_from_json_str;
 
@@ -79,4 +82,56 @@ fn legacy_bare_name_bake_cannot_reuse() {
     let model = Model::from_bytes(&aligned.0).unwrap();
     let picker = MetaPicker::new(&model);
     assert!(picker.feature_request().is_none());
+}
+
+#[test]
+fn unqualified_routers_fall_back_with_the_reason() {
+    // Pre-`name@hash` columns: no router can reuse an offer, so route() misses and
+    // route_or_heuristic reports UnqualifiedColumns for the router that ran first.
+    let bytes = Aligned(baked("variance\\nedge_density"));
+    let lossy = Model::from_bytes(&bytes.0).unwrap();
+    let gate = Model::from_bytes(&bytes.0).unwrap();
+    let lossless = Model::from_bytes(&bytes.0).unwrap();
+    let mut picker = MetaPicker::new(&lossy).with_router(&gate, &lossless);
+    let feats = [
+        fr("variance@11111111", 1.0),
+        fr("edge_density@22222222", 2.0),
+    ];
+    let offer = Offer::new(&feats, Provenance::new("0.2.7"));
+    let est = [0u32; CodecFamily::COUNT];
+    let mode = zenpredict::EncodeMode::QueuedBalanced;
+    for (target, router) in [
+        (QualityTarget::Zq(80.0), RouterKind::Gate),
+        (QualityTarget::Lossless, RouterKind::Lossless),
+    ] {
+        let all = AllowedFamilies::all();
+        assert_eq!(
+            picker.route(&offer, target, all, mode, None, &est).unwrap(),
+            None
+        );
+        let d = picker
+            .route_or_heuristic(&offer, target, all, mode, None, &est)
+            .unwrap()
+            .expect("heuristic decision");
+        assert_eq!(
+            Some(d.family()),
+            family_rule(&offer, target, all, mode, None, &est)
+        );
+        let RouteSource::Heuristic(FallbackReason::UnqualifiedColumns { router: r, .. }) =
+            d.source()
+        else {
+            panic!("expected UnqualifiedColumns, got {:?}", d.source());
+        };
+        assert_eq!(*r, router);
+        let RouteSource::Heuristic(reason) = d.source() else {
+            unreachable!()
+        };
+        assert_eq!(
+            reason.to_string(),
+            format!(
+                "{} router disabled: its columns are not qualified name@hash identities",
+                router.label()
+            )
+        );
+    }
 }

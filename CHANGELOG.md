@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **zenpicker: `default_route` no longer returns a silent `None` when a router cannot score
+  the offer.** The three shipped routers pin `chroma_subsample_dct_loss@48f0f976` (drifted
+  2026-07-03/05) and the pre-version-2 chroma–luma covariances, so since early July every live
+  offer made `default_route` return `Ok(None)`. Callers then fell back to `family_rule` without
+  knowing why. `default_route` now runs the `family_rule` heuristic itself and marks the decision
+  `RouteSource::Heuristic(FallbackReason::FeatureDrift { router, features })`, listing every
+  unsatisfied column with the offer's own identity for it. `Ok(None)` now only means that no
+  family survives the masks. `MetaPicker::route` keeps its re-extract contract (`Ok(None)` on a
+  miss). The routers are disabled pending a retrain on a new dataset; see zenpicker/README.md
+  "Router status". New CI step and `just zenpicker-live-route`: real codec-corpus `gb82` images
+  through `default_route`. It fails on a silent `None` or on a change to the known drift set.
+
 - **`chroma_luma_covariance_cb` / `_cr` are exactly 0.0 for grayscale input
   (feature value change, `feature_defs_version` 1 → 2).** Chroma was
   `(B − Y)/255` with the rounded f32 luma, so gray pixels carried a
@@ -53,6 +65,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The library no longer enables `archmage/testable_dispatch` for its consumers. Cargo unifies features, so it reached every downstream build and turned each archmage `summon()` there into a cache read, even for the x86-64 baseline token. The tier benches get it from the new dev-only `_dev` feature: `cargo bench --bench tier_isolation --features _dev`.
 
 ### Added
+
+- zenpicker (additive public API, for owner review): `RouteDecision::source()`,
+  `RouteSource` {`Model`, `Heuristic(FallbackReason)`} (`Eq`), `FallbackReason`
+  {`FeatureDrift { router, features }`, `UnqualifiedColumns { router }`} (`Eq`, `Display`),
+  `RouterKind` {`Gate`, `Lossy`, `Lossless`} with `label()`, `FeatureMismatch { wanted, offered }`,
+  and `MetaPicker::route_or_heuristic`. The new enums, both struct-like variants and the struct
+  are `#[non_exhaustive]`, so fields and variants can be added without a break.
 
 - Local `zenpicker-train`: opt-in measured encode-time budgets keep byte and scalar targets on the same eligible candidate and refuse unreachable image targets (`01088356`).
 
