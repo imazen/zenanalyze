@@ -68,9 +68,10 @@ pub enum ScoreTransform {
     ///
     /// Computed via `f32::exp` under `std` and `libm::expf` under
     /// no_std (`libm` is an unconditional dependency), so both build
-    /// configurations apply a true `exp` and produce the same
-    /// linear-space argmin — `ArgminOffsets` in linear-byte space mix
-    /// correctly with the exponentiated scores either way.
+    /// configurations apply a true `exp` — `ArgminOffsets` in
+    /// linear-byte space mix correctly with the exponentiated scores
+    /// either way. The two `exp`s can differ in the last bit, which can
+    /// only change the pick between near-tied cells.
     Exp,
 }
 
@@ -601,8 +602,8 @@ fn clamped_exp(x: f32) -> f32 {
     {
         // `core` has no `f32::exp`, but `libm` is an unconditional
         // dependency (it backs `ln` / `ln_1p` in `feature_transform`),
-        // so no_std computes a true `exp` — same linear-space argmin as
-        // the std path, no silent degradation.
+        // so no_std computes a true `exp` (possibly a last-bit different
+        // value from std's platform `exp`), no silent degradation.
         libm::expf(x)
     }
 }

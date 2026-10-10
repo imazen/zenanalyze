@@ -30,10 +30,13 @@ name = "zenpredict"
 
 [features]
 default = ["std", "simd"]
-# `std::error::Error` trait impls only. All numeric work (including
-# `f32::exp` for `argmin::ScoreTransform::Exp`) runs identically on
-# `no_std + alloc` via the unconditional `libm` dependency — no
-# transform degrades when `std` is off.
+# `std::error::Error` impls, plus the `std` float paths. `no_std + alloc`
+# computes the same functions (nothing is missing or approximated), but
+# not always the same bits: Dense layers accumulate with `a * b + c` (two
+# roundings) instead of the fused `f32::mul_add`, and the feature
+# transforms / `ScoreTransform::Exp` call the `libm` crate where `std`
+# calls the platform's `f32::{exp, ln, ln_1p, powf, cbrt}`. Expect
+# last-bit differences between a `std` and a `no_std` build.
 std = []
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety

@@ -107,11 +107,15 @@
 //!
 //! ## no_std
 //!
-//! `default-features = false` keeps the crate `no_std + alloc`. The
-//! `std` feature adds only `std::error::Error` impls; all numeric
-//! work — including `f32::exp` for [`ScoreTransform::Exp`] — runs
-//! identically on no_std via the unconditional `libm` dependency, so
-//! there is no degraded transform path.
+//! `default-features = false` keeps the crate `no_std + alloc`. It
+//! computes the same functions — no transform is missing or approximated —
+//! but not always the same bits as a `std` build: Dense layers accumulate
+//! with `a * b + c` (two roundings) instead of the fused `f32::mul_add`
+//! (see `inference::fma`), and the feature transforms and
+//! [`ScoreTransform::Exp`] call the `libm` crate where `std` calls the
+//! platform's `f32::{exp, ln, ln_1p, powf, cbrt}`. Expect last-bit
+//! differences between the two builds; within one build, results are
+//! deterministic.
 //!
 //! ## Crate boundary
 //!
