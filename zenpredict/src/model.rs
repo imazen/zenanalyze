@@ -390,6 +390,13 @@ pub struct Model {
     /// doesn't consume params (e.g., `Identity`, `Log1p`,
     /// `SignedLog1p`). Required for V0_20 parameterized variants.
     feature_transform_params: Option<alloc::vec::Vec<alloc::vec::Vec<f32>>>,
+    /// Per layer: an f16 layer's weights decoded to f32 once at load (with
+    /// [`crate::inference::f16_bits_to_f32`], the decode the f16 kernel
+    /// applies per weight per call), `None` for f32/i8 layers. The forward
+    /// pass runs these layers through the f32 kernel, whose loop and `fma`
+    /// order are the f16 kernel's, so outputs are bit-identical while the
+    /// per-call branchy software decode is gone. Costs 4 bytes per f16 weight.
+    f16_decoded: alloc::vec::Vec<Option<alloc::boxed::Box<[f32]>>>,
 }
 
 impl Model {
@@ -711,13 +718,31 @@ impl Model {
             }
         }
 
-        Ok(Self {
+        let mut model = Self {
             bytes,
             header,
             layer_offsets,
             feature_transforms,
             feature_transform_params,
-        })
+            f16_decoded: alloc::vec::Vec::new(),
+        };
+        model.f16_decoded = (0..model.layer_offsets.len())
+            .map(|idx| match model.materialize_layer(idx).weights {
+                WeightStorage::F16(w) => Some(
+                    w.iter()
+                        .map(|&h| crate::inference::f16_bits_to_f32(h))
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        Ok(model)
+    }
+
+    /// Layer `idx`'s f16 weights decoded to f32 at load; `None` for an
+    /// f32 or i8 layer. See the `f16_decoded` field.
+    pub(crate) fn decoded_f16_weights(&self, idx: usize) -> Option<&[f32]> {
+        self.f16_decoded.get(idx)?.as_deref()
     }
 
     pub fn header(&self) -> &Header {

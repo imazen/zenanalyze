@@ -79,7 +79,7 @@ pub fn forward(
             &mut output_buf[..out_dim]
         };
         let src = &input_buf[..in_dim];
-        layer_forward(&layer, src, dst)?;
+        layer_forward(&layer, model.decoded_f16_weights(idx), src, dst)?;
         if idx != last_idx {
             core::mem::swap(&mut input_buf, &mut output_buf);
         }
@@ -87,7 +87,16 @@ pub fn forward(
     Ok(())
 }
 
-fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) -> Result<(), PredictError> {
+/// `decoded` is an f16 layer's weights decoded to f32 at load
+/// ([`Model`]'s cache). The f32 kernel then runs the f16 kernel's exact
+/// loop and `fma` sequence on the same values, so the result is
+/// bit-identical without decoding each weight on every call.
+fn layer_forward(
+    layer: &LayerView<'_>,
+    decoded: Option<&[f32]>,
+    src: &[f32],
+    dst: &mut [f32],
+) -> Result<(), PredictError> {
     let out_dim = layer.out_dim;
     let in_dim = layer.in_dim;
     debug_assert_eq!(src.len(), in_dim);
@@ -101,7 +110,10 @@ fn layer_forward(layer: &LayerView<'_>, src: &[f32], dst: &mut [f32]) -> Result<
         }
         WeightStorage::F16(w) => {
             dst.copy_from_slice(layer.biases);
-            saxpy_matmul_f16(src, w, dst, in_dim, out_dim);
+            match decoded {
+                Some(d) => saxpy_matmul_f32(src, d, dst, in_dim, out_dim),
+                None => saxpy_matmul_f16(src, w, dst, in_dim, out_dim),
+            }
         }
         WeightStorage::I8 { weights, scales } => {
             // Per-output `scales[o]` only applies to the SAXPY
@@ -367,6 +379,55 @@ mod simd_parity_tests {
         (128, 1),
         (128, 3),
     ];
+
+    /// `Model` decodes f16 layers once at load and runs them through the f32
+    /// kernel. That must equal the f16 kernel bit for bit, on every tier, for
+    /// every binary16 pattern (zeros, subnormals, infinities, NaNs), with
+    /// exact-zero and negative-zero inputs (the kernels' skip test), including
+    /// the 820-input E33 first-layer shape.
+    #[test]
+    fn decoded_f16_through_f32_kernel_matches_f16_kernel_bitwise() {
+        let st = ScalarToken::summon().expect("ScalarToken is always available");
+        let mut rng = Rng(0xf16d_ec0d_e5ee_d001);
+        for &(in_dim, out_dim) in SHAPES.iter().chain(&[(820, 128), (420, 128)]) {
+            let src: Vec<f32> = (0..in_dim)
+                .map(|i| match i % 7 {
+                    0 => 0.0,
+                    1 => -0.0,
+                    _ => rng.next_f32(),
+                })
+                .collect();
+            let bias: Vec<f32> = (0..out_dim).map(|_| rng.next_f32()).collect();
+            let w16: Vec<u16> = (0..in_dim * out_dim)
+                .map(|_| (rng.next_u32() & 0xffff) as u16)
+                .collect();
+            let decoded: Vec<f32> = w16.iter().map(|&h| super::f16_bits_to_f32(h)).collect();
+            let mut f16_path = bias.clone();
+            let mut f32_path = bias.clone();
+            saxpy_matmul_f16(&src, &w16, &mut f16_path, in_dim, out_dim);
+            saxpy_matmul_f32(&src, &decoded, &mut f32_path, in_dim, out_dim);
+            assert_bits(
+                &f16_path,
+                &f32_path,
+                "f16 vs decoded f32",
+                in_dim,
+                out_dim,
+                "dispatch",
+            );
+            let mut f16_scalar = bias.clone();
+            let mut f32_scalar = bias.clone();
+            saxpy_matmul_f16_scalar(st, &src, &w16, &mut f16_scalar, in_dim, out_dim);
+            saxpy_matmul_f32_scalar(st, &src, &decoded, &mut f32_scalar, in_dim, out_dim);
+            assert_bits(
+                &f16_scalar,
+                &f32_scalar,
+                "f16 vs decoded f32",
+                in_dim,
+                out_dim,
+                "scalar",
+            );
+        }
+    }
 
     #[test]
     fn dispatcher_and_scalar_variant_agree_bitwise() {

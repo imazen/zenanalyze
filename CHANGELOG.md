@@ -138,6 +138,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **zenpredict: f16 layers run at f32-kernel speed, bit-identical.** `Model` decodes each f16
+  layer's weights to f32 once at load, using the same `f16_bits_to_f32`, and `forward` runs those
+  layers through `saxpy_matmul_f32`, which has the f16 kernel's exact loop, zero-skip and `fma`
+  order. The per-call branchy software decode had kept the f16 loop from vectorizing: about
+  0.74 ns per weight per call on a v3 (AVX2) host. The cost is 4 bytes per f16 weight. The new
+  test `decoded_f16_through_f32_kernel_matches_f16_kernel_bitwise` covers every binary16 pattern
+  on the dispatched and scalar tiers. Found by zensim's E33 runtime gate, where an 820×128 f16
+  first layer cost about 40 µs more per call than a 410×128 one.
+
 - **`analyze_features(SUPPORTED)` is 1.04× faster at 1 MP, 1.11× at 4 MP and up
   to 1.35× at 16 MP, with byte-identical output** (`103c5b1b`, `cca3c625`).
   Two changes, each measured as an interleaved A/B of two prebuilt binaries over
