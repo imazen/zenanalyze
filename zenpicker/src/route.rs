@@ -15,6 +15,7 @@
 //! over the surviving families via [`RouteDecision::resolve`].
 
 use crate::{AllowedFamilies, CodecFamily};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 /// The 6 lossy codec pairs the baked lossy router scores, **in output-neuron order** — the
@@ -130,6 +131,99 @@ pub struct RouteDecision {
     family: CodecFamily,
     lossless: bool,
     ranked: Vec<CodecFamily>,
+    source: RouteSource,
+}
+
+/// Which path produced a [`RouteDecision`]: the baked router models, or the
+/// [`family_rule`] heuristic because a router could not score the offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RouteSource {
+    /// The router models scored the offer.
+    Model,
+    /// A router could not score the offer, so the [`family_rule`] heuristic decided.
+    /// The reason names the router and every feature it could not get.
+    Heuristic(FallbackReason),
+}
+
+/// Which of the three shipped router models a [`FallbackReason`] refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RouterKind {
+    /// The lossy|lossless auto-gate.
+    Gate,
+    /// The lossy family router.
+    Lossy,
+    /// The lossless family router.
+    Lossless,
+}
+
+impl RouterKind {
+    /// Lowercase label for logs: `gate`, `lossy` or `lossless`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Gate => "gate",
+            Self::Lossy => "lossy",
+            Self::Lossless => "lossless",
+        }
+    }
+}
+
+/// One pinned router feature the offer could not supply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FeatureMismatch {
+    /// The router's pinned identity, `name@hex8`.
+    pub wanted: String,
+    /// The offer's identity for the same name (a different code version), or `None` when
+    /// the offer has no feature of that name.
+    pub offered: Option<String>,
+}
+
+/// Why a router could not score an offer (see [`RouteSource::Heuristic`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FallbackReason {
+    /// The offer lacks pinned features, or carries them at a different code version. Every
+    /// unsatisfied column is listed, in the router's column order.
+    #[non_exhaustive]
+    FeatureDrift {
+        /// The router that could not run.
+        router: RouterKind,
+        /// The unsatisfied columns.
+        features: Vec<FeatureMismatch>,
+    },
+    /// The router's columns are not qualified `name@hex8` identities (a pre-qualified bake),
+    /// so it cannot reuse a shared offer at all.
+    #[non_exhaustive]
+    UnqualifiedColumns {
+        /// The router that could not run.
+        router: RouterKind,
+    },
+}
+
+impl core::fmt::Display for FallbackReason {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::FeatureDrift { router, features } => {
+                write!(f, "{} router disabled: feature drift", router.label())?;
+                for (i, m) in features.iter().enumerate() {
+                    let sep = if i == 0 { " " } else { ", " };
+                    match &m.offered {
+                        Some(o) => write!(f, "{sep}{} (offer has {o})", m.wanted)?,
+                        None => write!(f, "{sep}{} (absent)", m.wanted)?,
+                    }
+                }
+                Ok(())
+            }
+            Self::UnqualifiedColumns { router } => write!(
+                f,
+                "{} router disabled: its columns are not qualified name@hash identities",
+                router.label()
+            ),
+        }
+    }
 }
 
 impl RouteDecision {
@@ -149,6 +243,12 @@ impl RouteDecision {
     #[must_use]
     pub fn ranked(&self) -> &[CodecFamily] {
         &self.ranked
+    }
+    /// Which path decided: [`RouteSource::Model`] when the router models scored the offer,
+    /// [`RouteSource::Heuristic`] (with the reason) when [`family_rule`] decided instead.
+    #[must_use]
+    pub fn source(&self) -> &RouteSource {
+        &self.source
     }
 
     /// Compose a decision from a router model's output: per-family scores (**lower = better**,
@@ -182,8 +282,54 @@ impl RouteDecision {
             family: ranked[0],
             lossless,
             ranked,
+            source: RouteSource::Model,
         })
     }
+
+    /// The [`family_rule`] decision over an already-narrowed `viable` set, as a full
+    /// decision tagged with `source` (the fallback path of
+    /// [`MetaPicker::route_or_heuristic`](crate::MetaPicker::route_or_heuristic)).
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub(crate) fn heuristic(
+        target: QualityTarget,
+        viable: AllowedFamilies,
+        source: RouteSource,
+    ) -> Option<Self> {
+        let (ranked, lossless) = rule_ranking(target, viable);
+        let family = *ranked.first()?;
+        Some(Self {
+            family,
+            lossless,
+            ranked,
+            source,
+        })
+    }
+}
+
+/// The one owner of the [`family_rule`] heuristic: the preference list for the target's
+/// mode, filtered to `viable`, best first, and whether that list is the lossless one.
+///
+/// Lossless if the caller asked or the target is at or above [`LOSSLESS_QUALITY`]. If that
+/// forces lossless but no lossless-capable family survives `viable`, the image is still
+/// plainly encodable by whatever lossy-capable family IS allowed, so this falls back to the
+/// lossy list (and reports `lossless = false`) rather than leaving a satisfiable request empty.
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+fn rule_ranking(target: QualityTarget, viable: AllowedFamilies) -> (Vec<CodecFamily>, bool) {
+    let pick = |order: &[CodecFamily]| -> Vec<CodecFamily> {
+        order
+            .iter()
+            .copied()
+            .filter(|&f| viable.is_allowed(f))
+            .collect()
+    };
+    let lossless = target.is_lossless() || target.score_input() >= LOSSLESS_QUALITY;
+    if lossless {
+        let ranked = pick(&LOSSLESS_PREFERENCE);
+        if !ranked.is_empty() {
+            return (ranked, true);
+        }
+    }
+    (pick(&LOSSY_PREFERENCE), false)
 }
 
 /// The families the IMAGE CONTENT can actually use, read from a zenanalyze-api
@@ -286,7 +432,6 @@ pub fn family_rule(
     latency_ms: Option<u32>,
     per_family_est_ms: &[u32; CodecFamily::COUNT],
 ) -> Option<CodecFamily> {
-    let lossless = target.is_lossless() || target.score_input() >= LOSSLESS_QUALITY;
     // viable = allowed ∩ can-represent-the-image (capability) ∩ fits-the-latency-budget.
     // The budget gate is [`AllowedFamilies::viable`]: real-time modes drop any codec whose own
     // per-image encode estimate exceeds `latency_ms` (so a tight RealtimeFastest budget falls
@@ -295,24 +440,7 @@ pub fn family_rule(
         allowed
             .intersect(content_capability(offer))
             .viable(mode, latency_ms, per_family_est_ms);
-    let order: &[CodecFamily] = if lossless {
-        &LOSSLESS_PREFERENCE
-    } else {
-        &LOSSY_PREFERENCE
-    };
-    if let Some(f) = order.iter().copied().find(|&f| viable.is_allowed(f)) {
-        return Some(f);
-    }
-    // Lossless was requested/forced but nothing lossless-capable survived `viable` — the image
-    // is still plainly encodable by whatever lossy-capable family IS allowed, so fall back
-    // rather than returning None for a request that can obviously be satisfied.
-    if lossless {
-        return LOSSY_PREFERENCE
-            .iter()
-            .copied()
-            .find(|&f| viable.is_allowed(f));
-    }
-    None
+    rule_ranking(target, viable).0.first().copied()
 }
 
 #[cfg(test)]
