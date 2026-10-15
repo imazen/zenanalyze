@@ -49,6 +49,43 @@ The **order** is the only place judgment lives, and there are two ways to get it
 
 Both mask to **any subset of available formats** — one, several, or none — so the pick is always sane.
 
+## Router status (2026-10-10): disabled pending retrain
+
+**The shipped routers cannot score any live image from current zenanalyze, so `default_route`
+takes the `family_rule` heuristic for every image, and says so.**
+
+**Why.** All three routers pin 101 qualified feature identities. Three of those no longer match
+what zenanalyze produces:
+
+| feature | the routers pin | current zenanalyze | changed |
+|---|---|---|---|
+| `chroma_subsample_dct_loss` | `@48f0f976` | `@fabc9776` | 2026-07-03/05 |
+| `chroma_luma_covariance_cb` | `@3e5ca2e1` | `@733d0d14` | 2026-10-09, feature-defs version 2 |
+| `chroma_luma_covariance_cr` | `@ca45d43f` | `@256868ee` | 2026-10-09, feature-defs version 2 |
+
+A model must not take a feature computed by a different code version, so these columns miss by
+design (`Select::Features`).
+
+**What callers get.**
+- `default_route` returns `Some(decision)`. `decision.source()` is `RouteSource::Heuristic(reason)`,
+  and `decision.family()` is exactly what `family_rule` picks for the same masks.
+- `reason` (a `FallbackReason`) names the router and every unsatisfied column. Its `Display` reads,
+  for example, `gate router disabled: feature drift chroma_luma_covariance_cb@3e5ca2e1 (offer has
+  chroma_luma_covariance_cb@733d0d14), …`. Log it.
+- `ranked()` is the `family_rule` preference order over the viable families. `lossless()` follows
+  the rule: an explicit lossless target, or a target at or above `LOSSLESS_QUALITY` (96).
+- `Ok(None)` still means only that nothing available can encode the image.
+
+Until 2026-10-10, `default_route` returned a silent `Ok(None)` for every image instead, and callers
+fell back to `family_rule` without knowing why. The routers have been in that state since early
+July 2026.
+
+**Next.** The routers will be retrained on a new, larger dataset (owner plan); the heuristic is
+the intermediate behaviour. No re-bake was done here. CI's `zenpicker_live_route` test (root
+crate, real codec-corpus images) fails if a live route ever returns a silent `None`, and fails
+when the drifted set changes. A retrain or a new drift therefore forces this section to be
+updated with the test's `KNOWN_DRIFT`.
+
 ## Quick start
 
 ```toml
@@ -58,7 +95,7 @@ zenpredict = "0.2.0"   # the runtime; provides `Model` and the ZNPR v3 parser
 ```
 
 ```rust,ignore
-use zenpicker::{CodecFamily, QualityTarget, default_route};
+use zenpicker::{CodecFamily, QualityTarget, RouteSource, default_route};
 use zenpredict::EncodeMode;
 
 // `offer` is a zenanalyze-api `Offer` (the image's features). Mask to the formats you can emit:
@@ -71,8 +108,13 @@ let decision = default_route(
     &[0; CodecFamily::COUNT],     // per-family encode-time estimates (used by realtime modes)
 )?;
 match decision {
-    Some(d) => { let _family = d.family(); /* → dispatch to that codec's per-codec picker */ }
-    None    => { /* nothing available can encode it, or no features — fall back to family_rule */ }
+    Some(d) => {
+        if let RouteSource::Heuristic(reason) = d.source() {
+            log::info!("{reason}"); // the routers could not score this offer; family_rule decided
+        }
+        let _family = d.family(); // → dispatch to that codec's per-codec picker
+    }
+    None => { /* nothing available can encode the image */ }
 }
 ```
 
@@ -89,7 +131,7 @@ let family: Option<CodecFamily> = family_rule(
 );
 ```
 
-For a hot loop, hold one `MetaPicker::default_routers()` and call `.route(..)` repeatedly — the parsed models are process-static (`OnceLock`); only the per-call `Predictor` scratch is rebuilt.
+For a hot loop, hold one `MetaPicker::default_routers()` and call `.route_or_heuristic(..)` repeatedly; that is what `default_route` runs. The parsed models are process-static (`OnceLock`); only the per-call `Predictor` scratch is rebuilt. `.route(..)` is the lower-level call: it returns `Ok(None)` when the offer can't satisfy a router, so that a caller can run its own analysis pass and retry.
 
 ## `pick` vs `route`
 
@@ -148,7 +190,7 @@ Adding a `CodecFamily` variant is a breaking change for any baked meta-picker th
 
 ## Status
 
-The shipped routers (`MetaPicker::default_routers`) are baked and wired: an **f32 6-pairwise-discriminant lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on the zensim-A retrain (7f4d914) — the median pick is the oracle, the loss is a thin tail concentrated on tiny images), plus **i8** auto-gate + lossless family routers, all trained on confound-corrected sweep data (no re-sweep). `default_route` is the one-call entry, masked by available format. Methodology + the per-percentile RD distribution: zenmetrics `docs/HOW_THE_PICKER_DECIDES.md`.
+**Routers currently disabled by feature drift; see [Router status](#router-status-2026-10-10-disabled-pending-retrain).** The shipped routers (`MetaPicker::default_routers`) are baked and wired: an **f32 6-pairwise-discriminant lossy router** (held-out **7.16% mean / 22.05% p90** extra bytes vs the perfect oracle on the zensim-A retrain (7f4d914) — the median pick is the oracle, the loss is a thin tail concentrated on tiny images), plus **i8** auto-gate + lossless family routers, all trained on confound-corrected sweep data (no re-sweep). `default_route` is the one-call entry, masked by available format. Methodology + the per-percentile RD distribution: zenmetrics `docs/HOW_THE_PICKER_DECIDES.md`.
 
 ## License
 

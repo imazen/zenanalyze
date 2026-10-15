@@ -6,24 +6,24 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpicker.txt 108 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 9 lines (9 hidden + 0 excluded-feature)
+# files: zenpicker.txt 131 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 14 lines (14 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 1
-#   pub types (struct/enum/trait/alias)        11
-#   pub consts/statics                         22
+#   pub types (struct/enum/trait/alias)        15
+#   pub consts/statics                         23
 #   free functions                              3
-#   inherent methods                           39
-#   struct fields                               4
-#   enum variants                              18
-#   trait roster entries (type × trait)        42
-#   auto-trait-complete types                  11
+#   inherent methods                           41
+#   struct fields                               9
+#   enum variants                              25
+#   trait roster entries (type × trait)        60
+#   auto-trait-complete types                  15
 #
 # per-module pub lines:
-#   (root)                           98
+#   (root)                          117
 
-## items (98 lines)
+## items (117 lines)
 
 pub mod zenpicker
 #[non_exhaustive] pub enum CellMode
@@ -41,6 +41,12 @@ pub const CodecFamily::ALL: [CodecFamily; 6]
 pub const CodecFamily::COUNT: usize
 pub const fn CodecFamily::index(self) -> usize
 pub const fn CodecFamily::label(self) -> &'static str
+#[non_exhaustive] pub enum FallbackReason
+#[non_exhaustive] pub FallbackReason::FeatureDrift
+pub FallbackReason::FeatureDrift::features: alloc::vec::Vec<FeatureMismatch>
+pub FallbackReason::FeatureDrift::router: RouterKind
+#[non_exhaustive] pub FallbackReason::UnqualifiedColumns
+pub FallbackReason::UnqualifiedColumns::router: RouterKind
 #[non_exhaustive] pub enum MetaPickerError
 pub MetaPickerError::CellContract(alloc::string::String)
 pub MetaPickerError::FamilyOrderMismatch
@@ -59,6 +65,14 @@ pub QualityTarget::Ssim2(f32)
 pub QualityTarget::Zq(f32)
 pub const fn QualityTarget::is_lossless(self) -> bool
 pub const fn QualityTarget::score_input(self) -> f32
+#[non_exhaustive] pub enum RouteSource
+pub RouteSource::Heuristic(FallbackReason)
+pub RouteSource::Model
+#[non_exhaustive] pub enum RouterKind
+pub RouterKind::Gate
+pub RouterKind::Lossless
+pub RouterKind::Lossy
+pub const fn RouterKind::label(self) -> &'static str
 pub struct AllowedFamilies
 pub const AllowedFamilies::LOSSLESS: Self
 pub const AllowedFamilies::LOSSY: Self
@@ -96,6 +110,9 @@ pub struct FamilyModeCell
 pub fn FamilyModeCell::family(&self) -> CodecFamily
 pub fn FamilyModeCell::label(&self) -> &str
 pub fn FamilyModeCell::mode(&self) -> CellMode
+#[non_exhaustive] pub struct FeatureMismatch
+pub FeatureMismatch::offered: core::option::Option<alloc::string::String>
+pub FeatureMismatch::wanted: alloc::string::String
 pub struct MetaPicker<'b>
 pub fn MetaPicker<'static>::default_routers() -> Self
 pub fn MetaPicker<'b>::feature_request(&self) -> core::option::Option<zenanalyze_api::Request<'_>>
@@ -103,6 +120,7 @@ pub fn MetaPicker<'b>::new(&'b zenpredict::model::Model) -> Self
 pub fn MetaPicker<'b>::pick(&mut self, &[f32], &AllowedFamilies) -> core::result::Result<core::option::Option<CodecFamily>, MetaPickerError>
 pub fn MetaPicker<'b>::predictor(&mut self) -> &mut zenpredict::predictor::Predictor<'b>
 pub fn MetaPicker<'b>::route(&mut self, &zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
+pub fn MetaPicker<'b>::route_or_heuristic(&mut self, &zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
 pub fn MetaPicker<'b>::validate_family_order(&mut self) -> core::result::Result<(), MetaPickerError>
 pub fn MetaPicker<'b>::with_router(self, &'b zenpredict::model::Model, &'b zenpredict::model::Model) -> Self
 pub struct RouteDecision
@@ -110,6 +128,7 @@ pub fn RouteDecision::family(&self) -> CodecFamily
 pub fn RouteDecision::lossless(&self) -> bool
 pub fn RouteDecision::ranked(&self) -> &[CodecFamily]
 pub fn RouteDecision::resolve(bool, &[f32; 6], AllowedFamilies) -> core::option::Option<Self>
+pub fn RouteDecision::source(&self) -> &RouteSource
 pub const ALL_LABELS_CSV: &str
 pub const CELL_LABELS_KEY: &str
 pub const FAMILY_ORDER_KEY: &str
@@ -124,18 +143,22 @@ pub fn content_capability(&zenanalyze_api::Offer<'_>) -> AllowedFamilies
 pub fn default_route(&zenanalyze_api::Offer<'_>, QualityTarget, &[CodecFamily], zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::result::Result<core::option::Option<RouteDecision>, MetaPickerError>
 pub fn family_rule(&zenanalyze_api::Offer<'_>, QualityTarget, AllowedFamilies, zenpredict::encode_strategy::EncodeMode, core::option::Option<u32>, &[u32; 6]) -> core::option::Option<CodecFamily>
 
-## trait impls (9 types)
+## trait impls (13 types)
 
 AllowedFamilies: Clone, Copy, Debug, Eq, PartialEq
 CellContract: Clone, Debug, Eq, PartialEq
 CellMode: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 CellPrediction<'c>: Clone, Debug, PartialEq
 CodecFamily: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+FallbackReason: Clone, Debug, Display, Eq, PartialEq
 FamilyModeCell: Clone, Debug, Eq, PartialEq
+FeatureMismatch: Clone, Debug, Eq, PartialEq
 MetaPickerError: Debug, Display, Error
 QualityTarget: Clone, Copy, Debug, PartialEq
 RouteDecision: Clone, Debug, PartialEq
+RouteSource: Clone, Debug, Eq, PartialEq
+RouterKind: Clone, Copy, Debug, Eq, PartialEq
 
 ## auto traits
 
-11 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+15 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

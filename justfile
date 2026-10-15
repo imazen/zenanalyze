@@ -147,3 +147,8 @@ magetypes030-clippy:
 # Run every workspace test with the real external model fixtures explicitly supplied.
 magetypes030-workspace-test metapicker bake:
     ZENPICKER_METAPICKER_V1_BAKE="{{metapicker}}" ZENPREDICT_VIZ_BAKES="{{bake}}" cargo test --workspace --features hdr,zenpredict/advanced,zenpredict-bake/fit-yj,zenpredict-viz/onnx-export,zenpredict-viz/feature-catalog
+
+# Live check of the shipped zenpicker routers on real images (codec-corpus gb82):
+# model route or reported heuristic fallback, never a silent None. CI runs this.
+zenpicker-live-route:
+    cargo test --features "api,hdr" --test zenpicker_live_route -- --nocapture

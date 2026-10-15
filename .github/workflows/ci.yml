@@ -75,6 +75,13 @@ jobs:
           cargo test --features "api,hdr" --doc
           cargo clippy -p zenanalyze-api --all-targets -- -D warnings
           cargo test -p zenanalyze-api
+      - name: Live zenpicker routes (real images through default_route)
+        # Real codec-corpus `gb82` images -> this build's offer -> the shipped routers.
+        # Fails on a silent None and on any change to the known router feature drift
+        # (KNOWN_DRIFT in the test; update it with zenpicker/README.md "Router status").
+        # Downloads gb82 on first use; a failed download fails the step.
+        if: matrix.features == 'experimental,hdr' && matrix.os == 'ubuntu-latest'
+        run: cargo test --features "api,hdr" --test zenpicker_live_route -- --nocapture
       - name: Build zenpicker
         run: cargo build -p zenpicker
       - name: Test zenpicker

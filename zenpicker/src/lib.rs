@@ -83,7 +83,8 @@ pub use cell::{
 
 mod route;
 pub use route::{
-    LOSSLESS_PREFERENCE, LOSSLESS_QUALITY, LOSSY_PREFERENCE, QualityTarget, RouteDecision,
+    FallbackReason, FeatureMismatch, LOSSLESS_PREFERENCE, LOSSLESS_QUALITY, LOSSY_PREFERENCE,
+    QualityTarget, RouteDecision, RouteSource, RouterKind,
 };
 #[cfg(feature = "api")]
 pub use route::{content_capability, family_rule};
@@ -334,24 +335,63 @@ fn parse_wants(model: &Model) -> Option<alloc::vec::Vec<zenanalyze_api::NamedFea
 
 /// Materialize a model's input vector from a shared offer (reuse its feature columns), append
 /// an optional scalar routing input (the target quality), and run the forward pass.
-/// `Ok(None)` when the offer can't satisfy the model's columns — the caller runs its own pass.
+/// `Err(reason)` inside `Ok` when the offer can't satisfy the model's columns: the reason
+/// lists every unsatisfied column, so a caller can re-extract or fall back knowingly.
 #[cfg(feature = "api")]
 fn score(
     pred: &mut Predictor<'_>,
+    router: RouterKind,
     wants: Option<&[zenanalyze_api::NamedFeature<'_>]>,
     offer: &zenanalyze_api::Offer<'_>,
     extra: Option<f32>,
-) -> Result<Option<alloc::vec::Vec<f32>>, MetaPickerError> {
-    let Some(w) = wants else { return Ok(None) };
+) -> Result<Result<alloc::vec::Vec<f32>, FallbackReason>, MetaPickerError> {
+    let Some(w) = wants else {
+        return Ok(Err(FallbackReason::UnqualifiedColumns { router }));
+    };
     let req = zenanalyze_api::Request::new(zenanalyze_api::Select::Features(w));
     let Some(mut x) = offer.reuse_for(&req) else {
-        return Ok(None);
+        // The same predicate `reuse_for` applies: a want is satisfied iff some offer cell
+        // carries exactly its qualified identity.
+        let features: alloc::vec::Vec<FeatureMismatch> = w
+            .iter()
+            .filter(|want| {
+                !offer
+                    .features()
+                    .iter()
+                    .any(|have| have.feature().qualified_name() == want.qualified_name())
+            })
+            .map(|want| FeatureMismatch {
+                wanted: want.qualified_name().into(),
+                offered: offer
+                    .get(want.name())
+                    .map(|have| have.feature().qualified_name().into()),
+            })
+            .collect();
+        debug_assert!(
+            !features.is_empty(),
+            "reuse_for missed but every want is present"
+        );
+        return Ok(Err(FallbackReason::FeatureDrift { router, features }));
     };
     if let Some(e) = extra {
         x.push(e);
     }
     let out = pred.predict(&x).map_err(MetaPickerError::Predict)?;
-    Ok(Some(out.to_vec()))
+    Ok(Ok(out.to_vec()))
+}
+
+/// What [`MetaPicker::route`]'s pipeline reached, before the public entry points map it.
+#[cfg(feature = "api")]
+enum Routed {
+    /// The router models decided.
+    Decision(RouteDecision),
+    /// No family survives the caller/content/latency masks.
+    NoViableFamily,
+    /// A router could not score the offer; `viable` is the already-narrowed family set.
+    Unscored {
+        reason: FallbackReason,
+        viable: AllowedFamilies,
+    },
 }
 
 impl<'b> MetaPicker<'b> {
@@ -494,6 +534,8 @@ impl<'b> MetaPicker<'b> {
     /// `Ok(None)` when no family survives the masks, or the offer can't satisfy a model's
     /// columns (the caller runs its own analysis pass); `Err` on a model/runtime error or a
     /// missing router model.
+    /// For a decision on every satisfiable request, with the reason reported when a router
+    /// cannot run, use [`route_or_heuristic`](Self::route_or_heuristic).
     #[cfg(feature = "api")]
     pub fn route(
         &mut self,
@@ -504,14 +546,73 @@ impl<'b> MetaPicker<'b> {
         latency_ms: Option<u32>,
         per_family_est_ms: &[u32; CodecFamily::COUNT],
     ) -> Result<Option<RouteDecision>, MetaPickerError> {
+        Ok(
+            match self.route_inner(offer, target, allowed, mode, latency_ms, per_family_est_ms)? {
+                Routed::Decision(d) => Some(d),
+                Routed::NoViableFamily | Routed::Unscored { .. } => None,
+            },
+        )
+    }
+
+    /// [`route`](Self::route), but when a router cannot score `offer` (its pinned features
+    /// are absent or drifted, or its columns are unqualified) the [`family_rule`] heuristic
+    /// decides instead, over the same caller/content/latency masks. The decision says which
+    /// path ran: [`RouteDecision::source`] is [`RouteSource::Model`] or
+    /// [`RouteSource::Heuristic`] with a [`FallbackReason`] naming the router and every
+    /// unsatisfied feature (its `Display` reads "lossy router disabled: feature drift …").
+    ///
+    /// `Ok(None)` only when no family survives the masks; there is no silent `None` for
+    /// missing features. Use [`route`](Self::route) instead when a miss should mean "run my
+    /// own analysis pass".
+    ///
+    /// If the gate scores but the chosen branch router cannot, the heuristic decides lossy vs
+    /// lossless from the target alone and the gate's answer is not used. (With the shipped
+    /// routers this cannot happen: all three share the drifted columns, so the gate fails first.)
+    #[cfg(feature = "api")]
+    pub fn route_or_heuristic(
+        &mut self,
+        offer: &zenanalyze_api::Offer<'_>,
+        target: QualityTarget,
+        allowed: AllowedFamilies,
+        mode: zenpredict::EncodeMode,
+        latency_ms: Option<u32>,
+        per_family_est_ms: &[u32; CodecFamily::COUNT],
+    ) -> Result<Option<RouteDecision>, MetaPickerError> {
+        Ok(
+            match self.route_inner(offer, target, allowed, mode, latency_ms, per_family_est_ms)? {
+                Routed::Decision(d) => Some(d),
+                Routed::NoViableFamily => None,
+                Routed::Unscored { reason, viable } => {
+                    RouteDecision::heuristic(target, viable, RouteSource::Heuristic(reason))
+                }
+            },
+        )
+    }
+
+    #[cfg(feature = "api")]
+    fn route_inner(
+        &mut self,
+        offer: &zenanalyze_api::Offer<'_>,
+        target: QualityTarget,
+        allowed: AllowedFamilies,
+        mode: zenpredict::EncodeMode,
+        latency_ms: Option<u32>,
+        per_family_est_ms: &[u32; CodecFamily::COUNT],
+    ) -> Result<Routed, MetaPickerError> {
         let allowed = allowed.intersect(content_capability(offer)).viable(
             mode,
             latency_ms,
             per_family_est_ms,
         );
         if !allowed.any() {
-            return Ok(None);
+            return Ok(Routed::NoViableFamily);
         }
+        let unscored = |reason| {
+            Ok(Routed::Unscored {
+                reason,
+                viable: allowed,
+            })
+        };
         // auto-gate: an explicit Lossless target bypasses the model
         let lossless = if target.is_lossless() {
             true
@@ -520,16 +621,17 @@ impl<'b> MetaPicker<'b> {
                 self.gate
                     .as_mut()
                     .ok_or(MetaPickerError::RouterIncomplete)?,
+                RouterKind::Gate,
                 self.gate_wants.as_deref(),
                 offer,
                 Some(target.score_input()),
             )?;
-            // `None` means the gate's columns aren't unqualified / the offer can't satisfy
-            // them — per this fn's contract that's `Ok(None)` (the caller re-extracts), NOT a
-            // silent default to the lossy branch. A wrong output count is a genuine
-            // model/schema error, surfaced the same way the branch routers' shape check is.
-            let Some(v) = g else {
-                return Ok(None);
+            // An unsatisfiable gate is reported, NOT a silent default to the lossy branch.
+            // A wrong output count is a genuine model/schema error, surfaced the same way the
+            // branch routers' shape check is.
+            let v = match g {
+                Ok(v) => v,
+                Err(reason) => return unscored(reason),
             };
             if v.len() < 2 {
                 return Err(MetaPickerError::OutputShape {
@@ -546,6 +648,7 @@ impl<'b> MetaPicker<'b> {
                     self.lossless
                         .as_mut()
                         .ok_or(MetaPickerError::RouterIncomplete)?,
+                    RouterKind::Lossless,
                     self.lossless_wants.as_deref(),
                     offer,
                     None,
@@ -556,14 +659,16 @@ impl<'b> MetaPicker<'b> {
                 AllowedFamilies::LOSSY,
                 score(
                     &mut self.predictor,
+                    RouterKind::Lossy,
                     self.wants.as_deref(),
                     offer,
                     Some(target.score_input()),
                 )?,
             )
         };
-        let Some(scored) = scored else {
-            return Ok(None);
+        let scored = match scored {
+            Ok(s) => s,
+            Err(reason) => return unscored(reason),
         };
         // Both family routers and the lossy pairwise router emit `CodecFamily::COUNT` outputs,
         // but they mean different things: the lossless router emits per-family scores
@@ -592,11 +697,12 @@ impl<'b> MetaPicker<'b> {
             // 6 pairwise margins → per-family round-robin scores (lower = better; png/gif last).
             route::pairwise_round_robin(&scored)
         };
-        Ok(RouteDecision::resolve(
-            lossless,
-            &scores,
-            allowed.intersect(branch),
-        ))
+        Ok(
+            match RouteDecision::resolve(lossless, &scores, allowed.intersect(branch)) {
+                Some(d) => Routed::Decision(d),
+                None => Routed::NoViableFamily,
+            },
+        )
     }
 
     /// Read the [`FAMILY_ORDER_KEY`] (`zenpicker.family_order`)
@@ -675,16 +781,24 @@ impl MetaPicker<'static> {
 /// )?;
 /// ```
 ///
-/// Equivalent to `MetaPicker::default_routers().route(offer, target,
+/// Equivalent to `MetaPicker::default_routers().route_or_heuristic(offer, target,
 /// AllowedFamilies::from_allowed(available), mode, latency_ms, per_family_est_ms)`. The format mask
 /// composes with the content-capability mask (alpha/HDR) and the latency-`viable` mask inside
 /// [`route`](MetaPicker::route).
 ///
-/// For a hot loop, hold one [`MetaPicker::default_routers`] and call [`route`](MetaPicker::route)
-/// repeatedly — this rebuilds the `Predictor` scratch each call (the parsed models are
-/// process-static via `OnceLock`, so that part is free). `Ok(None)` when nothing `available` can
-/// encode the image, or the offer lacks the routers' feature columns — fall back to [`family_rule`]
-/// (the no-features, no-model prior).
+/// For a hot loop, hold one [`MetaPicker::default_routers`] and call
+/// [`route_or_heuristic`](MetaPicker::route_or_heuristic) repeatedly — this rebuilds the
+/// `Predictor` scratch each call (the parsed models are process-static via `OnceLock`, so that
+/// part is free).
+///
+/// **When a router cannot score the offer** (its pinned features are absent or at a drifted code
+/// version), this does not return a silent `None`: the [`family_rule`] heuristic decides, and
+/// [`RouteDecision::source`] is [`RouteSource::Heuristic`] with a [`FallbackReason`] naming the
+/// router and every unsatisfied feature. **Current state (2026-10-10):** all three shipped
+/// routers pin `chroma_subsample_dct_loss@48f0f976`, which drifted on 2026-07-03/05, and
+/// `chroma_luma_covariance_{cb,cr}`, which changed in feature-defs version 2, so every live offer
+/// from this zenanalyze takes the heuristic path until the routers are retrained. `Ok(None)` only
+/// when nothing `available` can encode the image.
 #[cfg(all(feature = "std", feature = "api"))]
 pub fn default_route(
     offer: &zenanalyze_api::Offer<'_>,
@@ -694,7 +808,7 @@ pub fn default_route(
     latency_ms: Option<u32>,
     per_family_est_ms: &[u32; CodecFamily::COUNT],
 ) -> Result<Option<RouteDecision>, MetaPickerError> {
-    MetaPicker::default_routers().route(
+    MetaPicker::default_routers().route_or_heuristic(
         offer,
         target,
         AllowedFamilies::from_allowed(available.iter().copied()),
@@ -916,6 +1030,151 @@ mod tests {
             .unwrap()
             .expect("lossless routes");
         assert!(ll.lossless(), "explicit Lossless -> lossless branch");
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    /// The shipped routers' 101 qualified columns as `(name, qualified)`.
+    fn router_columns() -> Vec<(alloc::string::String, alloc::string::String)> {
+        use alloc::string::ToString;
+        let mut r = MetaPicker::default_routers();
+        r.predictor()
+            .model()
+            .feature_columns()
+            .map(|q| (q.split('@').next().unwrap().to_string(), q.to_string()))
+            .collect()
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    /// An offer carrying every router column at value 0.5, with `edit` applied per column:
+    /// `Some(new_qualified)` replaces the identity, `None` drops the column.
+    fn edited_offer_cells(
+        edit: impl Fn(&str, &str) -> Option<alloc::string::String>,
+    ) -> Vec<alloc::string::String> {
+        router_columns()
+            .iter()
+            .filter_map(|(name, q)| edit(name, q))
+            .collect()
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    fn route_both(
+        quals: &[alloc::string::String],
+        target: QualityTarget,
+        allowed: AllowedFamilies,
+    ) -> (
+        Option<RouteDecision>,
+        Option<RouteDecision>,
+        Option<CodecFamily>,
+    ) {
+        let cells: Vec<zenanalyze_api::FeatureResult<'_>> = quals
+            .iter()
+            .map(|q| {
+                zenanalyze_api::FeatureResult::new(
+                    zenanalyze_api::NamedFeature::parse(q).expect("qualified"),
+                    0.5f32,
+                )
+            })
+            .collect();
+        let offer = zenanalyze_api::Offer::new(&cells, zenanalyze_api::Provenance::new("test"));
+        let est = [0u32; CodecFamily::COUNT];
+        let mode = zenpredict::EncodeMode::QueuedBalanced;
+        let mut r = MetaPicker::default_routers();
+        let plain = r.route(&offer, target, allowed, mode, None, &est).unwrap();
+        let fallback = r
+            .route_or_heuristic(&offer, target, allowed, mode, None, &est)
+            .unwrap();
+        let rule = family_rule(&offer, target, allowed, mode, None, &est);
+        (plain, fallback, rule)
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    #[test]
+    fn drifted_feature_falls_back_to_the_rule_and_says_which() {
+        let drifted = "chroma_subsample_dct_loss@00000001";
+        let quals = edited_offer_cells(|name, q| {
+            Some(if name == "chroma_subsample_dct_loss" {
+                drifted.into()
+            } else {
+                q.into()
+            })
+        });
+        let wanted = router_columns()
+            .into_iter()
+            .find(|(n, _)| n == "chroma_subsample_dct_loss")
+            .unwrap()
+            .1;
+        let (plain, fallback, rule) =
+            route_both(&quals, QualityTarget::Zq(80.0), AllowedFamilies::all());
+        assert_eq!(plain, None, "route() keeps its re-extract contract");
+        let d = fallback.expect("a drifted offer still gets a decision");
+        assert_eq!(Some(d.family()), rule, "the heuristic path is family_rule");
+        assert_eq!(d.ranked()[0], d.family());
+        assert!(!d.lossless());
+        // zq80 is not lossless, so the gate runs first and is the router that reports.
+        let RouteSource::Heuristic(reason) = d.source() else {
+            panic!("expected the heuristic source, got {:?}", d.source());
+        };
+        assert_eq!(
+            reason,
+            &FallbackReason::FeatureDrift {
+                router: RouterKind::Gate,
+                features: alloc::vec![FeatureMismatch {
+                    wanted: wanted.clone(),
+                    offered: Some(drifted.into()),
+                }],
+            }
+        );
+        assert_eq!(
+            alloc::format!("{reason}"),
+            alloc::format!("gate router disabled: feature drift {wanted} (offer has {drifted})")
+        );
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    #[test]
+    fn missing_feature_reports_absent_and_lossless_skips_the_gate() {
+        let quals = edited_offer_cells(|name, q| (name != "variance").then(|| q.into()));
+        let (plain, fallback, rule) =
+            route_both(&quals, QualityTarget::Lossless, AllowedFamilies::all());
+        assert_eq!(plain, None);
+        let d = fallback.expect("decision");
+        assert_eq!(Some(d.family()), rule);
+        assert!(
+            d.lossless(),
+            "a lossless target stays lossless on the heuristic path"
+        );
+        let RouteSource::Heuristic(FallbackReason::FeatureDrift { router, features }) = d.source()
+        else {
+            panic!("expected feature drift, got {:?}", d.source());
+        };
+        assert_eq!(
+            *router,
+            RouterKind::Lossless,
+            "explicit Lossless bypasses the gate"
+        );
+        assert_eq!(features.len(), 1);
+        assert!(features[0].wanted.starts_with("variance@"));
+        assert_eq!(features[0].offered, None);
+    }
+
+    #[cfg(all(feature = "std", feature = "api"))]
+    #[test]
+    fn satisfied_offer_is_a_model_route_and_no_viable_family_is_none() {
+        let quals = edited_offer_cells(|_, q| Some(q.into()));
+        let (plain, fallback, _) =
+            route_both(&quals, QualityTarget::Zq(80.0), AllowedFamilies::all());
+        assert_eq!(
+            plain, fallback,
+            "both entry points agree when the routers can run"
+        );
+        assert_eq!(fallback.expect("routes").source(), &RouteSource::Model);
+        // A lossy target with only PNG allowed: nothing can encode it, on either path.
+        let (plain, fallback, rule) = route_both(
+            &quals,
+            QualityTarget::Zq(80.0),
+            AllowedFamilies::from_allowed([CodecFamily::Png]),
+        );
+        assert_eq!((plain, fallback, rule), (None, None, None));
     }
 
     // ── Gate 1: round-trip the baked lossy router's MODEL MATH ─────────────────────────────

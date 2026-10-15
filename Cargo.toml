@@ -132,6 +132,9 @@ zenbench = "0.1.8"
 # dependency graph — dev-only, and neither is a dependency of the library.
 zenpicker = { path = "zenpicker", features = ["api"] }
 zenpredict = { path = "zenpredict" }
+# Real test images for `tests/zenpicker_live_route.rs` (codec-corpus `gb82`), downloaded
+# on first use. Dev-only.
+codec-corpus = "1.1.0"
 
 [[example]]
 name = "render_imazen26_variants"
