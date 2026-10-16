@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict.txt 423 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
+# files: zenpredict.txt 424 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -16,19 +16,19 @@
 #   free functions                             24
 #   inherent methods                           95
 #   struct fields                             102
-#   enum variants                              83
+#   enum variants                              84
 #   trait roster entries (type × trait)       145
 #   auto-trait-complete types                  33
 #
 # per-module pub lines:
-#   (root)                          305
+#   (root)                          306
 #   argmin                           26
 #   keys                             19
 #   limits                            3
 #   output_spec                      33
 #   wire                             17
 
-## items (390 lines)
+## items (391 lines)
 
 pub mod zenpredict
 pub mod argmin
@@ -116,6 +116,7 @@ pub const wire::SECTION_OFF_SPARSE_OVERRIDES: usize
 pub Activation::Identity = 0
 pub Activation::LeakyRelu = 2
 pub Activation::Relu = 1
+pub Activation::SmoothHinge = 3
 pub enum EncodeMode
 pub EncodeMode::QueuedAggressive
 pub EncodeMode::QueuedBalanced

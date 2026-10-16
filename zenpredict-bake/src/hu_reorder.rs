@@ -471,6 +471,15 @@ mod tests {
                 *slot = match layer.activation {
                     Activation::Identity => acc,
                     Activation::Relu => acc.max(0.0),
+                    Activation::SmoothHinge => {
+                        if acc <= 0.0 {
+                            0.0
+                        } else if acc < 0.125 {
+                            (4.0 * acc) * acc
+                        } else {
+                            acc - 0.0625
+                        }
+                    }
                     Activation::LeakyRelu => {
                         if acc < 0.0 {
                             acc * 0.01

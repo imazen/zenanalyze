@@ -60,7 +60,7 @@
 //! ```text
 //! 0..4    in_dim: u32
 //! 4..8    out_dim: u32
-//! 8..9    activation: u8       (0=Identity, 1=Relu, 2=LeakyRelu)
+//! 8..9    activation: u8       (0=Identity, 1=Relu, 2=LeakyRelu, 3=SmoothHinge)
 //! 9..10   weight_dtype: u8     (0=F32, 1=F16, 2=I8)
 //! 10..12  flags: u16           (reserved)
 //! 12..20  weights: Section
@@ -275,6 +275,10 @@ pub enum Activation {
     /// `nn.LeakyReLU` default and what `train_hybrid.py
     /// --activation leakyrelu` emits.
     LeakyRelu = 2,
+    /// Fixed C1 convex hinge, tau = 1/8 in preactivation units.
+    /// Zero for z <= 0, 4*z*z for 0 < z < 1/8, otherwise z - 1/16.
+    /// Wire code 3 fixes the parameter; no per-layer parameter is implied.
+    SmoothHinge = 3,
 }
 
 impl Activation {
@@ -283,6 +287,7 @@ impl Activation {
             0 => Ok(Self::Identity),
             1 => Ok(Self::Relu),
             2 => Ok(Self::LeakyRelu),
+            3 => Ok(Self::SmoothHinge),
             other => Err(PredictError::UnknownActivation { byte: other }),
         }
     }
@@ -1743,4 +1748,20 @@ fn remap_sparse_override_indices(
         chunk[0..4].copy_from_slice(&new_idx.to_le_bytes());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod smooth_hinge_wire_tests {
+    use super::*;
+    #[test]
+    fn fixed_hinge_has_its_own_activation_byte() {
+        assert_eq!(Activation::from_byte(0).unwrap(), Activation::Identity);
+        assert_eq!(Activation::from_byte(1).unwrap(), Activation::Relu);
+        assert_eq!(Activation::from_byte(2).unwrap(), Activation::LeakyRelu);
+        assert_eq!(Activation::from_byte(3).unwrap(), Activation::SmoothHinge);
+        assert!(matches!(
+            Activation::from_byte(4),
+            Err(PredictError::UnknownActivation { byte: 4 })
+        ));
+    }
 }

@@ -314,6 +314,17 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 }
             }
         }
+        Activation::SmoothHinge => {
+            for v in buf.iter_mut() {
+                *v = if *v <= 0.0 {
+                    0.0
+                } else if *v < 0.125 {
+                    (4.0 * *v) * *v
+                } else {
+                    *v - 0.0625
+                };
+            }
+        }
         Activation::LeakyRelu => {
             for v in buf.iter_mut() {
                 if *v < 0.0 {

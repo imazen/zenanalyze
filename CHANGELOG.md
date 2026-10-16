@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > below carries the same not-yet-released work and the verified break list;
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
+### QUEUED BREAKING CHANGES
+
+- Extending ActivationJson with SmoothHinge adds a variant to its exhaustive JSON-side enum; review match sites before release.
+
+### Added
+
+- zenpredict/zenpredict-bake: fixed SmoothHinge activation (wire code3, tau1/8), JSON baking/inspection and runtime support for the zensim steering experiment. Existing activation codes/arithmetic are unchanged.
+
 ### Fixed
 
 - **zenpicker: `default_route` no longer returns a silent `None` when a router cannot score

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict-bake.txt 430 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 9 lines (9 hidden + 0 excluded-feature)
+# files: zenpredict-bake.txt 432 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 9 lines (9 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,20 +15,20 @@
 #   free functions                             23
 #   inherent methods                           24
 #   struct fields                             242
-#   enum variants                             105
+#   enum variants                             107
 #   trait roster entries (type × trait)        59
 #   auto-trait-complete types                  18
 #
 # per-module pub lines:
-#   (root)                          201
+#   (root)                          202
 #   append                           29
 #   cli                               3
 #   composer                        117
-#   json                             72
+#   json                             73
 #   optimize                          9
 #   zero_bias                         4
 
-## items (410 lines)
+## items (412 lines)
 
 pub mod zenpredict_bake
 pub mod append
@@ -167,6 +167,7 @@ pub mod json
 pub json::ActivationJson::Identity
 pub json::ActivationJson::LeakyRelu
 pub json::ActivationJson::Relu
+pub json::ActivationJson::SmoothHinge
 pub json::BakeJsonError::BadHex(alloc::string::String)
 pub json::BakeJsonError::Bake(composer::BakeError)
 pub json::BakeJsonError::MetadataValueAmbiguous
@@ -238,6 +239,7 @@ pub enum ActivationJson [also: json]
 pub ActivationJson::Identity
 pub ActivationJson::LeakyRelu
 pub ActivationJson::Relu
+pub ActivationJson::SmoothHinge
 #[non_exhaustive] pub enum AppendError [also: append]
 pub AppendError::BadMagic
 pub AppendError::BadMagic::found: [u8; 4]
