@@ -182,6 +182,7 @@ fn activation_name(a: Activation) -> &'static str {
         Activation::Identity => "identity",
         Activation::Relu => "relu",
         Activation::LeakyRelu => "leaky_relu",
+        Activation::SmoothHinge => "smooth_hinge",
         _ => "unknown",
     }
 }
@@ -553,6 +554,17 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 if *v < 0.0 {
                     *v = 0.0;
                 }
+            }
+        }
+        Activation::SmoothHinge => {
+            for v in buf.iter_mut() {
+                *v = if *v <= 0.0 {
+                    0.0
+                } else if *v < 0.125 {
+                    (4.0 * *v) * *v
+                } else {
+                    *v - 0.0625
+                };
             }
         }
         Activation::LeakyRelu => {

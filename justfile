@@ -152,3 +152,11 @@ magetypes030-workspace-test metapicker bake:
 # model route or reported heuristic fallback, never a silent None. CI runs this.
 zenpicker-live-route:
     cargo test --features "api,hdr" --test zenpicker_live_route -- --nocapture
+
+# Fixed hinge format/API admission, without corpus reads.
+steer-hinge-check:
+    cargo fmt -p zenpredict -p zenpredict-bake -p zenpredict-viz --check
+    cargo test -p zenpredict -p zenpredict-bake
+    cargo check -p zenpredict --no-default-features
+    cargo clippy -p zenpredict -p zenpredict-bake -p zenpredict-viz --all-targets -- -D warnings
+    just api-doc-check
