@@ -90,7 +90,7 @@ simd = ["std", "dep:archmage"]
 # consumer's own SIMD codegen. `^0.9.26` still lets consumers resolve
 # newer 0.9.x. Both ends are gated — the `simd_parity_tests` bit-identity
 # suite is run against 0.9.26 and 0.9.28 (2026-08-04).
-archmage = { version = "0.9.26", optional = true }
+archmage = { version = ">=0.9.26, <=0.9.31-beta.1", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }

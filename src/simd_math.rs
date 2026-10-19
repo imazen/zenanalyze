@@ -23,7 +23,7 @@
 //! It is a `macro_rules!` rather than a `fn` so it expands inside a `#[magetypes]`
 //! body against that body's per-tier `f32x8` (which the macro re-types to
 //! `f32x16`/`f32x4`/… per backend) — a plain generic `fn` can't ride that
-//! re-typing. The magic constant routes through `f32x8::splat(from_bits(..))
+//! re-typing. The magic constant routes through `f32x8::splat_t(from_bits(..))
 //! .bitcast_to_i()` so the integer vector is the *matching-width* companion of
 //! the float vector without ever naming `i32xN`.
 

@@ -160,3 +160,9 @@ steer-hinge-check:
     cargo check -p zenpredict --no-default-features
     cargo clippy -p zenpredict -p zenpredict-bake -p zenpredict-viz --all-targets -- -D warnings
     just api-doc-check
+
+# Check compatibility after admitting the current archmage/magetypes beta.
+beta-cohort-check:
+    cargo fmt --check
+    cargo clippy --locked --workspace --lib -- -D warnings
+    cargo test --locked --workspace --lib --no-fail-fast
