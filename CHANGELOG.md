@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions; use explicit-token aliases where needed. Formatting, strict library lint and library tests pass (`8b4519e5`).
+
 > **Everything under `[Unreleased]` ships as part of `0.2.0`.** `Cargo.toml` is
 > already at `0.2.0` and **nothing after `0.1.0` has ever been published** —
 > crates.io still serves `zenanalyze 0.1.0` (2026-04-28). The `[0.2.0]` section
