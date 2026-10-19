@@ -30,10 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-11-arm, macos-15-intel, macos-latest]
+        os: [ubuntu-latest, windows-11-arm, macos-latest]
         features: ["", "experimental", "hdr", "experimental,hdr"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -116,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-11-arm, macos-15-intel, macos-latest]
+        os: [ubuntu-latest, windows-11-arm, macos-latest]
         # zenpredict has 3 valid feature combos (`advanced` requires `std`):
         #   ""             — no_std + alloc, runtime only
         #   "std"          — full runtime (lean: predict + argmin_masked)
@@ -124,7 +124,7 @@ jobs:
         #                    rescue / top-K / scorer-hybrid API
         features: ["", "std", "std,advanced"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -155,7 +155,7 @@ jobs:
     name: zenpredict-bake (ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -182,7 +182,7 @@ jobs:
     name: zenpredict-viz (ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -207,7 +207,7 @@ jobs:
           - i686-unknown-linux-gnu
           - aarch64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
@@ -252,8 +252,8 @@ jobs:
     name: zentrain pytests (ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install test deps
@@ -290,7 +290,7 @@ jobs:
     name: golden-reference (x86_64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Golden value-stability tripwire (the reference — enforces structural-exempt features too)
@@ -327,7 +327,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: rsqrt + log2 method probe
