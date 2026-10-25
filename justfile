@@ -1,5 +1,9 @@
 # zenanalyze dev commands
 
+# Read-only local Git/jj ref census; run under the host's resource wrapper.
+dependency-ref-audit output roots=".. ../..":
+    python3 tools/audit_dependency_refs.py --output "{{output}}" --roots {{roots}}
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.
