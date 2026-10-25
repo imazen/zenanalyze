@@ -1,5 +1,8 @@
 # Publishing the zenanalyze workspace
 
+See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
+before treating every unpublished research interface as a release prerequisite.
+
 ## Registry state and dependency order
 
 Verified 2026-10-25 against source commit `8ca647c5` and the
