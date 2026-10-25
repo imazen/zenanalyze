@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tomllib
 
 DEPENDENCY = r"zenanalyze|zenpredict|zenpicker"
@@ -170,9 +171,20 @@ def main() -> None:
                             manifest_hits = hits(repo, sha, DEPENDENCY, ["*Cargo.toml"])
                             if not manifest_hits:
                                 continue
-                            source_hits = hits(repo, sha, args.source_pattern, ["*.rs", "*.py"])
+                            source_hits = []
                             manifest_paths = [x["path"] for x in manifest_hits]
                         parsed = manifests(repo, sha, manifest_paths, objects)
+                        if not args.manifest_graph:
+                            pattern = args.source_pattern
+                            if pattern == SOURCE:
+                                aliases = {d["name"].replace("-", "_") for m in parsed
+                                           for d in m.get("dependencies", [])
+                                           if re.search(DEPENDENCY, d["package"])}
+                                if aliases:
+                                    pattern += "|(" + "|".join(re.escape(a) for a in sorted(aliases))
+                                    pattern += r")[[:space:]]*(::|\.)"
+                                pattern += r"|zenpredict-bake|zenpredict-inspect"
+                            source_hits = hits(repo, sha, pattern, ["*.rs", "*.py"])
                     except Exception as error:
                         tip_errors.append({"sha": sha, "refs": names, "error": str(error)})
                         continue
@@ -200,5 +212,43 @@ def main() -> None:
     print(f"Scanned {len(groups)} object stores; evidence: {args.output}", flush=True)
 
 
+def compact() -> None:
+    """Losslessly store JSONL evidence in Parquet+zstd (requires pyarrow)."""
+    import hashlib
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    parser = argparse.ArgumentParser(description=compact.__doc__)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("inputs", type=Path, nargs="+")
+    args = parser.parse_args(sys.argv[2:])
+    schema = pa.schema([("source", pa.string()), ("json", pa.large_string())])
+    expected = {}
+    with pq.ParquetWriter(args.output, schema, compression="zstd", compression_level=9) as writer:
+        for path in args.inputs:
+            digest = hashlib.sha256()
+            batch = []
+            with path.open() as source:
+                for line in source:
+                    digest.update(line.encode())
+                    batch.append({"source": str(path), "json": line})
+                    if len(batch) == 32:
+                        writer.write_table(pa.Table.from_pylist(batch, schema=schema))
+                        batch.clear()
+            if batch:
+                writer.write_table(pa.Table.from_pylist(batch, schema=schema))
+            expected[str(path)] = digest.hexdigest()
+    actual = {path: hashlib.sha256() for path in expected}
+    for batch in pq.ParquetFile(args.output).iter_batches(batch_size=32):
+        for row in batch.to_pylist():
+            actual[row["source"]].update(row["json"].encode())
+    if any(actual[path].hexdigest() != digest for path, digest in expected.items()):
+        raise RuntimeError("Parquet evidence round-trip changed an input")
+    print(json.dumps({"output": str(args.output), "verified_sha256": expected}), flush=True)
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["compact"]:
+        compact()
+    else:
+        main()

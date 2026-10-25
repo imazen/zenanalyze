@@ -4,6 +4,10 @@
 dependency-ref-audit output roots=".. ../..":
     python3 tools/audit_dependency_refs.py --output "{{output}}" --roots {{roots}}
 
+# Preserve large census evidence in Parquet+zstd and verify every input hash.
+dependency-ref-compact output inputs:
+    python3 tools/audit_dependency_refs.py compact "{{output}}" {{inputs}}
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
 # is never built or run by plain `cargo test` or any CI job.
