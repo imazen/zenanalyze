@@ -22,6 +22,7 @@ SOURCE = (
     r"(zenanalyze|zenanalyze_api|zenpredict|zenpredict_bake|zenpicker)"
     r"[[:space:]]*(::|\.)"
 )
+MANIFEST_CACHE: dict[str, dict] = {}
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -43,24 +44,31 @@ def hits(repo: Path, revision: str, pattern: str, paths: list[str]) -> list[dict
     return rows
 
 
-def manifests(repo: Path, revision: str, paths: list[str]) -> list[dict]:
+def manifests(repo: Path, revision: str, paths: list[str], objects: dict | None = None) -> list[dict]:
     rows = []
     for path in sorted(set(paths)):
-        result = run(repo, "git", "show", f"{revision}:{path}")
-        try:
-            manifest = tomllib.loads(result.stdout)
-        except tomllib.TOMLDecodeError as error:
-            rows.append({"path": path, "error": str(error)})
-            continue
+        blob = objects.get(path) if objects else None
+        if blob in MANIFEST_CACHE:
+            manifest = MANIFEST_CACHE[blob]
+        else:
+            result = run(repo, "git", "show", blob or f"{revision}:{path}")
+            if result.returncode:
+                raise RuntimeError(result.stderr)
+            try:
+                manifest = tomllib.loads(result.stdout)
+            except tomllib.TOMLDecodeError as error:
+                rows.append({"path": path, "error": str(error)})
+                continue
+            if blob:
+                MANIFEST_CACHE[blob] = manifest
         dependencies = []
 
         def collect(table: dict, location: str) -> None:
             for key in ("dependencies", "dev-dependencies", "build-dependencies"):
                 for name, value in table.get(key, {}).items():
                     package = value.get("package", name) if isinstance(value, dict) else name
-                    if re.search(DEPENDENCY, name + " " + package):
-                        dependencies.append({"section": location + key, "name": name,
-                                             "package": package, "value": value})
+                    dependencies.append({"section": location + key, "name": name,
+                                         "package": package, "value": value})
 
         collect(manifest, "")
         collect(manifest.get("workspace", {}), "workspace.")
@@ -78,12 +86,19 @@ def main() -> None:
     parser.add_argument("--roots", nargs="+", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--owners", nargs="+", default=["imazen", "lilith", "imazen-private"])
+    parser.add_argument("--manifest-graph", action="store_true",
+                        help="Record every manifest on every ref, for transitive dependency analysis")
+    parser.add_argument("--only-repos", nargs="+", help="Restrict the census to these checkout names")
+    parser.add_argument("--source-pattern", default=SOURCE,
+                        help="Git extended-regexp for the source census")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     checkouts = []
     for root in args.roots:
         for path in sorted(root.iterdir()):
             if path.is_symlink() or not path.is_dir() or not (path / ".git").exists():
+                continue
+            if args.only_repos and path.name not in args.only_repos:
                 continue
             common = run(path, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
             if common.returncode:
@@ -135,30 +150,53 @@ def main() -> None:
                         if re.fullmatch(r"[0-9a-f]{40}", sha):
                             refs.setdefault(sha, []).append("jj-working-copy")
                 matched = 0
+                tip_errors = []
                 for sha, names in refs.items():
-                    manifest_hits = hits(repo, sha, DEPENDENCY, ["*Cargo.toml"])
-                    if not manifest_hits:
+                    objects = None
+                    try:
+                        if args.manifest_graph:
+                            tree = run(repo, "git", "ls-tree", "-r", sha)
+                            if tree.returncode:
+                                raise RuntimeError(tree.stderr)
+                            objects = {}
+                            for line in tree.stdout.splitlines():
+                                meta, path = line.split("\t", 1)
+                                if path.rsplit("/", 1)[-1] == "Cargo.toml":
+                                    objects[path] = meta.split()[-1]
+                            manifest_hits = []
+                            source_hits = []
+                            manifest_paths = list(objects)
+                        else:
+                            manifest_hits = hits(repo, sha, DEPENDENCY, ["*Cargo.toml"])
+                            if not manifest_hits:
+                                continue
+                            source_hits = hits(repo, sha, args.source_pattern, ["*.rs", "*.py"])
+                            manifest_paths = [x["path"] for x in manifest_hits]
+                        parsed = manifests(repo, sha, manifest_paths, objects)
+                    except Exception as error:
+                        tip_errors.append({"sha": sha, "refs": names, "error": str(error)})
                         continue
                     matched += 1
-                    source_hits = hits(repo, sha, SOURCE, ["*.rs", "*.py"])
                     row = {**entry, "sha": sha, "refs": names,
                            "manifest_hits": manifest_hits,
-                           "manifests": manifests(repo, sha, [x["path"] for x in manifest_hits]),
+                           "manifests": parsed,
                            "source_hits": source_hits}
                     evidence.write(json.dumps(row) + "\n")
                     evidence.flush()
                     lock.write_text(dt.datetime.now(dt.timezone.utc).isoformat()
                                     + f" codex committed-ref-dependency-audit pid={os.getpid()}\n")
                 summary.append({**entry, "unique_tips": len(refs), "matching_tips": matched,
+                                "tip_errors": tip_errors,
                                 "tracked_worktree_changes_excluded": dirty.splitlines(),
                                 "checkouts": [x["path"] for x in group]})
                 if matched:
-                    print(f"{repo.name}: {matched}/{len(refs)} tips with manifest mentions", flush=True)
+                    print(f"{repo.name}: {matched}/{len(refs)} tip snapshots recorded", flush=True)
             except Exception as error:
                 summary.append({**entry, "error": str(error)})
             finally:
                 lock.unlink()
                 (args.output / "summary.json").write_text(json.dumps(summary, indent=2))
+    (args.output / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"Scanned {len(groups)} object stores; evidence: {args.output}", flush=True)
 
 
