@@ -19,6 +19,20 @@ fmt:
 api-doc:
     cargo test --manifest-path apidoc/Cargo.toml
 
+# Print API audit edge cases without blessing them as behavioral contracts.
+api-necessity-probe:
+    cargo run --locked -p zenpredict-bake --example api_necessity_audit
+
+api-necessity-transforms:
+    cargo run --locked -p zenpredict --no-default-features --example output_transform_audit
+    cargo run --locked -p zenpredict --no-default-features --features std --example output_transform_audit
+
+# Focused symbol census; source hits need review for unrelated namesake types.
+api-necessity-callers output roots=".. ../..":
+    python3 tools/audit_dependency_refs.py --roots {{roots}} --output "{{output}}" \
+      --only-repos zenpipe zenwebp zensr zenavif zenjpeg zensim zensimx jxl-encoder coefficient zenmetrics zentone \
+      --source-pattern 'EncodeBudget|EncodeMode|PickerStrategy|next_trial|best_trial|QualityTarget|resolve_pre_argmin|apply_knob_vetoes|unachievable_zones|pick_with_confidence|argmin_masked_with_scorer|feature_vector|resolve_feature_ids|extract_offer|offer_for_request|Select::Names'
+
 # Verify the committed snapshots are current
 api-doc-check:
     ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml

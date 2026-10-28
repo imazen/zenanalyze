@@ -1,5 +1,9 @@
 # Publishing the zenanalyze workspace
 
+The [pre-publication API audit](API_NECESSITY_2026-10-28.md) identifies
+output-transform correctness blockers and proposes a smaller controller surface.
+Resolve those findings before treating the current surface as the release candidate.
+
 See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
 before treating every unpublished research interface as a release prerequisite.
 

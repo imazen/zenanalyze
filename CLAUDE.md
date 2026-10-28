@@ -335,6 +335,17 @@ runtime branch).
 
 ## Known Bugs
 
+- **2026-10-28 — pre-publication API audit, unresolved:** zenpredict's
+  `OutputTransform::Exp` is identity and `Sigmoid` is constant 0.5 without
+  `std`; `Round` changes 16,777,215 to 16,777,216 and saturates infinity in
+  both builds. `resolve_pre_argmin` can return a masked-out zone fallback;
+  `best_trial` can prefer NaN achieved quality over a finite measurement.
+  Reproducers: `just api-necessity-probe`, `just api-necessity-transforms`.
+  The audit also records raw/transformed prediction composition and
+  producer stride/configuration issues. See
+  [the findings and proposed surface](docs/API_NECESSITY_2026-10-28.md).
+  No behavior or established expectation was changed by the audit.
+
 - **2026-10-09 — magetypes 0.9.30 constructor deprecations: FIXED locally.**
   The old analyzer calls produced 201 denied diagnostics per compiled target
   from 153 distinct source calls; eight more calls in `bench_repr_simd` were
