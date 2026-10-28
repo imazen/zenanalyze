@@ -1,7 +1,8 @@
 # Pre-publication API necessity audit
 
 Audited source `208ee7ec` on 2026-10-28. **Keep the extractor, transport contract,
-MLP runtime and baker. Narrow the controller surface before publishing it.**
+MLP runtime and baker. Preserve the intended picker workflows while reviewing
+their smallest coherent public surface.**
 There are also reproducible output-transform defects to resolve before release.
 This audit changes no library API, model, numeric behavior or test expectation.
 
@@ -21,6 +22,57 @@ features is not creation of a new API. Encode budgets/modes, directed search,
 knob vetoes and unachievable zones are new relative to that release. The v3
 parser, separate baker and feature-transform pipeline are also new. Distinguish
 these groups when deciding what can be trimmed before 0.2.0.
+
+### Provenance and purpose: correction after the initial census
+
+The initial recommendation to defer controller APIs was too strong for caller
+search evidence alone. The owner pointed out that recent integration work may
+need new APIs before its callers land. Tracing the introducing commits establishes
+that the particular APIs below are older, and that they have concrete purposes.
+Commit messages describe intent; their historical measurement claims were not
+re-run or adopted as new results here.
+
+| Surface | Introduced | Workflow it enables |
+|---|---|---|
+| Numeric-id feature-vector facade | Documented by `d632f38`, June 18 | Feed model-aligned vectors without exposing the analyzer's enum/query types across a codec boundary. It is an intentional low-coupling adapter. |
+| Default top-K and quality/cost masks | `e3dc4e6`, June 26 | Rank a shortlist and encode/verify it under a quality floor and runtime cost ceiling, with shared NaN/tie/mask semantics. |
+| Knob vetoes | `56091e1`, June 28 | Enforce the same feature-conditioned forbidden settings at deployment that the trainer evaluated. Removing runtime enforcement alone changes the qualified training/deployment relationship. |
+| Size-zone fallback | `eb7385d`, June 29 | Answer an empty reachability set with an explicit best-achievable cell/scalar when a target lies above the learned size-class ceiling. |
+| Unified pre-argmin pipeline | `896e279`, June 29 | Keep zone handling, vetoes, selection and rescue in a consistent order. The commit records user-requested integration. |
+| Trial budget and strategy | `18a9939`, June 29 | Spend trial encodes on ambiguous settings when affordable; avoid paying for the same shortlist on a large/expensive image. |
+| Encode mode | `13bcf8d`, June 29 | Carry application latency intent into family viability and trial strategy. Current zencodecs names this type at its routing boundary. |
+| Directed search | `0f36a22`, June 29 | Use measured undershoot/reach to choose the next predicted candidate, then select the measured winner according to quality-first or byte-budget preference. The commit records user-requested behavior. |
+| `Select::Names` / `offer_for_request` | `47c3c69`, August 28 / `62bfd43`, August 30 | Let heuristics request version-agnostic signals; let a codec perform its own scan through one request resolver when an offered result cannot satisfy it. |
+
+There were **no changes to these crates' library source on main during October
+24–28** at the audited head. The recent zencodec work is a different contract
+layer. At public zencodec `87eff5f1`, the root has no normal zenpredict or
+zenanalyze dependency. Recent work provides:
+
+- [Planning before native startup](https://github.com/imazen/zencodec/blob/87eff5f162042aa46c50df3f8abd3745da0001b8/docs/encode-output-preparation.md): admit input, output and workspace requirements while candidate jobs are lightweight, then start the retained choice.
+- [Requirements bound outside policy callbacks](https://github.com/imazen/zencodec/commit/a15c28fdff95847e42dcb059f246a6defa0968cc): filtering by mandatory requirements must precede application selection and survive callback wrappers.
+- [Encoder-driven row acquisition](https://github.com/imazen/zencodec/commit/78ae87537945e8af1f0c254e23b7a61fa04e89fc): express replay/multipass input and row loans without assuming every encoder accepts the same push protocol.
+- [Precision evidence](https://github.com/imazen/zencodec/commit/68e685038ce7a505b7bd90338163ea74ac93519e): carry and validate declared sample precision before forwarding rows.
+
+These are concrete correctness and integration needs. They should not be
+classified as speculative because a narrow consumer census misses them. Native
+integration/refusal contracts and picker trial policy can both be needed; one
+does not establish the redundancy of the other.
+
+The current
+[zencodecs budget-aware picker](https://github.com/imazen/zenpipe/blob/e187505528f0caff895135421d79ead0ac19e5b2/zencodecs/src/picker.rs#L138)
+also demonstrates why the closure scorer stays: it adds the cost of degraded
+effort to model scores while ranking only already-valid candidates.
+[zencodecs' own EncodeBudget](https://github.com/imazen/zenpipe/blob/e187505528f0caff895135421d79ead0ac19e5b2/zencodecs/src/estimate.rs#L185)
+fits one encode's effort to wall-time/core/memory estimates; zenpredict's budget
+allocates multiple trial encodes. Their names overlap, but their units of work
+differ. Unification would require preserving both responsibilities.
+
+**Revised decision:** retain these capabilities pending workflow-level review.
+Review should name the owning layer, required callers and edge semantics before
+changing public placement or removing a wrapper. Lack of adoption alone does
+not authorize abandoning a directed workflow. The correctness findings below
+remain independent of that disposition.
 
 Consumer evidence includes the immutable-ref
 [October 25 census](ECOSYSTEM_USAGE_2026-10-25.md) and its
@@ -157,10 +209,11 @@ regression to fix silently. It is evidence that this type means a trial allowanc
 with a mandatory encode, rather than a universally binding resource ceiling.
 `Auto` and `MultiShot` currently execute identical resolution logic.
 
-**Proposal:** defer the unused controller policy rather than commit consumers
-to these semantics now. If any part stays public, specify these cases and test
-composition against actual codec constraints first. Preserve existing expectations
-until a changed contract is approved.
+**Proposal:** preserve the intended trial/safety workflows and settle these
+semantics before publication. Test composition against actual codec constraints;
+review ownership and public placement with the affected consumers. Preserve
+existing expectations until a changed contract is approved. A sparse caller
+census alone is not a reason to remove the capability.
 
 ## Recommended surface
 
@@ -170,13 +223,13 @@ until a changed contract is approved.
 | Existing transport types and methods | Keep frozen. Do not add a provider/extraction trait, pixel arguments, an owned catalog or a request-builder framework. |
 | `analyze_features`, typed queries/results, requested feature sets | Keep. Canonical implementation and sparse requests have real codec/export roles. |
 | Offer production/request resolution | Keep the capability; repair input shape and configuration semantics before stabilizing convenience signatures. |
-| Numeric-id `feature_vector*`, lookup/all/packed wrappers | Candidate to trim unpublished convenience wrappers after a final consumer check. They are adapters over the typed extractor, not another implementation, but their bool/NaN contract discards failure detail. No adoption was identified in the supplementary sample; do not expand this parallel facade without a caller needing it. |
+| Numeric-id `feature_vector*`, lookup/all/packed wrappers | Preserve the intended low-coupling vector boundary. Review redundant convenience forms and bool/NaN failure detail against callers before changing them; sparse adoption evidence does not invalidate the boundary. |
 | `Model`, `Predictor`, transforms, dtype support, v3 compression, bounds | Keep. Runtime/artifact use supports these; none of the audit probes justifies dropping wire capabilities. |
 | Free argmin/top-K and runtime masks | Keep shared selection math. They avoid replicated NaN, tie and mask semantics. Top-K is inherited API, not a new speculative release dependency. |
-| Closure scorer | Keep the demonstrated capability: zencodecs calls it. Do not sweep it away with unused confidence/rescue wrappers. |
+| Closure scorer | Keep. zencodecs uses it to fold effort-degradation penalties into candidate ranking without widening the allowed family set. |
 | `EncodeMode` | An actual zencodecs boundary names it, and zenpicker consumes it. Consider relocating application policy only with that consumer migration. |
-| `EncodeBudget`, `PickerStrategy`, directed search | Propose keeping out of the permanent default surface pending concrete callers and policy qualification. Do not equate their tests with a demonstrated codec requirement. |
-| Knob-veto / unachievable-zone / pre-argmin composition | Propose experimental or tool-side ownership until deployed composition is demonstrated. Preserve metadata readability and the baker's canonical encoding. |
+| `EncodeBudget`, `PickerStrategy`, directed search | Preserve affordable trial search and preference-aware measured selection. Review placement and edge semantics with the intended codec loop; no removal recommendation follows from a missing caller alone. |
+| Knob-veto / unachievable-zone / pre-argmin composition | Preserve training/deployment safety semantics and explicit unreachable-target handling. Fix hard-mask composition; assess the smallest shared API with the trainer and runtime together. |
 | Rescue/confidence/typed output extras | Inherited or feature-gated capabilities; assess individual consumers before pruning. `advanced` reduces default exposure but does not make a public API private. |
 | `wire`, `Section`, limits, model inspection views | Keep the cross-crate needs of the separate baker/inspection tools. Move code internally before inventing a new public wire crate or duplicate parser. |
 | New graph runtime or generic controller framework | Defer. No inspected v3 artifact requires a DAG. See the existing graph compatibility finding in the ecosystem audit. |
@@ -225,8 +278,8 @@ Resource-wrapper evidence: the combined API probe completed with `rc=0`,
 claims. No new RD, model qualification, analyzer golden run, full release matrix
 or all-target release gate was performed by this audit.
 
-**Order of work:** repair output-transform correctness; decide the retained
-controller surface; review the strided/fallible producer signatures; reconcile
+**Order of work:** repair output-transform correctness; qualify the controller
+contracts against their intended workflows; review the strided/fallible producer signatures; reconcile
 reuse documentation and caller preconditions; then regenerate API snapshots,
 run semver checks and the release gates in [PUBLISHING.md](PUBLISHING.md).
 Publication remains subject to README approval and the established release gates.
