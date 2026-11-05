@@ -39,10 +39,25 @@ def main():
     for suffix in ("", ".features", ".internal"):
         snapshot = root / "docs/public-api" / f"zenpredict{suffix}.txt"
         for number, line in enumerate(snapshot.read_text().splitlines(), 1):
-            match = re.search(r"\bpub (?:fn |struct |enum |type |const |mod |trait )?([^\s(=]+)", line)
+            match = re.search(
+                r"\bpub (?:(?:const )?fn |struct |enum |type |const |mod |trait )?",
+                line,
+            )
             if not match:
                 continue
-            path = re.sub(r"<[^>]*>", "", match[1])
+            # Generic paths may contain spaces (`<const K: usize>`) and
+            # lifetimes; keep parsing until the declaration's arguments/type.
+            path = ""
+            depth = 0
+            for char in line[match.end():]:
+                if char == "<":
+                    depth += 1
+                elif char == ">":
+                    depth -= 1
+                elif depth == 0:
+                    if char.isspace() or char in "(=":
+                        break
+                    path += char
             symbol = path.rstrip(":").split("::")[-1]
             refs = [f"{label}:{file}:{n}" for label, file, n, tokens in sources
                     if symbol in tokens]
