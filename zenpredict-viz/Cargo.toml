@@ -31,8 +31,8 @@ required-features = ["sample-pack"]
 # `advanced` for the per-output spec pipeline (`output_spec::apply_spec`,
 # `OutputValue`) the forward-pass waterfall mirrors.
 zenpredict = { path = "../zenpredict", features = ["advanced"] }
-wasm-bindgen = "0.2.103"
-serde = { version = "1.0.219", features = ["derive"] }
+wasm-bindgen = "0.2.130"
+serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 
 # Native-only deps (gated behind feature flags so wasm-pack ignores them).
@@ -40,9 +40,9 @@ serde-wasm-bindgen = "0.6.5"
 # `Message::encode` trait method resolves to the same crate.
 onnx-pb = { version = "0.1.4", optional = true }
 prost = { version = "0.6.1", optional = true }
-serde_json = { version = "1.0.140", optional = true }
-parquet = { version = "59.2.0", default-features = false, features = ["arrow", "zstd"], optional = true }
-arrow = { version = "59.2.0", default-features = false, optional = true }
+serde_json = { version = "1.0.154", optional = true }
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "60.1.0", default-features = false, optional = true }
 
 [features]
 default = []

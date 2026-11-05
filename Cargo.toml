@@ -120,7 +120,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 zenresize = "0.3.1"
 # Interleaved/paired microbench harness for the linear-intermediate
 # representation A/B (bench_linear_repr example). Example-only.
-zenbench = "0.1.8"
+zenbench = "0.1.11"
 # Decision-change measurement (budget_decision_ab example): drives the SHIPPED
 # cross-codec routers through their real entry point (`zenpicker::default_route`)
 # under two feature-extraction regimes, and replays the zenjpeg picker bake with

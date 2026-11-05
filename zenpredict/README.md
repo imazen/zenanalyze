@@ -213,7 +213,7 @@ The default surface follows normal 0.x semver. The `advanced` surface is **not y
 
 ## Compressed bakes
 
-A bake's payload (everything after the 128-byte header) may be LZ4-block-compressed as a single envelope. There is **no feature flag** — the loader always links the decoder (`lz4_flex`, `safe-decode` only, ~4 KB) and handles compression transparently:
+A bake's payload (everything after the 128-byte header) may be LZ4-block-compressed as a single envelope. There is **no feature flag** — the loader always includes the safe LZ4 block decoder (`lz4_flex` 0.14) and handles compression transparently:
 
 - Header `flags` bit 0 marks a compressed payload; the algorithm nibble selects LZ4 (`lz4_flex::block`). Header byte offset 96 carries `decompressed_payload_len: u32`.
 - At load the parser allocates `128 + decompressed_payload_len` bytes, copies the header verbatim, and decompresses the payload into place. From there it parses exactly as an uncompressed bake — section offsets are written as if uncompressed, so the compression is purely an envelope.

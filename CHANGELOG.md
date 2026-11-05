@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Tooling: update WASM bindings, visualizer Arrow/Parquet 60.1.0, benchmark,
+  fuzz and API-documentation dependencies. Preserve the ONNX/prost coupling.
+
 - zenpredict / zenpredict-bake: update lz4_flex to 0.14.0 with safe, checked
   decoding and explicit encoder allocation support. A frozen 0.11.6-compressed
   ZNPR bake protects historical loading in std/no_std builds. Refresh bytemuck,
