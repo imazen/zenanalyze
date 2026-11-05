@@ -10,8 +10,8 @@
 //!
 //! Two orthogonal controls:
 //! - [`PickerStrategy`] — the codec's *mode*: trust the pick, force trials, or adapt.
-//! - [`EncodeBudget`] — a *multi-axis resource ceiling* the **application** sets
-//!   (max passes / trial pixels / wall-time ms). The most restrictive binds.
+//! - `EncodeBudget` (experimental) — a multi-axis trial allowance the application
+//!   sets (passes / trial pixels / wall-time ms), with a mandatory first encode.
 //!
 //! The per-encode time estimate is **not** in the budget — the application shouldn't
 //! have to guess it. The *codec* owns a cost model, so it passes its own
@@ -72,13 +72,15 @@ impl EncodeMode {
     }
 }
 
-/// Multi-axis resource ceiling for trial encodes, set by the **application**. Any
-/// subset of axes may be set; the **most restrictive binds**. All-unset = unbounded
-/// (capped only by the candidate count). No per-encode-time estimate lives here — the
-/// codec supplies that to [`Self::resolve`].
+/// Multi-axis trial allowance with a mandatory first encode. Any subset of axes
+/// may be set; the most restrictive binds before flooring the result at one.
+/// All-unset is capped by candidate count. The caller must reject an empty
+/// shortlist itself; this is not an admission controller. The codec supplies
+/// the per-encode time estimate to [`Self::resolve`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg(any(feature = "experimental", test))]
 pub struct EncodeBudget {
-    /// Hard cap on trial encodes. `None` = not bounded by pass count.
+    /// Pass allowance before the mandatory-one floor. `None` leaves it unset.
     pub max_passes: Option<u16>,
     /// Pixel ceiling across trial encodes (size-adaptive: a large image fits fewer
     /// passes). `None` = not bounded by pixels.
@@ -87,6 +89,7 @@ pub struct EncodeBudget {
     pub max_ms: Option<u32>,
 }
 
+#[cfg(any(feature = "experimental", test))]
 impl EncodeBudget {
     /// Bound by a hard pass count only.
     pub const fn passes(n: u16) -> Self {

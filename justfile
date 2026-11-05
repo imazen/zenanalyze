@@ -35,6 +35,24 @@ predict-readiness:
     cargo test --locked -p zenpredict --all-features --all-targets
     cargo test --locked -p zenpredict --all-features --doc
     cargo clippy --locked -p zenpredict --all-features --all-targets -- -D warnings
+    cargo clippy --locked -p zenpredict --no-default-features --all-targets -- -D warnings
+    cargo clippy --locked -p zenpredict --no-default-features --features experimental --all-targets -- -D warnings
+
+# zenpredict-only release preparation; never publishes, tags or creates a release.
+predict-publish-check:
+    cargo test --locked -p zenanalyze-api -p zenpredict --all-targets
+    cargo test --locked -p zenanalyze-api -p zenpredict --doc
+    cargo test --locked -p zenpredict-bake --lib --tests --examples
+    cargo clippy --locked -p zenpredict-bake --all-targets -- -D warnings
+    cargo test --locked -p zenpredict-bake --doc
+    cargo package --locked -p zenpredict
+    cargo semver-checks check-release --manifest-path zenpredict/Cargo.toml -p zenpredict --baseline-version 0.1.0 --default-features
+    cargo semver-checks check-release --manifest-path zenpredict/Cargo.toml -p zenpredict --baseline-version 0.1.0 --all-features
+
+# Deliberately force a patch comparison to enumerate the planned 0.2.0 breaks.
+# A nonzero status here is evidence to review, not a change to the release version.
+predict-semver-audit:
+    cargo semver-checks check-release --manifest-path zenpredict/Cargo.toml -p zenpredict --baseline-version 0.1.0 --release-type patch --default-features
 
 # Focused symbol census; source hits need review for unrelated namesake types.
 api-necessity-callers output roots=".. ../..":

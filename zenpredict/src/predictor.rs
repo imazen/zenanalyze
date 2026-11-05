@@ -21,6 +21,11 @@ use crate::output_spec::{OutputValue, apply_spec};
 /// [`Predictor::new`]; `predict` and the `argmin_*` family are
 /// allocation-free hot paths.
 ///
+/// The selection wrappers accept the same caller-prepared model inputs as
+/// [`Self::predict`]; they do not apply baked feature transforms. For raw
+/// features, call [`Self::predict_transformed`] then a free selection function
+/// such as [`crate::argmin_masked`]. This keeps input transformation explicit.
+///
 /// `Predictor` **borrows** the `Model` rather than owning it. This
 /// lets a single `Model` live in `static OnceLock<Model>` and be
 /// shared by per-thread `Predictor` instances without a `Mutex` —

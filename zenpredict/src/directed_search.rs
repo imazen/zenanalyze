@@ -10,6 +10,11 @@
 //!   (reach the quality then minimize bytes, or fit the bytes then maximize quality).
 //!
 //! Pure + alloc-free: the codec owns the loop and the `done` slice; this only decides.
+//! The caller must first remove candidates forbidden by hard codec constraints.
+//! Quality-based navigation is a heuristic, not a promise that predicted quality
+//! orders encoded bytes. `best_trial` compares recorded measurements and does not
+//! guarantee an optimum among untried candidates. NaN measurements are excluded;
+//! infinities retain their ordinary numeric ordering.
 //! `predicted_zq[c]` is the picker's predicted quality for ranked candidate `c` (read
 //! from the predictor's scores at the `argmin_masked_top_k` indices).
 
@@ -317,6 +322,54 @@ mod tests {
         assert_eq!(
             next_trial(&pred, &done, QualityTarget::Bytes { max_bytes: 100 }),
             Some(1) // probe leaner than the lowest valid tried (75.0) -> candidate 1 (71.0)
+        );
+    }
+    #[test]
+    fn nan_measurements_never_win_or_supply_a_fallback() {
+        let invalid = f32::NAN;
+        let done = [t(0, 65.0, 4000), t(1, invalid, 1)];
+        for target in [
+            QualityTarget::Quality { target_zq: 70.0 },
+            QualityTarget::Bytes { max_bytes: 5000 },
+            QualityTarget::Bytes { max_bytes: 0 },
+        ] {
+            assert_eq!(best_trial(&done, target), Some(0));
+            assert_eq!(best_trial(&done[1..], target), None);
+        }
+        assert_eq!(
+            best_trial(
+                &[t(0, 80.0, 100)],
+                QualityTarget::Quality {
+                    target_zq: f32::NAN
+                }
+            ),
+            None
+        );
+    }
+    #[test]
+    fn failed_trials_and_nan_predictions_do_not_direct_search() {
+        let target = QualityTarget::Quality { target_zq: 70.0 };
+        assert_eq!(next_trial(&[f32::NAN, f32::NAN], &[], target), None);
+        assert_eq!(next_trial(&[f32::NAN, 71.0], &[], target), Some(1));
+        let failed = [t(0, f32::NAN, 1)];
+        assert_eq!(next_trial(&[75.0, 71.0], &failed, target), Some(1));
+        assert_eq!(
+            next_trial(
+                &[75.0, 71.0],
+                &failed,
+                QualityTarget::Bytes { max_bytes: 100 }
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            next_trial(
+                &[75.0],
+                &[],
+                QualityTarget::Quality {
+                    target_zq: f32::NAN
+                }
+            ),
+            None
         );
     }
 }
