@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Analyzer: retain historical stored-color alpha and matrix arithmetic for linear-light feature extraction; include both CI reference-golden modes in local cohort checks (`3240239e`).
+
 - **zenpicker: `default_route` no longer returns a silent `None` when a router cannot score
   the offer.** The three shipped routers pin `chroma_subsample_dct_loss@48f0f976` (drifted
   2026-07-03/05) and the pre-version-2 chroma–luma covariances, so since early July every live

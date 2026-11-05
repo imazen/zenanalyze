@@ -221,6 +221,7 @@ sibling-cohort-check:
     cargo metadata --format-version 1 > /dev/null
     cargo tree --locked -i zenpixels
     RUST_TEST_THREADS=1 cargo test --workspace --locked --lib --tests --all-features
+    just sibling-reference-check
     cargo test --workspace --locked --doc --all-features
     just sibling-cohort-lint
 
@@ -237,3 +238,8 @@ sibling-descriptor-check:
 sibling-hdr-check:
     just sibling-descriptor-check
     RUST_TEST_THREADS=1 cargo test --locked -p zenanalyze --lib --all-features
+
+# Exact CI reference modes enforce both gamma and linear-light columns.
+sibling-reference-check:
+    ZENANALYZE_GOLDEN_REFERENCE=1 cargo test --features experimental,hdr --lib versioning::tests::golden_is_stable -- --exact --nocapture
+    ZENANALYZE_GOLDEN_REFERENCE=1 ZENANALYZE_GOLDEN_TIER=scalar cargo test --features experimental,hdr,_dev --lib versioning::tests::golden_is_stable -- --exact --nocapture --test-threads=1

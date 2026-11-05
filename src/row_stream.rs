@@ -24,7 +24,7 @@ use linear_srgb::precise::linear_to_srgb_extended;
 use zenpixels::{PixelDescriptor, PixelSlice, TransferFunction};
 use zenpixels_convert::RowConverter;
 
-use crate::hdr_compat::HdrAnalysisConverter;
+use crate::hdr_compat::{HdrAnalysisConverter, LinearAnalysisConverter};
 
 const PQ_PEAK_NITS: f32 = 10000.0;
 const DEFAULT_DIFFUSE_WHITE_NITS: f32 = 203.0;
@@ -159,7 +159,7 @@ enum Inner<'a> {
     LinearNormalized {
         slice: PixelSlice<'a>,
         /// Source descriptor → RGBF32_LINEAR.
-        converter: RowConverter,
+        converter: Box<LinearAnalysisConverter>,
         /// `anchor_scale(slice)`: the **linear** diffuse-white anchor (1.0 = diffuse
         /// white, PQ/HLG exposure normalized to the signaled diffuse white). The sRGB
         /// OETF + ×255 to display range happen in `normalize_linear_row*`, so this
@@ -255,8 +255,7 @@ impl<'a> RowStream<'a> {
         let height = slice.rows();
         let desc = slice.descriptor();
         let scale = anchor_scale(&slice);
-        let converter = RowConverter::new(desc, PixelDescriptor::RGBF32_LINEAR)
-            .map_err(|e| format!("RowConverter::new (linear) failed: {:?}", e))?;
+        let converter = Box::new(LinearAnalysisConverter::new(desc, width)?);
         let w = width as usize;
         Ok(Self {
             inner: Inner::LinearNormalized {

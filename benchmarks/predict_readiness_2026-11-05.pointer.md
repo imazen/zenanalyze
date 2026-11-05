@@ -35,3 +35,8 @@ The refreshed review on shared-pixel main `bb88b421` is retained under
 `cohort-refresh/` in the same evidence directory, including
 `phase1-review-on-cohort.log` and source identity. Both the existing review head
 and qualified main remain ancestors; no review work was discarded.
+
+`cohort-refresh-strict/` records the final refresh on main `38dc80f7`, including
+both native/scalar reference-golden modes. The full cohort passes674 runtime
+tests,21 doctests,strict lint and fuzz compilation (rc0,41s,peak RSS0.86GiB).
+The earlier refresh and its evidence remain retained separately.

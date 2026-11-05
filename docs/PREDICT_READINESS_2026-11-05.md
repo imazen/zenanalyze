@@ -174,3 +174,12 @@ runtime/workspace lint and fuzz compilation pass. Wrapper: rc0, 38s, peak RSS
 0.86 GiB, minimum available 7,885 MiB, peak load 3.13. This is qualification on
 the new dependency cohort; the earlier package/semver evidence remains identified
 separately above. The analyzer's unchanged feature-name/value goldens pass.
+
+The strict-reference follow-up supersedes the initial dependency-cohort refresh:
+main `38dc80f7` repairs linear-light stored-color compatibility and includes both
+CI reference modes in local qualification. The review merges that main while
+retaining review head `99eeb787`. Its full cohort passes674 runtime tests,
+21 doctests and both native/scalar reference goldens, with existing ignores
+unchanged; strict lint and fuzz compilation pass. Wrapper: rc0,41s, peak RSS
+0.86GiB, minimum available7,688MiB, peak load2.99. The predictor proposal itself
+is unchanged; the package and semver evidence above remains separately identified.
