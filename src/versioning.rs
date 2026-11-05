@@ -220,6 +220,47 @@ pub fn descriptor_hash(slice: &zenpixels::PixelSlice<'_>) -> u64 {
     descriptor_hash_of(&slice.descriptor(), dw_nits)
 }
 
+// Serialized framing tags belong to this schema, not to enum memory layout.
+// Preserve zenpixels 0.2.16's original bytes (zenpixels-v0.2.16). The selected
+// 0.3.1 enums have the same named cases plus an uninhabited reserved variant.
+// An unsupported future case must fail rather than authorize incorrect reuse.
+const fn descriptor_transfer_tag(value: zenpixels::TransferFunction) -> u8 {
+    use zenpixels::TransferFunction as T;
+    match value {
+        T::Linear => 0,
+        T::Srgb => 1,
+        T::Bt709 => 2,
+        T::Pq => 3,
+        T::Hlg => 4,
+        T::Gamma22 => 5,
+        T::Unknown => 255,
+        _ => panic!("unsupported transfer function in descriptor reuse key"),
+    }
+}
+
+const fn descriptor_primaries_tag(value: zenpixels::ColorPrimaries) -> u8 {
+    use zenpixels::ColorPrimaries as P;
+    match value {
+        P::Bt709 => 1,
+        P::Bt2020 => 9,
+        P::DisplayP3 => 12,
+        P::AdobeRgb => 13,
+        P::Unknown => 255,
+        _ => panic!("unsupported primaries in descriptor reuse key"),
+    }
+}
+
+const fn descriptor_alpha_tag(value: zenpixels::AlphaMode) -> u8 {
+    use zenpixels::AlphaMode as A;
+    match value {
+        A::Undefined => 1,
+        A::Straight => 2,
+        A::Premultiplied => 3,
+        A::Opaque => 4,
+        _ => panic!("unsupported alpha mode in descriptor reuse key"),
+    }
+}
+
 /// The framing digest for an explicit descriptor + optional signaled diffuse-white
 /// (in nits) — the same hash [`descriptor_hash`] derives from a [`zenpixels::PixelSlice`],
 /// for callers that have the descriptor directly (e.g. the RGB8 fast path, which is
@@ -229,16 +270,16 @@ pub fn descriptor_hash_of(
     descriptor: &zenpixels::PixelDescriptor,
     diffuse_white_nits: Option<f32>,
 ) -> u64 {
-    // Discriminants are stable (`#[repr(u8)]` in zenpixels); alpha `None` → 0,
-    // distinct from every real `AlphaMode` (which start at 1). Unsignaled
-    // diffuse-white → 0 bits, distinct from any signaled value.
+    // Keep the historical serialization tags; enum representation is private.
+    // Alpha None uses 0, distinct from every named alpha tag (which start at 1).
+    // Unsignaled diffuse white retains the historical zero-bit encoding.
     let dw = diffuse_white_nits
         .map_or(0u64, |n| u64::from(n.to_bits()))
         .to_le_bytes();
     let bytes = [
-        descriptor.transfer as u8,
-        descriptor.primaries as u8,
-        descriptor.alpha.map_or(0u8, |a| a as u8),
+        descriptor_transfer_tag(descriptor.transfer),
+        descriptor_primaries_tag(descriptor.primaries),
+        descriptor.alpha.map_or(0u8, descriptor_alpha_tag),
         dw[0],
         dw[1],
         dw[2],
@@ -301,7 +342,8 @@ mod tests {
                 .expect("valid corpus slice");
                 if let Some(dw) = self.diffuse_white {
                     use std::sync::Arc;
-                    use zenpixels::{ColorContext, DiffuseWhite};
+                    use zenpixels::ColorContext;
+                    use zenpixels::hdr::DiffuseWhite;
                     slice = slice.with_color_context(Arc::new(
                         ColorContext::default().with_diffuse_white(DiffuseWhite::new(dw)),
                     ));

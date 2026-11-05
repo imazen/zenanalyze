@@ -215,3 +215,25 @@ beta-cohort-check:
     cargo fmt --check
     cargo clippy --locked --workspace --lib -- -D warnings
     cargo test --locked --workspace --lib --no-fail-fast
+
+# Shared unpublished pixel cohort; no zencodec dependency is introduced.
+sibling-cohort-check:
+    cargo metadata --format-version 1 > /dev/null
+    cargo tree --locked -i zenpixels
+    RUST_TEST_THREADS=1 cargo test --workspace --locked --lib --tests --all-features
+    cargo test --workspace --locked --doc --all-features
+    just sibling-cohort-lint
+
+sibling-cohort-lint:
+    cargo clippy --workspace --locked --all-targets --all-features --keep-going -- -D warnings
+    cargo check --manifest-path zenpredict/fuzz/Cargo.toml --bins
+
+# Isolated old-package oracle: its two pixel versions never enter production.
+sibling-descriptor-check:
+    cargo test --manifest-path tools/descriptor-hash-compat/Cargo.toml -- --nocapture
+    cargo clippy --manifest-path tools/descriptor-hash-compat/Cargo.toml --all-targets -- -D warnings
+
+# Approved HDR compatibility path: exact legacy rows, then unchanged feature gates.
+sibling-hdr-check:
+    just sibling-descriptor-check
+    RUST_TEST_THREADS=1 cargo test --locked -p zenanalyze --lib --all-features

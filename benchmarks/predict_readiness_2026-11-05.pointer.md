@@ -21,7 +21,7 @@ Evidence on **dev**, verified 2026-11-05:
   also ran its existing benchmark. Its timings are not qualification evidence.
 - `RUN.json` and `SHA256SUMS`: checked input revisions and complete evidence hashes.
 
-Validation ran on lilith-wsl in an isolated source mirror under a 4 GiB hard
+Validation ran on an isolated Ryzen 9 7950X Linux source mirror under a 4 GiB hard
 cap, two build jobs and the shared heavy lock. Final wrapper observation:
 `rc=0 92s | peak-RSS 0.54GiB | min-avail 6787MiB | peak-load 4.40`.
 This is a gate resource receipt, not a performance or memory comparison.
@@ -30,3 +30,8 @@ No model, training data, corpus, encoder or frozen EVAL artifact was changed
 for these gates. Source evidence uses the cloned codec mains named by
 `RUN.json`, plus this workspace and zensim's committed revision. Zentrain's
 bake interface is reviewed separately in the readiness document.
+
+The refreshed review on shared-pixel main `bb88b421` is retained under
+`cohort-refresh/` in the same evidence directory, including
+`phase1-review-on-cohort.log` and source identity. Both the existing review head
+and qualified main remain ancestors; no review work was discarded.

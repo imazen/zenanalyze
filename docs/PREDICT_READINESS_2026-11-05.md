@@ -164,3 +164,13 @@ fields; this is not a claim that 0.2.0 is patch-compatible with 0.1.0.
 The already-landed correctness commit's CI is green:
 [CI run 41990408982](https://github.com/imazen/zenanalyze/actions/runs/41990408982).
 The controller PR must receive its own CI and owner review before landing.
+
+The review was refreshed on shared-pixel main `bb88b421` while retaining the
+existing review head as a merge parent. `just predict-readiness
+sibling-cohort-check` passes on that merged source: 144 no-default, 159
+no_std-plus-advanced and 162 all-feature runtime tests; the full workspace passes
+674 runtime tests and 21 doctests, with existing ignores unchanged. Strict
+runtime/workspace lint and fuzz compilation pass. Wrapper: rc0, 38s, peak RSS
+0.86 GiB, minimum available 7,885 MiB, peak load 3.13. This is qualification on
+the new dependency cohort; the earlier package/semver evidence remains identified
+separately above. The analyzer's unchanged feature-name/value goldens pass.

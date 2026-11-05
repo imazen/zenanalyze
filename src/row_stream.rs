@@ -24,6 +24,8 @@ use linear_srgb::precise::linear_to_srgb_extended;
 use zenpixels::{PixelDescriptor, PixelSlice, TransferFunction};
 use zenpixels_convert::RowConverter;
 
+use crate::hdr_compat::HdrAnalysisConverter;
+
 const PQ_PEAK_NITS: f32 = 10000.0;
 const DEFAULT_DIFFUSE_WHITE_NITS: f32 = 203.0;
 
@@ -140,6 +142,10 @@ enum Inner<'a> {
         slice: PixelSlice<'a>,
         converter: RowConverter,
     },
+    HdrCompatibility {
+        slice: PixelSlice<'a>,
+        converter: Box<HdrAnalysisConverter>,
+    },
     /// Diffuse-white-normalized linear-light path (opt-in, linear-light
     /// analysis only). Decodes the source row to RGBF32_LINEAR, applies the
     /// diffuse-white exposure anchor (a linear ×scale, NOT a tone curve), then
@@ -204,6 +210,11 @@ impl<'a> RowStream<'a> {
             Inner::Native(slice)
         } else if let Some(rgb_idx) = strip_idx {
             Inner::StripAlpha8 { slice, rgb_idx }
+        } else if matches!(desc.transfer, TransferFunction::Pq | TransferFunction::Hlg) {
+            Inner::HdrCompatibility {
+                slice,
+                converter: Box::new(HdrAnalysisConverter::new(desc, width)?),
+            }
         } else {
             // Convert to plain RGB8_SRGB on the way in. The transfer
             // function difference vs the native input has at most
@@ -309,6 +320,9 @@ impl<'a> RowStream<'a> {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut dst[..len], self.width);
             }
+            Inner::HdrCompatibility { slice, converter } => {
+                converter.convert_row(slice.row(y), &mut dst[..len], self.width);
+            }
             Inner::LinearNormalized {
                 slice,
                 converter,
@@ -382,6 +396,12 @@ impl<'a> RowStream<'a> {
                     *d = b as f32;
                 }
             }
+            Inner::HdrCompatibility { slice, converter } => {
+                converter.convert_row(slice.row(y), &mut self.scratch[..len], self.width);
+                for (d, &b) in dst[..len].iter_mut().zip(&self.scratch[..len]) {
+                    *d = b as f32;
+                }
+            }
         }
     }
 
@@ -409,6 +429,10 @@ impl<'a> RowStream<'a> {
             Inner::Convert { slice, converter } => {
                 let src = slice.row(y);
                 converter.convert_row(src, &mut self.scratch[..len], self.width);
+                &self.scratch[..len]
+            }
+            Inner::HdrCompatibility { slice, converter } => {
+                converter.convert_row(slice.row(y), &mut self.scratch[..len], self.width);
                 &self.scratch[..len]
             }
             Inner::LinearNormalized {

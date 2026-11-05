@@ -173,6 +173,7 @@ mod chroma_subsample_loss;
 mod dimensions;
 pub mod feature;
 mod grayscale;
+mod hdr_compat;
 #[cfg(test)]
 mod linear_tier;
 pub(crate) mod luma;
