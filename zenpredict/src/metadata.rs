@@ -389,10 +389,9 @@ pub mod keys {
     pub const REACH_ZQ_TARGETS: &str = "zentrain.reach_zq_targets";
 
     /// utf8 — the `zenanalyze` crate version the model's features were extracted
-    /// with, e.g. `"0.2.7"` (`zenanalyze::analyzer_version()` at bake time). With
-    /// [`FEATURE_DEFS_VERSION`], its `major.minor` is the reuse key a codec uses
-    /// to decide whether an offered feature result was produced by compatible
-    /// definitions (see the `zenanalyze-api` `Offer::matches` contract). Absent
+    /// with, e.g. `"0.2.7"` (`zenanalyze::analyzer_version()` at bake time).
+    /// Informational provenance; the transport negotiates qualified feature
+    /// identities and does not automatically compare analyzer versions. Absent
     /// on models baked before this key existed.
     pub const ANALYZER_VERSION: &str = "zentrain.analyzer_version";
     /// numeric (u32) — `zenanalyze::feature_defs_version()` at bake time: the
@@ -402,9 +401,9 @@ pub mod keys {
     pub const FEATURE_DEFS_VERSION: &str = "zentrain.feature_defs_version";
     /// numeric (u64) — `zenanalyze::AnalysisQuery::config_hash()` at bake time:
     /// the value-affecting analysis-config digest the model was trained under
-    /// (`0` = canonical default / gamma). The third part of the `zenanalyze-api`
-    /// reuse key, alongside [`ANALYZER_VERSION`] + [`FEATURE_DEFS_VERSION`]. Stops
-    /// a codec reusing e.g. linear-light features against a gamma-trained model:
+    /// (`0` = canonical default / gamma). The consumer must compare this with
+    /// the offered provenance before reuse; name negotiation does not enforce it.
+    /// This prevents reusing linear-light features against a gamma-trained model:
     /// the same feature name carries a different value under the flag while the
     /// version + defs stay fixed. Absent (treated as `0`) on models baked before
     /// this key.
