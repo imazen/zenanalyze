@@ -38,7 +38,7 @@ The adapter preserves historical transfer kernels and quantizers, non-FMA
 matrix arithmetic, stored-color alpha semantics, and the U8 encoded-domain
 matrix placement. It is an analysis representation, not HDR rendering. It adds
 no source peak, tone mapping or public API. The source-direct HDR/alpha tiers and
-opt-in linear-light analysis path retain their existing behavior.
+opt-in linear-light measurement parameters retain their existing contract.
 
 The first full cohort attempt passed runtime/docs but found the resampler's old
 pixel lock in all-target compilation. After precise lock convergence the next
@@ -51,3 +51,40 @@ Full logs, resolved locks, source archives and source identities are retained at
 `/mnt/v/output/zensim-siblings-20261105/zenanalyze/` (checked on dev), with the
 approved continuation under `approved-hdr/`. Mirror:
 `/mnt/tower/output/zensim-siblings-20261105/zenanalyze/`.
+
+## Strict reference follow-up
+
+The initial local golden invocation used portable mode, which checks gamma
+columns only. CI run42028968647 exposed linear-light drift (not accepted):
+[failed reference job](https://github.com/imazen/zenanalyze/actions/runs/42028968647/job/127250213278).
+The input goldens and their thresholds remain unchanged. `sibling-cohort-check`
+now explicitly runs the native and forced-scalar reference modes from CI through
+`just sibling-reference-check`.
+
+The private linear decoder retains historical stored-color alpha semantics and
+matrix operation order. Its independent old-runtime oracle covers 5,880 cases
+(all seven transfers, four depths, five primaries, seven layout/alpha combinations,
+six widths, two strided rows): 11,760 rows and 1,548,744,960 bytes match exactly.
+The accompanying HDR gate still matches 3,360 rows/110,624,640 bytes; all 1,400
+hashes match. Scope: rc0,125s, peak RSS0.36GiB, minimum available7,992MiB,
+peak load3.15.
+
+Linear reference limits are explicit: 3,360 gray rows use equivalent replicated
+RGB; 5,040 wide-gamut alpha rows use their stored RGB channels (these groups
+overlap). The old four-lane matrix can panic after DropAlpha, so those cases are
+RGB-equivalence checks rather than direct old-RGBA comparisons. Both domains
+remain covered. The old float/half Unknown-transfer wide-gamut measurement's
+sRGB assumption is preserved explicitly; no caller metadata is relabeled.
+
+The initial two linear-oracle attempts exposed legacy matrix panics. The next
+completed attempt found143 float-bit differences, all in sRGB8 wide-gamut rows;
+retaining separate scalar sums resolves all143. All failed artifacts are kept.
+Additional receipts and source identity are under `strict-reference/` beside
+`approved-hdr/` in the same local and tower artifact directories.
+
+The repaired full cohort passes671 runtime tests and21 doctests, with the same
+four runtime/nine doc ignores, and both strict reference modes. Its only remaining
+lint finding was the larger private enum variant; boxing the adapter repairs it.
+Final reference/lint/fuzz scope: rc0,19s, peak RSS0.52GiB, minimum available
+7,813MiB, peak load3.43. The byte oracle covers Full signal range; it makes no
+claim about other ranges or unsupported color models.

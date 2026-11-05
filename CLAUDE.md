@@ -478,8 +478,7 @@ analyzer instead preserves its existing content-feature representation through
 private, explicit measurement stages. They reuse the pixel crate's EOTF/OETF and
 quantizers, preserve the historical non-FMA matrix sum order, and read stored
 color channels independently of alpha. The source-direct alpha/HDR tiers continue
-to read the original descriptor and samples; the opt-in linear-light path retains
-its existing behavior. No peak, tone curve, model, golden or threshold is changed.
+to read the original descriptor and samples; the opt-in linear-light path uses its own historical stored-color decoder. No peak, tone curve, model, golden or threshold is changed.
 
 Known historical limitation: U8 wide-gamut HDR content features apply their matrix
 after widening but before the EOTF, as 0.2.14 did. This encoded-domain operation
@@ -495,3 +494,25 @@ one-pixel row; this is RGB-equivalence coverage, not a direct old-gray compariso
 Unchanged analyzer tests: 235 pass, four existing ignores. Full workspace: 671
 runtime tests and 21 doctests pass; strict all-target lint and fuzz compilation
 pass. Receipts: [qualification](benchmarks/sibling_cohort_2026-11-05.pointer.md).
+
+### Strict reference qualification correction
+
+The first local cohort run used portable golden mode, which checks only the
+first (gamma) half of every feature vector. Reference CI also checks linear-light
+columns and failed on the migrated premultiplied-alpha handling. The local recipe
+now runs `sibling-reference-check`: both native and forced-scalar reference modes
+with ZENANALYZE_GOLDEN_REFERENCE=1, before doctests/lint. No golden, tolerance,
+assertion or existing ignore was altered.
+
+Private LinearAnalysisConverter preserves stored color channels independently
+of alpha and the historical matrix order/precision. The old float/half
+wide-gamut Unknown-transfer path assumes sRGB when introducing its matrix; that
+measurement convention is explicit here, without changing source metadata.
+An independent 0.2.14 oracle compares all seven historical transfers, four depths,
+five primaries, seven layout/alpha combinations and six widths: 11,760 linear
+rows, 1,548,744,960 bytes, zero differences. It also retains the 3,360 HDR rows
+and 1,400 descriptor-hash checks. Gray rows use replicated RGB references; linear
+wide-gamut alpha rows use their stored RGB samples because the old four-lane
+matrix can panic after dropping alpha. These are explicit equivalence properties,
+not claims of direct parity with a panicking implementation. See the qualification
+pointer for coverage and full failed/successful run receipts.
