@@ -204,3 +204,135 @@ impl StoredColors {
         &self.bytes
     }
 }
+
+/// Historical linear-light content representation. This preserves measurement
+/// arithmetic and stored colors independently of rendering alpha semantics.
+pub(crate) struct LinearAnalysisConverter {
+    converter: RowConverter,
+    colors: Option<StoredColors>,
+    matrix: Option<gamut::GamutMatrix>,
+    after: Option<RowConverter>,
+    scratch: Vec<u8>,
+}
+
+impl LinearAnalysisConverter {
+    pub(crate) fn new(from: PixelDescriptor, width: u32) -> Result<Self, String> {
+        let colors = StoredColors::new(from, width)?;
+        let rgb = PixelDescriptor::new(
+            from.channel_type(),
+            ChannelLayout::Rgb,
+            None,
+            from.transfer(),
+        )
+        .with_primaries(from.primaries)
+        .with_signal_range(from.signal_range);
+        let linear = PixelDescriptor::RGBF32_LINEAR;
+        let matrix = gamut::conversion_matrix(from.primaries, ColorPrimaries::Bt709);
+        // The old planner inserts its matrix after integer widening. U16
+        // PQ/HLG widen and decode in one step; those matrices follow the EOTF.
+        let encoded_matrix = matrix.is_some()
+            && ((from.channel_type() == ChannelType::U8
+                && from.transfer() != TransferFunction::Srgb)
+                || (from.channel_type() == ChannelType::U16
+                    && !matches!(
+                        from.transfer(),
+                        TransferFunction::Pq | TransferFunction::Hlg
+                    )));
+        let intermediate = if matrix.is_some() {
+            linear.with_primaries(from.primaries)
+        } else {
+            linear
+        };
+        let intermediate = if encoded_matrix {
+            intermediate.with_transfer(from.transfer())
+        } else {
+            intermediate
+        };
+        // The historical float/half wide-gamut planner assumes sRGB when its
+        // transfer is Unknown and it has to introduce a matrix. This is an
+        // explicit legacy measurement convention, not new source metadata.
+        let decode_source = if matrix.is_some()
+            && from.transfer() == TransferFunction::Unknown
+            && matches!(from.channel_type(), ChannelType::F16 | ChannelType::F32)
+        {
+            rgb.with_transfer(TransferFunction::Srgb)
+        } else {
+            rgb
+        };
+        let converter = RowConverter::from_plan(
+            ConvertPlan::new(decode_source, intermediate)
+                .map_err(|e| format!("Linear analysis decode failed: {e:?}"))?,
+        );
+        let after = if encoded_matrix {
+            Some(RowConverter::from_plan(
+                ConvertPlan::new(linear.with_transfer(from.transfer()), linear).map_err(|e| {
+                    format!("Linear analysis legacy post-matrix decode failed: {e:?}")
+                })?,
+            ))
+        } else {
+            None
+        };
+        let mut scratch = Vec::new();
+        if after.is_some() {
+            let len = (width as usize)
+                .checked_mul(12)
+                .ok_or_else(|| "Linear analysis row size overflow".to_string())?;
+            scratch
+                .try_reserve_exact(len)
+                .map_err(|e| format!("Linear analysis allocation failed: {e}"))?;
+            scratch.resize(len, 0);
+        }
+        Ok(Self {
+            converter,
+            colors,
+            matrix,
+            after,
+            scratch,
+        })
+    }
+
+    pub(crate) fn convert_row(&mut self, from: &[u8], to: &mut [u8], width: u32) {
+        let from = if let Some(colors) = &mut self.colors {
+            colors.extract(from)
+        } else {
+            from
+        };
+        let len = width as usize * 12;
+        if let Some(after) = &mut self.after {
+            self.converter.convert_row(from, &mut self.scratch, width);
+            if let Some(matrix) = &self.matrix {
+                legacy_matrix_row(&mut self.scratch, matrix);
+            }
+            after.convert_row(&self.scratch, to, width);
+        } else {
+            self.converter.convert_row(from, to, width);
+            if let Some(matrix) = &self.matrix {
+                legacy_matrix_row(&mut to[..len], matrix);
+            }
+        }
+    }
+}
+
+fn legacy_matrix_row(row: &mut [u8], matrix: &gamut::GamutMatrix) {
+    for bytes in row.as_chunks_mut::<12>().0 {
+        let mut rgb = [
+            f32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[4..8].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[8..12].try_into().unwrap()),
+        ];
+        gamut::apply_matrix_f32(&mut rgb, matrix);
+        for (channel, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(rgb) {
+            channel.copy_from_slice(&value.to_ne_bytes());
+        }
+    }
+}
+
+impl core::fmt::Debug for LinearAnalysisConverter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LinearAnalysisConverter")
+            .field("plan", self.converter.plan())
+            .field("matrix", &self.matrix)
+            .field("after", &self.after.as_ref().map(RowConverter::plan))
+            .finish()
+    }
+}

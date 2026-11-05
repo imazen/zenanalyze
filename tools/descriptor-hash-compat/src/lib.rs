@@ -68,7 +68,7 @@ mod tests {
             Some(f32::NEG_INFINITY),
         ];
         let mut compared = 0;
-        for (transfer, old_transfer) in transfers {
+        for &(transfer, old_transfer) in &transfers {
             for (primaries, old_primaries) in primaries {
                 for (alpha, old_alpha) in alphas {
                     let mut current = zenpixels::PixelDescriptor::RGB8_SRGB;
@@ -95,13 +95,49 @@ mod tests {
 
     #[test]
     fn hdr_analysis_rows_match_the_qualified_legacy_converter() {
-        use crate::hdr_compat::HdrAnalysisConverter;
+        compare_rows(false);
+    }
+
+    #[test]
+    fn linear_analysis_rows_match_the_qualified_legacy_converter() {
+        compare_rows(true);
+    }
+
+    fn compare_rows(linear: bool) {
+        use crate::hdr_compat::{HdrAnalysisConverter, LinearAnalysisConverter};
+        #[derive(Debug)]
+        enum Actual {
+            Hdr(Box<HdrAnalysisConverter>),
+            Linear(Box<LinearAnalysisConverter>),
+        }
+        impl Actual {
+            fn convert_row(&mut self, from: &[u8], to: &mut [u8], width: u32) {
+                match self {
+                    Self::Hdr(c) => c.convert_row(from, to, width),
+                    Self::Linear(c) => c.convert_row(from, to, width),
+                }
+            }
+        }
         use zenpixels::{ChannelLayout as L, ChannelType as C, PixelDescriptor as D};
         use zenpixels_convert_legacy::{
             AlphaMode as OA, ChannelLayout as OL, ChannelType as OC, ColorPrimaries as OP,
             PixelDescriptor as OD, RowConverter as OldConverter, TransferFunction as OT,
         };
-        let transfers = [(T::Pq, OT::Pq), (T::Hlg, OT::Hlg)];
+        let transfers = if linear {
+            vec![
+                (T::Linear, OT::Linear),
+                (T::Srgb, OT::Srgb),
+                (T::Bt709, OT::Bt709),
+                (T::Pq, OT::Pq),
+                (T::Hlg, OT::Hlg),
+                (T::Gamma22, OT::Gamma22),
+                (T::Unknown, OT::Unknown),
+            ]
+        } else {
+            vec![(T::Pq, OT::Pq), (T::Hlg, OT::Hlg)]
+        };
+        let output_bpp = if linear { 12 } else { 3 };
+        let domain = if linear { "LINEAR" } else { "HDR" };
         let primaries = [
             (P::Bt709, OP::Bt709),
             (P::Bt2020, OP::Bt2020),
@@ -146,12 +182,13 @@ mod tests {
         let mut matched_rows = 0;
         let mut differing_rows = 0;
         let mut gray_reference_rows = 0;
+        let mut alpha_reference_rows = 0;
         let mut failures = Vec::new();
         let mut compared_bytes = 0usize;
         for width in [1u32, 7, 16, 31, 257, 65_536] {
-            println!("HDR_LEGACY_PROGRESS width={width}");
+            println!("{domain}_LEGACY_PROGRESS width={width}");
             for (depth, old_depth, bpc) in depths {
-                for (transfer, old_transfer) in transfers {
+                for &(transfer, old_transfer) in &transfers {
                     for (primary, old_primary) in primaries {
                         for (layout, old_layout, alpha, old_alpha, channels) in layouts {
                             cases += 1;
@@ -161,7 +198,16 @@ mod tests {
                             // rows. Use the equivalent replicated-RGB source as that
                             // domain's independent reference; never skip its coverage.
                             let gray = matches!(layout, L::Gray | L::GrayAlpha);
-                            let reference_layout = if gray {
+                            // The old linear wide-gamut RGBA plan also panics: its matrix
+                            // still expects four lanes after DropAlpha. Its stored RGB
+                            // samples supply the independent reference for that domain.
+                            let wide_alpha = linear
+                                && alpha.is_some()
+                                && matches!(primary, P::Bt2020 | P::DisplayP3 | P::AdobeRgb);
+                            let reference_alpha = if wide_alpha { None } else { old_alpha };
+                            let reference_layout = if wide_alpha {
+                                OL::Rgb
+                            } else if gray {
                                 if old_alpha.is_some() {
                                     OL::Rgba
                                 } else {
@@ -171,10 +217,21 @@ mod tests {
                                 old_layout
                             };
                             let previous =
-                                OD::new(old_depth, reference_layout, old_alpha, old_transfer)
+                                OD::new(old_depth, reference_layout, reference_alpha, old_transfer)
                                     .with_primaries(old_primary);
-                            let mut reference = OldConverter::new(previous, OD::RGB8_SRGB);
-                            let mut actual = HdrAnalysisConverter::new(current, width);
+                            let target = if linear {
+                                OD::RGBF32_LINEAR
+                            } else {
+                                OD::RGB8_SRGB
+                            };
+                            let mut reference = OldConverter::new(previous, target);
+                            let mut actual = if linear {
+                                LinearAnalysisConverter::new(current, width)
+                                    .map(|c| Actual::Linear(Box::new(c)))
+                            } else {
+                                HdrAnalysisConverter::new(current, width)
+                                    .map(|c| Actual::Hdr(Box::new(c)))
+                            };
                             let label = format!(
                                 "{width}/{depth:?}/{transfer:?}/{primary:?}/{layout:?}/{alpha:?}"
                             );
@@ -216,12 +273,13 @@ mod tests {
                                             }
                                         }
                                         let source = &input[y * stride..y * stride + row_bytes];
-                                        let mut expected = vec![0x5au8; width as usize * 3];
-                                        let mut got = vec![0xa5u8; width as usize * 3];
+                                        let mut expected =
+                                            vec![0x5au8; width as usize * output_bpp];
+                                        let mut got = vec![0xa5u8; width as usize * output_bpp];
                                         let expanded;
                                         let reference_source = if gray {
                                             let target_channels =
-                                                if alpha.is_some() { 4 } else { 3 };
+                                                if reference_alpha.is_some() { 4 } else { 3 };
                                             let mut bytes = Vec::with_capacity(
                                                 width as usize * target_channels * bpc,
                                             );
@@ -229,11 +287,17 @@ mod tests {
                                                 for _ in 0..3 {
                                                     bytes.extend_from_slice(&pixel[..bpc]);
                                                 }
-                                                if alpha.is_some() {
+                                                if reference_alpha.is_some() {
                                                     bytes.extend_from_slice(&pixel[bpc..2 * bpc]);
                                                 }
                                             }
                                             expanded = bytes;
+                                            &expanded[..]
+                                        } else if wide_alpha {
+                                            expanded = source
+                                                .chunks_exact(channels * bpc)
+                                                .flat_map(|pixel| pixel[..3 * bpc].iter().copied())
+                                                .collect::<Vec<_>>();
                                             &expanded[..]
                                         } else {
                                             source
@@ -247,6 +311,9 @@ mod tests {
                                         compared_bytes += got.len();
                                         if gray {
                                             gray_reference_rows += 1;
+                                        }
+                                        if wide_alpha {
+                                            alpha_reference_rows += 1;
                                         }
                                         if got == expected {
                                             matched_rows += 1;
@@ -287,7 +354,7 @@ mod tests {
             }
         }
         println!(
-            "HDR_LEGACY_ROWS cases={cases} matched_rows={matched_rows} differing_rows={differing_rows} gray_via_rgb_rows={gray_reference_rows} compared_bytes={compared_bytes}"
+            "{domain}_LEGACY_ROWS cases={cases} matched_rows={matched_rows} differing_rows={differing_rows} gray_via_rgb_rows={gray_reference_rows} alpha_via_rgb_rows={alpha_reference_rows} compared_bytes={compared_bytes}"
         );
         assert!(
             failures.is_empty(),
