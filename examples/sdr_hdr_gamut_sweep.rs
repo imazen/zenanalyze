@@ -31,8 +31,9 @@ use image::{ImageReader, imageops::FilterType};
 use linear_srgb::tf::{linear_to_pq, srgb_to_linear};
 use zenanalyze::feature::{AnalysisQuery, AnalysisResults, FeatureSet};
 use zenanalyze::{analyze_features, analyze_features_rgb8};
+use zenpixels::hdr::DiffuseWhite;
 use zenpixels::{
-    ColorContext, ColorPrimaries, DiffuseWhite, PixelDescriptor, PixelSlice, TransferFunction,
+    ColorContext, ColorPrimaries, PixelDescriptor, PixelSlice, TransferFunction,
 };
 
 const DIFFUSE_WHITE_NITS: f32 = 203.0;

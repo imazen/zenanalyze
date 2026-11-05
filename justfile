@@ -201,9 +201,13 @@ beta-cohort-check:
 # Shared unpublished pixel cohort; no zencodec dependency is introduced.
 sibling-cohort-check:
     cargo metadata --format-version 1 > /dev/null
+    cargo tree --locked -i zenpixels
     RUST_TEST_THREADS=1 cargo test --workspace --locked --lib --tests --all-features
     cargo test --workspace --locked --doc --all-features
-    cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+    just sibling-cohort-lint
+
+sibling-cohort-lint:
+    cargo clippy --workspace --locked --all-targets --all-features --keep-going -- -D warnings
     cargo check --manifest-path zenpredict/fuzz/Cargo.toml --bins
 
 # Isolated old-package oracle: its two pixel versions never enter production.
