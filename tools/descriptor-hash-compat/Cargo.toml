@@ -1,0 +1,17 @@
+[package]
+name = "descriptor-hash-compat"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Deliberately isolated: the historical pixel package is an oracle only.
+[workspace]
+
+[dependencies]
+zenanalyze = { path = "../..", default-features = false }
+zenpixels = { version = ">=0.3.1, <0.4.0", default-features = false }
+zenpixels-legacy = { package = "zenpixels", version = "=0.2.16", default-features = false }
+
+[patch.crates-io]
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }

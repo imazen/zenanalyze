@@ -104,8 +104,8 @@ _dev = ["archmage/testable_dispatch"]
 # this workspace the path dep satisfies the requirement either way, so the bug
 # is invisible locally and only fires for a downstream consumer.
 zenanalyze-api = { version = "0.1.1", path = "zenanalyze-api", optional = true }
-zenpixels = { version = ">=0.2.14, <0.4.0", default-features = false, features = ["imgref"] }
-zenpixels-convert = { version = ">=0.2.14, <0.4.0", default-features = false }
+zenpixels = { version = ">=0.3.1, <0.4.0", default-features = false, features = ["imgref"] }
+zenpixels-convert = { version = ">=0.3.1, <0.4.0", default-features = false }
 archmage = { version = ">=0.9.27, <=0.9.31-beta.1", features = ["macros", "avx512"] }
 magetypes = { version = ">=0.9.30, <=0.9.31-beta.1", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,
@@ -253,7 +253,7 @@ members = ["zenanalyze-api", "zenpicker", "zenpredict", "zenpredict-bake", "zenp
 # `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
 # `cargo test` and every CI job never compile its dependency tree or run
 # rustdoc. Regenerate via `just api-doc`.
-exclude = ["zenpicker-train", "apidoc"]
+exclude = ["zenpicker-train", "apidoc", "tools/descriptor-hash-compat"]
 resolver = "3"
 
 [[bench]]
@@ -271,3 +271,8 @@ harness = false
 [[example]]
 name = "budget_decision_ab"
 required-features = ["api"]
+
+# Unpublished sibling qualification: one pixel type identity across consumers.
+[patch.crates-io]
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }

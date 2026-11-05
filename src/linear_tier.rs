@@ -201,7 +201,8 @@ fn rgba8_supported() {
 fn honors_signaled_diffuse_white() {
     use linear_srgb::tf::{linear_to_pq, srgb_to_linear};
     use std::sync::Arc;
-    use zenpixels::{ColorContext, DiffuseWhite, TransferFunction};
+    use zenpixels::hdr::DiffuseWhite;
+    use zenpixels::{ColorContext, TransferFunction};
 
     let (w, h) = (96u32, 64u32);
     let sdr = gray_ramp_rgb8(w as usize, h as usize, 200);
