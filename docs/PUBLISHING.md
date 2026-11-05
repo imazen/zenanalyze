@@ -4,6 +4,11 @@ The [pre-publication API audit](API_NECESSITY_2026-10-28.md) identifies
 output-transform correctness blockers and traces the controller APIs' intended workflows.
 Resolve those findings before treating the current surface as the release candidate.
 
+The [2026-11-05 readiness review](PREDICT_READINESS_2026-11-05.md) records the
+landed transform fix, experimental controller proposal, producer signature
+review, public-boundary listings and final local gate evidence. The producer
+signatures remain proposals; publication still requires owner approval.
+
 See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
 before treating every unpublished research interface as a release prerequisite.
 
