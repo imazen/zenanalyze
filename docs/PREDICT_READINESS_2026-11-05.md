@@ -155,6 +155,14 @@ This is a source review, not a claim that every consumer configuration has
 been rebuilt. Evidence belongs to the current refresh directory linked from
 the [receipt](../benchmarks/predict_readiness_2026-11-05.pointer.md).
 
+Main advanced again to `9c8d6c55` during the refresh. The PR also merges that
+commit, preserving head `33c49dcd`. It widens the archmage/magetypes upper bounds
+to `<0.10.0`; registry resolution still uses 0.9.30 for both, and `cargo update`
+changes zero packages. This admits a future stable 0.9.31 without claiming it
+has been published or tested here. The standalone fuzz lock resolves its former
+beta dependency to stable 0.9.30 under the new range. The source implementation, root dependency lock
+and public-surface proposal are unchanged by this final base refresh.
+
 ## Current qualification
 
 Runtime readiness passes without defaults, with no_std plus advanced, and with

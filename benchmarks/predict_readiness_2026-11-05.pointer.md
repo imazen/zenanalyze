@@ -59,3 +59,8 @@ that linear-light mode is x86-only under the existing versioning contract.
 Both native and forced-scalar reference modes pass on x86. No golden or
 threshold was changed. Packaging and source-selected semver evidence are kept
 with the fresh receipts; older gate records above remain historical.
+
+The final base update also merges main `9c8d6c55`, retaining review head
+`33c49dcd`. It admits stable SIMD versions below 0.10.0 while preserving the
+current 0.9.30 resolution. The updated workspace check and package/publication
+recipe pass on that manifest; no 0.9.31 test or publication is claimed.

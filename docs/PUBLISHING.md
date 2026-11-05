@@ -46,8 +46,7 @@ The independent dependency chains are:
 ## Third-party dependencies (2026-11-05)
 
 The runtime uses bytemuck 1.25.2, libm 0.2.16 and lz4_flex 0.14.0;
-SIMD optionally adds archmage within the existing 0.9.26–0.9.31-beta.1
-range. LZ4 block decoding stays available without `std`, with safe and
+SIMD optionally adds archmage in `>=0.9.26, <0.10.0`. LZ4 block decoding stays available without `std`, with safe and
 checked decoding enabled. The baker additionally enables LZ4's `alloc`
 encoder API and uses serde 1.0.229 / serde_json 1.0.154.
 
