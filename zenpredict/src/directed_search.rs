@@ -39,50 +39,59 @@ fn by_zq(zq: &[f32]) -> impl Fn(&usize, &usize) -> Ordering + '_ {
 }
 
 /// The best completed trial per `target` (over/undershoot-aware). Returns the index
-/// into `done`, or `None` if `done` is empty.
+/// into `done`, or `None` if no trial has a non-NaN quality measurement or
+/// the quality target is NaN. Invalid measurements cannot win either preference;
+/// infinite measurements retain their ordinary numeric ordering.
 pub fn best_trial(done: &[Trial], target: QualityTarget) -> Option<usize> {
-    if done.is_empty() {
+    if matches!(target, QualityTarget::Quality { target_zq } if target_zq.is_nan()) {
         return None;
     }
-    let idx = match target {
-        QualityTarget::Quality { target_zq } => (0..done.len())
+    let valid = || (0..done.len()).filter(|&i| !done[i].achieved_zq.is_nan());
+    match target {
+        QualityTarget::Quality { target_zq } => valid()
             .filter(|&i| done[i].achieved_zq >= target_zq)
             .min_by_key(|&i| done[i].bytes) // reaching -> fewest bytes
-            .unwrap_or_else(|| {
+            .or_else(|| {
                 // none reach -> the highest achieved quality (best effort)
-                (0..done.len())
-                    .max_by(|&a, &b| done[a].achieved_zq.total_cmp(&done[b].achieved_zq))
-                    .unwrap()
+                valid().max_by(|&a, &b| done[a].achieved_zq.total_cmp(&done[b].achieved_zq))
             }),
-        QualityTarget::Bytes { max_bytes } => (0..done.len())
+        QualityTarget::Bytes { max_bytes } => valid()
             .filter(|&i| done[i].bytes <= max_bytes)
             .max_by(|&a, &b| done[a].achieved_zq.total_cmp(&done[b].achieved_zq)) // fitting -> max quality
-            .unwrap_or_else(|| {
+            .or_else(|| {
                 // none fit -> the smallest output (best effort)
-                (0..done.len()).min_by_key(|&i| done[i].bytes).unwrap()
+                valid().min_by_key(|&i| done[i].bytes)
             }),
-    };
-    Some(idx)
+    }
 }
 
 /// The next candidate to trial, directed by the over/undershoot of `done` against
 /// `target`. Returns an untried candidate index, or `None` to stop (the target is
-/// bracketed or candidates are exhausted). Alloc-free.
+/// bracketed or candidates are exhausted). NaN predictions are ineligible; trials
+/// with NaN measurements or invalid prediction indices provide no search evidence.
+/// Failed trials remain tried so they are not repeatedly encoded. A NaN quality
+/// target returns `None`. Alloc-free.
 pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -> Option<usize> {
     let n = predicted_zq.len();
-    if n == 0 {
+    if matches!(target, QualityTarget::Quality { target_zq } if target_zq.is_nan()) {
         return None;
     }
     let tried = |c: usize| done.iter().any(|t| t.candidate == c);
+    let available = || (0..n).filter(|&c| !tried(c) && !predicted_zq[c].is_nan());
+    let observed = || {
+        done.iter().filter(|t| {
+            !t.achieved_zq.is_nan() && predicted_zq.get(t.candidate).is_some_and(|zq| !zq.is_nan())
+        })
+    };
 
-    if done.is_empty() {
+    if observed().next().is_none() {
         // First probe: the candidate whose predicted quality best brackets the target.
         return match target {
-            QualityTarget::Quality { target_zq } => (0..n)
+            QualityTarget::Quality { target_zq } => available()
                 .filter(|&c| predicted_zq[c] >= target_zq)
                 .min_by(by_zq(predicted_zq)) // leanest predicted to reach
-                .or_else(|| (0..n).max_by(by_zq(predicted_zq))), // else the best shot
-            QualityTarget::Bytes { .. } => (0..n).max_by(by_zq(predicted_zq)), // start high, walk leaner
+                .or_else(|| available().max_by(by_zq(predicted_zq))), // else the best shot
+            QualityTarget::Bytes { .. } => available().max_by(by_zq(predicted_zq)), // start high, walk leaner
         };
     }
 
@@ -92,46 +101,42 @@ pub fn next_trial(predicted_zq: &[f32], done: &[Trial], target: QualityTarget) -
     // from the fold, rather than indexing straight into `predicted_zq`.
     match target {
         QualityTarget::Quality { target_zq } => {
-            let reaching_pred = done
-                .iter()
+            let reaching_pred = observed()
                 .filter(|t| t.achieved_zq >= target_zq)
                 .filter_map(|t| predicted_zq.get(t.candidate).copied())
                 .fold(f32::INFINITY, f32::min);
             if reaching_pred.is_finite() {
                 // have a reach -> probe a leaner untried (predicted below it): may also reach, fewer bytes
-                (0..n)
-                    .filter(|&c| !tried(c) && predicted_zq[c] < reaching_pred)
+                available()
+                    .filter(|&c| predicted_zq[c] < reaching_pred)
                     .max_by(by_zq(predicted_zq))
             } else {
                 // no reach yet -> probe a higher untried, closest above the highest tried
-                let max_tried = done
-                    .iter()
+                let max_tried = observed()
                     .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::NEG_INFINITY, f32::max);
-                (0..n)
-                    .filter(|&c| !tried(c) && predicted_zq[c] > max_tried)
+                available()
+                    .filter(|&c| predicted_zq[c] > max_tried)
                     .min_by(by_zq(predicted_zq))
             }
         }
         QualityTarget::Bytes { max_bytes } => {
-            if done.iter().any(|t| t.bytes <= max_bytes) {
+            if observed().any(|t| t.bytes <= max_bytes) {
                 // already fitting -> probe a higher-quality untried that might still fit
-                let best_fit_pred = done
-                    .iter()
+                let best_fit_pred = observed()
                     .filter(|t| t.bytes <= max_bytes)
                     .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::NEG_INFINITY, f32::max);
-                (0..n)
-                    .filter(|&c| !tried(c) && predicted_zq[c] > best_fit_pred)
+                available()
+                    .filter(|&c| predicted_zq[c] > best_fit_pred)
                     .min_by(by_zq(predicted_zq))
             } else {
                 // nothing fits -> probe a leaner untried (lower predicted quality -> fewer bytes)
-                let min_tried = done
-                    .iter()
+                let min_tried = observed()
                     .filter_map(|t| predicted_zq.get(t.candidate).copied())
                     .fold(f32::INFINITY, f32::min);
-                (0..n)
-                    .filter(|&c| !tried(c) && predicted_zq[c] < min_tried)
+                available()
+                    .filter(|&c| predicted_zq[c] < min_tried)
                     .max_by(by_zq(predicted_zq))
             }
         }
@@ -208,6 +213,61 @@ mod tests {
         assert_eq!(
             next_trial(&pred, &done, QualityTarget::Quality { target_zq: 70.0 }),
             None
+        );
+    }
+
+    #[test]
+    fn best_trial_excludes_nan_measurements_in_every_preference_branch() {
+        let done = [t(0, 70.0, 200), t(1, f32::NAN, 1)];
+        for target in [
+            QualityTarget::Quality { target_zq: 60.0 },
+            QualityTarget::Quality { target_zq: 80.0 },
+            QualityTarget::Bytes { max_bytes: 300 },
+            QualityTarget::Bytes { max_bytes: 100 },
+            QualityTarget::Bytes { max_bytes: 0 },
+        ] {
+            assert_eq!(best_trial(&done, target), Some(0), "{target:?}");
+            assert_eq!(best_trial(&done[1..], target), None, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn search_excludes_nan_predictions_and_does_not_retry_failed_trials() {
+        for target in [
+            QualityTarget::Quality { target_zq: 80.0 },
+            QualityTarget::Bytes { max_bytes: 100 },
+        ] {
+            assert_eq!(next_trial(&[75.0, f32::NAN, 65.0], &[], target), Some(0));
+            assert_eq!(next_trial(&[f32::NAN], &[], target), None);
+        }
+        let failed = [t(0, f32::NAN, 1)];
+        for target in [
+            QualityTarget::Quality { target_zq: 70.0 },
+            QualityTarget::Bytes { max_bytes: 100 },
+        ] {
+            assert_eq!(next_trial(&[75.0, 71.0, 68.0], &failed, target), Some(1));
+        }
+        assert_eq!(
+            next_trial(&[75.0], &failed, QualityTarget::Bytes { max_bytes: 100 }),
+            None
+        );
+    }
+
+    #[test]
+    fn nan_quality_target_has_no_meaningful_winner_or_next_trial() {
+        let target = QualityTarget::Quality {
+            target_zq: f32::NAN,
+        };
+        assert_eq!(best_trial(&[t(0, 70.0, 200)], target), None);
+        assert_eq!(next_trial(&[70.0], &[], target), None);
+    }
+
+    #[test]
+    fn infinite_quality_measurements_retain_their_ordering() {
+        let done = [t(0, 70.0, 200), t(1, f32::INFINITY, 300)];
+        assert_eq!(
+            best_trial(&done, QualityTarget::Quality { target_zq: 80.0 }),
+            Some(1)
         );
     }
 

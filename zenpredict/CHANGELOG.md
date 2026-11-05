@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Directed trial selection ignores NaN predictions and measured quality, returns
+  no winner for an entirely invalid trial set or NaN quality target, and does
+  not retry failed trials. Finite and infinite quality ordering is preserved.
+
 - Output transforms compute Exp and sigmoid with libm without std. Round now
   preserves large integral values, signed zero and infinities, with ties away
   from zero. Nonzero and boundary regressions run in both configurations.

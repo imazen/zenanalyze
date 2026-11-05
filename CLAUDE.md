@@ -342,12 +342,20 @@ runtime branch).
 
 - **2026-10-28 — pre-publication controller audit, unresolved:**
   `resolve_pre_argmin` can return a masked-out zone fallback;
-  `best_trial` can prefer NaN achieved quality over a finite measurement.
+  the mask conflates predicted reachability and caller constraints, so enforcing
+  hard constraints requires separate caller evidence or an approved API change.
   Reproducers: `just api-necessity-probe`, `just api-necessity-transforms`.
   The audit also records raw/transformed prediction composition and
   producer stride/configuration issues. See
   [the findings and proposed surface](docs/API_NECESSITY_2026-10-28.md).
   No behavior or established expectation was changed by the audit.
+
+- **2026-11-05 — directed-search NaN handling fixed:** `best_trial` excludes
+  NaN quality measurements in all preference branches; `next_trial` excludes
+  NaN predictions and measurements while keeping failed candidates tried.
+  A NaN quality target or an entirely invalid winner set returns `None`.
+  Infinite quality retains numeric ordering. Existing finite-input regressions
+  and the new invalid-input controls pass with and without std.
 
 - **2026-10-09 — magetypes 0.9.30 constructor deprecations: FIXED locally.**
   The old analyzer calls produced 201 denied diagnostics per compiled target
