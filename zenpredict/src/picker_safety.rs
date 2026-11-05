@@ -26,6 +26,12 @@
 //! [`PreArgminDecision`]. Steps **3-4 are the codec's** (it owns the encoder,
 //! the verify, and the never-strand fallback around its argmin).
 //!
+//! Keep caller hard constraints separately from predicted reachability. A zone
+//! fallback may deliberately miss the requested quality, but it must still obey
+//! caller constraints. [`resolve_pre_argmin`] cannot recover that distinction
+//! from a combined reach mask: validate its fallback against the original hard
+//! mask before encoding, including the fallback cell's index and scalar.
+//!
 //! ## Granular quality targeting (runtime contract)
 //!
 //! The picker is conditioned on a **continuous** quality target: the training
@@ -66,13 +72,20 @@
 //! };
 //! # fn encode(_cell: usize, _scalar: Option<f32>) {}
 //! # fn run(zones: &UnachievableZones, vetoes: &[zenpredict::KnobVeto<'_>],
-//! #        features: &[f32], predicted_bytes: &[f32], target_zq: f32, reach: &[bool]) {
-//! // `reach` = cells whose predicted metric >= target_zq (the caller's mask).
+//! #        features: &[f32], predicted_bytes: &[f32], target_zq: f32,
+//! #        reach: &[bool], hard_allowed: &[bool]) -> Result<(), &'static str> {
+//! // `reach` combines predicted quality reachability with caller constraints.
+//! // `hard_allowed` retains caller constraints independently of predicted quality.
 //! let mut allowed = reach.to_vec();              // veto pass mutates a copy
 //! match resolve_pre_argmin(features, target_zq, zones, vetoes, &mut allowed) {
 //!     PreArgminDecision::ZoneFallback(fb) => {
-//!         // physically unreachable target -> declared best-achievable knobset
-//!         encode(fb.cell, fb.scalar);
+//!         // Validate index and hard constraints before using the fallback.
+//!         // Also check `fb.scalar` against the caller's scalar limits, if any.
+//!         if hard_allowed.get(fb.cell).copied().unwrap_or(false) {
+//!             encode(fb.cell, fb.scalar);
+//!         } else {
+//!             return Err("no permitted zone fallback is available");
+//!         }
 //!     }
 //!     PreArgminDecision::Argmin => {
 //!         let pick = argmin_masked(predicted_bytes, &AllowedMask::new(&allowed),
@@ -84,6 +97,7 @@
 //!     }
 //! }
 //! // ...then pass-0 verify + crate::should_rescue(...) for step 4.
+//! # Ok(())
 //! # }
 //! ```
 
@@ -94,7 +108,8 @@ use crate::unachievable_zone::{UnachievableZones, ZoneFallback};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PreArgminDecision {
     /// `target_zq` is physically unreachable for the image's size class.
-    /// Encode this declared fallback knobset directly — do **not** argmin.
+    /// Validate this declared fallback's cell and scalar against caller hard
+    /// constraints before encoding; it need not satisfy predicted reachability.
     ZoneFallback(ZoneFallback),
     /// No unachievable zone fired. The vetoes (if any) have been applied to
     /// the caller's `allowed` mask; proceed to the masked argmin (with the
@@ -120,6 +135,11 @@ pub enum PreArgminDecision {
 /// [module docs](self) example. `features` is the bake's feat_cols-ordered
 /// vector (the same the picker forward pass consumes). Panic-free: every
 /// out-of-range index in either overlay is skipped.
+///
+/// A returned zone fallback is advisory with respect to caller constraints:
+/// `allowed` is not consulted on that branch because it may be an entirely empty
+/// quality-reachability mask. The caller must retain an independent hard mask and
+/// validate both the returned cell and scalar before encoding.
 pub fn resolve_pre_argmin(
     features: &[f32],
     target_zq: f32,

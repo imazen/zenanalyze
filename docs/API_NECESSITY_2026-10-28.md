@@ -4,7 +4,9 @@ Update 2026-11-05: output-transform defects were fixed in `7064f1df`.
 Directed-search NaN predictions/measurements and NaN quality targets are now
 handled explicitly, with regression coverage and unchanged valid-input tests.
 The zone-mask, input-transform composition and offer configuration/stride
-findings below still require their stated contract decisions.
+findings below still require their stated contract decisions. The
+[consumer follow-up](CONSUMER_SURFACES_2026-11-05.md) records their current
+disposition and the serving-versus-research feature-gate recommendation.
 
 Audited source `208ee7ec` on 2026-10-28. **Keep the extractor, transport contract,
 MLP runtime and baker. Preserve the intended picker workflows while reviewing

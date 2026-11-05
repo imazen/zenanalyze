@@ -130,6 +130,13 @@ impl<'a> Predictor<'a> {
     /// into the destination buffer **before** accumulating, so stale
     /// data from a prior call never leaks into the result. Calling
     /// `predict` twice with the same `features` is deterministic.
+    ///
+    /// This applies the embedded scaler, but does **not** apply the bake's
+    /// nonlinear feature transforms. For raw features from extraction, use
+    /// [`Self::predict_transformed`] when the bake declares those transforms.
+    /// The `argmin_*` convenience methods use this same scaler-only contract;
+    /// compose transformed prediction with the free selection functions when
+    /// selecting directly from raw extracted features.
     pub fn predict(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
         forward(
             self.model,

@@ -135,6 +135,23 @@ let distance: f32 = predictor.predict(&features)?[0];
 > `None` when no cell is allowed). Same `ScoreTransform` / `ArgminOffsets`
 > semantics either way.
 
+### Input transforms and selection
+
+`predict` and the `Predictor::argmin_*` wrappers apply the embedded scaler,
+but leave baked nonlinear feature transforms to the caller. Their input is
+unnormalized with respect to the scaler, and must already be in the nonlinear
+transform domain used during training. To start from raw extracted features,
+call `predict_transformed`, then apply a free selection function to its scores:
+
+```rust,ignore
+let scores = predictor.predict_transformed(&raw_features)?;
+let pick = zenpredict::argmin_masked(scores, &mask, ScoreTransform::Exp, None);
+```
+
+Calling the raw wrapper on a bake that requires a log or other nonlinear input
+transform can change the winning cell. `predict_transformed` also works for a
+bake without transforms, forwarding its input without a transform copy.
+
 ## Format (ZNPR v3)
 
 Fixed-shape `#[repr(C)]` header (128 bytes) + offset-table `LayerEntry[n_layers]` (48 bytes each) + aligned data sections + a typed-TLV metadata blob + optional `output_specs` / `discrete_sets` / `sparse_overrides` sections.
@@ -158,7 +175,7 @@ Three weight dtypes:
 - **F16** — half the size at ~no accuracy cost. Conversion is built in (no `half` dep) — compact integer bit math, see [`f16_bits_to_f32`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/src/inference.rs).
 - **I8** — `1/4` size with one f32 scale per output neuron. Per-output (column-wise) scaling — each output has its own dynamic range so one big-magnitude column doesn't waste i8 resolution on the small-magnitude ones.
 
-Three activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`.
+Four activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`, and fixed `SmoothHinge` (τ=1/8).
 
 ## Metadata
 

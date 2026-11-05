@@ -1,8 +1,9 @@
 # Publishing the zenanalyze workspace
 
-The [pre-publication API audit](API_NECESSITY_2026-10-28.md) identifies
-output-transform correctness blockers and traces the controller APIs' intended workflows.
-Resolve those findings before treating the current surface as the release candidate.
+The [pre-publication API audit](API_NECESSITY_2026-10-28.md) traces the controller
+APIs' intended workflows. Its output-transform and directed-search NaN defects
+are fixed. The [consumer follow-up](CONSUMER_SURFACES_2026-11-05.md) records
+remaining contract decisions and model-qualification gaps to resolve before release.
 
 See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
 before treating every unpublished research interface as a release prerequisite.
