@@ -48,9 +48,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }],
     };
     let mut allowed = [true, false];
-    if let PreArgminDecision::ZoneFallback(fallback) =
-        resolve_pre_argmin(&[100.0], 95.0, &zones, &[], &mut allowed)
-    {
+    if let PreArgminDecision::ZoneFallback(fallback) = resolve_pre_argmin(
+        &[100.0],
+        95.0,
+        &zones,
+        &[],
+        &AllowedMask::new(&[true, false]),
+        &mut allowed,
+    ) {
         println!(
             "zone: fallback={}, allowed={}",
             fallback.cell, allowed[fallback.cell]

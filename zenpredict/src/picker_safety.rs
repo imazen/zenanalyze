@@ -1,92 +1,32 @@
-//! Picker safety pipeline — the one canonical order a codec composes the
-//! safety overlays in, so every deployed single-encode picker enforces the
-//! same bake-time-validated bounds the same way.
+//! Experimental composition of size-zone fallback and knob vetoes.
 //!
-//! The safety system is three cooperating layers, applied in a fixed order:
+//! Applications supply separate hard constraints and predicted reachability.
+//! A size-zone fallback may bypass predicted reachability, because its target
+//! was declared unreachable, but it must pass the hard constraint mask.
+//! The zone table is model policy, not evidence that a target is physically
+//! impossible for every encoder or source.
 //!
-//! 1. **Unachievable-zone resolve** ([`UnachievableZones::resolve`]) — the
-//!    size discriminant. If `target_zq` exceeds the achievable ceiling for the
-//!    image's size class, the target is physically unreachable: short-circuit
-//!    to the declared fallback knobset (best-achievable cell + scalar). No
-//!    argmin, no veto — there is nothing to pick among.
-//! 2. **Knob vetoes** ([`apply_knob_vetoes`]) — feature-gated per-cell mask
-//!    that bounds the catastrophic RD tail (forbid value `V` on a categorical
-//!    axis when feature `F {op} threshold`). Applied to the reach mask.
-//! 3. **Masked argmin** (codec) — pick min predicted bytes over
-//!    `reach & ~veto`; if the vetoes stranded the row (no cell left), fall
-//!    back to the un-vetoed reach mask so a row is never stranded.
-//! 4. **Two-shot rescue** (codec, post-encode — [`crate::rescue`]) — after the
-//!    pass-0 encode + verify, if the achieved quality undershoots `target_zq`
-//!    by more than the bake-tuned threshold, run one rescue pass
-//!    ([`crate::should_rescue`] + [`crate::RescueStrategy`]); the
-//!    [`crate::FallbackEntry`] table backs `KnownGoodFallback`.
-//!
-//! Steps **1-2 are pre-argmin and pure** (no encoder, no I/O) — this module
-//! composes them into a single [`resolve_pre_argmin`] call returning a
-//! [`PreArgminDecision`]. Steps **3-4 are the codec's** (it owns the encoder,
-//! the verify, and the never-strand fallback around its argmin).
-//!
-//! ## Granular quality targeting (runtime contract)
-//!
-//! The picker is conditioned on a **continuous** quality target: the training
-//! input carries `zq_norm = target_zq / 100` plus the `zq_norm²`,
-//! `zq_norm·log_px`, and `zq_norm·feature` interaction terms, and the student
-//! is a LeakyReLU MLP (piecewise-linear ⇒ continuous in its inputs) whose
-//! quality-relevant outputs carry no snap-to-discrete `OutputSpec`. The
-//! deployed picker therefore smoothly targets *any* granular quality value,
-//! not just the training-grid points — verified monotonic (predicted bytes
-//! rise smoothly with the target, 100% monotone across sampled images, no
-//! discontinuities).
-//!
-//! For that to hold at inference the codec MUST build the engineered input
-//! from the **raw, unsnapped** target: `zq_norm = target_zq / 100` for the
-//! caller's granular `target_zq`, and the matching `zq_norm²` /
-//! `zq_norm·log_px` / `zq_norm·feature` terms — never round `target_zq` to the
-//! training grid first (that would step the picker and defeat granular
-//! targeting). The unachievable-zone check above is likewise continuous in
-//! `target_zq` (a strict `target_zq > ceiling_zq` compare), so the granular
-//! boundary is exact, not grid-quantized.
-//!
-//! Distinction between the two fallback paths (both yield a knobset, but they
-//! fire on different signals and must not be conflated):
-//!
-//! - **Zone fallback** (step 1) — the target is *physically unreachable* for
-//!   the size class. Deterministic, pre-encode, size-keyed. The picker is not
-//!   wrong; the request is impossible, so encode the best-achievable knobset.
-//! - **Rescue `KnownGoodFallback`** (step 4) — the picker *was consulted* and
-//!   its pass-0 pick *undershot* (OOD input, low confidence). Post-encode,
-//!   zq-keyed via [`crate::fallback_for`].
-//!
-//! ## Worked example
+//! If the fallback is forbidden or out of range, apply hard constraints and
+//! vetoes to the caller's reach mask and return `Argmin`. An empty mask means
+//! no candidate; the controller does not authorize a forbidden encode.
+//! The codec owns encoding, measurement, and any later rescue. A never-strand
+//! retry may discard the soft vetoes but must retain the hard constraints.
 //!
 //! ```rust
-//! use zenpredict::{
-//!     AllowedMask, PreArgminDecision, ScoreTransform, UnachievableZones,
-//!     argmin_masked, resolve_pre_argmin,
-//! };
-//! # fn encode(_cell: usize, _scalar: Option<f32>) {}
-//! # fn run(zones: &UnachievableZones, vetoes: &[zenpredict::KnobVeto<'_>],
-//! #        features: &[f32], predicted_bytes: &[f32], target_zq: f32, reach: &[bool]) {
-//! // `reach` = cells whose predicted metric >= target_zq (the caller's mask).
-//! let mut allowed = reach.to_vec();              // veto pass mutates a copy
-//! match resolve_pre_argmin(features, target_zq, zones, vetoes, &mut allowed) {
-//!     PreArgminDecision::ZoneFallback(fb) => {
-//!         // physically unreachable target -> declared best-achievable knobset
-//!         encode(fb.cell, fb.scalar);
-//!     }
-//!     PreArgminDecision::Argmin => {
-//!         let pick = argmin_masked(predicted_bytes, &AllowedMask::new(&allowed),
-//!                                  ScoreTransform::Exp, None)
-//!             // never-strand: vetoes emptied the mask -> revert to reach
-//!             .or_else(|| argmin_masked(predicted_bytes, &AllowedMask::new(reach),
-//!                                       ScoreTransform::Exp, None));
-//!         if let Some(cell) = pick { encode(cell, None); }
-//!     }
-//! }
-//! // ...then pass-0 verify + crate::should_rescue(...) for step 4.
-//! # }
+//! use zenpredict::{AllowedMask, PreArgminDecision, ScoreTransform,
+//!     UnachievableZones, argmin_masked, resolve_pre_argmin};
+//! let hard = [true, false, true];
+//! let reach = [true, true, true];
+//! let mut allowed = reach;
+//! let decision = resolve_pre_argmin(&[100.0], 80.0,
+//!     &UnachievableZones::default(), &[], &AllowedMask::new(&hard), &mut allowed);
+//! assert_eq!(decision, PreArgminDecision::Argmin);
+//! assert_eq!(allowed, [true, false, true]);
+//! assert_eq!(argmin_masked(&[30.0, 1.0, 20.0], &AllowedMask::new(&allowed),
+//!     ScoreTransform::Identity, None), Some(2));
 //! ```
 
+use crate::AllowedMask;
 use crate::knob_veto::{KnobVeto, VetoOp, ZQ_VETO_SENTINEL, apply_knob_vetoes};
 use crate::unachievable_zone::{UnachievableZones, ZoneFallback};
 
@@ -102,35 +42,30 @@ pub enum PreArgminDecision {
     Argmin,
 }
 
-/// Compose the pre-argmin safety overlays in the canonical order:
-/// unachievable-zone resolve **then** knob vetoes (see the [module docs](self)).
+/// Apply hard constraints, then the size-zone fallback or knob-veto policy.
 ///
-/// - Returns [`PreArgminDecision::ZoneFallback`] when
-///   [`UnachievableZones::resolve`] fires for `(features, target_zq)` — the
-///   target is unreachable for the size class, so the vetoes are **not**
-///   applied (there is no pick to constrain) and the caller encodes the
-///   fallback knobset.
-/// - Otherwise applies [`apply_knob_vetoes`] to `allowed` in place and returns
-///   [`PreArgminDecision::Argmin`].
+/// `hard_allowed` describes constraints the caller will never relax. `allowed`
+/// starts as predicted reachability and is intersected with that hard mask.
+/// A declared zone fallback can ignore reachability only if `hard_allowed`
+/// permits its cell. A missing hard-mask entry denies that cell.
 ///
-/// `allowed` is the picker's mask backing slice — typically a **copy** of the
-/// reach mask (`predicted metric >= target_zq`). Pass a copy and keep the
-/// original reach mask so the codec can compose the never-strand fallback
-/// around its argmin (revert to reach when the vetoes empty the mask); see the
-/// [module docs](self) example. `features` is the bake's feat_cols-ordered
-/// vector (the same the picker forward pass consumes). Panic-free: every
-/// out-of-range index in either overlay is skipped.
+/// Otherwise vetoes further restrict `allowed` and the result is `Argmin`.
+/// The caller must preserve hard constraints in any subsequent fallback/rescue.
 pub fn resolve_pre_argmin(
     features: &[f32],
     target_zq: f32,
     zones: &UnachievableZones,
     vetoes: &[KnobVeto<'_>],
+    hard_allowed: &AllowedMask<'_>,
     allowed: &mut [bool],
 ) -> PreArgminDecision {
-    // Step 1: zone resolve runs FIRST. An unreachable target has no valid
-    // pick, so vetoes (which only constrain a pick) are irrelevant — skip them
-    // and hand back the declared fallback.
-    if let Some(fb) = zones.resolve(features, target_zq) {
+    for (cell, allowed) in allowed.iter_mut().enumerate() {
+        *allowed &= hard_allowed.is_allowed(cell);
+    }
+    if let Some(fb) = zones.resolve(features, target_zq)
+        && fb.cell < allowed.len()
+        && hard_allowed.is_allowed(fb.cell)
+    {
         return PreArgminDecision::ZoneFallback(fb);
     }
     // Step 2: feature-gated knob vetoes mask the catastrophic-tail cells.
@@ -161,6 +96,7 @@ pub fn resolve_pre_argmin(
 mod tests {
     use super::*;
     use crate::knob_veto::VetoOp;
+    use crate::picker_safety::{PreArgminDecision, resolve_pre_argmin};
     use crate::unachievable_zone::parse_unachievable_zones;
     use alloc::vec::Vec;
 
@@ -190,7 +126,14 @@ mod tests {
         };
         let features = [500_000.0, 1.0]; // pixels in zone; veto-feature would fire
         let mut allowed = [true, true, true];
-        let d = resolve_pre_argmin(&features, 94.0, &zones, &[veto], &mut allowed);
+        let d = resolve_pre_argmin(
+            &features,
+            94.0,
+            &zones,
+            &[veto],
+            &AllowedMask::new(&[true; 3]),
+            &mut allowed,
+        );
         assert_eq!(
             d,
             PreArgminDecision::ZoneFallback(ZoneFallback {
@@ -200,6 +143,64 @@ mod tests {
         );
         // vetoes NOT applied — mask untouched (the zone short-circuits).
         assert_eq!(allowed, [true, true, true]);
+    }
+
+    #[test]
+    fn zone_fallback_respects_hard_constraints_separately_from_reachability() {
+        let zones = zones_one();
+        let features = [500_000.0];
+        let hard = [true, true, false];
+        let mut reach = [true, true, false];
+        let d = resolve_pre_argmin(
+            &features,
+            94.0,
+            &zones,
+            &[],
+            &AllowedMask::new(&hard),
+            &mut reach,
+        );
+        assert_eq!(d, PreArgminDecision::Argmin);
+        assert_eq!(reach, [true, true, false]);
+        let mut no_reach = [false; 3];
+        let d = resolve_pre_argmin(
+            &features,
+            94.0,
+            &zones,
+            &[],
+            &AllowedMask::new(&[true; 3]),
+            &mut no_reach,
+        );
+        assert!(matches!(
+            d,
+            PreArgminDecision::ZoneFallback(ZoneFallback { cell: 2, .. })
+        ));
+        for hard in [&[][..], &[false; 3][..]] {
+            let mut allowed = [true; 3];
+            assert_eq!(
+                resolve_pre_argmin(
+                    &features,
+                    94.0,
+                    &zones,
+                    &[],
+                    &AllowedMask::new(hard),
+                    &mut allowed
+                ),
+                PreArgminDecision::Argmin
+            );
+            assert_eq!(allowed, [false; 3]);
+        }
+        let mut short_reach = [true; 2];
+        assert_eq!(
+            resolve_pre_argmin(
+                &features,
+                94.0,
+                &zones,
+                &[],
+                &AllowedMask::new(&[true; 3]),
+                &mut short_reach
+            ),
+            PreArgminDecision::Argmin
+        );
     }
 
     #[test]
@@ -214,7 +215,14 @@ mod tests {
         let features = [500_000.0, 1.0]; // in zone class, but target reachable
         let mut allowed = [true, true, true];
         // target 80 <= ceiling 90 -> not a zone -> vetoes apply.
-        let d = resolve_pre_argmin(&features, 80.0, &zones, &[veto], &mut allowed);
+        let d = resolve_pre_argmin(
+            &features,
+            80.0,
+            &zones,
+            &[veto],
+            &AllowedMask::new(&[true; 3]),
+            &mut allowed,
+        );
         assert_eq!(d, PreArgminDecision::Argmin);
         assert_eq!(allowed, [false, true, true]); // cell 0 vetoed
     }
@@ -223,7 +231,14 @@ mod tests {
     fn no_zones_no_vetoes_is_plain_argmin() {
         let zones = UnachievableZones::default();
         let mut allowed = [true, true];
-        let d = resolve_pre_argmin(&[123.0], 99.0, &zones, &[], &mut allowed);
+        let d = resolve_pre_argmin(
+            &[123.0],
+            99.0,
+            &zones,
+            &[],
+            &AllowedMask::new(&[true; 3]),
+            &mut allowed,
+        );
         assert_eq!(d, PreArgminDecision::Argmin);
         assert_eq!(allowed, [true, true]);
     }
@@ -241,12 +256,26 @@ mod tests {
         };
         // target 70 > 62.5 → fires → cell 0 denied.
         let mut a = [true, true, true];
-        let d = resolve_pre_argmin(&[1.0], 70.0, &zones, &[veto], &mut a);
+        let d = resolve_pre_argmin(
+            &[1.0],
+            70.0,
+            &zones,
+            &[veto],
+            &AllowedMask::new(&[true; 3]),
+            &mut a,
+        );
         assert_eq!(d, PreArgminDecision::Argmin);
         assert_eq!(a, [false, true, true]);
         // target 50 < 62.5 → does not fire.
         let mut a2 = [true, true, true];
-        resolve_pre_argmin(&[1.0], 50.0, &zones, &[veto], &mut a2);
+        resolve_pre_argmin(
+            &[1.0],
+            50.0,
+            &zones,
+            &[veto],
+            &AllowedMask::new(&[true; 3]),
+            &mut a2,
+        );
         assert_eq!(a2, [true, true, true]);
         // The feature-indexed pass alone (apply_knob_vetoes) must SKIP the
         // sentinel (out of range) — features has no index 0xFFFF.
@@ -263,12 +292,26 @@ mod tests {
         let features = [500_000.0];
         let mut a1 = [true, true, true];
         assert_eq!(
-            resolve_pre_argmin(&features, 90.0, &zones, &[], &mut a1),
+            resolve_pre_argmin(
+                &features,
+                90.0,
+                &zones,
+                &[],
+                &AllowedMask::new(&[true; 3]),
+                &mut a1
+            ),
             PreArgminDecision::Argmin
         );
         let mut a2 = [true, true, true];
         assert!(matches!(
-            resolve_pre_argmin(&features, 90.01, &zones, &[], &mut a2),
+            resolve_pre_argmin(
+                &features,
+                90.01,
+                &zones,
+                &[],
+                &AllowedMask::new(&[true; 3]),
+                &mut a2
+            ),
             PreArgminDecision::ZoneFallback(_)
         ));
     }

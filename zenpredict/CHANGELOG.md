@@ -13,6 +13,11 @@
      bumps stay non-breaking). Persist across patch releases. Only
      clear when the breaking release ships. -->
 
+- Trial budgets, directed search and pre-argmin composition require
+  `experimental` (also enabled by `advanced`). `resolve_pre_argmin` takes a
+  separate hard constraint mask; forbidden zone fallbacks proceed to masked
+  selection. Invalid measured qualities cannot win `best_trial`.
+
 - `LayerEntry.*` and `LayerView.*` field tightening may follow once
   `WeightStorage` variant pattern-matching has a stable accessor
   pair (likely `LayerView::weights() -> &WeightStorage<'_>`).

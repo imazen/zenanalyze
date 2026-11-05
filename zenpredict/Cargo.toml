@@ -53,7 +53,12 @@ std = []
 # specific version if you depend on them. (Distinct from `zenanalyze`'s
 # `experimental`, which gates unstable feature numerics rather than
 # extra API.)
-advanced = []
+advanced = ["experimental"]
+# Controller policy without a qualified deployed caller. This preserves the
+# trial-budget, directed-search and pre-argmin workflows for other users while
+# their integration contracts are reviewed. `advanced` remains a compatibility
+# opt-in; the artifact parser, MLP runtime and baker do not require this feature.
+experimental = []
 # Runtime CPU dispatch for the forward-pass SAXPY kernels (archmage
 # `#[autoversion]`). **Codegen only — no source or numeric change.**
 #

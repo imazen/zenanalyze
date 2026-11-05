@@ -35,6 +35,8 @@ predict-readiness:
     cargo test --locked -p zenpredict --all-features --all-targets
     cargo test --locked -p zenpredict --all-features --doc
     cargo clippy --locked -p zenpredict --all-features --all-targets -- -D warnings
+    cargo clippy --locked -p zenpredict --no-default-features --all-targets -- -D warnings
+    cargo clippy --locked -p zenpredict --no-default-features --features experimental --all-targets -- -D warnings
 
 # Focused symbol census; source hits need review for unrelated namesake types.
 api-necessity-callers output roots=".. ../..":
