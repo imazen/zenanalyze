@@ -27,6 +27,15 @@ api-necessity-transforms:
     cargo run --locked -p zenpredict --no-default-features --example output_transform_audit
     cargo run --locked -p zenpredict --no-default-features --features std --example output_transform_audit
 
+# Release-readiness runtime gates, including genuinely no_std output transforms.
+predict-readiness:
+    cargo fmt -p zenpredict --check
+    cargo test --locked -p zenpredict --no-default-features --all-targets
+    cargo test --locked -p zenpredict --no-default-features --features advanced --lib
+    cargo test --locked -p zenpredict --all-features --all-targets
+    cargo test --locked -p zenpredict --all-features --doc
+    cargo clippy --locked -p zenpredict --all-features --all-targets -- -D warnings
+
 # Focused symbol census; source hits need review for unrelated namesake types.
 api-necessity-callers output roots=".. ../..":
     python3 tools/audit_dependency_refs.py --roots {{roots}} --output "{{output}}" \

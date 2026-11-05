@@ -67,7 +67,7 @@ pub enum OutputTransform {
     /// `exp(x)` clamped to `x ∈ [-30, 30]` so finite f32 stays finite.
     /// Useful for log-domain regressors emitting `log(bytes)`.
     Exp = 3,
-    /// Round to nearest integer (banker's rounding via `f32::round`).
+    /// Round to nearest integer, with halfway cases away from zero.
     /// Apply before the discrete-set snap when both are needed —
     /// rounding first lets the snap operate on integers.
     Round = 4,
@@ -114,10 +114,7 @@ impl OutputTransform {
                 }
                 #[cfg(not(feature = "std"))]
                 {
-                    // no_std + alloc has no `f32::exp`. Mirror
-                    // `argmin::ScoreTransform::Exp`'s degraded path.
-                    let _ = clamped;
-                    x
+                    libm::expf(clamped)
                 }
             }
             Self::Round => round_no_std(x),
@@ -125,22 +122,18 @@ impl OutputTransform {
     }
 }
 
-/// `round_ties_away_from_zero` for `f32`, available in both std and
-/// no_std builds. `f32::round` is a `std`-only method, so we
-/// reimplement it via the bit-level "add ±0.5 then truncate" pattern.
-/// Matches IEEE-754 `roundToIntegralTiesAway` semantics, which is
-/// what `f32::round` uses.
+/// Round halfway cases away from zero, preserving signed zero, large
+/// integral values, infinities and NaNs in both std and no_std builds.
 #[inline]
 fn round_no_std(x: f32) -> f32 {
-    if x.is_nan() {
-        return x;
+    #[cfg(feature = "std")]
+    {
+        x.round()
     }
-    let bias = if x >= 0.0 { 0.5 } else { -0.5 };
-    // (x + bias) as i64 truncates toward zero. Cast back to f32.
-    // Saturates for values outside i64 range, but those round to
-    // ±inf in f32 anyway and the user almost certainly didn't mean
-    // to ship a picker that emits 9.2e18-ish values.
-    ((x + bias) as i64) as f32
+    #[cfg(not(feature = "std"))]
+    {
+        libm::roundf(x)
+    }
 }
 
 #[inline]
@@ -157,8 +150,8 @@ fn sigmoid(x: f32) -> f32 {
         }
         #[cfg(not(feature = "std"))]
         {
-            let _ = x;
-            0.5
+            let z = libm::expf(-x);
+            1.0 / (1.0 + z)
         }
     } else {
         #[cfg(feature = "std")]
@@ -168,8 +161,8 @@ fn sigmoid(x: f32) -> f32 {
         }
         #[cfg(not(feature = "std"))]
         {
-            let _ = x;
-            0.5
+            let z = libm::expf(x);
+            z / (1.0 + z)
         }
     }
 }
@@ -392,21 +385,18 @@ mod tests {
         assert_eq!(OutputTransform::Identity.apply(2.5, [0.0, 0.0]), 2.5);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn sigmoid_transform_at_zero_is_half() {
         let v = OutputTransform::Sigmoid.apply(0.0, [0.0, 0.0]);
         assert!((v - 0.5).abs() < 1e-6);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn sigmoid_scaled_remaps() {
         let v = OutputTransform::SigmoidScaled.apply(0.0, [0.0, 100.0]);
         assert!((v - 50.0).abs() < 1e-4);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn exp_clamp_caps_at_30() {
         let v = OutputTransform::Exp.apply(1000.0, [0.0, 0.0]);
@@ -420,6 +410,58 @@ mod tests {
         assert_eq!(OutputTransform::Round.apply(1.4, [0.0, 0.0]), 1.0);
         assert_eq!(OutputTransform::Round.apply(1.6, [0.0, 0.0]), 2.0);
         assert_eq!(OutputTransform::Round.apply(-0.6, [0.0, 0.0]), -1.0);
+    }
+
+    #[test]
+    fn nonzero_transforms_compute_their_functions_without_std() {
+        for (input, expected) in [(1.0, 0.731_058_6), (-1.0, 0.268_941_43)] {
+            let actual = OutputTransform::Sigmoid.apply(input, [0.0, 0.0]);
+            assert!((actual - expected).abs() < 1e-6);
+            let scaled = OutputTransform::SigmoidScaled.apply(input, [-10.0, 90.0]);
+            assert!((scaled - (-10.0 + 100.0 * expected)).abs() < 1e-4);
+        }
+        for (input, expected) in [(1.0, core::f32::consts::E), (-1.0, 0.367_879_45)] {
+            let actual = OutputTransform::Exp.apply(input, [0.0, 0.0]);
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        assert_eq!(OutputTransform::Sigmoid.apply(f32::INFINITY, [0.0; 2]), 1.0);
+        assert_eq!(
+            OutputTransform::Sigmoid.apply(f32::NEG_INFINITY, [0.0; 2]),
+            0.0
+        );
+        assert!(OutputTransform::Sigmoid.apply(f32::NAN, [0.0; 2]).is_nan());
+        let low_cap = OutputTransform::Exp.apply(-30.0, [0.0; 2]);
+        assert!(low_cap > 0.0);
+        assert_eq!(OutputTransform::Exp.apply(-1000.0, [0.0; 2]), low_cap);
+    }
+
+    #[test]
+    fn round_preserves_boundaries_and_special_values() {
+        for (input, expected) in [
+            (0.5, 1.0),
+            (-0.5, -1.0),
+            (1.5, 2.0),
+            (-1.5, -2.0),
+            (0.499_999_97, 0.0),
+            (-0.499_999_97, -0.0),
+            (0.0, 0.0),
+            (-0.0, -0.0),
+            (0.25, 0.0),
+            (-0.25, -0.0),
+            (16_777_215.0, 16_777_215.0),
+            (-16_777_215.0, -16_777_215.0),
+            (f32::MAX, f32::MAX),
+            (f32::MIN, f32::MIN),
+            (f32::INFINITY, f32::INFINITY),
+            (f32::NEG_INFINITY, f32::NEG_INFINITY),
+        ] {
+            assert_eq!(
+                OutputTransform::Round.apply(input, [0.0; 2]).to_bits(),
+                expected.to_bits(),
+                "round({input})"
+            );
+        }
+        assert!(OutputTransform::Round.apply(f32::NAN, [0.0; 2]).is_nan());
     }
 
     #[test]

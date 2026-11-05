@@ -335,10 +335,13 @@ runtime branch).
 
 ## Known Bugs
 
-- **2026-10-28 — pre-publication API audit, unresolved:** zenpredict's
-  `OutputTransform::Exp` is identity and `Sigmoid` is constant 0.5 without
-  `std`; `Round` changes 16,777,215 to 16,777,216 and saturates infinity in
-  both builds. `resolve_pre_argmin` can return a masked-out zone fallback;
+- **2026-11-05 — output-transform blockers fixed:** no_std Exp and sigmoid
+  use libm; Round preserves large integral values, signed zero and infinities.
+  `just predict-readiness` covers nonzero inputs and boundaries with and without
+  std, all-feature runtime tests, doctests and strict clippy.
+
+- **2026-10-28 — pre-publication controller audit, unresolved:**
+  `resolve_pre_argmin` can return a masked-out zone fallback;
   `best_trial` can prefer NaN achieved quality over a finite measurement.
   Reproducers: `just api-necessity-probe`, `just api-necessity-transforms`.
   The audit also records raw/transformed prediction composition and

@@ -6,6 +6,12 @@ their smallest coherent public surface.**
 There are also reproducible output-transform defects to resolve before release.
 This audit changes no library API, model, numeric behavior or test expectation.
 
+The output-transform findings 1–2 below were repaired on 2026-11-05.
+`just predict-readiness` passes with no defaults, no_std plus advanced, and
+all features, including nonzero Exp/sigmoid and rounding boundaries. The
+observations below describe the original audit revision; controller and
+producer qualification remain separate work.
+
 ## Release baseline
 
 The crates.io API still reports **0.1.0** for each of

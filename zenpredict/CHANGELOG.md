@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Output transforms compute Exp and sigmoid with libm without std. Round now
+  preserves large integral values, signed zero and infinities, with ties away
+  from zero. Nonzero and boundary regressions run in both configurations.
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that ship together in the next minor (0.x patch
      bumps stay non-breaking). Persist across patch releases. Only
