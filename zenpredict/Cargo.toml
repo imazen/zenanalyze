@@ -93,7 +93,7 @@ simd = ["std", "dep:archmage"]
 archmage = { version = ">=0.9.26, <=0.9.31-beta.1", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
-bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
 # `f32::ln` / `f32::ln_1p` are not in `core`. `no_std` builds need
 # `libm`; `std` builds call `f32::ln`/`f32::ln_1p` directly via the
 # `cfg(feature = "std")` arm in `feature_transform::FeatureTransform::apply`.
@@ -103,17 +103,17 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 # for a 13 KB compile-only cost on std builds.
 libm = { version = "0.2.16", default-features = false }
 # LZ4 block decoder for whole-bake-compressed payloads (header flag
-# bit 0 + algo nibble 1). ~4 KB binary; pure-safe-Rust + no_std.
+# bit 0 + algo nibble 1). Pure-safe-Rust + no_std.
 # Always available — the wire format may set the compressed flag,
 # so the loader needs decompression unconditionally.
-# `default-features = false` strips the encoder/frame helpers; we
-# only need `safe-decode`. The bake-side crate pulls `safe-encode`
-# separately.
-lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-decode"] }
+# Disabling defaults avoids std/frame/alloc. Keep safe, checked decoding
+# without allocating inside LZ4. The bake-side crate enables `alloc` and
+# `safe-encode` for its Vec-returning encoder.
+lz4_flex = { version = "0.14.0", default-features = false, features = ["safe-decode", "checked-decode"] }
 
 
 [dev-dependencies]
-rand = { version = "0.10.2", default-features = false, features = ["std", "std_rng"] }
+rand = { version = "0.10.3", default-features = false, features = ["std", "std_rng"] }
 
 [lints.rust]
 unsafe_code = "forbid"

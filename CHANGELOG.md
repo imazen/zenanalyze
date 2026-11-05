@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- zenpredict / zenpredict-bake: update lz4_flex to 0.14.0 with safe, checked
+  decoding and explicit encoder allocation support. A frozen 0.11.6-compressed
+  ZNPR bake protects historical loading in std/no_std builds. Refresh bytemuck,
+  serialization, fitting (Arrow/Parquet 60.1.0) and test dependencies; correct
+  obsolete per-layer compression documentation.
+
 - Analyzer: converge on zenpixels/convert 0.3.1 while preserving descriptor hashes and the historical HDR content-feature representation, with independent old-runtime byte parity (`90f12497`).
 
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions; use explicit-token aliases where needed. Formatting, strict library lint and library tests pass (`8b4519e5`).

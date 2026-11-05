@@ -70,40 +70,19 @@ v2 bins from earlier ships migrate via [`zentrain/tools/migrate_znpr_v2_to_v3.py
 | Feature | Default | What it gates |
 |---|---|---|
 | `std` | yes | `std::error::Error` impls on `BakeError` / `BakeJsonError` |
-| `lz4` | no | Emit `WeightDtype::I8Lz4` bakes (LZ4-compressed i8 weight streams). Pulls `lz4_flex` for the encoder. The matching decoder lives in zenpredict's `compressed-weights` feature. |
+| `fit-yj` | no | Arrow/Parquet input for the `fit_yeo_johnson` fitting tool. |
 
-## Compressed bakes (`lz4` feature)
+## Compressed bakes
 
-Set `BakeLayer { dtype: WeightDtype::I8Lz4, weights, ... }` and `bake(&req)` emits a v3 stream where every layer's i8 byte payload is LZ4-block-compressed. Wire format details are in [zenpredict's README](../zenpredict/README.md#compressed-weights).
+Set `BakeRequest::compressed = true` (or JSON `"compressed": true`) to compress
+the entire post-header payload as an LZ4 block. Compression is always available;
+there is no compression feature flag or per-layer compressed dtype. The runtime
+decompresses once when loading the model. See [the format](../zenpredict/README.md).
 
-**Pair lz4 with `apply_zero_bias_in_place` / `apply_zero_bias`** — raw uniform i8 streams are near-incompressible. Calibrated thresholds from the 2026-05-13 RLE/zerobias eval:
-
-| τ (per-output, vs column max) | i8 zero density | CID22 SROCC vs V0_18 |
-|---:|---:|---:|
-| 0 | 1.4 % | baseline |
-| 0.005 | 87.5 % | -0.0001 |
-| 0.02 | 90.2 % | -0.0003 |
-| 0.05 | 92.8 % | -0.0014 |
-
-Pre-quantization pseudocode:
-
-```rust,ignore
-use zenpredict_bake::{BakeLayer, BakeRequest, apply_zero_bias_in_place, bake};
-use zenpredict::WeightDtype;
-
-let mut weights = trained_weights.to_vec();
-apply_zero_bias_in_place(&mut weights, out_dim, 0.005);
-let layer = BakeLayer {
-    in_dim, out_dim,
-    dtype: WeightDtype::I8Lz4,
-    weights: &weights,
-    biases: &biases,
-    activation: zenpredict::Activation::LeakyRelu,
-};
-let bytes = bake(&BakeRequest::new(0, 0, &mean, &scale, &[layer])).unwrap();
-```
-
-On the V0_17 → V0_18 shape (228 → 384 → 1) with τ=0.005 per-layer zerobias: bake shrinks from 93 KB to 38 KB (-59 %), per-predict cost +40 µs (decompress on every predict by design, no cache).
+Both encoder and decoder use `lz4_flex` 0.14 with safe Rust and checked decoding.
+The baker enables LZ4's `alloc` feature; zenpredict only needs `decompress_into`,
+which also works without `std` or LZ4's `alloc` feature. Existing ZNPR v3 blocks
+keep their wire format.
 
 ## JSON pipeline knobs (since 0.1.1)
 

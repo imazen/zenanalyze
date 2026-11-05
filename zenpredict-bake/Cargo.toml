@@ -53,22 +53,22 @@ required-features = ["fit-yj"]
 # in its own tests, and the JSON-bake CLI parses + verifies the bake
 # before writing.
 zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "simd"] }
-bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
-serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
-serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
+bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
 # LZ4 encoder + decoder. Always pulled — whole-bake compression is
 # built into bake() unconditionally (gated by BakeRequest.compressed),
 # and the append_metadata_utf8 splice decompresses/recompresses
 # compressed bakes. Pure-safe-Rust + no_std on both paths.
-lz4_flex = { version = "0.11.6", default-features = false, features = ["safe-encode", "safe-decode"] }
+lz4_flex = { version = "0.14.0", default-features = false, features = ["alloc", "safe-encode", "safe-decode", "checked-decode"] }
 # Optional: parquet/arrow for the `fit_yeo_johnson` MLE binary.
 # Gated behind the `fit-yj` feature.
-parquet = { version = "59.2.0", default-features = false, features = ["arrow", "zstd"], optional = true }
-arrow = { version = "59.2.0", default-features = false, optional = true }
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "60.1.0", default-features = false, optional = true }
 
 [dev-dependencies]
-rand = { version = "0.10.2", default-features = false, features = ["std", "std_rng"] }
-zenbench = "0.1.8"
+rand = { version = "0.10.3", default-features = false, features = ["std", "std_rng"] }
+zenbench = "0.1.11"
 # Lifecycle / safety / output-specs integration tests cover the
 # advanced subsystems (rescue, safety, output_specs, top_k argmin
 # variants). Re-pull zenpredict with `advanced` enabled for tests
