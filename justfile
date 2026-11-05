@@ -210,3 +210,8 @@ sibling-cohort-check:
 sibling-descriptor-check:
     cargo test --manifest-path tools/descriptor-hash-compat/Cargo.toml -- --nocapture
     cargo clippy --manifest-path tools/descriptor-hash-compat/Cargo.toml --all-targets -- -D warnings
+
+# Approved HDR compatibility path: exact legacy rows, then unchanged feature gates.
+sibling-hdr-check:
+    just sibling-descriptor-check
+    RUST_TEST_THREADS=1 cargo test --locked -p zenanalyze --lib --all-features

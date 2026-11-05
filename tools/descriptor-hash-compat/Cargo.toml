@@ -10,7 +10,10 @@ publish = false
 [dependencies]
 zenanalyze = { path = "../..", default-features = false }
 zenpixels = { version = ">=0.3.1, <0.4.0", default-features = false }
-zenpixels-legacy = { package = "zenpixels", version = "=0.2.16", default-features = false }
+zenpixels-legacy = { package = "zenpixels", version = "=0.2.14", default-features = false }
+
+zenpixels-convert = { version = ">=0.3.1, <0.4.0", default-features = false }
+zenpixels-convert-legacy = { package = "zenpixels-convert", version = "=0.2.14", default-features = false }
 
 [patch.crates-io]
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }

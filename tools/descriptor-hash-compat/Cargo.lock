@@ -55,8 +55,10 @@ name = "descriptor-hash-compat"
 version = "0.0.0"
 dependencies = [
  "zenanalyze",
- "zenpixels 0.2.16",
+ "zenpixels 0.2.14",
  "zenpixels 0.3.1",
+ "zenpixels-convert 0.2.14",
+ "zenpixels-convert 0.3.1",
 ]
 
 [[package]]
@@ -204,14 +206,14 @@ dependencies = [
  "linear-srgb",
  "magetypes",
  "zenpixels 0.3.1",
- "zenpixels-convert",
+ "zenpixels-convert 0.3.1",
 ]
 
 [[package]]
 name = "zenpixels"
-version = "0.2.16"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5851fd39b312749a3c367a0cd3522bd95d43276cfa613e9c18df748447cef3a8"
+checksum = "515b2d87c361de4a3c1e4131a1de03d9cceab59cf599ac48235d46e60ef1768d"
 dependencies = [
  "bytemuck",
  "whereat",
@@ -226,6 +228,23 @@ dependencies = [
  "imgref",
  "rgb",
  "whereat",
+]
+
+[[package]]
+name = "zenpixels-convert"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c49c5c25ca3577cef11f12f594a9966297d949c1a801f3a79ca9f5df74a09fa2"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "garb",
+ "linear-srgb",
+ "magetypes",
+ "once_cell",
+ "paste",
+ "whereat",
+ "zenpixels 0.2.14",
 ]
 
 [[package]]
