@@ -150,8 +150,8 @@ perf-grid out="benchmarks/perf_grid.tsv" sides="64,256,1024,2048,4096":
 # The trainer is workspace-excluded; run its full local gate explicitly.
 picker-train-check:
     TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo fmt --manifest-path zenpicker-train/Cargo.toml --check
-    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo clippy --manifest-path zenpicker-train/Cargo.toml --all-targets --locked -- -D warnings
-    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo test --manifest-path zenpicker-train/Cargo.toml --locked
+    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo clippy --manifest-path zenpicker-train/Cargo.toml --all-targets --all-features --locked -- -D warnings
+    TMPDIR="$HOME/tmp" CARGO_BUILD_JOBS=4 nice -n 19 cargo test --manifest-path zenpicker-train/Cargo.toml --all-features --locked
 
 # Exact per-tier dump over the existing golden test corpus; fresh single-test process.
 # Output is separate from versioning_golden.tsv and does not bless expectations.
@@ -225,3 +225,31 @@ sibling-hdr-check:
 sibling-reference-check:
     ZENANALYZE_GOLDEN_REFERENCE=1 cargo test --features experimental,hdr --lib versioning::tests::golden_is_stable -- --exact --nocapture
     ZENANALYZE_GOLDEN_REFERENCE=1 ZENANALYZE_GOLDEN_TIER=scalar cargo test --features experimental,hdr,_dev --lib versioning::tests::golden_is_stable -- --exact --nocapture --test-threads=1
+
+# Dependency-upgrade compatibility gates; invoke under run-heavy on a build host.
+dependency-check:
+    just predict-readiness
+    cargo test --locked -p zenanalyze-api -p zenpicker -p zenpredict-bake --all-targets --all-features
+    cargo test --locked -p zenanalyze-api -p zenpicker -p zenpredict-bake --all-features --doc
+    cargo clippy --locked -p zenanalyze-api -p zenpicker -p zenpredict-bake --all-features --all-targets -- -D warnings
+    just viz-test
+    just dependency-data-check
+
+# Columnar tools, trainer, fuzz compilation, analyzer and API snapshots.
+dependency-data-check:
+    cargo clippy --locked -p zenpredict-viz --all-features --all-targets -- -D warnings
+    just picker-train-check
+    cargo check --locked --manifest-path zenpredict/fuzz/Cargo.toml --bins
+    cargo test --locked -p zenanalyze --lib --tests --examples --features api,hdr
+    cargo bench --locked -p zenanalyze --profile dev --bench tier_isolation --bench tier_kernels --bench budget_cost --features api,hdr -- --dry-run
+    cargo test --locked -p zenanalyze --doc --features api,hdr
+    cargo clippy --locked -p zenanalyze --lib --features api,hdr -- -D warnings
+    just api-doc-check
+
+# Refresh every mutable lockfile; descriptor-hash-compat keeps exact legacy oracles.
+dependency-update:
+    cargo update
+    cargo update --manifest-path zenpicker-train/Cargo.toml
+    cargo update --manifest-path apidoc/Cargo.toml
+    cargo update --manifest-path zenpredict/fuzz/Cargo.toml
+    cargo update --manifest-path tools/descriptor-hash-compat/Cargo.toml

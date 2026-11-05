@@ -49,17 +49,17 @@ zenpredict-bake = { path = "../zenpredict-bake", default-features = false, featu
 # IQA statistical panel (Mohammadi 2025). Self-contained member of
 # the zenmetrics workspace with zero zenmetrics-root deps, so this
 # path dep drags in no GPU infrastructure.
-zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false }
+zenstats = { package = "zenmetrics-stats", path = "../../zenmetrics/crates/zenmetrics-stats", default-features = false }
 # Columnar input. Same major as zenpredict-bake's `fit-yj` feature
-# (parquet 58.3.0) to keep the lockfile single-version.
-parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
-arrow = { version = "58.3.0", default-features = false }
+# (parquet 60.1.0) to keep the lockfile single-version.
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "60.1.0", default-features = false }
 # Manifest serialization (reproduce-this recipe, mirrors §3).
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-toml = "1.1.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.2.0"
 # Input-file provenance hashing for the manifest.
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 # Pure-Rust k-means for the `cluster_features` source-picker binary
 # (port of scripts/cluster_sources.py). NO `blas` feature → no system
 # BLAS dependency; linfa-clustering 0.8.1 pins ndarray 0.16 /
@@ -76,7 +76,7 @@ rand_xoshiro = "0.6.0"
 # default builds stay lean. (forust-ml is the production GBDT follow-up if
 # trees win the A/B.)
 gbdt = { version = "0.1.3", optional = true }
-smartcore = { version = "0.5.0", optional = true }
+smartcore = { version = "0.7.0", optional = true }
 
 [features]
 # A/B experiment binary only (picker_tree_ab) — off by default.
@@ -84,8 +84,8 @@ tree-ab = ["dep:gbdt", "dep:smartcore"]
 
 [dev-dependencies]
 # Mint a tiny synthetic parquet in the end-to-end test.
-parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
-arrow = { version = "58.3.0", default-features = false }
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "60.1.0", default-features = false }
 # Confirm the bake loads through the consumer that will use per-codec
 # picker bakes (the meta-picker wraps the same zenpredict::Predictor).
 zenpicker = { path = "../zenpicker", default-features = false, features = ["std"] }

@@ -10,7 +10,7 @@ before treating every unpublished research interface as a release prerequisite.
 
 ## Registry state and dependency order
 
-Verified 2026-10-25 against source commit `8ca647c5` and the
+Registry versions rechecked 2026-11-05 against the working manifests and the
 [crates.io API](https://crates.io/api/v1/crates/zenanalyze). A version in a
 manifest or changelog does not establish publication. Recheck each crate at
 `https://crates.io/api/v1/crates/<name>` before preparing a release.
@@ -18,7 +18,7 @@ manifest or changelog does not establish publication. Recheck each crate at
 | Crate | Source version | Published version | Immediate prerequisite |
 |---|---|---|---|
 | zenanalyze-api | 0.1.1 | 0.1.0 | None; zero dependencies |
-| zenanalyze | 0.2.0 | 0.1.0 | zenanalyze-api 0.1.1 |
+| zenanalyze | 0.2.0 | 0.1.0 | zenanalyze-api 0.1.1; zenpixels and zenpixels-convert 0.3.1 |
 | zenpredict | 0.2.0 | 0.1.0 | No unpublished normal dependency |
 | zenpredict-bake | 0.1.0 | None (registry 404) | zenpredict 0.2.0 |
 | zenpicker | 0.1.0 | None (registry 404) | zenpredict 0.2.0 |
@@ -28,11 +28,57 @@ workspace-excluded local tooling with versionless path dependencies, including
 zenstats; its manifest does not currently set `publish = false`. These tools
 are not required to publish zenanalyze or to satisfy zenjpeg's runtime graph.
 
-The two independent dependency chains are:
+The independent dependency chains are:
 
-- zenanalyze-api 0.1.1, then zenanalyze 0.2.0.
+- zenanalyze-api 0.1.1 and the shared-pixel 0.3.1 cohort, then zenanalyze 0.2.0.
+  The registry still has zenpixels/zenpixels-convert 0.2.16; workspace-root
+  Git patches keep development on the required 0.3.1 sources. Release those
+  prerequisites before packaging the analyzer. The existing zenresize Git
+  patch is a development dependency, not an analyzer runtime prerequisite.
 - zenpredict 0.2.0, then zenpredict-bake and zenpicker if those consumers need
   registry releases. Neither bake nor picker is a normal dependency of zenjpeg.
+
+## Third-party dependencies (2026-11-05)
+
+The runtime uses bytemuck 1.25.2, libm 0.2.16 and lz4_flex 0.14.0;
+SIMD optionally adds archmage within the existing 0.9.26–0.9.31-beta.1
+range. LZ4 block decoding stays available without `std`, with safe and
+checked decoding enabled. The baker additionally enables LZ4's `alloc`
+encoder API and uses serde 1.0.229 / serde_json 1.0.154.
+
+Arrow/Parquet 60.1.0 belong to the optional fitting/sample tools and the
+local trainer; they are absent from the normal runtime graph. The visualizer
+uses wasm-bindgen 0.2.130. Its ONNX converter keeps prost 0.6.1 to match
+onnx-pb 0.1.4; the trainer keeps ndarray 0.16.1 / ndarray-rand 0.15.0 /
+rand_xoshiro 0.6.0 to match linfa 0.8.1. The descriptor compatibility tool's
+exact 0.2.14 pixel dependencies remain historical oracles.
+
+The main, trainer and fuzz lockfiles are intentionally ignored; `just
+dependency-update` refreshes them and the tracked tooling lockfiles. Run
+`RUST_TEST_THREADS=4 just dependency-check` under the resource wrapper on a build host, with
+`ZENPICKER_METAPICKER_V1_BAKE` pointing to the recorded bake. The analyzer
+benchmark registration checks use `--dry-run` and require the existing
+codec-corpus checkout (`ZENANALYZE_CORPUS_DIR`); they produce no timing claims.
+These checks verify compatibility; they do not authorize publication.
+
+## Dependency verification on 2026-11-05
+
+The individual gates in `dependency-check` passed across isolated x86-64 and
+ARM64 builds: runtime std/no_std/advanced tests, frozen 0.11.6 LZ4 bake loading,
+baker fitting/round-trip tests, ONNX/parity tests, wasm32 build, strict lint,
+trainer integration tests (including exact canonical-stat parity), fuzz target
+compilation, analyzer api/hdr unit/integration/example tests and goldens,
+benchmark registration dry runs, and doctests. The updated API snapshot tool
+accepts the existing public listings unchanged. The current shipped zensim
+`rev7_mix_h128_2026-11-03.bin` also gives bit-identical visualizer/runtime output.
+
+These are compatibility checks. No quality qualification, model promotion or
+performance comparison was performed. Logs and source/command identities are
+preserved under `/mnt/v/output/zenanalyze/dependency-update-2026-11-05/`, mirrored
+to the same relative path under `/mnt/tower/output/`. Initial isolated runs
+stopped on missing fixtures/lockfiles or insufficient disk; the completed
+component gates supplied the recorded inputs and preserved all existing test
+expectations and ignores.
 
 ## What the unpublished versions contain
 

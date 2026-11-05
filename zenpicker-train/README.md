@@ -80,7 +80,7 @@ Held-out per-axis MAE is reported in the panel. Categorical-only
 A **grouped-by-image** split (≥20% of *images*, no image in both
 sides). The report covers:
 
-- the full **`zenstats`** Mohammadi-2025 panel (SROCC / PLCC / KROCC /
+- the full **`zenmetrics-stats`** Mohammadi-2025 panel (imported as `zenstats`) (SROCC / PLCC / KROCC /
   OR / PWRC / Z-RMSE) of predicted-vs-actual `bytes_log` over reachable
   cells, and
 - zentrain's headline picker metrics: **argmin accuracy** + byte

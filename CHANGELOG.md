@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Trainer: align Arrow/Parquet at 60.1.0, refresh serialization/TOML/hashing
+  and the optional tree experiment, and alias the renamed canonical
+  zenmetrics-stats crate. Retain linfa's matching ndarray/rand family.
+  Document dependency prerequisites and the verified compatibility gates.
+
 - Tooling: update WASM bindings, visualizer Arrow/Parquet 60.1.0, benchmark,
   fuzz and API-documentation dependencies. Preserve the ONNX/prost coupling.
 
