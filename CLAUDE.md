@@ -466,3 +466,20 @@ rows of EITHER canonical by `source_filename`. Two canonical variants (same 700k
 - **Credit:** reference images + distortion design © VQA Group, Universität Konstanz (Lin, Hosu,
   Saupe) — KADID-10k / KADIS-700k, https://database.mmsp-kn.de/kadid-10k-database.html ("freely
   available to the research community"). Cite KADID-10k (QoMEX 2019) + DeepFL-IQA (arXiv:2001.08113).
+
+## Known Bugs — shared-pixel HDR conversion hold (2026-11-05)
+
+Selected pixels fa836abf makes three enum casts in descriptor_hash_of invalid.
+Private historical serialization tags preserve the existing public hash contract;
+the isolated0.2.16 oracle passes1400 comparisons (all7 transfer ×5 primaries ×
+5 alpha/absence states ×8 diffuse-white bit patterns). Test imports now use
+zenpixels::hdr::DiffuseWhite. No hash or public signature is changed.
+
+The next runtime gate has225 passes,10 failures and4 existing ignores. All10
+failures are RowConverter::new rejecting PQ→sRGB without a source peak at
+src/row_stream.rs:214 (HdrSourceRequiresPeak), including both feature/golden
+versioning gates. Existing tests require peak-less PQ input to be accepted.
+No source peak, tone-map policy, destination-label workaround, model, golden,
+assertion or threshold has been supplied or changed. Coordinator direction is
+required before changing this behavior contract. No analyzer convergence commit
+is pushed. Receipts:benchmarks/sibling_cohort_2026-11-05.pointer.md.
