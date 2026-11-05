@@ -40,3 +40,22 @@ and qualified main remain ancestors; no review work was discarded.
 both native/scalar reference-golden modes. The full cohort passes674 runtime
 tests,21 doctests,strict lint and fuzz compilation (rc0,41s,peak RSS0.86GiB).
 The earlier refresh and its evidence remain retained separately.
+
+## Current-main refresh
+
+Current source merges main `17d9cf8e` and review head `c55554da`. Evidence is at
+`/mnt/v/output/zenanalyze/pr92-refresh-2026-11-05/`, with a mirror under the
+same relative `output/` path on `/mnt/tower`.
+
+The source identity, declaration census and combined public-surface diff are
+recorded separately. The combined surface differs from main only in the added
+hard-mask parameter to `resolve_pre_argmin`; the remaining controller
+capabilities move behind the feature gate. The owner selected main's NaN-only
+quality policy; its implementation and regression tests are retained verbatim.
+
+ARM portable goldens and model parity pass. The ARM strict-reference control
+reproduces the same 39 feature/value mismatches on unchanged main and the PR;
+that linear-light mode is x86-only under the existing versioning contract.
+Both native and forced-scalar reference modes pass on x86. No golden or
+threshold was changed. Packaging and source-selected semver evidence are kept
+with the fresh receipts; older gate records above remain historical.

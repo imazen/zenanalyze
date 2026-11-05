@@ -340,15 +340,22 @@ runtime branch).
   `just predict-readiness` covers nonzero inputs and boundaries with and without
   std, all-feature runtime tests, doctests and strict clippy.
 
-- **2026-10-28 — pre-publication controller audit, unresolved:**
-  `resolve_pre_argmin` can return a masked-out zone fallback;
-  the mask conflates predicted reachability and caller constraints, so enforcing
-  hard constraints requires separate caller evidence or an approved API change.
-  Reproducers: `just api-necessity-probe`, `just api-necessity-transforms`.
-  The audit also records raw/transformed prediction composition and
-  producer stride/configuration issues. See
-  [the findings and proposed surface](docs/API_NECESSITY_2026-10-28.md).
-  No behavior or established expectation was changed by the audit.
+- **2026-11-05 — pre-argmin caller constraints repaired in PR 92:**
+  the experimental `resolve_pre_argmin` proposal takes a separate hard mask,
+  intersects reachability with it, and returns a zone fallback only when its
+  index is in range and hard-allowed. A model-policy fallback may still bypass
+  predicted reachability. The caller owns scalar limits and later rescue.
+  Signature placement remains subject to owner review before landing. Raw versus
+  transformed serving and producer stride/configuration work remain documented
+  in [the consumer follow-up](docs/CONSUMER_SURFACES_2026-11-05.md) and
+  [the readiness review](docs/PREDICT_READINESS_2026-11-05.md).
+
+- **2026-11-05 — linear-light reference qualification is x86-only:**
+  portable gamma goldens pass on ARM. Forcing the x86 linear-light reference
+  mode on ARM produces the same 39 failing feature/value rows on main `17d9cf8e`
+  and the refreshed PR; this is the existing scope documented in
+  `src/versioning.rs`, not a controller regression. Native and forced-scalar
+  reference modes pass on x86. No golden values or tolerances were changed.
 
 - **2026-11-05 — directed-search NaN handling fixed:** `best_trial` excludes
   NaN quality measurements in all preference branches; `next_trial` excludes
