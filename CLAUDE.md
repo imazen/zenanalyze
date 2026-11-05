@@ -467,19 +467,31 @@ rows of EITHER canonical by `source_filename`. Two canonical variants (same 700k
   Saupe) — KADID-10k / KADIS-700k, https://database.mmsp-kn.de/kadid-10k-database.html ("freely
   available to the research community"). Cite KADID-10k (QoMEX 2019) + DeepFL-IQA (arXiv:2001.08113).
 
-## Known Bugs — shared-pixel HDR conversion hold (2026-11-05)
+## Shared-pixel HDR measurement contract (2026-11-05)
 
-Selected pixels fa836abf makes three enum casts in descriptor_hash_of invalid.
-Private historical serialization tags preserve the existing public hash contract;
-the isolated0.2.16 oracle passes1400 comparisons (all7 transfer ×5 primaries ×
-5 alpha/absence states ×8 diffuse-white bit patterns). Test imports now use
-zenpixels::hdr::DiffuseWhite. No hash or public signature is changed.
+The analyzer uses zenpixels/convert fa836abf (0.3.1). Private historical enum tags
+retain descriptor hashes: 1,400 comparisons against actual 0.2.14 enum casts and
+the historical hash implementation pass. DiffuseWhite is under zenpixels::hdr.
 
-The next runtime gate has225 passes,10 failures and4 existing ignores. All10
-failures are RowConverter::new rejecting PQ→sRGB without a source peak at
-src/row_stream.rs:214 (HdrSourceRequiresPeak), including both feature/golden
-versioning gates. Existing tests require peak-less PQ input to be accepted.
-No source peak, tone-map policy, destination-label workaround, model, golden,
-assertion or threshold has been supplied or changed. Coordinator direction is
-required before changing this behavior contract. No analyzer convergence commit
-is pushed. Receipts:benchmarks/sibling_cohort_2026-11-05.pointer.md.
+Plain rendering conversion now requires source-peak metadata for HDR→SDR. The
+analyzer instead preserves its existing content-feature representation through
+private, explicit measurement stages. They reuse the pixel crate's EOTF/OETF and
+quantizers, preserve the historical non-FMA matrix sum order, and read stored
+color channels independently of alpha. The source-direct alpha/HDR tiers continue
+to read the original descriptor and samples; the opt-in linear-light path retains
+its existing behavior. No peak, tone curve, model, golden or threshold is changed.
+
+Known historical limitation: U8 wide-gamut HDR content features apply their matrix
+after widening but before the EOTF, as 0.2.14 did. This encoded-domain operation
+and stored-color alpha semantics are retained feature definitions, not rendering
+color conversion. Do not reuse this private adapter for rendering. Correcting
+those definitions would require separately reviewed feature/model provenance.
+
+The isolated compatibility oracle covers four depths, PQ/HLG, five primaries,
+seven layout/alpha combinations, six widths and strided two-row inputs. All
+3,360 rows and 110,624,640 output bytes match. The 960 gray rows use equivalent
+replicated-RGB legacy inputs because the old gray HDR converter panics on a
+one-pixel row; this is RGB-equivalence coverage, not a direct old-gray comparison.
+Unchanged analyzer tests: 235 pass, four existing ignores. Full workspace: 671
+runtime tests and 21 doctests pass; strict all-target lint and fuzz compilation
+pass. Receipts: [qualification](benchmarks/sibling_cohort_2026-11-05.pointer.md).

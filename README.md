@@ -52,6 +52,13 @@ zenpixels = { version = "0.2.14", default-features = false }
 > section below still references them as historical calibration data — those
 > rows describe a prior surface and no longer map to live variants.
 
+HDR content analysis preserves the existing feature representation without
+requiring a source-peak estimate. Its private compatibility path measures stored
+color channels and retains historical quantization and matrix order; it is not
+an HDR rendering conversion. The source-direct HDR/alpha tiers and opt-in
+linear-light analysis remain separate. See the
+[compatibility qualification](benchmarks/sibling_cohort_2026-11-05.pointer.md).
+
 ## Why
 
 Modern adaptive codecs (zenjpeg, zenwebp, zenpng, zenavif, zenjxl) all want the

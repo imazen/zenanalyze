@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Analyzer: converge on zenpixels/convert 0.3.1 while preserving descriptor hashes and the historical HDR content-feature representation, with independent old-runtime byte parity (`90f12497`).
+
 - Admit archmage/magetypes 0.9.31-beta.1 alongside compatible stable versions; use explicit-token aliases where needed. Formatting, strict library lint and library tests pass (`8b4519e5`).
 
 > **Everything under `[Unreleased]` ships as part of `0.2.0`.** `Cargo.toml` is
