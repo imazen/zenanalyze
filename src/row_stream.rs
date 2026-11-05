@@ -159,7 +159,7 @@ enum Inner<'a> {
     LinearNormalized {
         slice: PixelSlice<'a>,
         /// Source descriptor → RGBF32_LINEAR.
-        converter: LinearAnalysisConverter,
+        converter: Box<LinearAnalysisConverter>,
         /// `anchor_scale(slice)`: the **linear** diffuse-white anchor (1.0 = diffuse
         /// white, PQ/HLG exposure normalized to the signaled diffuse white). The sRGB
         /// OETF + ×255 to display range happen in `normalize_linear_row*`, so this
@@ -255,7 +255,7 @@ impl<'a> RowStream<'a> {
         let height = slice.rows();
         let desc = slice.descriptor();
         let scale = anchor_scale(&slice);
-        let converter = LinearAnalysisConverter::new(desc, width)?;
+        let converter = Box::new(LinearAnalysisConverter::new(desc, width)?);
         let w = width as usize;
         Ok(Self {
             inner: Inner::LinearNormalized {
