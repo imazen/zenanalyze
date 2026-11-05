@@ -105,9 +105,10 @@
   `keys::FEATURE_DEFS_VERSION` (u32), `keys::FEATURE_CONFIG_HASH` (u64), and
   `Model::feature_columns()` / `analyzer_version()` / `feature_defs_version()` /
   `feature_config_hash()` accessors. A codec builds a `zenanalyze_api::Request`
-  (names + the three-part reuse key) from these, so it can check whether an
+  (qualified names) from the feature columns, and separately checks whether an
   offered feature result was produced by compatible definitions AND the same
-  analysis config (e.g. gamma vs linear-light) before reusing it. The two numeric
+  analysis config (e.g. gamma vs linear-light) before reusing it. Transport name
+  matching does not compare the informational provenance stamps. The two numeric
   keys decode LE-explicit (i686/any-endian). All keys are `Option`/empty on bakes
   predating them (additive, non-breaking). Bakers (zentrain) populate them.
 

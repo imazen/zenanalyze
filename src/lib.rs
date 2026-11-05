@@ -1199,13 +1199,11 @@ pub const fn feature_defs_version() -> u32 {
 
 /// This crate's version string (`CARGO_PKG_VERSION`, e.g. `"0.2.0"`).
 ///
-/// The producer side of the **offered-results** contract stamps this together
-/// with [`feature_defs_version`] onto a self-describing feature offer, so a
-/// downstream codec picker can decide whether the offer was produced by the
-/// same feature *definitions* its model was trained on — `(major.minor,
-/// defs_version)` is the reuse key (a `0.2` offer can't satisfy a `1.0`-trained
-/// model; `0.2.3` vs `0.2.7` is caught by `defs_version`). The negotiation logic
-/// itself is version-agnostic and lives downstream, not here.
+/// The producer records this as informational provenance on its feature offer.
+/// Model consumers pin feature definitions through qualified feature identities;
+/// the transport matches those identities rather than comparing this version or
+/// [`feature_defs_version`]. Consumers must separately establish compatible
+/// analysis configuration and input framing before reusing values.
 pub const fn analyzer_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

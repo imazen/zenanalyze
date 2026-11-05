@@ -390,10 +390,9 @@ pub mod keys {
 
     /// utf8 — the `zenanalyze` crate version the model's features were extracted
     /// with, e.g. `"0.2.7"` (`zenanalyze::analyzer_version()` at bake time). With
-    /// [`FEATURE_DEFS_VERSION`], its `major.minor` is the reuse key a codec uses
-    /// to decide whether an offered feature result was produced by compatible
-    /// definitions (see the `zenanalyze-api` `Offer::matches` contract). Absent
-    /// on models baked before this key existed.
+    /// [`FEATURE_DEFS_VERSION`], it records training provenance. The transport
+    /// matches qualified feature identities; it does not automatically compare
+    /// these stamps. Absent on models baked before this key existed.
     pub const ANALYZER_VERSION: &str = "zentrain.analyzer_version";
     /// numeric (u32) — `zenanalyze::feature_defs_version()` at bake time: the
     /// feature numeric-definition version the model was trained against. Catches
@@ -402,11 +401,11 @@ pub mod keys {
     pub const FEATURE_DEFS_VERSION: &str = "zentrain.feature_defs_version";
     /// numeric (u64) — `zenanalyze::AnalysisQuery::config_hash()` at bake time:
     /// the value-affecting analysis-config digest the model was trained under
-    /// (`0` = canonical default / gamma). The third part of the `zenanalyze-api`
-    /// reuse key, alongside [`ANALYZER_VERSION`] + [`FEATURE_DEFS_VERSION`]. Stops
-    /// a codec reusing e.g. linear-light features against a gamma-trained model:
-    /// the same feature name carries a different value under the flag while the
-    /// version + defs stay fixed. Absent (treated as `0`) on models baked before
-    /// this key.
+    /// (`0` = canonical default / gamma). The consumer must compare this with
+    /// offered provenance, or establish an equivalent configuration precondition,
+    /// to avoid reusing linear-light values against a gamma-trained model.
+    /// Name-only transport negotiation does not enforce that comparison.
+    /// Absent on older bakes; assume default only when training provenance
+    /// establishes it.
     pub const FEATURE_CONFIG_HASH: &str = "zentrain.feature_config_hash";
 }

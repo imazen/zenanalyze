@@ -1,5 +1,12 @@
 # The feature contract — frozen for a decade
 
+Historical June 2026 design, superseded by the August 30 transport review.
+The implemented contract is zenanalyze-api 0.1.x; selection compares qualified
+feature identities. Configuration and framing remain separate consumer
+preconditions, not fields on Request or an automatic three-part gate. See
+[the current consumer/correctness review](CONSUMER_SURFACES_2026-11-05.md)
+and [the frozen-contract README](../zenanalyze-api/README.md).
+
 **Status:** 2026-06-19. `zenanalyze-api` is **1.0** and frozen. The full Rust
 producer surface (contract, `zenanalyze` config digest, `zenpredict` model
 accessors, `zenpredict-bake` stamps) and the Python forwarder have landed. The

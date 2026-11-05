@@ -2028,26 +2028,27 @@ impl AnalysisQuery {
         self.diffuse_white_clip
     }
 
-    /// Opaque digest of the **value-affecting** analysis config, for the
-    /// `zenanalyze-api` reuse key (`zenanalyze_api::Request::config_hash` /
-    /// `Offer::config_hash`).
+    /// Opaque digest of the **value-affecting** analysis config, recorded in
+    /// an offer's provenance and the model's training metadata. The consumer
+    /// checks configuration compatibility separately: contract requests match
+    /// qualified names and do not automatically compare this digest.
     ///
     /// Two passes that share this hash compute every feature identically (given
     /// the same image + same crate `major.minor` + same `feature_defs_version`);
     /// two that differ may not. `0` is the **canonical default** (gamma, no mode
-    /// flags) — so default-config models and the default pass interoperate
-    /// without anyone stamping anything. Only equality is meaningful.
+    /// flags). Only equality is meaningful; a missing model stamp is not itself
+    /// proof that its training used the default configuration.
     ///
     /// What's hashed: the caller-settable flags that change a feature's *value*
-    /// for a fixed name — currently just [`linear_light`](Self::linear_light)
-    /// (gamma vs linear-light `variance`). What's **not**: the
+    /// for a fixed name — [`linear_light`](Self::linear_light) and
+    /// [`diffuse_white_clip`](Self::diffuse_white_clip). What's **not**: the
     /// [`features`](Self::features) set (that's "which features," handled by the
     /// offer's names, not "what value") and the crate-internal sampling budgets
     /// (those are invariants folded into `feature_defs_version`). A flag mixes in
     /// only when it *deviates from its default*, so the canonical default stays
     /// `0` as new flags land. The byte layout may grow across releases, but it is
-    /// stable within a `major.minor` — which is all reuse soundness needs, since
-    /// cross-minor reuse is already gated by the analyzer version.
+    /// stable within a `major.minor`. A caller comparing configurations across
+    /// versions must establish that their digest definitions remain compatible.
     #[must_use]
     pub const fn config_hash(&self) -> u64 {
         // FNV-1a over the non-default value-affecting flags.

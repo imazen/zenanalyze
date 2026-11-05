@@ -891,9 +891,8 @@ impl Model {
 
     /// The `zenanalyze` version the model's features were extracted with (the
     /// [`ANALYZER_VERSION`](crate::keys::ANALYZER_VERSION) metadata, e.g.
-    /// `"0.2.7"`), or `None` on bakes predating the key. Its `major.minor` plus
-    /// [`feature_defs_version`](Self::feature_defs_version) is the reuse key a
-    /// codec checks against an offered feature result.
+    /// `"0.2.7"`), or `None` on bakes predating the key. This is informational
+    /// training provenance; feature negotiation matches qualified identities.
     pub fn analyzer_version(&self) -> Option<&str> {
         self.metadata().get_utf8(crate::keys::ANALYZER_VERSION).ok()
     }
@@ -917,8 +916,10 @@ impl Model {
     /// The value-affecting analysis-config digest the model was trained under
     /// (the [`FEATURE_CONFIG_HASH`](crate::keys::FEATURE_CONFIG_HASH) metadata,
     /// `zenanalyze::AnalysisQuery::config_hash()` at bake time), or `None` on
-    /// bakes predating the key (treat as `0` = canonical default). The third part
-    /// of the `zenanalyze-api` reuse key.
+    /// bakes predating the key. A consumer must check configuration compatibility
+    /// before reusing an offer; the transport's name matching does not enforce
+    /// it. Interpret an absent stamp as canonical default (`0`) only when the
+    /// training provenance establishes that default.
     ///
     /// Decoded as an 8-byte little-endian `u64`, endian-explicit so it round-trips
     /// identically on i686 / big-endian.
