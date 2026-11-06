@@ -206,6 +206,9 @@ Behind the `advanced` feature (default-off): the closure-scorer hybrids `argmin_
 |---|---|---|
 | `std` | yes | `std::error::Error` trait impls |
 | `advanced` | no | safety / rescue / output_specs typed API / closure-scorer argmin hybrids / `pick_with_confidence` — see "Decision math" above |
+| `experimental` | no | trial `EncodeBudget`, directed search and `resolve_pre_argmin`; also enabled by `advanced` |
+
+`EncodeMode` and `PickerStrategy` remain available for routing consumers. The experimental controller distinguishes hard caller constraints from predicted reachability; `resolve_pre_argmin` takes both masks. Invalid measured quality never wins `best_trial`. Trial budgets preserve the mandatory first encode (even at a zero allowance); they are not admission limits for an empty candidate set.
 
 The default surface follows normal 0.x semver. The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
 

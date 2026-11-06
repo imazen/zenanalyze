@@ -6,29 +6,29 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict.txt 424 lines (supported surface) | zenpredict.features.txt 84 added (features: advanced,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
+# files: zenpredict.txt 376 lines (supported surface) | zenpredict.features.txt 132 added (features: advanced,experimental,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        39
-#   pub consts/statics                         54
-#   free functions                             24
-#   inherent methods                           95
-#   struct fields                             102
-#   enum variants                              84
-#   trait roster entries (type × trait)       145
-#   auto-trait-complete types                  33
+#   pub types (struct/enum/trait/alias)        32
+#   pub consts/statics                         50
+#   free functions                             19
+#   inherent methods                           90
+#   struct fields                              86
+#   enum variants                              80
+#   trait roster entries (type × trait)       115
+#   auto-trait-complete types                  26
 #
 # per-module pub lines:
-#   (root)                          306
+#   (root)                          265
 #   argmin                           26
 #   keys                             19
 #   limits                            3
 #   output_spec                      33
 #   wire                             17
 
-## items (391 lines)
+## items (350 lines)
 
 pub mod zenpredict
 pub mod argmin
@@ -170,9 +170,6 @@ pub enum PickerStrategy
 pub PickerStrategy::Auto
 pub PickerStrategy::MultiShot
 pub PickerStrategy::OneShot
-pub enum PreArgminDecision
-pub PreArgminDecision::Argmin
-pub PreArgminDecision::ZoneFallback(ZoneFallback)
 #[non_exhaustive] pub enum PredictError
 pub PredictError::BadMagic
 pub PredictError::BadMagic::found: [u8; 4]
@@ -232,11 +229,6 @@ pub PredictError::UnsupportedVersion::expected: u16
 pub PredictError::UnsupportedVersion::version: u16
 pub PredictError::ZeroDimension
 pub PredictError::ZeroDimension::what: &'static str
-pub enum QualityTarget
-pub QualityTarget::Bytes
-pub QualityTarget::Bytes::max_bytes: u64
-pub QualityTarget::Quality
-pub QualityTarget::Quality::target_zq: f32
 #[non_exhaustive] pub enum ScoreTransform [also: argmin]
 pub ScoreTransform::Exp
 pub ScoreTransform::Identity
@@ -265,15 +257,6 @@ pub struct ArgminOffsets<'a> [also: argmin]
 pub ArgminOffsets::per_output: core::option::Option<&'a [f32]>
 pub ArgminOffsets::uniform: f32
 pub fn argmin::ArgminOffsets<'a>::uniform(f32) -> Self
-pub struct EncodeBudget
-pub EncodeBudget::max_ms: core::option::Option<u32>
-pub EncodeBudget::max_passes: core::option::Option<u16>
-pub EncodeBudget::max_trial_pixels: core::option::Option<u64>
-pub const fn EncodeBudget::milliseconds(u32) -> Self
-pub const fn EncodeBudget::passes(u16) -> Self
-pub fn EncodeBudget::resolve(&self, PickerStrategy, usize, u64, u32) -> usize
-pub fn EncodeBudget::time_exhausted(&self, u32) -> bool
-pub const fn EncodeBudget::trial_pixels(u64) -> Self
 #[repr(C)] pub struct FeatureBound
 pub FeatureBound::high: f32
 pub FeatureBound::low: f32
@@ -347,7 +330,6 @@ pub fn Model::scaler_scale(&self) -> &[f32]
 pub fn Model::schema_hash(&self) -> u64
 pub fn Model::scratch_len(&self) -> usize
 pub fn Model::sparse_overrides(&self) -> &[output_spec::SparseOverride]
-pub fn Model::unachievable_zones(&self) -> core::result::Result<UnachievableZones, PredictError>
 pub fn Model::version(&self) -> u16
 #[repr(C)] pub struct OutputSpec [also: output_spec]
 pub OutputSpec::_pad: [u8; 3]
@@ -383,49 +365,25 @@ pub fn Section::slice<'a>(self, &'static str, &'a [u8]) -> core::result::Result<
 #[repr(C)] pub struct SparseOverride [also: output_spec]
 pub SparseOverride::idx: u32
 pub SparseOverride::value: f32
-pub struct Trial
-pub Trial::achieved_zq: f32
-pub Trial::bytes: u64
-pub Trial::candidate: usize
-pub struct UnachievableZone
-pub UnachievableZone::ceiling_zq: f32
-pub UnachievableZone::fallback_cell: u8
-pub UnachievableZone::fallback_scalar: f32
-pub UnachievableZone::pixel_upper: f32
-pub struct UnachievableZones
-pub UnachievableZones::pixels_feat_idx: u16
-pub UnachievableZones::zones: alloc::vec::Vec<UnachievableZone>
-pub fn UnachievableZones::is_empty(&self) -> bool
-pub fn UnachievableZones::resolve(&self, &[f32], f32) -> core::option::Option<ZoneFallback>
-pub struct ZoneFallback
-pub ZoneFallback::cell: usize
-pub ZoneFallback::scalar: core::option::Option<f32>
 pub const FORMAT_VERSION: u16
 pub const KNOB_VETOES_KEY: &str
 pub const LEAKY_RELU_ALPHA: f32
-pub const UNACHIEVABLE_ZONES_KEY: &str
 pub fn apply_feature_transforms(&[FeatureTransform], &[f32], &mut [f32]) -> core::result::Result<(), PredictError>
 pub fn apply_knob_vetoes(&[f32], &[KnobVeto<'_>], &mut [bool])
 pub fn argmin_masked(&[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::option::Option<usize> [also: argmin]
 pub fn argmin_masked_in_range(&[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::option::Option<usize> [also: argmin]
 pub fn argmin_masked_top_k<const K: usize>(&[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> [core::option::Option<usize>; K] [also: argmin]
 pub fn argmin_masked_top_k_in_range<const K: usize>(&[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> [core::option::Option<usize>; K] [also: argmin]
-pub fn best_trial(&[Trial], QualityTarget) -> core::option::Option<usize>
 pub fn f16_bits_to_f32(u16) -> f32
 pub fn first_out_of_distribution(&[f32], &[FeatureBound]) -> core::option::Option<usize>
 pub fn knob_vetoes_from_metadata<'a>(&Metadata<'a>) -> core::result::Result<alloc::vec::Vec<KnobVeto<'a>>, PredictError>
 pub fn mask_at_least(&[f32], f32, &mut [bool]) [also: argmin]
 pub fn mask_at_most(&[f32], f32, &mut [bool]) [also: argmin]
-pub fn next_trial(&[f32], &[Trial], QualityTarget) -> core::option::Option<usize>
 pub fn parse_knob_vetoes(&[u8]) -> core::result::Result<alloc::vec::Vec<KnobVeto<'_>>, PredictError>
-pub fn parse_unachievable_zones(&[u8]) -> core::result::Result<UnachievableZones, PredictError>
-pub fn resolve_pre_argmin(&[f32], f32, &UnachievableZones, &[KnobVeto<'_>], &mut [bool]) -> PreArgminDecision
-pub fn unachievable_zones_from_metadata(&Metadata<'_>) -> core::result::Result<UnachievableZones, PredictError>
 
-## trait impls (32 types)
+## trait impls (25 types)
 
 Activation: Clone, Copy, Debug, Eq, PartialEq
-EncodeBudget: Clone, Copy, Debug, Default, Eq, PartialEq
 EncodeMode: Clone, Copy, Debug, Eq, PartialEq
 FeatureBound: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 FeatureTransform: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -438,17 +396,11 @@ MetadataEntry<'a>: Clone, Copy, Debug
 MetadataType: Clone, Copy, Debug, Eq, PartialEq
 Model: Debug
 PickerStrategy: Clone, Copy, Debug, Eq, PartialEq
-PreArgminDecision: Clone, Copy, Debug, PartialEq
 PredictError: Clone, Debug, Display, Eq, Error, PartialEq
-QualityTarget: Clone, Copy, Debug, PartialEq
 Section: Clone, Copy, Debug, Default, Eq, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
-Trial: Clone, Copy, Debug, PartialEq
-UnachievableZone: Clone, Copy, Debug, PartialEq
-UnachievableZones: Clone, Debug, Default, PartialEq
 VetoOp: Clone, Copy, Debug, Eq, PartialEq
 WeightDtype: Clone, Copy, Debug, Eq, PartialEq
 WeightStorage<'a>: Debug
-ZoneFallback: Clone, Copy, Debug, PartialEq
 argmin::AllowedMask<'a>: Clone, Copy, Debug
 argmin::ArgminOffsets<'a>: Clone, Copy, Debug, Default
 argmin::ScoreTransform: Clone, Copy, Debug, Default, Eq, PartialEq
@@ -459,4 +411,4 @@ output_spec::SparseOverride: Clone, Copy, Debug, Default, bytemuck::pod::Pod, by
 
 ## auto traits
 
-33 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+26 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

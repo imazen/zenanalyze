@@ -132,6 +132,7 @@ extern crate alloc;
 
 pub mod argmin;
 mod bounds;
+#[cfg(any(feature = "experimental", test))]
 mod directed_search;
 mod encode_strategy;
 mod error;
@@ -142,12 +143,14 @@ pub mod limits;
 mod metadata;
 mod model;
 pub mod output_spec;
+#[cfg(any(feature = "experimental", test))]
 mod picker_safety;
 mod predictor;
 #[cfg(feature = "advanced")]
 pub mod rescue;
 #[cfg(feature = "advanced")]
 mod safety;
+#[cfg(any(feature = "experimental", test))]
 mod unachievable_zone;
 pub mod wire;
 
@@ -184,6 +187,7 @@ pub use metadata::{Metadata, MetadataEntry, MetadataType, keys};
 // placement as `knob_veto` — both are pre-argmin picker-selection overlays
 // the codec composes around its argmin (here a `resolve`-then-skip-argmin
 // short-circuit; there a masking pass).
+#[cfg(feature = "experimental")]
 pub use unachievable_zone::{
     UNACHIEVABLE_ZONES_KEY, UnachievableZone, UnachievableZones, ZoneFallback,
     parse_unachievable_zones, unachievable_zones_from_metadata,
@@ -193,8 +197,11 @@ pub use unachievable_zone::{
 // the bake-validated bounds in the same order. The post-encode rescue step
 // lives in `rescue` (advanced); `picker_safety`'s module docs document the
 // full 4-step pipeline tying them together.
+#[cfg(feature = "experimental")]
 pub use directed_search::{QualityTarget, Trial, best_trial, next_trial};
-pub use encode_strategy::{EncodeBudget, EncodeMode, PickerStrategy};
+#[cfg(feature = "experimental")]
+pub use encode_strategy::EncodeBudget;
+pub use encode_strategy::{EncodeMode, PickerStrategy};
 pub use model::{
     Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
     WeightDtype, WeightStorage,
@@ -202,6 +209,7 @@ pub use model::{
 pub use output_spec::{OutputSpec, OutputTransform, SparseOverride};
 #[cfg(feature = "advanced")]
 pub use output_spec::{OutputValue, apply_spec};
+#[cfg(feature = "experimental")]
 pub use picker_safety::{PreArgminDecision, resolve_pre_argmin};
 pub use predictor::Predictor;
 #[cfg(feature = "advanced")]

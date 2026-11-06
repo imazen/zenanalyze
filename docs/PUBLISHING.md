@@ -5,6 +5,11 @@ APIs' intended workflows. Its output-transform and directed-search NaN defects
 are fixed. The [consumer follow-up](CONSUMER_SURFACES_2026-11-05.md) records
 remaining contract decisions and model-qualification gaps to resolve before release.
 
+The [2026-11-05 readiness review](PREDICT_READINESS_2026-11-05.md) records the
+landed transform fix, experimental controller proposal, producer signature
+review, public-boundary listings and final local gate evidence. The producer
+signatures remain proposals; publication still requires owner approval.
+
 See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
 before treating every unpublished research interface as a release prerequisite.
 
@@ -41,8 +46,7 @@ The independent dependency chains are:
 ## Third-party dependencies (2026-11-05)
 
 The runtime uses bytemuck 1.25.2, libm 0.2.16 and lz4_flex 0.14.0;
-SIMD optionally adds archmage within the existing 0.9.26–0.9.31-beta.1
-range. LZ4 block decoding stays available without `std`, with safe and
+SIMD optionally adds archmage in `>=0.9.26, <0.10.0`. LZ4 block decoding stays available without `std`, with safe and
 checked decoding enabled. The baker additionally enables LZ4's `alloc`
 encoder API and uses serde 1.0.229 / serde_json 1.0.154.
 

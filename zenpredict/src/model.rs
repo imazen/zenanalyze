@@ -957,6 +957,7 @@ impl Model {
     /// when `target_zq` exceeds the achievable ceiling for the image's size
     /// class the codec encodes the declared fallback knobset directly instead
     /// of attempting an unreachable pick.
+    #[cfg(feature = "experimental")]
     pub fn unachievable_zones(&self) -> Result<crate::UnachievableZones, PredictError> {
         crate::unachievable_zones_from_metadata(&self.metadata())
     }
