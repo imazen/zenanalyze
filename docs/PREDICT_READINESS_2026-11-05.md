@@ -1,7 +1,9 @@
 # zenpredict 0.2.0 readiness review — 2026-11-05
 
-The owner approved this on 2026-11-05, and zenpredict 0.2.0 was published on 2026-11-06. The controller changes require signature review
-through a PR. The runtime, ZNPR v3 artifact format, transport contract and baker
+The owner approved this on 2026-11-05, and zenpredict 0.2.0 was published on
+2026-11-06. The controller changes passed signature review in PR 92, merged
+as `c3fb486`, and are included in that release. The runtime, ZNPR v3 artifact
+format, transport contract and baker
 remain available. The no_std correctness repair is on main at `7064f1df`.
 
 The declaration census contains **491** public declaration rows. This includes

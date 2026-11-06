@@ -6,9 +6,11 @@ are fixed. The [consumer follow-up](CONSUMER_SURFACES_2026-11-05.md) records
 remaining contract decisions and model-qualification gaps to resolve before release.
 
 The [2026-11-05 readiness review](PREDICT_READINESS_2026-11-05.md) records the
-landed transform fix, experimental controller proposal, producer signature
-review, public-boundary listings and final local gate evidence. The producer
-signatures remain proposals; publication still requires owner approval.
+landed transform fix, controller placement, producer signature review,
+public-boundary listings and final local gate evidence. PR 92 merged in
+`c3fb486`; its experimental controller and separate hard-mask argument shipped
+in zenpredict 0.2.0. Producer signatures remain proposals; further publication
+still requires owner approval.
 
 See [ecosystem use and approaches to reconsider](ECOSYSTEM_USAGE_2026-10-25.md)
 before treating every unpublished research interface as a release prerequisite.

@@ -351,11 +351,11 @@ runtime branch).
   std, all-feature runtime tests, doctests and strict clippy.
 
 - **2026-11-05 — pre-argmin caller constraints repaired in PR 92:**
-  the experimental `resolve_pre_argmin` proposal takes a separate hard mask,
+  the experimental `resolve_pre_argmin` takes a separate hard mask,
   intersects reachability with it, and returns a zone fallback only when its
   index is in range and hard-allowed. A model-policy fallback may still bypass
   predicted reachability. The caller owns scalar limits and later rescue.
-  Signature placement remains subject to owner review before landing. Raw versus
+  PR 92 merged in `c3fb486` and shipped in zenpredict 0.2.0. Raw versus
   transformed serving and producer stride/configuration work remain documented
   in [the consumer follow-up](docs/CONSUMER_SURFACES_2026-11-05.md) and
   [the readiness review](docs/PREDICT_READINESS_2026-11-05.md).
@@ -411,6 +411,18 @@ Resolved 2026-06-20 (`edge_slope_stdev` cross-platform divergence):
   diverge. Diagnosis: `docs/feature-cross-platform-divergence-2026-06-20.md`.
 
 ## Investigation Notes
+
+- **2026-11-06 UTC — repository issue triage:** reviewed all 12 open issues
+  against `15544897`; added source-backed status, remaining acceptance and
+  priority to each issue. Closed #87 (LZ4 migration complete), #11 (source audit
+  complete) and #46 (adaptive pixel-budget policy unsupported by the existing
+  study). Nine remain open. #88 is the highest-priority picker qualification
+  gap: learned routers remain disabled even though explicit drift fallback is
+  fixed. #12 still has a live vendored oracle path; #51 and #85 have runtime
+  primitives but need consumer/data/model qualification. #41/#50 track current
+  consumption and measured cost; #62 needs grouped ablation qualification;
+  #1/#13 remain experiments. Issue threads own the detailed evidence and gates.
+  No models, numerical thresholds or sampling defaults changed in this triage.
 
 - **2026-09-24: opt-in picker time budgets.** The shared Rust dataset loader
   now supports `build_picker_dataset_with_time_budget`: inclusive measured-time

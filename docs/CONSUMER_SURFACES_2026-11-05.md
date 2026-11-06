@@ -7,25 +7,30 @@ consumer changes have been published. Consumer checkouts were read without
 synchronization or edits. This updates the
 [October API audit](API_NECESSITY_2026-10-28.md).
 
+Follow-up on 2026-11-06 UTC: PR 92 merged as `c3fb486` and its controller
+changes shipped in zenpredict 0.2.0. `resolve_pre_argmin` is experimental,
+takes an independent hard mask and refuses a forbidden or out-of-range zone
+fallback. The original proposal discussion below describes the design rationale;
+this signature is now implemented. Consumer checkout observations remain the
+dated source inspection above, not a new consumer qualification.
+
 ## Correctness disposition
 
 | Finding | Disposition | Reason and remaining work |
 |---|---|---|
 | no_std Exp/sigmoid and inaccurate Round | Already fixed on main in `7064f1df` | libm implements the no_std math; rounding preserves large integral values, signed zero and infinities. Existing nonzero/boundary controls remain enabled. |
 | NaN wins trial selection | Fixed in `b15e914a` | Every winner branch excludes NaN measurements. Search excludes NaN predictions and measured evidence, keeps failed candidates tried, and refuses a NaN quality target. Entirely invalid trial sets return `None`; infinities retain numeric ordering in winner selection. New controls failed before repair. |
-| Zone fallback can bypass a caller prohibition | Integration correctness gap; documentation example repaired | The current mask can be an empty quality-reachability mask. Testing the fallback against that mask would disable the intended unreachable-target fallback. Retain and validate an independent caller hard mask and scalar constraints. A self-enforcing helper needs separately represented hard constraints and an explicit refusal outcome; changing its signature/enum requires API review. |
+| Zone fallback can bypass a caller prohibition | Fixed in merged PR 92, zenpredict 0.2.0 | The experimental helper takes an independent hard mask and accepts a zone fallback only if its index is in range and permitted. It may bypass predicted quality reachability, but cannot widen hard constraints. The caller still owns scalar constraints and later rescue. |
 | Raw prediction bypasses baked nonlinear transforms | Intentional primitive plus misleading usage guidance | `predict` and Predictor argmin wrappers apply the scaler only. Preserve the existing raw-path regression. Documentation now directs raw extracted features through `predict_transformed` plus a free selector. Consumers must choose the correct input domain. |
 | Feature offer configuration/framing | Compatibility precondition, not enforced by the frozen request | `Select::Features` checks qualified identities only. Model training configuration and crop/framing must be checked separately using existing provenance, or established when grouping extraction passes. Do not silently change frozen request semantics. |
 | Packed-only offer producers | API design limitation | Core extraction already takes a strided `PixelSlice`. A fallible producer accepting that slice and an `AnalysisQuery`, deriving framing from the source, would preserve the existing request resolver and result conversion. Review an additive producer entry before implementation; do not replace existing signatures unilaterally. |
 | Zero trial budget / empty candidate set resolves to one | Existing specified policy | It is an allowance around a mandatory encode. Keep the existing tests. A truly hard total-work ceiling would need a distinct contract. |
 
-The zone helper's `allowed` mask cannot say whether false means "caller forbids
-this setting" or "this setting is predicted to miss quality". A minimal future
-proposal is a separately borrowed hard mask plus validation of the chosen cell
-and scalar before encoding. Unknown or disallowed fallback must produce a
-visible refusal, rather than widening caller constraints. The source-compatible
-composition can perform that validation in the codec today; documentation now
-shows it explicitly. Scalar limits remain codec-specific.
+The zone helper now distinguishes "caller forbids this setting" from "this
+setting is predicted to miss quality" through separate masks. It validates a
+fallback against the hard mask; otherwise it returns to argmin with hard
+constraints applied. An empty resulting mask means no candidate. Codecs still
+validate scalar limits and preserve hard constraints through any later rescue.
 
 There is also a consumer-specific model qualification gap in zensr, described
 below. A feature flag cannot correct mismatched training definitions.

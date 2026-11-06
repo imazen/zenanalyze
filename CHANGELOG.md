@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - zenpredict: gate controller policy behind `experimental` (also enabled by
   `advanced`), and add the hard constraint mask to `resolve_pre_argmin`. This
-  remains a signature-review proposal in PR 92 (`c55554da`).
+  landed through PR 92 (`c3fb486`) and shipped in zenpredict 0.2.0.
 
 - Extending ActivationJson with SmoothHinge adds a variant to its exhaustive JSON-side enum; review match sites before release.
 
