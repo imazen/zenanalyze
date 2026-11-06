@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+<!-- Breaking changes that ship together in the next minor (0.x patch
+     bumps stay non-breaking). Persist across patch releases. Only
+     clear when the breaking release ships. -->
+
+- `LayerEntry.*` and `LayerView.*` field tightening may follow once
+  `WeightStorage` variant pattern-matching has a stable accessor
+  pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
+
+## [0.2.0] - 2026-11-06
+
+First crates.io publish of the **ZNPR v3** format and the runtime /
+bake-tool crate split. `0.1.0` shipped the v2 format with the baker
+bundled in-crate; everything below is the cumulative delta. The
+intermediate `0.2.0`/`0.2.1`/`0.2.2` development cuts were never
+published, so this single section is the accurate record of what
+ships.
+
+### Changed
+
+- Trial budgets, directed search and pre-argmin composition require
+  `experimental` (also enabled by `advanced`). `resolve_pre_argmin` takes a
+  separate hard constraint mask; forbidden zone fallbacks proceed to masked
+  selection. NaN measured qualities cannot win `best_trial`; infinities retain
+  main’s numeric ordering.
+
 ### Fixed
 
 - Directed trial selection ignores NaN predictions and measured quality, returns
@@ -11,21 +37,6 @@
 - Output transforms compute Exp and sigmoid with libm without std. Round now
   preserves large integral values, signed zero and infinities, with ties away
   from zero. Nonzero and boundary regressions run in both configurations.
-
-### QUEUED BREAKING CHANGES
-<!-- Breaking changes that ship together in the next minor (0.x patch
-     bumps stay non-breaking). Persist across patch releases. Only
-     clear when the breaking release ships. -->
-
-- Trial budgets, directed search and pre-argmin composition require
-  `experimental` (also enabled by `advanced`). `resolve_pre_argmin` takes a
-  separate hard constraint mask; forbidden zone fallbacks proceed to masked
-  selection. NaN measured qualities cannot win `best_trial`; infinities retain
-  main’s numeric ordering.
-
-- `LayerEntry.*` and `LayerView.*` field tightening may follow once
-  `WeightStorage` variant pattern-matching has a stable accessor
-  pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
 
 ### Added
 
@@ -137,15 +148,6 @@
   no `#[repr(C, align(16))]` and the input need not outlive the `Model` — but
   the `Model` must outlive the `Predictor`); and pinned the `ArgminOffsets`
   fields + `ScoreTransform::Exp` (log-domain) semantics. Docs-only.
-
-## [0.2.0] - 2026-06-11
-
-First crates.io publish of the **ZNPR v3** format and the runtime /
-bake-tool crate split. `0.1.0` shipped the v2 format with the baker
-bundled in-crate; everything below is the cumulative delta. The
-intermediate `0.2.0`/`0.2.1`/`0.2.2` development cuts were never
-published, so this single section is the accurate record of what
-ships.
 
 This is a **hard fork**: v1/v2 bakes do not load (they fail with
 `PredictError::UnsupportedVersion`). Migrate existing bakes via

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- zenpredict: release 0.2.0, the first crates.io publish of the ZNPR v3 runtime.
+
 - Accept the archmage and magetypes 0.9.31 stable release.
 
 - Trainer: align Arrow/Parquet at 60.1.0, refresh serialization/TOML/hashing
