@@ -1,6 +1,6 @@
 # zenpredict 0.2.0 readiness review — 2026-11-05
 
-Publication is not authorized. The controller changes require signature review
+The owner approved this on 2026-11-05, and zenpredict 0.2.0 was published on 2026-11-06. The controller changes require signature review
 through a PR. The runtime, ZNPR v3 artifact format, transport contract and baker
 remain available. The no_std correctness repair is on main at `7064f1df`.
 

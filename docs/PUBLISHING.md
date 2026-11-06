@@ -15,7 +15,7 @@ before treating every unpublished research interface as a release prerequisite.
 
 ## Registry state and dependency order
 
-Registry versions rechecked 2026-11-05 against the working manifests and the
+Registry versions rechecked 2026-11-06 against the working manifests and the
 [crates.io API](https://crates.io/api/v1/crates/zenanalyze). A version in a
 manifest or changelog does not establish publication. Recheck each crate at
 `https://crates.io/api/v1/crates/<name>` before preparing a release.
@@ -24,7 +24,7 @@ manifest or changelog does not establish publication. Recheck each crate at
 |---|---|---|---|
 | zenanalyze-api | 0.1.1 | 0.1.0 | None; zero dependencies |
 | zenanalyze | 0.2.0 | 0.1.0 | zenanalyze-api 0.1.1; zenpixels and zenpixels-convert 0.3.1 |
-| zenpredict | 0.2.0 | 0.1.0 | No unpublished normal dependency |
+| zenpredict | 0.2.0 | 0.2.0 (published 2026-11-06, tag `zenpredict-v0.2.0`) | None |
 | zenpredict-bake | 0.1.0 | None (registry 404) | zenpredict 0.2.0 |
 | zenpicker | 0.1.0 | None (registry 404) | zenpredict 0.2.0 |
 
