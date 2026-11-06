@@ -1,5 +1,15 @@
 # zenanalyze — Claude project guide
 
+## Dependency compatibility
+
+**USER DIRECTIVE 2026-11-05: never cap archmage within 0.9.x.** Use a normal
+caret-compatible full version such as `"0.9.27"` (or `"^0.9.27"`), preserving
+the minimum each crate needs while admitting every later stable 0.9.x release.
+No exact pins, tilde requirements, patch-level upper bounds or prerelease ceilings.
+The 0.10 line remains a separate compatibility decision. Fix incompatibilities
+rather than excluding newer 0.9.x patches. `just dependency-policy` and CI enforce
+this across tracked Cargo manifests, including renamed and target dependencies.
+
 ## API stability — 0.2.x policy (revised 2026-05-17)
 
 **zenanalyze is now on 0.2.x — breaking changes to library APIs are

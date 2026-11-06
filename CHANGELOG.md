@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Preserve the existing archmage minimums with caret-compatible requirements,
+  admitting every later stable 0.9.x patch. Enforce the no-cap policy across
+  tracked Cargo manifests in CI and `just dependency-policy`.
+
 - zenpredict: release 0.2.0, the first crates.io publish of the ZNPR v3 runtime.
 
 - Accept the archmage and magetypes 0.9.31 stable release.

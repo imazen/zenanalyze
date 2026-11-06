@@ -256,6 +256,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Check dependency version policy
+        run: python tools/check_dependency_policy.py
       - name: Install test deps
         # numpy: _predict/_metapicker libs; pyarrow: provenance Parquet metadata;
         # scikit-learn + joblib: _picker_lib's GBDT path (test_picker_lib_strict).

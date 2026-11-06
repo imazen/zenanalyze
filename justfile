@@ -244,8 +244,13 @@ sibling-reference-check:
     ZENANALYZE_GOLDEN_REFERENCE=1 cargo test --features experimental,hdr --lib versioning::tests::golden_is_stable -- --exact --nocapture
     ZENANALYZE_GOLDEN_REFERENCE=1 ZENANALYZE_GOLDEN_TIER=scalar cargo test --features experimental,hdr,_dev --lib versioning::tests::golden_is_stable -- --exact --nocapture --test-threads=1
 
+# Keep future compatible archmage 0.9.x patches eligible in every manifest.
+dependency-policy:
+    python3 tools/check_dependency_policy.py
+
 # Dependency-upgrade compatibility gates; invoke under run-heavy on a build host.
 dependency-check:
+    just dependency-policy
     just predict-readiness
     cargo test --locked -p zenanalyze-api -p zenpicker -p zenpredict-bake --all-targets --all-features
     cargo test --locked -p zenanalyze-api -p zenpicker -p zenpredict-bake --all-features --doc
