@@ -323,6 +323,8 @@ pub enum ActivationJson {
     LeakyRelu,
     #[serde(rename = "smooth_hinge")]
     SmoothHinge,
+    Softplus,
+    Silu,
 }
 
 impl From<ActivationJson> for Activation {
@@ -332,6 +334,8 @@ impl From<ActivationJson> for Activation {
             ActivationJson::Relu => Activation::Relu,
             ActivationJson::LeakyRelu => Activation::LeakyRelu,
             ActivationJson::SmoothHinge => Activation::SmoothHinge,
+            ActivationJson::Softplus => Activation::Softplus,
+            ActivationJson::Silu => Activation::Silu,
         }
     }
 }

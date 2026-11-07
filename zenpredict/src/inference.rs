@@ -304,6 +304,29 @@ fn fma(a: f32, b: f32, c: f32) -> f32 {
     }
 }
 
+// Both exponential arguments are nonpositive, including at finite f32 extremes.
+// Use the existing std/libm policy; cross-build bit identity is not implied.
+fn smooth_activation(x: f32, act: Activation) -> f32 {
+    #[cfg(feature = "std")]
+    let e = (-x.abs()).exp();
+    #[cfg(not(feature = "std"))]
+    let e = libm::expf(-libm::fabsf(x));
+    if act == Activation::Softplus {
+        #[cfg(feature = "std")]
+        let tail = e.ln_1p();
+        #[cfg(not(feature = "std"))]
+        let tail = libm::log1pf(e);
+        // Explicit branch preserves NaN instead of max's NaN suppression.
+        if x > 0.0 { x + tail } else { tail }
+    } else if x >= 0.0 {
+        x / (1.0 + e)
+    } else if x == f32::NEG_INFINITY {
+        -0.0
+    } else {
+        (x * e) / (1.0 + e)
+    }
+}
+
 fn apply_activation(buf: &mut [f32], act: Activation) {
     match act {
         Activation::Identity => {}
@@ -323,6 +346,11 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 } else {
                     *v - 0.0625
                 };
+            }
+        }
+        Activation::Softplus | Activation::Silu => {
+            for v in buf.iter_mut() {
+                *v = smooth_activation(*v, act);
             }
         }
         Activation::LeakyRelu => {
@@ -608,5 +636,43 @@ mod f16_tests {
         check(0xfc00, f32::NEG_INFINITY, "-inf");
         let nan = f16_bits_to_f32(0x7e00);
         assert!(nan.is_nan(), "0x7e00 should be NaN");
+    }
+}
+
+#[cfg(test)]
+mod analytic_activation_tests {
+    use super::*;
+
+    #[test]
+    fn smooth_operators_boundaries_and_nan() {
+        for activation in [Activation::Softplus, Activation::Silu] {
+            let mut values = [
+                f32::NEG_INFINITY,
+                -f32::MAX,
+                -100.0,
+                -0.0,
+                0.0,
+                100.0,
+                f32::MAX,
+                f32::INFINITY,
+                f32::NAN,
+            ];
+            apply_activation(&mut values, activation);
+            assert_eq!(values[0], 0.0);
+            assert_eq!(values[1], 0.0);
+            assert!(values[2].is_finite());
+            assert!(values[3].is_finite());
+            assert_eq!(values[5], 100.0);
+            assert_eq!(values[6], f32::MAX);
+            assert_eq!(values[7], f32::INFINITY);
+            assert!(values[8].is_nan());
+        }
+        assert_eq!(
+            smooth_activation(0.0, Activation::Softplus),
+            core::f32::consts::LN_2
+        );
+        assert!(
+            smooth_activation(-2.0, Activation::Silu) < smooth_activation(-3.0, Activation::Silu)
+        );
     }
 }

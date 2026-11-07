@@ -276,3 +276,9 @@ dependency-update:
     cargo update --manifest-path apidoc/Cargo.toml
     cargo update --manifest-path zenpredict/fuzz/Cargo.toml
     cargo update --manifest-path tools/descriptor-hash-compat/Cargo.toml
+
+# Native analytic activation qualification; caller supplies resource wrapper.
+analytic-activation-check:
+    cargo test -p zenpredict -p zenpredict-bake --lib --tests
+    cargo test -p zenpredict --no-default-features --lib --tests
+    cargo clippy -p zenpredict -p zenpredict-bake --all-targets -- -D warnings
