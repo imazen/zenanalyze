@@ -283,6 +283,9 @@ pub enum Activation {
     Softplus = 4,
     /// Ordinary `x * sigmoid(x)`. This activation is not monotone.
     Silu = 5,
+    /// Research-only ReLU bank with declared stable max pairs. Requires
+    /// `zenpredict.research_max_pairs`; older readers reject wire code 6.
+    ResearchReluMaxPairs = 6,
 }
 
 impl Activation {
@@ -294,6 +297,7 @@ impl Activation {
             3 => Ok(Self::SmoothHinge),
             4 => Ok(Self::Softplus),
             5 => Ok(Self::Silu),
+            6 => Ok(Self::ResearchReluMaxPairs),
             other => Err(PredictError::UnknownActivation { byte: other }),
         }
     }
@@ -384,6 +388,7 @@ pub(crate) struct LayerOffsets {
 /// sees the on-disk permutation or compression.
 #[derive(Debug)]
 pub struct Model {
+    pub(crate) research_max_pairs: alloc::vec::Vec<[usize; 2]>,
     bytes: alloc::boxed::Box<[u8]>,
     header: Header,
     /// Per-layer offsets + dims, cached at parse time. The
@@ -730,6 +735,7 @@ impl Model {
         }
 
         let mut model = Self {
+            research_max_pairs: alloc::vec::Vec::new(),
             bytes,
             header,
             layer_offsets,
@@ -747,6 +753,7 @@ impl Model {
                 _ => None,
             })
             .collect();
+        model.research_max_pairs = crate::research_max_pairs::parse(&model)?;
         Ok(model)
     }
 

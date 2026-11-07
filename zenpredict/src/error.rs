@@ -5,6 +5,8 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredictError {
+    /// Opt-in research max-pair metadata or its input domain is invalid.
+    InvalidResearchMaxPair { reason: &'static str },
     /// Header magic bytes don't match `ZNPR`.
     BadMagic { found: [u8; 4] },
     /// Format version not supported by this build. v3 is the only
@@ -98,6 +100,9 @@ pub enum PredictError {
 impl fmt::Display for PredictError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            Self::InvalidResearchMaxPair { reason } => {
+                write!(f, "invalid research max pair: {reason}")
+            }
             Self::BadMagic { found } => {
                 write!(f, "zenpredict: bad magic, expected ZNPR, found {found:?}")
             }

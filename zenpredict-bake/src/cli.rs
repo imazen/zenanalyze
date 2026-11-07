@@ -178,6 +178,7 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
                 Activation::SmoothHinge => "smooth_hinge",
                 Activation::Softplus => "softplus",
                 Activation::Silu => "silu",
+                Activation::ResearchReluMaxPairs => "research_relu_max_pairs",
                 _ => "unknown",
             };
             let (dtype, n_weights, scales): (&str, usize, Option<&[f32]>) = match &layer.weights {

@@ -219,3 +219,5 @@ pub use safety::{CellHint, FallbackEntry, SafetyCompact, SafetyProfile, fallback
 
 #[cfg(test)]
 mod tests;
+
+mod research_max_pairs;

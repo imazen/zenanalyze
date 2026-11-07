@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- zenpredict: opt-in research ReLU max-pair operator (wire code 6), validated
+  pair metadata and `InvalidResearchMaxPair` errors. Existing bakes keep their
+  arithmetic; marked research bakes use direct maxima.
+
 - zenpredict / zenpredict-bake: native unit-temperature Softplus and ordinary
   SiLU activation operators and JSON names. Existing wire codes retain their
   arithmetic; older runtimes reject models using the new codes.

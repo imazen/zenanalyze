@@ -325,6 +325,8 @@ pub enum ActivationJson {
     SmoothHinge,
     Softplus,
     Silu,
+    #[serde(rename = "research_relu_max_pairs")]
+    ResearchReluMaxPairs,
 }
 
 impl From<ActivationJson> for Activation {
@@ -336,6 +338,7 @@ impl From<ActivationJson> for Activation {
             ActivationJson::SmoothHinge => Activation::SmoothHinge,
             ActivationJson::Softplus => Activation::Softplus,
             ActivationJson::Silu => Activation::Silu,
+            ActivationJson::ResearchReluMaxPairs => Activation::ResearchReluMaxPairs,
         }
     }
 }
