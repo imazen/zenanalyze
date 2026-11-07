@@ -190,8 +190,10 @@ is unchanged. Older parsers reject these new codes as unknown activations.
 
 Temperature and anchoring are explicit graph operations, not additional wire
 parameters. To represent `tau*(f((b+x)/tau)-f(b/tau))`, emit two activation
-branches, subtract them in a separate zero-bias identity layer, then apply the
-output head. Do not replace branch subtraction with a rounded compensating
+branches, subtract them using unit coefficients in a separate zero-bias identity
+layer, then scale by temperature in another layer before applying the output head.
+Combining arbitrary temperature scaling with the subtraction can leave an FMA
+rounding residual at identity. Do not replace branch subtraction with a rounded compensating
 output bias. The study must separately validate its full exported graph.
 
 Qualification at source `40b9b837`: `just analytic-activation-check` passes

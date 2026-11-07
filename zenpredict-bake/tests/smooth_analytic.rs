@@ -53,10 +53,10 @@ fn analytic_bake_matches_double_reference_including_extremes() {
 fn explicit_anchor_subtraction_preserves_identity_and_monotone_domain() {
     for activation in [Activation::Softplus, Activation::Silu] {
         for bias in [0.0, 0.01, 1.0, 20.0] {
-            for temperature in [0.125, 1.0, 8.0] {
+            for temperature in [0.125, 0.13, 0.73, 1.0, 3.17, 8.0] {
                 let weights = [1.0 / temperature, 0.0];
                 let biases = [bias / temperature; 2];
-                let subtraction = [temperature, -temperature];
+                let subtraction = [1.0, -1.0];
                 let layers = [
                     BakeLayer {
                         in_dim: 1,
@@ -73,6 +73,14 @@ fn explicit_anchor_subtraction_preserves_identity_and_monotone_domain() {
                         activation: Activation::Identity,
                         dtype: WeightDtype::F32,
                         weights: &subtraction,
+                        biases: &[0.0],
+                    },
+                    BakeLayer {
+                        in_dim: 1,
+                        out_dim: 1,
+                        activation: Activation::Identity,
+                        dtype: WeightDtype::F32,
+                        weights: &[temperature],
                         biases: &[0.0],
                     },
                     BakeLayer {
