@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Name the existing native-tier SIMD multiply-add as `mul_add_relaxed`;
+  require magetypes 0.9.31 for the explicit alias, preserving its arithmetic.
+
 - Preserve the existing archmage minimums with caret-compatible requirements,
   admitting every later stable 0.9.x patch. Enforce the no-cap policy across
   tracked Cargo manifests in CI and `just dependency-policy`.

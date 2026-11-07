@@ -95,7 +95,7 @@ macro_rules! tier_mul_add_native {
         impl TierMulAdd for magetypes::simd::generic::f32x8<$token> {
             #[inline(always)]
             fn tier_mul_add(self, a: Self, b: Self) -> Self {
-                self.mul_add(a, b)
+                self.mul_add_relaxed(a, b)
             }
         }
     )*};

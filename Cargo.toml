@@ -104,7 +104,7 @@ zenpixels = { version = ">=0.3.1, <0.4.0", default-features = false, features = 
 zenpixels-convert = { version = ">=0.3.1, <0.4.0", default-features = false }
 # Keep the entire compatible 0.9.x line eligible; checked by dependency-policy.
 archmage = { version = "0.9.27", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.30", features = ["avx512"] }
+magetypes = { version = "0.9.31", features = ["avx512"] }
 # `garb` provides SIMD pixel-format conversions (`rgba_to_rgb`,
 # `bgra_to_rgb`, etc.) via `archmage::incant!` — used by the
 # `RowStream::StripAlpha8` fast path. Measured ~7× speedup over the
