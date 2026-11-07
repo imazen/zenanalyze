@@ -69,7 +69,8 @@ in-flight V0_18 bakes with per-layer I8Lz4 must be re-baked.
 ```
 0..4    in_dim: u32
 4..8    out_dim: u32
-8..9    activation: u8       (0=Identity, 1=Relu, 2=LeakyRelu)
+8..9    activation: u8       (0=Identity, 1=Relu, 2=LeakyRelu,
+                             3=SmoothHinge, 4=Softplus, 5=SiLU)
 9..10   weight_dtype: u8     (0=F32, 1=F16, 2=I8)
 10..12  flags: u16           (reserved)
 12..20  weights: Section

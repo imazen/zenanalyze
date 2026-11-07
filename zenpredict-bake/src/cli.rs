@@ -176,6 +176,8 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
                 Activation::Relu => "relu",
                 Activation::LeakyRelu => "leakyrelu",
                 Activation::SmoothHinge => "smooth_hinge",
+                Activation::Softplus => "softplus",
+                Activation::Silu => "silu",
                 _ => "unknown",
             };
             let (dtype, n_weights, scales): (&str, usize, Option<&[f32]>) = match &layer.weights {

@@ -279,6 +279,10 @@ pub enum Activation {
     /// Zero for z <= 0, 4*z*z for 0 < z < 1/8, otherwise z - 1/16.
     /// Wire code 3 fixes the parameter; no per-layer parameter is implied.
     SmoothHinge = 3,
+    /// Unit-temperature `ln(1 + exp(x))`, evaluated without overflow.
+    Softplus = 4,
+    /// Ordinary `x * sigmoid(x)`. This activation is not monotone.
+    Silu = 5,
 }
 
 impl Activation {
@@ -288,6 +292,8 @@ impl Activation {
             1 => Ok(Self::Relu),
             2 => Ok(Self::LeakyRelu),
             3 => Ok(Self::SmoothHinge),
+            4 => Ok(Self::Softplus),
+            5 => Ok(Self::Silu),
             other => Err(PredictError::UnknownActivation { byte: other }),
         }
     }
@@ -1762,8 +1768,8 @@ mod smooth_hinge_wire_tests {
         assert_eq!(Activation::from_byte(2).unwrap(), Activation::LeakyRelu);
         assert_eq!(Activation::from_byte(3).unwrap(), Activation::SmoothHinge);
         assert!(matches!(
-            Activation::from_byte(4),
-            Err(PredictError::UnknownActivation { byte: 4 })
+            Activation::from_byte(255),
+            Err(PredictError::UnknownActivation { byte: 255 })
         ));
     }
 }

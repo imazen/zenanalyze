@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- zenpredict / zenpredict-bake: native unit-temperature Softplus and ordinary
+  SiLU activation operators and JSON names. Existing wire codes retain their
+  arithmetic; older runtimes reject models using the new codes.
+
 ### Changed
 
 - Preserve the existing archmage minimums with caret-compatible requirements,

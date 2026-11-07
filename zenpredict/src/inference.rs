@@ -304,6 +304,29 @@ fn fma(a: f32, b: f32, c: f32) -> f32 {
     }
 }
 
+// Both exponential arguments are nonpositive, including at finite f32 extremes.
+// Use the existing std/libm policy; cross-build bit identity is not implied.
+fn smooth_activation(x: f32, act: Activation) -> f32 {
+    #[cfg(feature = "std")]
+    let e = (-x.abs()).exp();
+    #[cfg(not(feature = "std"))]
+    let e = libm::expf(-libm::fabsf(x));
+    if act == Activation::Softplus {
+        #[cfg(feature = "std")]
+        let tail = e.ln_1p();
+        #[cfg(not(feature = "std"))]
+        let tail = libm::log1pf(e);
+        // Explicit branch preserves NaN instead of max's NaN suppression.
+        if x > 0.0 { x + tail } else { tail }
+    } else if x >= 0.0 {
+        x / (1.0 + e)
+    } else if x == f32::NEG_INFINITY {
+        -0.0
+    } else {
+        (x * e) / (1.0 + e)
+    }
+}
+
 fn apply_activation(buf: &mut [f32], act: Activation) {
     match act {
         Activation::Identity => {}
@@ -323,6 +346,11 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 } else {
                     *v - 0.0625
                 };
+            }
+        }
+        Activation::Softplus | Activation::Silu => {
+            for v in buf.iter_mut() {
+                *v = smooth_activation(*v, act);
             }
         }
         Activation::LeakyRelu => {
