@@ -80,6 +80,9 @@ pub fn forward(
         };
         let src = &input_buf[..in_dim];
         layer_forward(&layer, model.decoded_f16_weights(idx), src, dst)?;
+        if idx == 0 {
+            crate::research_max_pairs::apply(model, src, dst)?;
+        }
         if idx != last_idx {
             core::mem::swap(&mut input_buf, &mut output_buf);
         }
@@ -330,7 +333,7 @@ fn smooth_activation(x: f32, act: Activation) -> f32 {
 fn apply_activation(buf: &mut [f32], act: Activation) {
     match act {
         Activation::Identity => {}
-        Activation::Relu => {
+        Activation::Relu | Activation::ResearchReluMaxPairs => {
             for v in buf.iter_mut() {
                 if *v < 0.0 {
                     *v = 0.0;
