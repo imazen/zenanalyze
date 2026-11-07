@@ -178,3 +178,25 @@ and the agent verified row reorder doesn't help V0_18). V0_18 does use:
 - Whole-bake LZ4 compression: −58 % on the bake overall.
 
 Combined, the ~38 KB bake becomes ~14 KB.
+
+## Analytic activation additions
+
+Codes 4 and 5 are unit-temperature Softplus and ordinary SiLU. Softplus is
+`max(x,0) + log1p(exp(-abs(x)))`; SiLU is `x*sigmoid(x)`, evaluated using
+nonpositive exponential arguments. SiLU is not monotone on the full real line.
+Both propagate NaN. Softplus maps negative infinity to zero; SiLU maps it to
+negative zero. Positive infinity maps to itself. Existing activation arithmetic
+is unchanged. Older parsers reject these new codes as unknown activations.
+
+Temperature and anchoring are explicit graph operations, not additional wire
+parameters. To represent `tau*(f((b+x)/tau)-f(b/tau))`, emit two activation
+branches, subtract them in a separate zero-bias identity layer, then apply the
+output head. Do not replace branch subtraction with a rounded compensating
+output bias. The study must separately validate its full exported graph.
+
+Qualification at source `40b9b837`: `just analytic-activation-check` passes
+on x86-64, including existing runtime/baker regressions, analytic reference
+comparisons, anchored graph identity and nonnegative-domain order probes,
+no-default-feature runtime tests and strict clippy. This is not cross-target
+qualification or a trained-model quality result. The existing std versus libm
+rounding policy remains; no cross-build bit-identity claim is made.
