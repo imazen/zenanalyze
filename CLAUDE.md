@@ -345,6 +345,13 @@ runtime branch).
 
 ## Known Bugs
 
+- **2026-11-09 — input-program review:** required composition needs a v4
+  envelope because v3 readers ignore unknown metadata/flags. Source and compact
+  input domains can have equal widths; callers must select the explicit source
+  path. The review fixes unchecked hidden-unit permutations, empty optimized
+  requests and max-pair metadata indices under hidden-unit reorder. See
+  `zenpredict/docs/INPUT_PROGRAM.md` for contracts and remaining boundaries.
+
 - **2026-11-05 — output-transform blockers fixed:** no_std Exp and sigmoid
   use libm; Round preserves large integral values, signed zero and infinities.
   `just predict-readiness` covers nonzero inputs and boundaries with and without

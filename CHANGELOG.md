@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### zenpredict / zenpredict-bake
+
+- Add required input programs for products, monotone damage shapers and
+  nonnegative reference gates, with source-input prediction and typed JSON.
+  Required programs use ZNPR v4; ordinary bakes retain v3.
+- Add byte-preserving attachment of composition to existing bakes and typed
+  program inspection. Share transformed forwarding and output finalization.
+- Handle Drop-only preprocessing without parameter metadata and reserve raw-width
+  parameter scratch at predictor construction.
+- Reject unsupported visualizer traces and input-program ONNX exports explicitly.
+- Validate hidden-unit permutations and empty optimized requests before indexing;
+  remap max-pair declarations together with hidden-unit order.
+
 ### Added
 
 - zenpredict: opt-in research ReLU max-pair operator (wire code 6), validated

@@ -133,6 +133,16 @@ let distance: f32 = predictor.predict(&features)?[0];
 > `None` when no cell is allowed). Same `ScoreTransform` / `ArgminOffsets`
 > semantics either way.
 
+### Product and shaped inputs
+
+For bakes with required input composition, use `predict_from_source` with
+`model.n_source_inputs()` columns. It composes products and shaping, applies
+feature transforms and the scaler, then runs the ordinary network. Such bakes
+use ZNPR v4 so v3-only readers reject them. See [input programs](docs/INPUT_PROGRAM.md)
+for JSON/Rust producer paths, exact attachment to existing bakes and input-domain
+contracts. Softplus is available as a native layer activation; temperature and
+anchoring remain explicit network operations.
+
 ### Input transforms and selection
 
 `predict` and the `Predictor::argmin_*` wrappers apply the embedded scaler,
