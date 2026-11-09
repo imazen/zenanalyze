@@ -160,6 +160,9 @@ fn collect_calibration_warnings(model: &Model) -> Vec<&'static str> {
 }
 
 fn build_onnx_model(model: &Model, name: &str) -> Result<ModelProto, String> {
+    if model.input_program().is_some() {
+        return Err("znpr2onnx: required input programs are not supported by this exporter".into());
+    }
     let n_inputs = model.n_inputs();
     let n_outputs = model.n_outputs();
     let n_layers = model.n_layers();
@@ -412,5 +415,32 @@ fn make_value_info(name: &str, dims: &[i64]) -> ValueInfoProto {
             value: Some(TypeProtoValue::TensorType(tensor_type)),
         }),
         ..ValueInfoProto::default()
+    }
+}
+
+#[cfg(test)]
+mod input_program_tests {
+    use super::*;
+    #[test]
+    fn required_input_program_cannot_be_exported_as_a_partial_network() {
+        use zenpredict::input_program::{InputOp, InputProgram};
+        use zenpredict::{Activation, WeightDtype};
+        use zenpredict_bake::{BakeLayer, BakeRequest};
+        let layers = [BakeLayer {
+            in_dim: 1,
+            out_dim: 1,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &[1.],
+            biases: &[0.],
+        }];
+        let p = InputProgram::new(1, vec![InputOp::Source { index: 0 }], vec![0]).unwrap();
+        let bytes = zenpredict_bake::input_program::bake_with_input_program(
+            &BakeRequest::new(0, 0, &[0.], &[1.], &layers),
+            &p,
+        )
+        .unwrap();
+        let model = Model::from_bytes(&bytes).unwrap();
+        assert!(build_onnx_model(&model, "program").is_err());
     }
 }
