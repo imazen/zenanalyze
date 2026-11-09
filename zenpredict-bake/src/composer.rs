@@ -1,6 +1,6 @@
-//! ZNPR v3 byte-stream composer.
+//! ZNPR byte-stream composer (v3 by default, v4 for required input programs).
 //!
-//! Emits the v3 wire format described in zenpredict's `model` module
+//! Emits the wire formats described in zenpredict's `model` module
 //! (see [`zenpredict::Model`] and [`zenpredict::Header`]). Earlier
 //! formats (v1, v2) are not producible from this crate; older bakes
 //! must be migrated via `zentrain/tools/migrate_znpr_v2_to_v3.py`.
@@ -11,13 +11,18 @@ use zenpredict::{
     Activation, MetadataType, OutputSpec, OutputTransform, Section, SparseOverride, WeightDtype,
 };
 
-/// Bake-side input for a single codec's slot in a multi-codec joint
 /// Errors raised by [`bake`]. Distinct from `PredictError` —
 /// these are bake-side validation failures, not runtime decode
 /// issues.
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BakeError {
+    /// A model dimension is zero, exceeds the runtime limits or overflows.
+    InvalidDimension {
+        what: &'static str,
+    },
+    /// Required input program failed the runtime contract.
+    InvalidInputProgram(zenpredict::PredictError),
     EmptyLayers,
     LayerDimMismatch {
         layer: usize,
@@ -130,6 +135,8 @@ pub enum BakeError {
 impl fmt::Display for BakeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDimension { what } => write!(f, "bake: invalid or excessive {what}"),
+            Self::InvalidInputProgram(e) => write!(f, "bake: {e}"),
             Self::EmptyLayers => write!(f, "bake: layers list is empty"),
             Self::LayerDimMismatch {
                 layer,
@@ -334,9 +341,8 @@ impl<'a> BakeRequest<'a> {
     /// every optional section empty (no feature bounds, no metadata,
     /// no output specs, no discrete sets, no sparse overrides). Set
     /// the optional fields by direct assignment after construction —
-    /// the struct is `#[non_exhaustive]`, which blocks struct-literal
-    /// construction outside this crate, but field assignment on a
-    /// `mut` binding works.
+    /// direct field assignment on a `mut` binding and struct literals are
+    /// both supported.
     ///
     /// Prefer [`Self::builder`] when chaining several optional
     /// sections; it returns a fluent [`BakeRequestBuilder`] with one
@@ -481,9 +487,7 @@ use zenpredict::wire::{
 /// Compose a v3 ZNPR byte stream. Output round-trips through
 /// [`Model::from_bytes`](zenpredict::Model::from_bytes).
 pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
-    if req.layers.is_empty() {
-        return Err(BakeError::EmptyLayers);
-    }
+    validate_dimensions(req)?;
     let n_inputs = req.layers[0].in_dim;
     let n_outputs = req.layers.last().unwrap().out_dim;
     let n_layers = req.layers.len();
@@ -562,7 +566,13 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
                 got_in: layer.in_dim,
             });
         }
-        let expect_w = layer.in_dim * layer.out_dim;
+        let expect_w =
+            layer
+                .in_dim
+                .checked_mul(layer.out_dim)
+                .ok_or(BakeError::InvalidDimension {
+                    what: "layer weight count",
+                })?;
         if layer.weights.len() != expect_w {
             return Err(BakeError::WeightLengthMismatch {
                 layer: i,
@@ -590,7 +600,38 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     // No-op on fully-live matrices; never regresses size.
     //
     // See `hu_reorder` module for measured numbers and references.
-    let permuted_owned = crate::hu_reorder::apply_hu_reorder(req.layers, req.hu_permutations);
+    if let Some(perms) = req.hu_permutations {
+        if perms.len() != n_layers - 1 {
+            return Err(BakeError::InvalidPermutation {
+                what: "hu_permutations",
+            });
+        }
+        for (i, p) in perms.iter().enumerate() {
+            validate_permutation(p, req.layers[i].out_dim, "hu_permutations")?;
+        }
+    }
+    let (permuted_owned, first_permutation) =
+        crate::hu_reorder::apply_hu_reorder(req.layers, req.hu_permutations);
+    let pair_key = "zenpredict.research_max_pairs";
+    let remapped_pairs = req
+        .metadata
+        .iter()
+        .find(|e| e.key == pair_key)
+        .map(|e| remap_pairs(e.value, &first_permutation))
+        .transpose()?;
+    let metadata: alloc::vec::Vec<_> = req
+        .metadata
+        .iter()
+        .map(|e| BakeMetadataEntry {
+            key: e.key,
+            kind: e.kind,
+            value: if e.key == pair_key {
+                remapped_pairs.as_ref().unwrap().as_bytes()
+            } else {
+                e.value
+            },
+        })
+        .collect();
     let permuted_layers: alloc::vec::Vec<BakeLayer<'_>> = permuted_owned
         .iter()
         .map(crate::hu_reorder::OwnedBakeLayer::as_borrowed)
@@ -598,7 +639,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     let layers: &[BakeLayer<'_>] = &permuted_layers;
 
     // Validate metadata keys up front.
-    for entry in req.metadata {
+    for entry in &metadata {
         if entry.key.is_empty() {
             return Err(BakeError::MetadataKeyEmpty);
         }
@@ -609,12 +650,33 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
         }
     }
 
+    let program_entries: alloc::vec::Vec<_> = req
+        .metadata
+        .iter()
+        .filter(|e| e.key == zenpredict::input_program::METADATA_KEY)
+        .collect();
+    let program_version = match program_entries.as_slice() {
+        [] => zenpredict::FORMAT_VERSION,
+        [entry] if entry.kind == MetadataType::Bytes => {
+            zenpredict::input_program::InputProgram::from_bytes(entry.value)
+                .map_err(BakeError::InvalidInputProgram)?;
+            zenpredict::input_program::FORMAT_VERSION
+        }
+        _ => {
+            return Err(BakeError::InvalidInputProgram(
+                zenpredict::PredictError::InvalidInputProgram {
+                    reason: "expected a single bytes input program",
+                },
+            ));
+        }
+    };
+
     // Validate `zentrain.feature_transforms` + `feature_transform_params`
     // pair (if present). Catches misspelled tokens and per-variant
     // arity / domain errors at bake time so they never ship in a
     // wire bake. See `validate_feature_transforms` for the full set
     // of checks.
-    validate_feature_transforms(req.metadata, n_inputs)?;
+    validate_feature_transforms(&metadata, n_inputs)?;
 
     // Layout: Header at 0, LayerEntry table at HEADER_SIZE, then
     // aligned data sections in this order:
@@ -630,7 +692,7 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
 
     // Magic + version + flags + dims + schema_hash.
     buf[0..4].copy_from_slice(b"ZNPR");
-    buf[4..6].copy_from_slice(&zenpredict::FORMAT_VERSION.to_le_bytes());
+    buf[4..6].copy_from_slice(&program_version.to_le_bytes());
     buf[6..8].copy_from_slice(&req.flags.to_le_bytes());
     buf[8..12].copy_from_slice(&(n_inputs as u32).to_le_bytes());
     buf[12..16].copy_from_slice(&(n_outputs as u32).to_le_bytes());
@@ -735,11 +797,11 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
     write_section(&mut buf, SECTION_OFF_FEATURE_BOUNDS, feature_bounds_section);
 
     // Metadata blob (optional).
-    let metadata_section = if req.metadata.is_empty() {
+    let metadata_section = if metadata.is_empty() {
         Section::empty()
     } else {
         let start = buf.len() as u32;
-        for entry in req.metadata {
+        for entry in &metadata {
             // [1] key_len
             buf.push(entry.key.len() as u8);
             // [...] key bytes
@@ -900,6 +962,11 @@ pub fn bake(req: &BakeRequest<'_>) -> Result<alloc::vec::Vec<u8>, BakeError> {
             .copy_from_slice(&payload_len.to_le_bytes());
     }
 
+    if program_version == zenpredict::input_program::FORMAT_VERSION {
+        // Includes transform expansion, permutations, compression and program
+        // output arity. Reuse the consumer parser instead of a second validator.
+        zenpredict::Model::from_bytes(&buf).map_err(BakeError::InvalidInputProgram)?;
+    }
     Ok(buf)
 }
 
@@ -920,6 +987,9 @@ fn read_section_inline(buf: &[u8], entry_off: usize, field_off: usize) -> Sectio
 }
 
 fn validate_permutation(perm: &[u32], n: usize, what: &'static str) -> Result<(), BakeError> {
+    if perm.len() != n {
+        return Err(BakeError::InvalidPermutation { what });
+    }
     let mut seen = alloc::vec![false; n];
     for &v in perm {
         let i = v as usize;
@@ -1203,10 +1273,19 @@ fn validate_feature_transforms(
     // baking — UNLESS an expander variant is declared, in which
     // case params are required (frequencies for Sinusoidal).
     let Some(p_entry) = params_entry else {
-        if has_expander {
+        if transforms.contains(&FeatureTransform::Sinusoidal) {
             return Err(BakeError::FeatureTransformsLenMismatch {
                 expected: transforms.len(),
                 got: 0,
+            });
+        }
+        // Drop has arity zero and no parameters. Only frequency expansion
+        // requires a params entry; validate the remaining width explicitly.
+        let expanded: usize = transforms.iter().map(|t| t.output_arity(&[])).sum();
+        if expanded != n_inputs {
+            return Err(BakeError::FeatureTransformsLenMismatch {
+                expected: n_inputs,
+                got: expanded,
             });
         }
         return Ok(());
@@ -1489,4 +1568,64 @@ pub fn f32_to_f16_bits(f: f32) -> u16 {
     let mant16 = (mant16_full >> 13) as u16 & 0x3ff;
     let carry = (mant16_full >> 13) >> 10;
     sign | ((exp16 + carry as u16) << 10) | mant16
+}
+
+// Remap semantic first-layer references alongside the composer's hidden-unit
+// permutation. Semantic validation remains in Model::from_bytes after baking.
+fn remap_pairs(bytes: &[u8], perm: &[u32]) -> Result<alloc::string::String, BakeError> {
+    let invalid = || {
+        BakeError::InvalidInputProgram(zenpredict::PredictError::InvalidResearchMaxPair {
+            reason: "malformed pair declaration during hidden-unit permutation",
+        })
+    };
+    let text = core::str::from_utf8(bytes).map_err(|_| invalid())?;
+    if perm.iter().enumerate().all(|(i, &x)| i == x as usize) {
+        return Ok(alloc::string::String::from(text));
+    }
+    let mut lines = text.lines();
+    if lines.next() != Some("relu-max-pairs-v1") {
+        return Err(invalid());
+    }
+    let mut inverse = alloc::vec![0u32;perm.len()];
+    for (new, &old) in perm.iter().enumerate() {
+        inverse[old as usize] = new as u32;
+    }
+    let mut out = alloc::string::String::from("relu-max-pairs-v1\n");
+    for line in lines {
+        let indices = line
+            .split_whitespace()
+            .map(|x| x.parse::<usize>().map_err(|_| invalid()))
+            .collect::<Result<alloc::vec::Vec<_>, _>>()?;
+        if indices.len() != 2 || indices.iter().any(|&i| i >= inverse.len()) {
+            return Err(invalid());
+        }
+        use core::fmt::Write;
+        writeln!(out, "{} {}", inverse[indices[0]], inverse[indices[1]]).unwrap();
+    }
+    Ok(out)
+}
+
+// Shared preflight before baker/optimizer indexing or allocation.
+pub(crate) fn validate_dimensions(req: &BakeRequest<'_>) -> Result<(), BakeError> {
+    if req.layers.is_empty() {
+        return Err(BakeError::EmptyLayers);
+    }
+    if req.layers.len() > zenpredict::limits::MAX_LAYERS {
+        return Err(BakeError::InvalidDimension {
+            what: "layer count",
+        });
+    }
+    for layer in req.layers {
+        if layer.in_dim == 0
+            || layer.out_dim == 0
+            || layer.in_dim > zenpredict::limits::MAX_DIM
+            || layer.out_dim > zenpredict::limits::MAX_DIM
+            || layer.in_dim.checked_mul(layer.out_dim).is_none()
+        {
+            return Err(BakeError::InvalidDimension {
+                what: "layer width",
+            });
+        }
+    }
+    Ok(())
 }

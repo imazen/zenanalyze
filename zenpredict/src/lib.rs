@@ -138,6 +138,8 @@ mod encode_strategy;
 mod error;
 mod feature_transform;
 mod inference;
+/// Required input composition for shaped and product-feature models.
+pub mod input_program;
 mod knob_veto;
 pub mod limits;
 mod metadata;

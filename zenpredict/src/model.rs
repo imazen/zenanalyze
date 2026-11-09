@@ -399,6 +399,7 @@ pub struct Model {
     /// when the bake omitted the key (consumer treats every feature
     /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
     feature_transforms: Option<alloc::vec::Vec<FeatureTransform>>,
+    input_program: Option<crate::input_program::InputProgram>,
     /// Owned cache of parsed `zentrain.feature_transform_params`.
     /// `None` when the bake omitted the key; `Some(_)` with one
     /// per-feature `Vec<f32>` of variant-specific params otherwise.
@@ -467,7 +468,9 @@ impl Model {
                 found: header.magic,
             });
         }
-        if header.version != FORMAT_VERSION {
+        if header.version != FORMAT_VERSION
+            && header.version != crate::input_program::FORMAT_VERSION
+        {
             return Err(PredictError::UnsupportedVersion {
                 version: header.version,
                 expected: FORMAT_VERSION,
@@ -734,7 +737,33 @@ impl Model {
             }
         }
 
+        let mut program_entries = metadata
+            .iter()
+            .filter(|e| e.key == crate::input_program::METADATA_KEY);
+        let input_program = match (program_entries.next(), program_entries.next()) {
+            (None, None) if header.version == FORMAT_VERSION => None,
+            (Some(entry), None)
+                if header.version == crate::input_program::FORMAT_VERSION
+                    && entry.kind == crate::MetadataType::Bytes =>
+            {
+                let program = crate::input_program::InputProgram::from_bytes(entry.value)?;
+                let expected = feature_transforms.as_ref().map_or(n_inputs, |ts| ts.len());
+                if program.outputs().len() != expected {
+                    return Err(PredictError::InvalidInputProgram {
+                        reason: "program output count differs from feature-transform input count",
+                    });
+                }
+                Some(program)
+            }
+            _ => {
+                return Err(PredictError::InvalidInputProgram {
+                    reason: "v4 requires exactly one bytes input program; v3 forbids it",
+                });
+            }
+        };
+        drop(program_entries);
         let mut model = Self {
+            input_program,
             research_max_pairs: alloc::vec::Vec::new(),
             bytes,
             header,
@@ -1076,6 +1105,25 @@ impl Model {
             .collect()
     }
 
+    /// Required input composition, or None for legacy caller-prepared bakes.
+    pub fn input_program(&self) -> Option<&crate::input_program::InputProgram> {
+        self.input_program.as_ref()
+    }
+
+    /// Number of raw source columns accepted by Predictor::predict_from_source.
+    pub fn n_source_inputs(&self) -> usize {
+        self.input_program.as_ref().map_or_else(
+            || {
+                self.feature_transforms
+                    .as_ref()
+                    .map_or(self.n_inputs(), |ts| ts.len())
+            },
+            |p| p.source_count(),
+        )
+    }
+
+    /// Per-compact-input nonlinear transforms, applied before the scaler by
+    /// Predictor::predict_transformed and Predictor::predict_from_source.
     pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
         self.feature_transforms.as_deref()
     }

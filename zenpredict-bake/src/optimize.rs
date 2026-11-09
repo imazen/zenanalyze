@@ -125,6 +125,7 @@ pub fn bake_optimized_with(
     req: &BakeRequest<'_>,
     cfg: &OptimizeConfig,
 ) -> Result<Vec<u8>, BakeError> {
+    crate::composer::validate_dimensions(req)?;
     let n_in = req.layers[0].in_dim;
     let n_out = req.layers.last().expect("nonempty layers").out_dim;
     let n_interior = req.layers.len().saturating_sub(1);

@@ -84,7 +84,7 @@ impl OwnedBakeLayer {
 pub(crate) fn apply_hu_reorder(
     layers: &[BakeLayer<'_>],
     perms: Option<&[&[u32]]>,
-) -> Vec<OwnedBakeLayer> {
+) -> (Vec<OwnedBakeLayer>, Vec<u32>) {
     let mut owned: Vec<OwnedBakeLayer> = layers.iter().map(OwnedBakeLayer::from_borrowed).collect();
 
     let n_interior = owned.len().saturating_sub(1);
@@ -92,6 +92,7 @@ pub(crate) fn apply_hu_reorder(
         debug_assert_eq!(p.len(), n_interior);
     }
 
+    let mut first_permutation = Vec::new();
     for i in 0..n_interior {
         let interior_dim = owned[i].out_dim;
         debug_assert_eq!(owned[i].out_dim, owned[i + 1].in_dim);
@@ -102,10 +103,13 @@ pub(crate) fn apply_hu_reorder(
         };
         debug_assert_eq!(perm.len(), interior_dim);
 
+        if i == 0 {
+            first_permutation = perm.clone();
+        }
         apply_hu_permutation(&mut owned, i, &perm);
     }
 
-    owned
+    (owned, first_permutation)
 }
 
 /// Apply a single interior-dim permutation in-place to the two
@@ -314,7 +318,7 @@ mod tests {
             weights: &weights,
             biases: &biases,
         }];
-        let permuted = apply_hu_reorder(&layers, None);
+        let (permuted, _) = apply_hu_reorder(&layers, None);
         assert_eq!(permuted.len(), 1);
         assert_eq!(permuted[0].weights, weights);
         assert_eq!(permuted[0].biases, biases);
@@ -349,7 +353,7 @@ mod tests {
                 biases: &b1,
             },
         ];
-        let permuted = apply_hu_reorder(&layers, None);
+        let (permuted, _) = apply_hu_reorder(&layers, None);
 
         // Dead HU (originally col 1) should now be at position 0
         // (L2 = 0, smallest).
@@ -394,7 +398,7 @@ mod tests {
             },
         ];
 
-        let permuted = apply_hu_reorder(&layers, None);
+        let (permuted, _) = apply_hu_reorder(&layers, None);
 
         // Manual forward pass for both versions; results must be
         // bit-equal.
@@ -446,7 +450,7 @@ mod tests {
             },
         ];
 
-        let permuted = apply_hu_reorder(&layers, None);
+        let (permuted, _) = apply_hu_reorder(&layers, None);
         let permuted_borrowed: Vec<BakeLayer<'_>> =
             permuted.iter().map(OwnedBakeLayer::as_borrowed).collect();
 

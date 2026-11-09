@@ -5,12 +5,14 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredictError {
+    /// Invalid required input composition or an incompatible serving path.
+    InvalidInputProgram { reason: &'static str },
     /// Opt-in research max-pair metadata or its input domain is invalid.
     InvalidResearchMaxPair { reason: &'static str },
     /// Header magic bytes don't match `ZNPR`.
     BadMagic { found: [u8; 4] },
-    /// Format version not supported by this build. v3 is the only
-    /// version this crate parses; older bakes must be migrated via
+    /// Format version not supported by this build. Versions 3 and 4 are
+    /// accepted; older bakes must be migrated via
     /// `zentrain/tools/migrate_znpr_v2_to_v3.py`.
     UnsupportedVersion { version: u16, expected: u16 },
     /// Bytes ran out before a section completed parsing.
@@ -100,6 +102,9 @@ pub enum PredictError {
 impl fmt::Display for PredictError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            Self::InvalidInputProgram { reason } => {
+                write!(f, "zenpredict: input program: {reason}")
+            }
             Self::InvalidResearchMaxPair { reason } => {
                 write!(f, "invalid research max pair: {reason}")
             }

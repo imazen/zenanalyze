@@ -39,6 +39,8 @@ pub mod append;
 pub mod cli;
 pub mod composer;
 pub(crate) mod hu_reorder;
+/// Typed input-program composition for JSON producers and Rust callers.
+pub mod input_program;
 pub mod json;
 pub mod optimize;
 pub mod zero_bias;

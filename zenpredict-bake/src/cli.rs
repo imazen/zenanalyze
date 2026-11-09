@@ -151,6 +151,29 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
     out.insert("version".into(), json!(model.version()));
     out.insert("flags".into(), json!(model.flags()));
     out.insert("n_inputs".into(), json!(model.n_inputs()));
+    out.insert("n_source_inputs".into(), json!(model.n_source_inputs()));
+    if let Some(program) = model.input_program() {
+        use zenpredict::input_program::InputOp;
+        let nodes: Vec<Value> = program
+            .nodes()
+            .iter()
+            .map(|op| match op {
+                InputOp::Source { index } => json!({"op":"source","index":index}),
+                InputOp::Product { left, right } => {
+                    json!({"op":"product","left":left,"right":right})
+                }
+                InputOp::Shape { input, shape } => {
+                    let p = shape.parameters();
+                    json!({"op":"shape","input":input,"knots":&p[..2],"slopes":&p[2..]})
+                }
+                InputOp::Gate { input, gate } => {
+                    json!({"op":"gate","input":input,"values":gate.parameters()})
+                }
+                _ => json!({"op":"unknown"}),
+            })
+            .collect();
+        out.insert("input_program".into(), json!({"source_count":program.source_count(),"nodes":nodes,"outputs":program.outputs()}));
+    }
     out.insert("n_outputs".into(), json!(model.n_outputs()));
     out.insert("n_layers".into(), json!(model.n_layers()));
     out.insert(
