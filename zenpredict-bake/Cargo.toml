@@ -24,6 +24,7 @@ default = ["std"]
 # `std::error::Error` impls for `BakeError`. The composer itself is
 # `no_std + alloc` compatible.
 std = []
+generic-powf = ["zenpredict/generic-powf"]
 # Pulls `parquet` + `arrow` so the `fit_yeo_johnson` MLE binary can
 # read training-corpus parquets. Off by default — keeps the lean
 # composer/JSON-bake build free of columnar-format crates. Enable
@@ -52,7 +53,7 @@ required-features = ["fit-yj"]
 # The reader side: zenpredict-bake round-trips against the parser
 # in its own tests, and the JSON-bake CLI parses + verifies the bake
 # before writing.
-zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "simd"] }
+zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "simd", "baking"] }
 bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
 serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
@@ -67,6 +68,8 @@ parquet = { version = "60.1.0", default-features = false, features = ["arrow", "
 arrow = { version = "60.1.0", default-features = false, optional = true }
 
 [dev-dependencies]
+libm = { version = "0.2.16", default-features = false }
+magetypes = { version = "0.9.31", default-features = false, features = ["std"] }
 rand = { version = "0.10.3", default-features = false, features = ["std", "std_rng"] }
 zenbench = "0.1.11"
 # Lifecycle / safety / output-specs integration tests cover the
@@ -74,7 +77,7 @@ zenbench = "0.1.11"
 # variants). Re-pull zenpredict with `advanced` enabled for tests
 # only; runtime consumers of zenpredict-bake (the JSON-bake CLI)
 # don't need advanced API.
-zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced", "simd"] }
+zenpredict = { version = "0.2.0", path = "../zenpredict", default-features = false, features = ["std", "advanced", "simd", "baking"] }
 # Full producer->consumer loop test: build a zenanalyze_api::Request from a baked
 # Model's accessors and negotiate an Offer. Dev-only — the baker doesn't depend
 # on the contract.
@@ -92,3 +95,12 @@ all = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+
+[[bench]]
+name = "lifecycle"
+harness = false
+
+[[bench]]
+name = "power"
+harness = false
+required-features = ["generic-powf"]

@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .metadata(&metadata)
         .bake()?;
     let model = Model::from_bytes(&bytes)?;
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let mask = AllowedMask::new(&[true, true]);
     let wrapper_pick = predictor.argmin_masked(&[3.0], &mask, ScoreTransform::Identity, None)?;
     let transformed = predictor.predict_transformed(&[3.0])?;

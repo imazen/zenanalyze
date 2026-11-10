@@ -31,7 +31,7 @@ fn var_f32_simd(token: Token, p: &[f32]) -> f64 {
         for k in 0..4 {
             let v = f32x8::from_slice_t(token, &c[k * 8..k * 8 + 8]);
             s[k] += v;
-            sq[k] = v.mul_add(v, sq[k]);
+            sq[k] = v.mul_add_fused(v, sq[k]);
         }
     }
     let (mut st, mut sqt) = (0.0f64, 0.0f64);

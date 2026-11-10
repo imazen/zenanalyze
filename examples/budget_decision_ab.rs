@@ -207,7 +207,7 @@ impl ZenjpegPicker {
             x[i] = if v.is_finite() { v } else { 0.0 };
         }
         x[ZJ_N_FEATURES] = (target / 100.0).clamp(0.0, 1.0);
-        let mut predictor = Predictor::new(&self.model);
+        let mut predictor = Predictor::new(&self.model).unwrap();
         let out = if self.model.has_nontrivial_feature_transforms() {
             predictor.predict_transformed(&x).ok()?
         } else {
@@ -225,7 +225,7 @@ impl ZenjpegPicker {
             x[i] = if v.is_finite() { v } else { 0.0 };
         }
         x[ZJ_N_FEATURES] = (target / 100.0).clamp(0.0, 1.0);
-        let mut predictor = Predictor::new(&self.model);
+        let mut predictor = Predictor::new(&self.model).unwrap();
         let bounds = self.model.feature_bounds();
         if !bounds.is_empty() && zenpredict::first_out_of_distribution(&x, bounds).is_some() {
             return None;

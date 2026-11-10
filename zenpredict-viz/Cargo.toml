@@ -70,6 +70,7 @@ version = "0.1.7"
 optional = true
 
 [dev-dependencies]
+libm = "0.2.16"
 # Synthetic ZNPR v3 bakes for the parity tests — built in-test from
 # the composer, so the tests never depend on a sibling checkout.
 zenpredict-bake = { path = "../zenpredict-bake" }

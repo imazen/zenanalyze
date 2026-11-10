@@ -122,6 +122,7 @@ pub struct Section {
 }
 
 impl Section {
+    #[cfg(any(feature = "baking", test))]
     pub const fn empty() -> Self {
         Self { offset: 0, len: 0 }
     }
@@ -130,16 +131,19 @@ impl Section {
     /// [`Self::offset`] / [`Self::len_bytes`]. Used by the composer in the
     /// sibling `zenpredict-bake` crate; runtime consumers shouldn't
     /// need to mint Sections directly.
+    #[cfg(any(feature = "baking", test))]
     pub const fn new(offset: u32, len: u32) -> Self {
         Self { offset, len }
     }
 
     /// Absolute byte offset into the bake file.
+    #[cfg(any(feature = "baking", test))]
     pub const fn offset(self) -> u32 {
         self.offset
     }
 
     /// Section byte length. Zero means "section absent."
+    #[cfg(any(feature = "baking", test))]
     pub const fn len_bytes(self) -> u32 {
         self.len
     }
@@ -279,6 +283,13 @@ pub enum Activation {
     /// Zero for z <= 0, 4*z*z for 0 < z < 1/8, otherwise z - 1/16.
     /// Wire code 3 fixes the parameter; no per-layer parameter is implied.
     SmoothHinge = 3,
+    /// Unit-temperature `ln(1 + exp(x))`, evaluated without overflow.
+    Softplus = 4,
+    /// Ordinary `x * sigmoid(x)`. This activation is not monotone.
+    Silu = 5,
+    /// Research-only ReLU bank with declared stable max pairs. Requires
+    /// `zenpredict.research_max_pairs`; older readers reject wire code 6.
+    ResearchReluMaxPairs = 6,
 }
 
 impl Activation {
@@ -288,6 +299,9 @@ impl Activation {
             1 => Ok(Self::Relu),
             2 => Ok(Self::LeakyRelu),
             3 => Ok(Self::SmoothHinge),
+            4 => Ok(Self::Softplus),
+            5 => Ok(Self::Silu),
+            6 => Ok(Self::ResearchReluMaxPairs),
             other => Err(PredictError::UnknownActivation { byte: other }),
         }
     }
@@ -346,8 +360,7 @@ pub enum WeightStorage<'a> {
 /// All field validation (dimension checks, alignment, section
 /// bounds) happens once at parse time. Per-access materialization
 /// is a handful of `bytemuck::cast_slice` calls; in release builds
-/// the alignment check is one comparison and one transmute —
-/// ~10 ns total, no panic possible since alignment was validated.
+/// alignment and bounds have already been validated.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LayerOffsets {
     pub(crate) in_dim: u32,
@@ -359,18 +372,47 @@ pub(crate) struct LayerOffsets {
     pub(crate) biases: Section,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct BakeBlock([u8; 16]);
+#[derive(Debug)]
+struct BakeBytes {
+    blocks: alloc::boxed::Box<[BakeBlock]>,
+    len: usize,
+}
+impl BakeBytes {
+    fn new(len: usize) -> Result<Self, PredictError> {
+        let count = len.checked_add(15).ok_or(PredictError::DimensionOverflow {
+            what: "aligned bake bytes",
+        })? / 16;
+        let blocks = bytemuck::allocation::try_zeroed_slice_box(count)
+            .map_err(|_| PredictError::AllocationFailed { what: "bake bytes" })?;
+        Ok(Self { blocks, len })
+    }
+}
+impl core::ops::Deref for BakeBytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &bytemuck::cast_slice(&self.blocks)[..self.len]
+    }
+}
+impl core::ops::DerefMut for BakeBytes {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut bytemuck::cast_slice_mut(&mut self.blocks)[..self.len]
+    }
+}
+
 /// Parsed view over a ZNPR v3 model. The `Model` **owns** the bake
 /// bytes (always; whether the input was compressed or not).
 /// `Predictor` borrows `&Model` for inference — `Model` is `Sync`,
 /// so a single `static OnceLock<Model>` can back per-thread
 /// `Predictor` instances without a `Mutex`.
 ///
-/// The bake bytes live in a heap-allocated `Box<[u8]>`. Views into
+/// The bake bytes live in a heap allocation with guaranteed 16-byte alignment. Views into
 /// the bake (layer weights, scaler, metadata, etc.) borrow from
 /// `&self.bytes` and are materialized on demand — no self-referential
 /// storage, no `'a` parameter on `Model` itself. Per-access cost is
-/// a handful of `bytemuck::cast_slice` operations (~10–50 ns total
-/// for a layer view, negligible vs the µs-scale matmul).
+/// a handful of `bytemuck::cast_slice` operations.
 ///
 /// Load-time mutations (decompression, feature_order / output_order
 /// inverse permutations) happen once inside [`Self::from_bytes`] and
@@ -378,7 +420,8 @@ pub(crate) struct LayerOffsets {
 /// sees the on-disk permutation or compression.
 #[derive(Debug)]
 pub struct Model {
-    bytes: alloc::boxed::Box<[u8]>,
+    pub(crate) research_max_pairs: alloc::vec::Vec<[usize; 2]>,
+    bytes: BakeBytes,
     header: Header,
     /// Per-layer offsets + dims, cached at parse time. The
     /// [`LayerView`] materialized via [`Self::layer`] is constructed
@@ -388,6 +431,8 @@ pub struct Model {
     /// when the bake omitted the key (consumer treats every feature
     /// as `Identity`); `Some(_)` with `len == n_inputs` otherwise.
     feature_transforms: Option<alloc::vec::Vec<FeatureTransform>>,
+    input_program: Option<crate::input_program::InputProgram>,
+    metadata_entry_count: usize,
     /// Owned cache of parsed `zentrain.feature_transform_params`.
     /// `None` when the bake omitted the key; `Some(_)` with one
     /// per-feature `Vec<f32>` of variant-specific params otherwise.
@@ -406,7 +451,7 @@ pub struct Model {
 
 impl Model {
     /// Parse a v3 model from raw bytes. The returned `Model` owns
-    /// its copy of the bake (heap-allocated `Box<[u8]>`); `input`
+    /// its copy of the bake (heap allocation with guaranteed 16-byte alignment); `input`
     /// is consumed only at construction time.
     ///
     /// On a compressed bake (`flags` bit 0 set), the loader
@@ -415,7 +460,7 @@ impl Model {
     /// permutation in-place so the in-memory bake is in caller-natural
     /// order — the predict hot path is unaffected.
     ///
-    /// Reserved fields in [`Header`] and [`LayerEntry`] are ignored
+    /// Reserved fields in the wire header and layer records are ignored
     /// on read, so future format extensions can populate them
     /// without invalidating the schema. Bakers MUST zero them.
     pub fn from_bytes(input: &[u8]) -> Result<Self, PredictError> {
@@ -456,7 +501,9 @@ impl Model {
                 found: header.magic,
             });
         }
-        if header.version != FORMAT_VERSION {
+        if header.version != FORMAT_VERSION
+            && header.version != crate::input_program::FORMAT_VERSION
+        {
             return Err(PredictError::UnsupportedVersion {
                 version: header.version,
                 expected: FORMAT_VERSION,
@@ -496,17 +543,17 @@ impl Model {
             return Err(PredictError::DimensionOverflow { what: "n_layers" });
         }
 
-        // ── Stage 1: materialize the owned bake into a Box<[u8]>. ──
+        // ── Stage 1: materialize the owned bake into aligned storage. ──
         //
         // For uncompressed bakes this is one memcpy of `input` into
         // owned storage (~5 µs for a 38 KB picker). For compressed
         // bakes, we decompress the payload directly into the owned
         // storage at offset 128. Either way, after this block,
-        // `bytes` is a heap-owned `Box<[u8]>` we can mutate freely
+        // `bytes` is heap-owned aligned storage we can mutate freely
         // for load-time permutations.
         let compressed = (header.flags & crate::wire::FLAG_COMPRESSED) != 0;
         let algo = ((header.flags & crate::wire::FLAGS_COMPRESSION_ALGO_MASK) >> 1) as u8;
-        let bytes: alloc::boxed::Box<[u8]> = if compressed {
+        let bytes: BakeBytes = if compressed {
             let payload_len = header.decompressed_payload_len as usize;
             if payload_len == 0 {
                 return Err(PredictError::SectionOutOfRange {
@@ -529,7 +576,7 @@ impl Model {
                     have: total_len,
                 });
             }
-            let mut owned = alloc::vec![0u8; total_len].into_boxed_slice();
+            let mut owned = BakeBytes::new(total_len)?;
             owned[..HEADER_SIZE].copy_from_slice(&input[..HEADER_SIZE]);
             // Decompress payload into owned[HEADER_SIZE..]. Only LZ4
             // is supported right now.
@@ -558,7 +605,9 @@ impl Model {
         } else {
             // Uncompressed: copy verbatim. We always own the bake,
             // so load-time permutations can mutate freely.
-            input.to_vec().into_boxed_slice()
+            let mut owned = BakeBytes::new(input.len())?;
+            owned.copy_from_slice(input);
+            owned
         };
 
         // ── Stage 2: parse + validate layer table from owned bytes. ──
@@ -584,7 +633,12 @@ impl Model {
                 required_align: core::mem::align_of::<LayerEntry>(),
             })?;
 
-        let mut layer_offsets = alloc::vec::Vec::with_capacity(n_layers);
+        let mut layer_offsets = alloc::vec::Vec::new();
+        layer_offsets
+            .try_reserve_exact(n_layers)
+            .map_err(|_| PredictError::AllocationFailed {
+                what: "layer table",
+            })?;
         let mut prev_out = n_inputs;
         for (layer_idx, entry) in layer_entries.iter().enumerate() {
             let in_dim = entry.in_dim as usize;
@@ -723,7 +777,36 @@ impl Model {
             }
         }
 
+        let mut program_entries = metadata
+            .iter()
+            .filter(|e| e.key == crate::input_program::METADATA_KEY);
+        let input_program = match (program_entries.next(), program_entries.next()) {
+            (None, None) if header.version == FORMAT_VERSION => None,
+            (Some(entry), None)
+                if header.version == crate::input_program::FORMAT_VERSION
+                    && entry.kind == crate::MetadataType::Bytes =>
+            {
+                let program = crate::input_program::InputProgram::from_bytes(entry.value)?;
+                let expected = feature_transforms.as_ref().map_or(n_inputs, |ts| ts.len());
+                if program.outputs().len() != expected {
+                    return Err(PredictError::InvalidInputProgram {
+                        reason: "program output count differs from feature-transform input count",
+                    });
+                }
+                Some(program)
+            }
+            _ => {
+                return Err(PredictError::InvalidInputProgram {
+                    reason: "v4 requires exactly one bytes input program; v3 forbids it",
+                });
+            }
+        };
+        drop(program_entries);
+        let metadata_entry_count = metadata.len();
         let mut model = Self {
+            metadata_entry_count,
+            input_program,
+            research_max_pairs: alloc::vec::Vec::new(),
             bytes,
             header,
             layer_offsets,
@@ -731,16 +814,34 @@ impl Model {
             feature_transform_params,
             f16_decoded: alloc::vec::Vec::new(),
         };
-        model.f16_decoded = (0..model.layer_offsets.len())
-            .map(|idx| match model.materialize_layer(idx).weights {
-                WeightStorage::F16(w) => Some(
-                    w.iter()
-                        .map(|&h| crate::inference::f16_bits_to_f32(h))
-                        .collect(),
-                ),
-                _ => None,
-            })
-            .collect();
+        if model
+            .layers()
+            .any(|l| matches!(l.weights, WeightStorage::F16(_)))
+        {
+            model
+                .f16_decoded
+                .try_reserve_exact(model.n_layers())
+                .map_err(|_| PredictError::AllocationFailed {
+                    what: "f16 layer index",
+                })?;
+            for idx in 0..model.n_layers() {
+                let decoded = match model.materialize_layer(idx).weights {
+                    WeightStorage::F16(w) => {
+                        let mut decoded = bytemuck::allocation::try_zeroed_slice_box(w.len())
+                            .map_err(|_| PredictError::AllocationFailed {
+                                what: "decoded f16 weights",
+                            })?;
+                        for (dst, &v) in decoded.iter_mut().zip(w) {
+                            *dst = crate::inference::f16_bits_to_f32(v);
+                        }
+                        Some(decoded)
+                    }
+                    _ => None,
+                };
+                model.f16_decoded.push(decoded);
+            }
+        }
+        model.research_max_pairs = crate::research_max_pairs::parse(&model)?;
         Ok(model)
     }
 
@@ -872,7 +973,7 @@ impl Model {
             .metadata
             .slice("metadata", &self.bytes)
             .expect("metadata validated at parse time");
-        Metadata::parse(raw).expect("metadata blob parse validated at parse time")
+        Metadata::from_validated_bytes(raw, self.metadata_entry_count)
     }
 
     /// The model's feature-column NAMES in input order, parsed from the
@@ -1063,6 +1164,35 @@ impl Model {
             .collect()
     }
 
+    /// Whether scoring starts with a required input composition program.
+    pub fn has_input_program(&self) -> bool {
+        self.input_program.is_some()
+    }
+
+    /// Input-program representation for bake/inspection tooling.
+    #[cfg(feature = "baking")]
+    pub fn input_program(&self) -> Option<&crate::input_program::InputProgram> {
+        self.input_program.as_ref()
+    }
+    #[cfg(not(feature = "baking"))]
+    pub(crate) fn input_program(&self) -> Option<&crate::input_program::InputProgram> {
+        self.input_program.as_ref()
+    }
+
+    /// Number of raw source columns accepted by Predictor::predict_from_source.
+    pub fn n_source_inputs(&self) -> usize {
+        self.input_program.as_ref().map_or_else(
+            || {
+                self.feature_transforms
+                    .as_ref()
+                    .map_or(self.n_inputs(), |ts| ts.len())
+            },
+            |p| p.source_count(),
+        )
+    }
+
+    /// Per-compact-input nonlinear transforms, applied before the scaler by
+    /// Predictor::predict_transformed and Predictor::predict_from_source.
     pub fn feature_transforms(&self) -> Option<&[FeatureTransform]> {
         self.feature_transforms.as_deref()
     }
@@ -1466,7 +1596,11 @@ fn read_permutation_indices(
             file_len: bytes.len(),
         });
     };
-    let mut out = alloc::vec::Vec::with_capacity(n);
+    let mut out = alloc::vec::Vec::new();
+    out.try_reserve_exact(n)
+        .map_err(|_| PredictError::AllocationFailed {
+            what: "permutation indices",
+        })?;
     match width {
         1 => {
             for &b in raw {
@@ -1495,7 +1629,11 @@ fn read_permutation_indices(
         }
     }
     // Validate: permutation (every index in 0..n appears exactly once).
-    let mut seen = alloc::vec![false; n];
+    let mut seen = bytemuck::allocation::try_zeroed_slice_box::<bool>(n).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation validation",
+        }
+    })?;
     for &idx in &out {
         let i = idx as usize;
         if seen[i] {
@@ -1616,7 +1754,11 @@ fn permute_pod_array_inverse(
         });
     }
     // Allocate scratch (one alloc per call; total ~few KB).
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for (bake_pos, &caller_u32) in perm.iter().enumerate() {
@@ -1660,7 +1802,11 @@ fn permute_rows_inverse(
             file_len: bytes.len(),
         });
     }
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for (bake_pos, &caller_u32) in perm.iter().enumerate() {
@@ -1697,7 +1843,11 @@ fn permute_cols_inverse(
         });
     }
     let row_stride = n_cols * elem_bytes;
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for r in 0..n_rows {
@@ -1762,8 +1912,22 @@ mod smooth_hinge_wire_tests {
         assert_eq!(Activation::from_byte(2).unwrap(), Activation::LeakyRelu);
         assert_eq!(Activation::from_byte(3).unwrap(), Activation::SmoothHinge);
         assert!(matches!(
-            Activation::from_byte(4),
-            Err(PredictError::UnknownActivation { byte: 4 })
+            Activation::from_byte(255),
+            Err(PredictError::UnknownActivation { byte: 255 })
         ));
+    }
+}
+
+#[cfg(test)]
+mod owned_storage_tests {
+    #[test]
+    fn allocation_is_aligned_and_preserves_logical_byte_length() {
+        let mut bytes = super::BakeBytes::new(129).unwrap();
+        assert_eq!(bytes.len(), 129);
+        assert_eq!(bytes.as_ptr() as usize % 16, 0);
+        assert!(bytes.iter().all(|&x| x == 0));
+        bytes[128] = 7;
+        assert_eq!(bytes[128], 7);
+        assert!(super::BakeBytes::new(usize::MAX).is_err());
     }
 }

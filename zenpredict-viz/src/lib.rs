@@ -183,6 +183,9 @@ fn activation_name(a: Activation) -> &'static str {
         Activation::Relu => "relu",
         Activation::LeakyRelu => "leaky_relu",
         Activation::SmoothHinge => "smooth_hinge",
+        Activation::Softplus => "softplus",
+        Activation::Silu => "silu",
+        Activation::ResearchReluMaxPairs => "research_relu_max_pairs",
         _ => "unknown",
     }
 }
@@ -360,6 +363,10 @@ pub fn forward_with_taps(bytes: &[u8], features: Vec<f32>) -> Result<JsValue, Js
 /// exactly what a codec hands to `Predictor::predict_transformed`.
 pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<ForwardTaps, String> {
     let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    if model.has_input_program() {
+        return Err("input-program tracing is not implemented; use zenpredict::Predictor::predict_from_source for scores".into());
+    }
+
     let n_inputs = model.n_inputs();
     let caller_width = model.caller_input_width();
     if features.len() != caller_width {
@@ -449,7 +456,7 @@ pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<Forwar
         let pre = layer_pre_activation(&layer, &current, in_dim, out_dim);
         let pre_activation = pre.clone();
         let mut post = pre;
-        apply_activation(&mut post, layer.activation);
+        apply_activation(&mut post, layer.activation)?;
         layer_stages.push(LayerStage {
             idx,
             pre_activation,
@@ -542,11 +549,8 @@ fn layer_pre_activation(
 }
 
 /// Same branch structure as `zenpredict::inference::apply_activation`.
-/// An activation this viz build doesn't know about passes the
-/// pre-activation values through unchanged; `activation_name` renders
-/// "unknown" for the same variant, so post == pre signals "not
-/// applied" rather than silently faking a curve.
-fn apply_activation(buf: &mut [f32], act: Activation) {
+/// Unsupported activations return an error, never an identity trace.
+fn apply_activation(buf: &mut [f32], act: Activation) -> Result<(), String> {
     match act {
         Activation::Identity => {}
         Activation::Relu => {
@@ -574,8 +578,13 @@ fn apply_activation(buf: &mut [f32], act: Activation) {
                 }
             }
         }
-        _ => {}
+        _ => {
+            return Err(format!(
+                "this visualizer cannot trace activations such as {act:?}; use zenpredict::Predictor for scores"
+            ));
+        }
     }
+    Ok(())
 }
 
 /// Feature-transform tokens as the bake declares them (one per caller

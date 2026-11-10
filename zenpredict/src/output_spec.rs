@@ -108,14 +108,8 @@ impl OutputTransform {
                 // dynamic range generous while ruling out infinities
                 // from a model emitting unbounded scores.
                 let clamped = x.clamp(-30.0, 30.0);
-                #[cfg(feature = "std")]
-                {
-                    clamped.exp()
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    libm::expf(clamped)
-                }
+
+                libm::expf(clamped)
             }
             Self::Round => round_no_std(x),
         }
@@ -126,14 +120,7 @@ impl OutputTransform {
 /// integral values, infinities and NaNs in both std and no_std builds.
 #[inline]
 fn round_no_std(x: f32) -> f32 {
-    #[cfg(feature = "std")]
-    {
-        x.round()
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        libm::roundf(x)
-    }
+    libm::roundf(x)
 }
 
 #[inline]
@@ -143,23 +130,11 @@ fn sigmoid(x: f32) -> f32 {
     // codec features can include unscaled byte counts so we prefer
     // the safer branch here.
     if x >= 0.0 {
-        #[cfg(feature = "std")]
-        {
-            let z = (-x).exp();
-            1.0 / (1.0 + z)
-        }
-        #[cfg(not(feature = "std"))]
         {
             let z = libm::expf(-x);
             1.0 / (1.0 + z)
         }
     } else {
-        #[cfg(feature = "std")]
-        {
-            let z = x.exp();
-            z / (1.0 + z)
-        }
-        #[cfg(not(feature = "std"))]
         {
             let z = libm::expf(x);
             z / (1.0 + z)

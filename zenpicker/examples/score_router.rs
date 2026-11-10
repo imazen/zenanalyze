@@ -19,7 +19,7 @@ fn main() {
     }
     let model_bytes = Aligned(fs::read(&a[1]).unwrap());
     let model = Model::from_bytes(&model_bytes.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let branch: Vec<usize> = a[3].split(',').map(|s| s.trim().parse().unwrap()).collect();
 
     let txt = fs::read_to_string(&a[2]).unwrap();

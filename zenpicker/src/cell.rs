@@ -458,7 +458,7 @@ impl CellPicker {
                 r.len()
             )));
         }
-        let mut predictor = Predictor::new(&self.model);
+        let mut predictor = Predictor::new(&self.model).map_err(MetaPickerError::Predict)?;
         let scores: Vec<f32> = if self.model.has_nontrivial_feature_transforms() {
             predictor.predict_transformed(input)
         } else {

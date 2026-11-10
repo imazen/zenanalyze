@@ -206,8 +206,8 @@ fn main() {
         eprintln!("re-parse: {:?}", e);
         std::process::exit(1);
     });
-    let mut p_old = zenpredict::Predictor::new(&model);
-    let mut p_new = zenpredict::Predictor::new(&new_model);
+    let mut p_old = zenpredict::Predictor::new(&model).unwrap();
+    let mut p_new = zenpredict::Predictor::new(&new_model).unwrap();
     let features = vec![0.5f32; n_inputs];
     let out_old = p_old.predict(&features).unwrap();
     let out_new = p_new.predict(&features).unwrap();

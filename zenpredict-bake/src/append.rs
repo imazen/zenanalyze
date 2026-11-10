@@ -194,6 +194,28 @@ impl Region {
 /// before it is returned, so a successful return is guaranteed
 /// loadable.
 pub fn append_metadata_utf8(bytes: &[u8], key: &str, value: &str) -> Result<Vec<u8>, AppendError> {
+    append_metadata_impl(bytes, key, 1, value.as_bytes(), None)
+}
+
+pub(crate) fn attach_program(bytes: &[u8], value: &[u8]) -> Result<Vec<u8>, AppendError> {
+    // Qualify the original bake before preserving its payloads verbatim.
+    zenpredict::Model::from_bytes(bytes).map_err(AppendError::OutputValidation)?;
+    append_metadata_impl(
+        bytes,
+        zenpredict::input_program::METADATA_KEY,
+        0,
+        value,
+        Some(zenpredict::input_program::FORMAT_VERSION),
+    )
+}
+
+fn append_metadata_impl(
+    bytes: &[u8],
+    key: &str,
+    kind: u8,
+    value: &[u8],
+    version_override: Option<u16>,
+) -> Result<Vec<u8>, AppendError> {
     // ── New-entry validation (mirrors the composer's rules). ──────
     if key.is_empty() {
         return Err(AppendError::KeyEmpty);
@@ -218,7 +240,7 @@ pub fn append_metadata_utf8(bytes: &[u8], key: &str, value: &str) -> Result<Vec<
         });
     }
     let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-    if version != FORMAT_VERSION {
+    if version != FORMAT_VERSION && version != zenpredict::input_program::FORMAT_VERSION {
         return Err(AppendError::UnsupportedVersion {
             version,
             expected: FORMAT_VERSION,
@@ -371,7 +393,7 @@ pub fn append_metadata_utf8(bytes: &[u8], key: &str, value: &str) -> Result<Vec<
         if entry.key == key {
             // Replace in place; drop any duplicate occurrences.
             if !replaced {
-                write_meta_entry(&mut new_blob, key, 1, value.as_bytes());
+                write_meta_entry(&mut new_blob, key, kind, value);
                 replaced = true;
             }
         } else {
@@ -380,7 +402,7 @@ pub fn append_metadata_utf8(bytes: &[u8], key: &str, value: &str) -> Result<Vec<
         }
     }
     if !replaced {
-        write_meta_entry(&mut new_blob, key, 1, value.as_bytes());
+        write_meta_entry(&mut new_blob, key, kind, value);
     }
 
     // ── Splice point + tail set. ───────────────────────────────────
@@ -502,6 +524,10 @@ pub fn append_metadata_utf8(bytes: &[u8], key: &str, value: &str) -> Result<Vec<
         out
     };
 
+    let mut final_out = final_out;
+    if let Some(version) = version_override {
+        final_out[4..6].copy_from_slice(&version.to_le_bytes());
+    }
     // ── Self-check: a successful return is guaranteed loadable. ───
     zenpredict::Model::from_bytes(&final_out).map_err(AppendError::OutputValidation)?;
     Ok(final_out)
@@ -735,7 +761,7 @@ mod tests {
 
     fn predict_all(bytes: &[u8]) -> Vec<Vec<u32>> {
         let model = Model::from_bytes(bytes).expect("model parses");
-        let mut p = Predictor::new(&model);
+        let mut p = Predictor::new(&model).unwrap();
         feature_vectors()
             .iter()
             .map(|v| p.predict(v).unwrap().iter().map(|f| f.to_bits()).collect())

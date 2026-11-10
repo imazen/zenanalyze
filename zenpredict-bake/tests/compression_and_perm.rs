@@ -80,7 +80,7 @@ fn build_bake(
 fn predict_features(bake_bytes: &[u8], features: &[f32]) -> Vec<f32> {
     let aligned = Aligned(bake_bytes.to_vec());
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     p.predict(features).unwrap().to_vec()
 }
 

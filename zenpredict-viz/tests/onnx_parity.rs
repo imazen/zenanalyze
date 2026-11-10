@@ -152,7 +152,7 @@ fn exported_graph_matches_zenpredict_for_every_dtype_and_activation() {
             }
 
             let model = Model::from_bytes(&bytes).unwrap();
-            let mut p = Predictor::new(&model);
+            let mut p = Predictor::new(&model).unwrap();
             for seed in [1u64, 5] {
                 let f = probe_features(seed);
                 let reference = p.predict(&f).unwrap().to_vec();
@@ -186,7 +186,7 @@ fn converter_reports_dropped_calibration_stages_in_doc_string() {
     // applies them before standardize, so the ONNX output equals
     // `predict` (untransformed), not `predict_transformed`.
     let model = Model::from_bytes(&bytes).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let f = probe_features(3);
     let raw = p.predict(&f).unwrap().to_vec();
     let got = eval_graph(&m, &f);

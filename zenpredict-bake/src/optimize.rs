@@ -125,6 +125,7 @@ pub fn bake_optimized_with(
     req: &BakeRequest<'_>,
     cfg: &OptimizeConfig,
 ) -> Result<Vec<u8>, BakeError> {
+    crate::composer::validate_dimensions(req)?;
     let n_in = req.layers[0].in_dim;
     let n_out = req.layers.last().expect("nonempty layers").out_dim;
     let n_interior = req.layers.len().saturating_sub(1);
@@ -830,8 +831,8 @@ mod tests {
         struct Aligned(alloc::vec::Vec<u8>);
         let m_base = Model::from_bytes(&Aligned(baseline).0).unwrap();
         let m_opt = Model::from_bytes(&Aligned(optimized).0).unwrap();
-        let mut p_base = Predictor::new(&m_base);
-        let mut p_opt = Predictor::new(&m_opt);
+        let mut p_base = Predictor::new(&m_base).unwrap();
+        let mut p_opt = Predictor::new(&m_opt).unwrap();
         let features = [0.5f32, -0.3, 0.1, 0.8, -0.2, 0.6, -0.5, 0.0];
         let out_base = p_base.predict(&features).unwrap().to_vec();
         let out_opt = p_opt.predict(&features).unwrap().to_vec();

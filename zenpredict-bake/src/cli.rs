@@ -86,6 +86,13 @@ pub fn run_bake_cli(argv: &[String]) -> ExitCode {
         }
     };
 
+    let model = match Model::from_bytes(&bytes) {
+        Ok(model) => model,
+        Err(e) => {
+            eprintln!("zenpredict-bake: output validation failed: {e}");
+            return ExitCode::from(3);
+        }
+    };
     if let Err(e) = std::fs::write(&output, &bytes) {
         eprintln!("zenpredict-bake: failed to write {}: {e}", output.display());
         return ExitCode::from(1);
@@ -95,11 +102,11 @@ pub fn run_bake_cli(argv: &[String]) -> ExitCode {
         "zenpredict-bake: wrote {} ({} bytes) — n_inputs={} n_outputs={} n_layers={} schema_hash=0x{:016x} metadata_entries={}",
         output.display(),
         bytes.len(),
-        req.scaler_mean.len(),
-        req.layers.last().map(|l| l.out_dim).unwrap_or(0),
-        req.layers.len(),
-        req.schema_hash,
-        req.metadata.len(),
+        model.n_inputs(),
+        model.n_outputs(),
+        model.n_layers(),
+        model.schema_hash(),
+        model.metadata().iter().count(),
     );
     ExitCode::SUCCESS
 }
@@ -151,6 +158,29 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
     out.insert("version".into(), json!(model.version()));
     out.insert("flags".into(), json!(model.flags()));
     out.insert("n_inputs".into(), json!(model.n_inputs()));
+    out.insert("n_source_inputs".into(), json!(model.n_source_inputs()));
+    if let Some(program) = model.input_program() {
+        use zenpredict::input_program::InputOp;
+        let nodes: Vec<Value> = program
+            .nodes()
+            .iter()
+            .map(|op| match op {
+                InputOp::Source { index } => json!({"op":"source","index":index}),
+                InputOp::Product { left, right } => {
+                    json!({"op":"product","left":left,"right":right})
+                }
+                InputOp::Shape { input, shape } => {
+                    let p = shape.parameters();
+                    json!({"op":"shape","input":input,"knots":&p[..2],"slopes":&p[2..]})
+                }
+                InputOp::Gate { input, gate } => {
+                    json!({"op":"gate","input":input,"values":gate.parameters()})
+                }
+                _ => json!({"op":"unknown"}),
+            })
+            .collect();
+        out.insert("input_program".into(), json!({"source_count":program.source_count(),"nodes":nodes,"outputs":program.outputs()}));
+    }
     out.insert("n_outputs".into(), json!(model.n_outputs()));
     out.insert("n_layers".into(), json!(model.n_layers()));
     out.insert(
@@ -176,6 +206,9 @@ pub fn run_inspect_cli(argv: &[String]) -> ExitCode {
                 Activation::Relu => "relu",
                 Activation::LeakyRelu => "leakyrelu",
                 Activation::SmoothHinge => "smooth_hinge",
+                Activation::Softplus => "softplus",
+                Activation::Silu => "silu",
+                Activation::ResearchReluMaxPairs => "research_relu_max_pairs",
                 _ => "unknown",
             };
             let (dtype, n_weights, scales): (&str, usize, Option<&[f32]>) = match &layer.weights {
@@ -524,19 +557,8 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
         }
     };
 
-    if let Err(e) = std::fs::write(&out_path, &new_bytes) {
-        eprintln!("write {}: {}", out_path.display(), e);
-        return ExitCode::from(1);
-    }
-    eprintln!(
-        "wrote {}: {} bytes ({:.1}% of input)",
-        out_path.display(),
-        new_bytes.len(),
-        new_bytes.len() as f64 / input_bytes.len() as f64 * 100.0
-    );
-
     // Verify round-trip: load the new bake, run a quick predict on
-    // a uniform-0.5 input, compare to the original model's predict.
+    // a uniform-0.5 source input, including all baked preprocessing.
     let new_model = match Model::from_bytes(&new_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -544,11 +566,35 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let mut p_old = zenpredict::Predictor::new(&model);
-    let mut p_new = zenpredict::Predictor::new(&new_model);
-    let features = vec![0.5f32; n_inputs];
-    let out_old = p_old.predict(&features).unwrap();
-    let out_new = p_new.predict(&features).unwrap();
+    let mut p_old = match zenpredict::Predictor::new(&model) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("original predictor: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut p_new = match zenpredict::Predictor::new(&new_model) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("repacked predictor: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let features = vec![0.5f32; model.n_source_inputs()];
+    let out_old = match p_old.predict_from_source(&features) {
+        Ok(values) => values,
+        Err(e) => {
+            eprintln!("original source prediction: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let out_new = match p_new.predict_from_source(&features) {
+        Ok(values) => values,
+        Err(e) => {
+            eprintln!("repacked source prediction: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let max_diff = out_old
         .iter()
         .zip(out_new.iter())
@@ -564,6 +610,17 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             "WARNING: round-trip differs by > 1e-3 — likely I8 quantization noise from re-baking"
         );
     }
+    if let Err(e) = std::fs::write(&out_path, &new_bytes) {
+        eprintln!("write {}: {}", out_path.display(), e);
+        return ExitCode::from(1);
+    }
+    eprintln!(
+        "wrote {}: {} bytes ({:.1}% of input)",
+        out_path.display(),
+        new_bytes.len(),
+        new_bytes.len() as f64 / input_bytes.len() as f64 * 100.0
+    );
+
     ExitCode::SUCCESS
 }
 

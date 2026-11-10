@@ -1,6 +1,6 @@
 //! Scratch-owning forward-pass wrapper.
 //!
-//! Owns a [`Model`] plus the scratch buffers that [`forward`] needs,
+//! Borrows a [`Model`] and owns the scratch buffers that [`forward`] needs,
 //! exposes one allocation-free `predict` entry. Both downstream
 //! shapes — codec picker, perceptual scorer — wrap a `Predictor`
 //! and add their own typed front door.
@@ -9,9 +9,7 @@
 use crate::argmin::pick_confidence_from_top_k;
 use crate::argmin::{self, AllowedMask, ArgminOffsets, ScoreTransform};
 use crate::error::PredictError;
-use crate::feature_transform::{
-    FeatureTransform, apply_feature_pipeline_expanding, apply_feature_transforms,
-};
+use crate::feature_transform::{FeatureTransform, apply_feature_transforms};
 use crate::inference::forward;
 use crate::model::Model;
 #[cfg(feature = "advanced")]
@@ -36,27 +34,71 @@ use crate::output_spec::{OutputValue, apply_spec};
 /// `static OnceLock<Model>` it's `'static`.
 pub struct Predictor<'a> {
     model: &'a Model,
-    scratch_a: alloc::vec::Vec<f32>,
-    scratch_b: alloc::vec::Vec<f32>,
-    output: alloc::vec::Vec<f32>,
-    /// Post-processed output buffer for [`Self::predict_with_specs`].
-    /// Sized to `n_outputs` at construction; reused across calls.
-    /// Gated behind `advanced` — `predict_with_specs` lives under
-    /// the same feature, so the buffer only exists when callable.
+    scratch: Scratch,
     #[cfg(feature = "advanced")]
     spec_output: alloc::vec::Vec<OutputValue>,
-    /// Scratch buffer for the `_transformed` family. Sized to
-    /// `n_inputs` when the bake declared scalar-only
-    /// `feature_transforms`, to `model.expanded_input_dim()` when an
-    /// expander variant is present (resized lazily on first call),
-    /// and to zero otherwise (the no-transform path forwards the
-    /// input slice without copying). Reused across calls.
-    feat_scratch: alloc::vec::Vec<f32>,
-    /// Scratch view of per-feature param slices, rebuilt on each
-    /// expander-path call. Stored on `Predictor` to avoid an
-    /// allocation per `predict_transformed` invocation; the underlying
-    /// storage lives in `Model::feature_transform_params()`.
-    feat_param_refs: alloc::vec::Vec<&'a [f32]>,
+}
+struct Scratch {
+    values: alloc::boxed::Box<[f32]>,
+    need: usize,
+    n_out: usize,
+    n_feat: usize,
+    n_program: usize,
+    n_compact: usize,
+}
+struct Parts<'a> {
+    a: &'a mut [f32],
+    b: &'a mut [f32],
+    output: &'a mut [f32],
+    feature: &'a mut [f32],
+    program: &'a mut [f32],
+    compact: &'a mut [f32],
+}
+impl Scratch {
+    fn new(model: &Model) -> Result<Self, PredictError> {
+        let need = model.scratch_len();
+        let n_out = model.n_outputs();
+        let n_feat = if model.feature_transforms().is_some() {
+            model.n_inputs()
+        } else {
+            0
+        };
+        let n_program = model.input_program().map_or(0, |p| p.scratch_len());
+        let n_compact = model.input_program().map_or(0, |p| p.outputs().len());
+        let len = 2 * need + n_out + n_feat + n_program + n_compact;
+        let values = bytemuck::allocation::try_zeroed_slice_box(len).map_err(|_| {
+            PredictError::AllocationFailed {
+                what: "predictor scratch",
+            }
+        })?;
+        Ok(Self {
+            values,
+            need,
+            n_out,
+            n_feat,
+            n_program,
+            n_compact,
+        })
+    }
+    fn parts(&mut self) -> Parts<'_> {
+        let (a, rest) = self.values.split_at_mut(self.need);
+        let (b, rest) = rest.split_at_mut(self.need);
+        let (output, rest) = rest.split_at_mut(self.n_out);
+        let (feature, rest) = rest.split_at_mut(self.n_feat);
+        let (program, compact) = rest.split_at_mut(self.n_program);
+        debug_assert_eq!(compact.len(), self.n_compact);
+        Parts {
+            a,
+            b,
+            output,
+            feature,
+            program,
+            compact,
+        }
+    }
+    fn output(&self) -> &[f32] {
+        &self.values[2 * self.need..2 * self.need + self.n_out]
+    }
 }
 
 impl<'a> Predictor<'a> {
@@ -79,35 +121,26 @@ impl<'a> Predictor<'a> {
     ///     static PREDICTOR: RefCell<Predictor<'static>> =
     ///         RefCell::new(Predictor::new(MODEL.get_or_init(
     ///             || Model::from_bytes(BAKE).unwrap()
-    ///         )));
+    ///         )).unwrap());
     /// }
     /// ```
-    pub fn new(model: &'a Model) -> Self {
-        let need = model.scratch_len();
-        let n_out = model.n_outputs();
-        let n_in = model.n_inputs();
-        let feat_scratch_len = if model.has_expander_feature_transforms() {
-            model.expanded_input_dim()
-        } else if model.feature_transforms().is_some() {
-            n_in
-        } else {
-            0
+    pub fn new(model: &'a Model) -> Result<Self, PredictError> {
+        #[cfg(feature = "advanced")]
+        let spec_output = {
+            let mut v = alloc::vec::Vec::new();
+            v.try_reserve_exact(model.n_outputs())
+                .map_err(|_| PredictError::AllocationFailed {
+                    what: "output specifications",
+                })?;
+            v.resize(model.n_outputs(), OutputValue::Default);
+            v
         };
-        let feat_param_refs_cap = if model.has_expander_feature_transforms() {
-            n_in
-        } else {
-            0
-        };
-        Self {
+        Ok(Self {
             model,
-            scratch_a: alloc::vec![0.0; need],
-            scratch_b: alloc::vec![0.0; need],
-            output: alloc::vec![0.0; n_out],
+            scratch: Scratch::new(model)?,
             #[cfg(feature = "advanced")]
-            spec_output: alloc::vec![OutputValue::Default; n_out],
-            feat_scratch: alloc::vec![0.0; feat_scratch_len],
-            feat_param_refs: alloc::vec::Vec::with_capacity(feat_param_refs_cap),
-        }
+            spec_output,
+        })
     }
 
     pub fn n_inputs(&self) -> usize {
@@ -136,6 +169,8 @@ impl<'a> Predictor<'a> {
     /// data from a prior call never leaks into the result. Calling
     /// `predict` twice with the same `features` is deterministic.
     ///
+    /// This does not execute an input program. For source columns of a
+    /// composed bake use [`Self::predict_from_source`].
     /// This applies the embedded scaler, but does **not** apply the bake's
     /// nonlinear feature transforms. For raw features from extraction, use
     /// [`Self::predict_transformed`] when the bake declares those transforms.
@@ -143,14 +178,9 @@ impl<'a> Predictor<'a> {
     /// compose transformed prediction with the free selection functions when
     /// selecting directly from raw extracted features.
     pub fn predict(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
-        forward(
-            self.model,
-            features,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
-        Ok(&self.output)
+        let Parts { a, b, output, .. } = self.scratch.parts();
+        forward(self.model, features, a, b, output)?;
+        Ok(output)
     }
 
     /// Run forward pass and apply the bake's per-output specs and
@@ -181,25 +211,28 @@ impl<'a> Predictor<'a> {
     /// pairs were rejected at load time.
     #[cfg(feature = "advanced")]
     pub fn predict_with_specs(&mut self, features: &[f32]) -> Result<&[OutputValue], PredictError> {
-        forward(
-            self.model,
-            features,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
+        self.predict(features)?;
+        Ok(self.finish_output_specs())
+    }
+
+    #[cfg(feature = "advanced")]
+    fn finish_output_specs(&mut self) -> &[OutputValue] {
         let specs = self.model.output_specs();
         let pool = self.model.discrete_sets();
         // Two paths: with-specs (apply per-output pipeline) vs.
         // without (raw passthrough → Override). We keep the loop
         // tight in either case.
         if specs.is_empty() {
-            for (slot, &raw) in self.spec_output.iter_mut().zip(self.output.iter()) {
+            for (slot, &raw) in self
+                .spec_output
+                .iter_mut()
+                .zip(self.scratch.output().iter())
+            {
                 *slot = OutputValue::Override(raw);
             }
         } else {
             for (i, slot) in self.spec_output.iter_mut().enumerate() {
-                *slot = apply_spec(&specs[i], self.output[i], pool);
+                *slot = apply_spec(&specs[i], self.scratch.output()[i], pool);
             }
         }
         // Sparse overrides land last so a maintainer can force a
@@ -217,9 +250,11 @@ impl<'a> Predictor<'a> {
                 };
             }
         }
-        Ok(&self.spec_output)
+        &self.spec_output
     }
 
+    /// Starts from compact program outputs, without executing an input program.
+    /// For source columns use [`Self::predict_from_source`].
     /// Like [`Self::predict`], but applies the bake's
     /// `zentrain.feature_transforms` (issue #52) to each feature
     /// element before standardize + forward pass. **This is the
@@ -233,100 +268,36 @@ impl<'a> Predictor<'a> {
     /// `Identity`), this method forwards the caller's slice without
     /// copying — same allocation profile as [`Self::predict`].
     pub fn predict_transformed(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
-        // Apply transforms inline so the forward call can borrow
-        // `scratch_a`/`scratch_b`/`output` mutably without aliasing
-        // through a helper that also borrows `self`.
-        //
-        // Three cases, in priority order:
-        //
-        // 1. No transforms metadata ⇒ forward `features` unchanged.
-        //
-        // 2. All transforms are scalar (Identity / Log / Log1p /
-        //    Signed* / Clip* / Winsor* / QuantileBins) ⇒ apply
-        //    per-feature into `feat_scratch[..features.len()]`,
-        //    forward the (raw-length) scratch. Same allocation
-        //    profile as `predict`.
-        //
-        // 3. At least one transform is an expander
-        //    ([`FeatureTransform::Sinusoidal`]) ⇒ allocate
-        //    `feat_scratch` to `model.expanded_input_dim()` slots,
-        //    apply via `apply_feature_pipeline_expanding`, forward
-        //    the expanded scratch. The model's first layer
-        //    `in_dim` must equal `expanded_input_dim()` — this
-        //    is enforced at bake time by the composer, so the
-        //    runtime can trust it.
-        let Some(transforms) = self.model.feature_transforms() else {
-            forward(
-                self.model,
-                features,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
-            return Ok(&self.output);
+        let Parts {
+            a,
+            b,
+            output,
+            feature,
+            ..
+        } = self.scratch.parts();
+        forward_transformed(self.model, features, feature, a, b, output)?;
+        Ok(output)
+    }
+
+    /// Compose raw source columns, then apply baked feature transforms, scaler
+    /// and network. Without an input program this equals predict_transformed.
+    /// No allocations occur after construction. Selection uses the free argmin
+    /// functions on the returned scores, keeping preprocessing explicit.
+    pub fn predict_from_source(&mut self, features: &[f32]) -> Result<&[f32], PredictError> {
+        let Some(program) = self.model.input_program() else {
+            return self.predict_transformed(features);
         };
-        if features.len() != transforms.len() {
-            return Err(PredictError::FeatureLenMismatch {
-                expected: transforms.len(),
-                got: features.len(),
-            });
-        }
-
-        let has_expander = self.model.has_expander_feature_transforms();
-        if has_expander {
-            // Expanding path. Per-feature params must be present —
-            // Sinusoidal requires its frequency list.
-            let params = self
-                .model
-                .feature_transform_params()
-                .ok_or(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 0 })?;
-            let expanded_dim = self.model.expanded_input_dim();
-            if self.feat_scratch.len() < expanded_dim {
-                self.feat_scratch.resize(expanded_dim, 0.0);
-            }
-            let dst = &mut self.feat_scratch[..expanded_dim];
-            // Build a `&[&[f32]]` view over the owned per-feature params.
-            // `feat_param_refs` is a stable scratch field on Predictor;
-            // re-fill it here rather than allocating a fresh Vec.
-            self.feat_param_refs.clear();
-            self.feat_param_refs
-                .extend(params.iter().map(|v| v.as_slice()));
-            apply_feature_pipeline_expanding(transforms, &self.feat_param_refs, features, dst)?;
-            forward(
-                self.model,
-                dst,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
-            return Ok(&self.output);
-        }
-
-        // Scalar path.
-        if self.feat_scratch.len() < features.len() {
-            self.feat_scratch.resize(features.len(), 0.0);
-        }
-        let dst = &mut self.feat_scratch[..features.len()];
-        match self.model.feature_transform_params() {
-            Some(params) => {
-                debug_assert_eq!(params.len(), transforms.len());
-                for i in 0..features.len() {
-                    // Scalar contract — `apply_with_params` panics for
-                    // expander variants, but `has_expander` already
-                    // proved there aren't any in this branch.
-                    dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
-                }
-            }
-            None => apply_feature_transforms(transforms, features, dst)?,
-        }
-        forward(
-            self.model,
-            dst,
-            &mut self.scratch_a,
-            &mut self.scratch_b,
-            &mut self.output,
-        )?;
-        Ok(&self.output)
+        let Parts {
+            a,
+            b,
+            output,
+            feature,
+            program: values,
+            compact,
+        } = self.scratch.parts();
+        program.apply(features, values, compact)?;
+        forward_transformed(self.model, compact, feature, a, b, output)?;
+        Ok(output)
     }
 
     /// Like [`Self::predict_with_specs`], but applies the bake's
@@ -339,93 +310,19 @@ impl<'a> Predictor<'a> {
         &mut self,
         features: &[f32],
     ) -> Result<&[OutputValue], PredictError> {
-        // Same dispatch as `predict_transformed`: scalar bakes use
-        // the fast path; expander bakes route through
-        // `apply_feature_pipeline_expanding` with an expanded scratch
-        // buffer. The output specs / discrete sets / sparse overrides
-        // post-processing runs once at the bottom regardless of
-        // which pipeline shape filled `self.output`.
-        if let Some(transforms) = self.model.feature_transforms() {
-            if features.len() != transforms.len() {
-                return Err(PredictError::FeatureLenMismatch {
-                    expected: transforms.len(),
-                    got: features.len(),
-                });
-            }
-            if self.model.has_expander_feature_transforms() {
-                let params = self
-                    .model
-                    .feature_transform_params()
-                    .ok_or(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 0 })?;
-                let expanded_dim = self.model.expanded_input_dim();
-                if self.feat_scratch.len() < expanded_dim {
-                    self.feat_scratch.resize(expanded_dim, 0.0);
-                }
-                let dst = &mut self.feat_scratch[..expanded_dim];
-                self.feat_param_refs.clear();
-                self.feat_param_refs
-                    .extend(params.iter().map(|v| v.as_slice()));
-                apply_feature_pipeline_expanding(transforms, &self.feat_param_refs, features, dst)?;
-                forward(
-                    self.model,
-                    dst,
-                    &mut self.scratch_a,
-                    &mut self.scratch_b,
-                    &mut self.output,
-                )?;
-            } else {
-                if self.feat_scratch.len() < features.len() {
-                    self.feat_scratch.resize(features.len(), 0.0);
-                }
-                let dst = &mut self.feat_scratch[..features.len()];
-                match self.model.feature_transform_params() {
-                    Some(params) => {
-                        debug_assert_eq!(params.len(), transforms.len());
-                        for i in 0..features.len() {
-                            dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
-                        }
-                    }
-                    None => apply_feature_transforms(transforms, features, dst)?,
-                }
-                forward(
-                    self.model,
-                    dst,
-                    &mut self.scratch_a,
-                    &mut self.scratch_b,
-                    &mut self.output,
-                )?;
-            }
-        } else {
-            forward(
-                self.model,
-                features,
-                &mut self.scratch_a,
-                &mut self.scratch_b,
-                &mut self.output,
-            )?;
-        }
-        let specs = self.model.output_specs();
-        let pool = self.model.discrete_sets();
-        if specs.is_empty() {
-            for (slot, &raw) in self.spec_output.iter_mut().zip(self.output.iter()) {
-                *slot = OutputValue::Override(raw);
-            }
-        } else {
-            for (i, slot) in self.spec_output.iter_mut().enumerate() {
-                *slot = apply_spec(&specs[i], self.output[i], pool);
-            }
-        }
-        for entry in self.model.sparse_overrides() {
-            let i = entry.idx as usize;
-            if i < self.spec_output.len() {
-                self.spec_output[i] = if entry.value.is_nan() {
-                    OutputValue::Default
-                } else {
-                    OutputValue::Override(entry.value)
-                };
-            }
-        }
-        Ok(&self.spec_output)
+        self.predict_transformed(features)?;
+        Ok(self.finish_output_specs())
+    }
+
+    /// Source composition followed by the same output specs and overrides as
+    /// predict_with_specs. This includes all baked preprocessing stages.
+    #[cfg(feature = "advanced")]
+    pub fn predict_with_specs_from_source(
+        &mut self,
+        features: &[f32],
+    ) -> Result<&[OutputValue], PredictError> {
+        self.predict_from_source(features)?;
+        Ok(self.finish_output_specs())
     }
 
     /// Per-feature transforms declared by the bake. Convenience
@@ -448,10 +345,10 @@ impl<'a> Predictor<'a> {
     ) -> Result<Option<usize>, PredictError> {
         self.predict(features)?;
         if let Some(o) = offsets {
-            o.validate(self.output.len())?;
+            o.validate(self.scratch.output().len())?;
         }
         Ok(argmin::argmin_masked(
-            &self.output,
+            self.scratch.output(),
             mask,
             transform,
             offsets,
@@ -472,9 +369,9 @@ impl<'a> Predictor<'a> {
     ) -> Result<Option<usize>, PredictError> {
         self.predict(features)?;
         let (start, end) = range;
-        if end > self.output.len() || start > end {
+        if end > self.scratch.output().len() || start > end {
             return Err(PredictError::OutputDimMismatch {
-                expected: self.output.len(),
+                expected: self.scratch.output().len(),
                 got: end,
             });
         }
@@ -482,7 +379,7 @@ impl<'a> Predictor<'a> {
             o.validate(end - start)?;
         }
         Ok(argmin::argmin_masked(
-            &self.output[start..end],
+            &self.scratch.output()[start..end],
             mask,
             transform,
             offsets,
@@ -508,10 +405,10 @@ impl<'a> Predictor<'a> {
     ) -> Result<[Option<usize>; K], PredictError> {
         self.predict(features)?;
         if let Some(o) = offsets {
-            o.validate(self.output.len())?;
+            o.validate(self.scratch.output().len())?;
         }
         Ok(argmin::argmin_masked_top_k::<K>(
-            &self.output,
+            self.scratch.output(),
             mask,
             transform,
             offsets,
@@ -532,9 +429,9 @@ impl<'a> Predictor<'a> {
     ) -> Result<[Option<usize>; K], PredictError> {
         self.predict(features)?;
         let (start, end) = range;
-        if end > self.output.len() || start > end {
+        if end > self.scratch.output().len() || start > end {
             return Err(PredictError::OutputDimMismatch {
-                expected: self.output.len(),
+                expected: self.scratch.output().len(),
                 got: end,
             });
         }
@@ -542,7 +439,7 @@ impl<'a> Predictor<'a> {
             o.validate(end - start)?;
         }
         Ok(argmin::argmin_masked_top_k::<K>(
-            &self.output[start..end],
+            &self.scratch.output()[start..end],
             mask,
             transform,
             offsets,
@@ -561,11 +458,11 @@ impl<'a> Predictor<'a> {
     ) -> Result<Option<(usize, f32)>, PredictError> {
         self.predict(features)?;
         if let Some(o) = offsets {
-            o.validate(self.output.len())?;
+            o.validate(self.scratch.output().len())?;
         }
-        let top = argmin::argmin_masked_top_k::<2>(&self.output, mask, transform, offsets);
+        let top = argmin::argmin_masked_top_k::<2>(self.scratch.output(), mask, transform, offsets);
         Ok(pick_confidence_from_top_k(
-            &self.output,
+            self.scratch.output(),
             transform,
             offsets,
             top,
@@ -583,16 +480,16 @@ impl<'a> Predictor<'a> {
     ) -> Result<Option<(usize, f32)>, PredictError> {
         self.predict(features)?;
         let (start, end) = range;
-        if end > self.output.len() || start > end {
+        if end > self.scratch.output().len() || start > end {
             return Err(PredictError::OutputDimMismatch {
-                expected: self.output.len(),
+                expected: self.scratch.output().len(),
                 got: end,
             });
         }
         if let Some(o) = offsets {
             o.validate(end - start)?;
         }
-        let slice = &self.output[start..end];
+        let slice = &self.scratch.output()[start..end];
         let top = argmin::argmin_masked_top_k::<2>(slice, mask, transform, offsets);
         Ok(pick_confidence_from_top_k(slice, transform, offsets, top))
     }
@@ -621,7 +518,7 @@ impl<'a> Predictor<'a> {
         F: Fn(&[f32], usize) -> f32,
     {
         self.predict(features)?;
-        let out = &self.output[..];
+        let out = self.scratch.output();
         Ok(argmin::argmin_masked_with_scorer(out.len(), mask, |i| {
             scorer(out, i)
         }))
@@ -640,7 +537,7 @@ impl<'a> Predictor<'a> {
         F: Fn(&[f32], usize) -> f32,
     {
         self.predict(features)?;
-        let out = &self.output[..];
+        let out = self.scratch.output();
         Ok(argmin::argmin_masked_top_k_with_scorer::<K, _>(
             out.len(),
             mask,
@@ -666,13 +563,13 @@ impl<'a> Predictor<'a> {
     {
         self.predict(features)?;
         let (start, end) = range;
-        if end > self.output.len() || start > end {
+        if end > self.scratch.output().len() || start > end {
             return Err(PredictError::OutputDimMismatch {
-                expected: self.output.len(),
+                expected: self.scratch.output().len(),
                 got: end,
             });
         }
-        let out = &self.output[..];
+        let out = self.scratch.output();
         Ok(argmin::argmin_masked_top_k_with_scorer::<K, _>(
             end - start,
             mask,
@@ -701,15 +598,53 @@ impl<'a> Predictor<'a> {
     {
         self.predict(features)?;
         let (start, end) = range;
-        if end > self.output.len() || start > end {
+        if end > self.scratch.output().len() || start > end {
             return Err(PredictError::OutputDimMismatch {
-                expected: self.output.len(),
+                expected: self.scratch.output().len(),
                 got: end,
             });
         }
-        let out = &self.output[..];
+        let out = self.scratch.output();
         Ok(argmin::argmin_masked_with_scorer(end - start, mask, |i| {
             scorer(out, i)
         }))
     }
+}
+
+// One transform implementation for compact and source-input serving paths.
+fn forward_transformed(
+    model: &Model,
+    features: &[f32],
+    feat_scratch: &mut [f32],
+    scratch_a: &mut [f32],
+    scratch_b: &mut [f32],
+    output: &mut [f32],
+) -> Result<(), PredictError> {
+    let Some(transforms) = model.feature_transforms() else {
+        return forward(model, features, scratch_a, scratch_b, output);
+    };
+    if features.len() != transforms.len() {
+        return Err(PredictError::FeatureLenMismatch {
+            expected: transforms.len(),
+            got: features.len(),
+        });
+    }
+    let dst = feat_scratch;
+    if model.has_expander_feature_transforms() {
+        let params = model.feature_transform_params();
+        if params.is_none() && transforms.contains(&FeatureTransform::Sinusoidal) {
+            return Err(PredictError::UnexpectedExpanderInScalarPipeline { feature_index: 0 });
+        }
+        crate::feature_transform::expand_model_inputs(transforms, params, features, dst)?;
+    } else {
+        match model.feature_transform_params() {
+            Some(params) => {
+                for i in 0..features.len() {
+                    dst[i] = transforms[i].apply_with_params(features[i], &params[i]);
+                }
+            }
+            None => apply_feature_transforms(transforms, features, dst)?,
+        }
+    }
+    forward(model, dst, scratch_a, scratch_b, output)
 }

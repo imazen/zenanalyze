@@ -5,10 +5,16 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredictError {
+    /// Storage could not be allocated.
+    AllocationFailed { what: &'static str },
+    /// Invalid required input composition or an incompatible serving path.
+    InvalidInputProgram { reason: &'static str },
+    /// Opt-in research max-pair metadata or its input domain is invalid.
+    InvalidResearchMaxPair { reason: &'static str },
     /// Header magic bytes don't match `ZNPR`.
     BadMagic { found: [u8; 4] },
-    /// Format version not supported by this build. v3 is the only
-    /// version this crate parses; older bakes must be migrated via
+    /// Format version not supported by this build. Versions 3 and 4 are
+    /// accepted; older bakes must be migrated via
     /// `zentrain/tools/migrate_znpr_v2_to_v3.py`.
     UnsupportedVersion { version: u16, expected: u16 },
     /// Bytes ran out before a section completed parsing.
@@ -24,10 +30,8 @@ pub enum PredictError {
         len: u32,
         file_len: usize,
     },
-    /// A typed slice view requested alignment the input bytes
-    /// don't satisfy. Wrap `include_bytes!` in an `#[repr(C, align(16))]`
-    /// struct (see crate docs) to guarantee alignment for f32/u32/f64
-    /// payloads.
+    /// A wire section offset does not satisfy the typed payload alignment.
+    /// Caller input alignment is unrestricted; owned storage is aligned.
     SectionMisaligned {
         what: &'static str,
         offset: u32,
@@ -98,6 +102,15 @@ pub enum PredictError {
 impl fmt::Display for PredictError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            Self::AllocationFailed { what } => {
+                write!(f, "zenpredict: allocation failed for {what}")
+            }
+            Self::InvalidInputProgram { reason } => {
+                write!(f, "zenpredict: input program: {reason}")
+            }
+            Self::InvalidResearchMaxPair { reason } => {
+                write!(f, "invalid research max pair: {reason}")
+            }
             Self::BadMagic { found } => {
                 write!(f, "zenpredict: bad magic, expected ZNPR, found {found:?}")
             }

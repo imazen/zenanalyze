@@ -276,3 +276,45 @@ dependency-update:
     cargo update --manifest-path apidoc/Cargo.toml
     cargo update --manifest-path zenpredict/fuzz/Cargo.toml
     cargo update --manifest-path tools/descriptor-hash-compat/Cargo.toml
+
+# Native analytic activation qualification; caller supplies resource wrapper.
+analytic-activation-check:
+    cargo test -p zenpredict -p zenpredict-bake --lib --tests
+    cargo test -p zenpredict --no-default-features --lib --tests
+    cargo clippy -p zenpredict -p zenpredict-bake --all-targets -- -D warnings
+
+# Run under run-heavy on a build host. No datasets or holdout exposure required.
+predict-input-programs:
+    cargo fmt -p zenpredict -p zenpredict-bake --check
+    cargo test --locked -p zenpredict -p zenpredict-bake --lib --test input_program --test input_program_cli
+    cargo test --locked -p zenpredict --no-default-features --lib
+    cargo test --locked -p zenpredict-bake --test smooth_analytic --test research_max_pairs
+    cargo clippy --locked -p zenpredict -p zenpredict-bake --all-targets -- -D warnings
+
+# Diagnostic/export paths fail explicitly on operators they cannot represent.
+predict-input-consumers:
+    cargo test --locked -p zenpredict-viz --test input_program_rejection --test forward_parity -- --skip shipped_bakes_parity
+    cargo test --locked -p zenpredict-viz --features onnx-export --bin znpr2onnx
+    cargo clippy --locked -p zenpredict-viz --all-targets --features onnx-export -- -D warnings
+
+# No labels are read. Oracle is the caller-supplied canonical research shaping.rs.
+predict-research-shaping oracle output bakes:
+    python3 zenpredict-bake/tools/qualify_research_shaping.py --oracle-shaping-rs "{{oracle}}" --output "{{output}}" {{bakes}}
+
+# Run under run-heavy. zenbench owns CPU placement and benchmark admission.
+predict-lifecycle *args:
+    cargo bench --locked -p zenpredict-bake --bench lifecycle -- {{args}}
+
+predict-heaptrack case phase iterations output:
+    cargo build --locked --release -p zenpredict-bake --example profile_inference
+    heaptrack -o "{{output}}" "${CARGO_TARGET_DIR:-target}/release/examples/profile_inference" "{{case}}" "{{phase}}" "{{iterations}}"
+
+# Requires release profile_inference with symbols; invoke under run-heavy.
+predict-heaptrack-suite binary output revision:
+    python3 zenpredict-bake/tools/profile_lifecycle.py "{{binary}}" "{{output}}" --revision "{{revision}}"
+
+predict-power *args:
+    cargo bench --locked -p zenpredict-bake --features generic-powf --bench power -- {{args}}
+
+predict-measurement-summary root:
+    python3 zenpredict-bake/tools/summarize_lifecycle.py "{{root}}"

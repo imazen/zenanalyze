@@ -34,14 +34,17 @@
 
 extern crate alloc;
 
-pub mod append;
+mod append;
 #[cfg(feature = "std")]
+#[doc(hidden)]
 pub mod cli;
-pub mod composer;
+mod composer;
 pub(crate) mod hu_reorder;
-pub mod json;
-pub mod optimize;
-pub mod zero_bias;
+/// Typed input-program composition for JSON producers and Rust callers.
+pub mod input_program;
+mod json;
+mod optimize;
+mod zero_bias;
 
 pub use append::{AppendError, append_metadata_utf8};
 pub use composer::{
@@ -52,7 +55,7 @@ pub use json::{
     MetadataEntryJson, OutputSpecJson, OutputTransformJson, SparseOverrideJson, bake_from_json,
     bake_from_json_str,
 };
-pub use optimize::bake_optimized;
+pub use optimize::{OptimizeConfig, bake_optimized, bake_optimized_with};
 pub use zero_bias::{
     apply_zero_bias, apply_zero_bias_in_place, apply_zero_bias_per_layer,
     apply_zero_bias_per_layer_in_place,

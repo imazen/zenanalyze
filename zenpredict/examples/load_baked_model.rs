@@ -27,17 +27,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // Re-align into a u64-backed buffer so the loader's
-    // bytemuck::try_cast_slice can zero-copy borrow the f32 / u16
-    // sections. Production consumers wrap `include_bytes!` in
-    // `#[repr(C, align(16))]` instead.
-    let n_u64 = bytes.len().div_ceil(8);
-    let mut storage: Vec<u64> = vec![0; n_u64];
-    let view: &mut [u8] = bytemuck::cast_slice_mut(&mut storage);
-    view[..bytes.len()].copy_from_slice(&bytes);
-    let aligned: &[u8] = &bytemuck::cast_slice::<u64, u8>(&storage)[..bytes.len()];
-
-    let model = match zenpredict::Model::from_bytes(aligned) {
+    let model = match zenpredict::Model::from_bytes(&bytes) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("parse: {e}");
@@ -58,7 +48,13 @@ fn main() -> ExitCode {
     let n_in = model.n_inputs();
     let features: Vec<f32> = (0..n_in).map(|i| ((i as f32) * 0.1).sin()).collect();
 
-    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut predictor = match zenpredict::Predictor::new(&model) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("construct: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let out = match predictor.predict(&features) {
         Ok(v) => v,
         Err(e) => {

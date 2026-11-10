@@ -1,7 +1,7 @@
 //! ZNPR v3 metadata blob — typed, length-prefixed key/value entries.
 //!
-//! Read once at load, kept on the [`crate::Model`] as a borrowed
-//! `Vec<MetadataEntry>` over the original bytes. Per-entry value
+//! Validated once at load and exposed as a borrowed view over the original
+//! bytes. Iteration yields small Copy entries without heap allocation. Per-entry value
 //! decoding happens at the call site that wants the value (typically
 //! the codec or scoring crate, knowing what shape it expects from
 //! the bake).
@@ -28,7 +28,7 @@
 //! unaligned via `u32::from_le_bytes`. Values that are themselves
 //! `#[repr(C)]` structs (e.g. `zentrain.calibration_metrics`'s
 //! three-`f32` payload) are read with `bytemuck::pod_read_unaligned`
-//! at the call site — metadata is not zero-copy by design.
+//! at the call site; entry keys and value byte slices borrow the model.
 //!
 //! Hot-path entries (anything in [`keys`] that the runtime reads
 //! every encode) MUST be `value_type=0` (bytes) — never compressed.
@@ -108,7 +108,8 @@ pub struct MetadataEntry<'a> {
 /// real bakes carry (≤ 30).
 #[derive(Clone, Debug, Default)]
 pub struct Metadata<'a> {
-    entries: alloc::vec::Vec<MetadataEntry<'a>>,
+    bytes: &'a [u8],
+    len: usize,
 }
 
 impl<'a> Metadata<'a> {
@@ -121,96 +122,23 @@ impl<'a> Metadata<'a> {
     /// forward-compat. Lookups via [`Metadata::get`] use exact string
     /// match, so an empty-string key only collides with itself.
     pub fn parse(bytes: &'a [u8]) -> Result<Self, PredictError> {
-        let mut entries = alloc::vec::Vec::new();
-        let mut pos = 0usize;
+        let mut pos = 0;
+        let mut len = 0;
         while pos < bytes.len() {
-            // [1] key_len
-            let key_len = *bytes.get(pos).ok_or(PredictError::Truncated {
-                offset: pos,
-                want: 1,
-                have: 0,
-            })? as usize;
-            pos += 1;
-
-            // [key_len] key
-            let key_end = pos.checked_add(key_len).ok_or(PredictError::Truncated {
-                offset: pos,
-                want: key_len,
-                have: bytes.len().saturating_sub(pos),
-            })?;
-            if key_end > bytes.len() {
-                return Err(PredictError::Truncated {
-                    offset: pos,
-                    want: key_len,
-                    have: bytes.len() - pos,
-                });
-            }
-            let key_bytes = &bytes[pos..key_end];
-            let key = core::str::from_utf8(key_bytes)
-                .map_err(|_| PredictError::MetadataKeyNotUtf8 { offset: pos })?;
-            pos = key_end;
-
-            // [1] value_type
-            let value_type_byte = *bytes.get(pos).ok_or(PredictError::Truncated {
-                offset: pos,
-                want: 1,
-                have: 0,
-            })?;
-            pos += 1;
-
-            // [4] value_len (unaligned LE)
-            if pos + 4 > bytes.len() {
-                return Err(PredictError::Truncated {
-                    offset: pos,
-                    want: 4,
-                    have: bytes.len() - pos,
-                });
-            }
-            // The 4-byte slice → [u8; 4] conversion is infallible
-            // because we just bounds-checked `pos + 4 <= bytes.len()`
-            // above, but we use `?` instead of `.expect` to keep the
-            // hot parse loop panic-free (defense-in-depth: a future
-            // refactor can't accidentally drop the bounds check and
-            // leave a panic in its wake).
-            let value_len_bytes: [u8; 4] =
-                bytes[pos..pos + 4]
-                    .try_into()
-                    .map_err(|_| PredictError::Truncated {
-                        offset: pos,
-                        want: 4,
-                        have: bytes.len() - pos,
-                    })?;
-            let value_len = u32::from_le_bytes(value_len_bytes) as usize;
-            pos += 4;
-
-            // [value_len] value
-            let value_end = pos.checked_add(value_len).ok_or(PredictError::Truncated {
-                offset: pos,
-                want: value_len,
-                have: bytes.len().saturating_sub(pos),
-            })?;
-            if value_end > bytes.len() {
-                return Err(PredictError::Truncated {
-                    offset: pos,
-                    want: value_len,
-                    have: bytes.len() - pos,
-                });
-            }
-            let value = &bytes[pos..value_end];
-            pos = value_end;
-
-            entries.push(MetadataEntry {
-                key,
-                kind: MetadataType::from_byte(value_type_byte),
-                value,
-            });
+            let (_, end) = decode_entry(bytes, pos)?;
+            pos = end;
+            len += 1;
         }
-        Ok(Self { entries })
+        Ok(Self { bytes, len })
+    }
+
+    pub(crate) fn from_validated_bytes(bytes: &'a [u8], len: usize) -> Self {
+        Self { bytes, len }
     }
 
     /// Lookup by exact key. Linear scan — fine at ≤ 30 entries.
-    pub fn get(&self, key: &str) -> Option<&MetadataEntry<'a>> {
-        self.entries.iter().find(|e| e.key == key)
+    pub fn get(&self, key: &str) -> Option<MetadataEntry<'a>> {
+        self.iter().find(|e| e.key == key)
     }
 
     /// Lookup + type-check + UTF-8 borrow. Use for keys whose value
@@ -285,16 +213,19 @@ impl<'a> Metadata<'a> {
         Some(pod_read_unaligned(entry.value))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &MetadataEntry<'a>> {
-        self.entries.iter()
+    pub fn iter(&self) -> impl Iterator<Item = MetadataEntry<'a>> {
+        MetadataIter {
+            bytes: self.bytes,
+            pos: 0,
+        }
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.len == 0
     }
 }
 
@@ -408,4 +339,107 @@ pub mod keys {
     /// Absent on older bakes; assume default only when training provenance
     /// establishes it.
     pub const FEATURE_CONFIG_HASH: &str = "zentrain.feature_config_hash";
+}
+
+// Keys and lengths were checked by parse before a view/iterator is exposed.
+struct MetadataIter<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+impl<'a> Iterator for MetadataIter<'a> {
+    type Item = MetadataEntry<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos == self.bytes.len() {
+            return None;
+        }
+        let (entry, end) =
+            decode_entry(self.bytes, self.pos).expect("immutable validated metadata");
+        self.pos = end;
+        Some(entry)
+    }
+}
+fn decode_entry(bytes: &[u8], mut pos: usize) -> Result<(MetadataEntry<'_>, usize), PredictError> {
+    // [1] key_len
+    let key_len = *bytes.get(pos).ok_or(PredictError::Truncated {
+        offset: pos,
+        want: 1,
+        have: 0,
+    })? as usize;
+    pos += 1;
+
+    // [key_len] key
+    let key_end = pos.checked_add(key_len).ok_or(PredictError::Truncated {
+        offset: pos,
+        want: key_len,
+        have: bytes.len().saturating_sub(pos),
+    })?;
+    if key_end > bytes.len() {
+        return Err(PredictError::Truncated {
+            offset: pos,
+            want: key_len,
+            have: bytes.len() - pos,
+        });
+    }
+    let key_bytes = &bytes[pos..key_end];
+    let key = core::str::from_utf8(key_bytes)
+        .map_err(|_| PredictError::MetadataKeyNotUtf8 { offset: pos })?;
+    pos = key_end;
+
+    // [1] value_type
+    let value_type_byte = *bytes.get(pos).ok_or(PredictError::Truncated {
+        offset: pos,
+        want: 1,
+        have: 0,
+    })?;
+    pos += 1;
+
+    // [4] value_len (unaligned LE)
+    if pos + 4 > bytes.len() {
+        return Err(PredictError::Truncated {
+            offset: pos,
+            want: 4,
+            have: bytes.len() - pos,
+        });
+    }
+    // The 4-byte slice → [u8; 4] conversion is infallible
+    // because we just bounds-checked `pos + 4 <= bytes.len()`
+    // above, but we use `?` instead of `.expect` to keep the
+    // hot parse loop panic-free (defense-in-depth: a future
+    // refactor can't accidentally drop the bounds check and
+    // leave a panic in its wake).
+    let value_len_bytes: [u8; 4] =
+        bytes[pos..pos + 4]
+            .try_into()
+            .map_err(|_| PredictError::Truncated {
+                offset: pos,
+                want: 4,
+                have: bytes.len() - pos,
+            })?;
+    let value_len = u32::from_le_bytes(value_len_bytes) as usize;
+    pos += 4;
+
+    // [value_len] value
+    let value_end = pos.checked_add(value_len).ok_or(PredictError::Truncated {
+        offset: pos,
+        want: value_len,
+        have: bytes.len().saturating_sub(pos),
+    })?;
+    if value_end > bytes.len() {
+        return Err(PredictError::Truncated {
+            offset: pos,
+            want: value_len,
+            have: bytes.len() - pos,
+        });
+    }
+    let value = &bytes[pos..value_end];
+    pos = value_end;
+
+    Ok((
+        MetadataEntry {
+            key,
+            kind: MetadataType::from_byte(value_type_byte),
+            value,
+        },
+        pos,
+    ))
 }

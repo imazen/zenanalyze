@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
+
+- `Predictor::new` returns `Result<_, PredictError>` for fallible scratch allocation.
+- `Metadata::get`/`iter` yield borrowed entries by value; model metadata access
+  no longer allocates or reparses the complete metadata blob.
+- `Header`, `LayerEntry`, `Section`, `wire` and `input_program` require `baking`.
+- no_std dense layers use fused FMA, and all builds use libm transcendentals;
+  historical platform-dependent last bits change deliberately.
 <!-- Breaking changes that ship together in the next minor (0.x patch
      bumps stay non-breaking). Persist across patch releases. Only
      clear when the breaking release ships. -->
@@ -10,6 +17,14 @@
 - `LayerEntry.*` and `LayerView.*` field tightening may follow once
   `WeightStorage` variant pattern-matching has a stable accessor
   pair (likely `LayerView::weights() -> &WeightStorage<'_>`).
+
+### Added
+
+- Explicit source-input programs, Softplus, SiLU and research max pairs.
+- Aligned model storage and consolidated predictor scratch use bytemuck fast
+  fallible zeroed allocations. F32/I8 models omit the unused F16 cache index.
+- Opt-in `generic-powf` trial uses archmage PR144 Full/HIGHP for every power
+  transform. Default math stays libm; this feature is a distinct numeric policy.
 
 ## [0.2.0] - 2026-11-06
 

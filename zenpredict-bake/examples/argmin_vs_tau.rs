@@ -43,7 +43,7 @@ fn predict_all(bytes: &[u8], inputs: &[Vec<f32>]) -> (Vec<Vec<f32>>, Vec<usize>)
     view[..bytes.len()].copy_from_slice(bytes);
     let aligned: &[u8] = &bytemuck::cast_slice::<u64, u8>(&storage)[..bytes.len()];
     let model = Model::from_bytes(aligned).expect("parse");
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let mut outs = Vec::with_capacity(inputs.len());
     let mut argmins = Vec::with_capacity(inputs.len());
     for f in inputs {

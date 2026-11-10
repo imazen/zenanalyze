@@ -74,16 +74,15 @@ pub(crate) fn rsqrt_stable_scalar(x: f32) -> f32 {
 /// **bit-identical** to v3/v4/NEON. The scalar tier is slower for it; it only
 /// runs on CPUs without AVX2+FMA / NEON and on 32-bit x86.
 ///
-/// The **wasm128** tier deliberately keeps `mul_add` (the engine's madd, which
-/// may round twice) — unchanged values and speed; making it single-rounding too
-/// would cost ~8× on these ops (`mul_add_portable` fuses in software there).
+/// wasm128 also uses the fused operation; software supplies one rounding where
+/// the platform has no matching hardware instruction.
 pub(crate) trait TierMulAdd: Sized {
     /// `self * a + b` with the tier's rounding (see the trait docs).
     fn tier_mul_add(self, a: Self, b: Self) -> Self;
 }
 
 /// Tiers whose `mul_add` already rounds once (hardware FMA) or whose current
-/// rounding is kept (wasm128): plain `mul_add`. (32-bit x86 dispatches to the
+/// rounding is kept (wasm128): explicit `mul_add_fused`. (32-bit x86 dispatches to the
 /// scalar tier only, so it has no native impl.)
 #[cfg(any(
     target_arch = "x86_64",
@@ -95,7 +94,7 @@ macro_rules! tier_mul_add_native {
         impl TierMulAdd for magetypes::simd::generic::f32x8<$token> {
             #[inline(always)]
             fn tier_mul_add(self, a: Self, b: Self) -> Self {
-                self.mul_add(a, b)
+                self.mul_add_fused(a, b)
             }
         }
     )*};

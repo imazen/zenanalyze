@@ -418,7 +418,7 @@ fn scalar_bake_roundtrips_through_zenpredict() {
         ds.n_cells * 3,
         "bake carries the wide output"
     );
-    let mut predictor = zenpredict::Predictor::new(&zmodel);
+    let mut predictor = zenpredict::Predictor::new(&zmodel).unwrap();
 
     let n_cells = ds.n_cells;
     let n_in = ds.n_in;

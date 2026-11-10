@@ -15,27 +15,35 @@ pub const HEADER_SIZE: usize = 128;
 pub const LAYER_ENTRY_SIZE: usize = 48;
 
 /// Header byte offset of the `scaler_mean` [`crate::Section`].
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_SCALER_MEAN: usize = 32;
 
 /// Header byte offset of the `scaler_scale` [`crate::Section`].
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_SCALER_SCALE: usize = 40;
 
 /// Header byte offset of the `layer_table` [`crate::Section`].
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_LAYER_TABLE: usize = 48;
 
 /// Header byte offset of the `feature_bounds` [`crate::Section`].
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_FEATURE_BOUNDS: usize = 56;
 
 /// Header byte offset of the `metadata` [`crate::Section`].
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_METADATA: usize = 64;
 
 /// Header byte offset of the `output_specs` [`crate::Section`] (v3+).
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_OUTPUT_SPECS: usize = 72;
 
 /// Header byte offset of the `discrete_sets` [`crate::Section`] (v3+).
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_DISCRETE_SETS: usize = 80;
 
 /// Header byte offset of the `sparse_overrides` [`crate::Section`] (v3+).
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_SPARSE_OVERRIDES: usize = 88;
 
 /// Header byte offset of `decompressed_payload_len: u32` (v3.1+).
@@ -44,10 +52,12 @@ pub const OFF_DECOMPRESSED_PAYLOAD_LEN: usize = 96;
 
 /// Header byte offset of the `feature_order` [`crate::Section`] (v3.1+).
 /// Empty (len=0) when the bake's inputs are in caller-natural order.
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_FEATURE_ORDER: usize = 100;
 
 /// Header byte offset of the `output_order` [`crate::Section`] (v3.1+).
 /// Empty (len=0) when the bake's outputs are in caller-natural order.
+#[cfg(feature = "baking")]
 pub const SECTION_OFF_OUTPUT_ORDER: usize = 108;
 
 // Header bytes 116..124 are reserved for a future header section.

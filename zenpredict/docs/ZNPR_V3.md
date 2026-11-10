@@ -17,7 +17,7 @@
 ```rust
 let bytes: &'static [u8] = include_bytes!("…trained_v3.bin");
 let model = zenpredict::Model::from_bytes(bytes)?;
-let mut p = zenpredict::Predictor::new(model);
+let mut p = zenpredict::Predictor::new(model)?;
 let out = p.predict(&features)?;
 ```
 

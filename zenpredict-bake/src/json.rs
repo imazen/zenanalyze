@@ -196,6 +196,9 @@ impl From<BakeError> for BakeJsonError {
 #[derive(Deserialize, Debug)]
 #[non_exhaustive]
 pub struct BakeRequestJson {
+    /// Optional raw source-to-compact input program; selects format v4.
+    #[serde(default)]
+    pub input_program: Option<crate::input_program::InputProgramJson>,
     pub schema_hash: u64,
     #[serde(default)]
     pub flags: u16,
@@ -323,6 +326,10 @@ pub enum ActivationJson {
     LeakyRelu,
     #[serde(rename = "smooth_hinge")]
     SmoothHinge,
+    Softplus,
+    Silu,
+    #[serde(rename = "research_relu_max_pairs")]
+    ResearchReluMaxPairs,
 }
 
 impl From<ActivationJson> for Activation {
@@ -332,6 +339,9 @@ impl From<ActivationJson> for Activation {
             ActivationJson::Relu => Activation::Relu,
             ActivationJson::LeakyRelu => Activation::LeakyRelu,
             ActivationJson::SmoothHinge => Activation::SmoothHinge,
+            ActivationJson::Softplus => Activation::Softplus,
+            ActivationJson::Silu => Activation::Silu,
+            ActivationJson::ResearchReluMaxPairs => Activation::ResearchReluMaxPairs,
         }
     }
 }
@@ -710,6 +720,19 @@ pub fn bake_from_json(req: &BakeRequestJson) -> Result<Vec<u8>, BakeJsonError> {
         })
         .collect();
 
+    let program_bytes = req
+        .input_program
+        .as_ref()
+        .map(|p| p.build().map(|p| p.to_bytes()))
+        .transpose()
+        .map_err(|e| BakeJsonError::Bake(BakeError::InvalidInputProgram(e)))?;
+    if let Some(ref value) = program_bytes {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::input_program::METADATA_KEY,
+            kind: MetadataType::Bytes,
+            value,
+        });
+    }
     let request = BakeRequest {
         schema_hash: req.schema_hash,
         flags: req.flags,

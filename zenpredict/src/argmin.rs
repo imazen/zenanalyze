@@ -66,12 +66,8 @@ pub enum ScoreTransform {
     /// numerics finite) before adding offsets and running argmin.
     /// Lets log-domain regressors mix with linear-domain offsets.
     ///
-    /// Computed via `f32::exp` under `std` and `libm::expf` under
-    /// no_std (`libm` is an unconditional dependency), so both build
-    /// configurations apply a true `exp` — `ArgminOffsets` in
-    /// linear-byte space mix correctly with the exponentiated scores
-    /// either way. The two `exp`s can differ in the last bit, which can
-    /// only change the pick between near-tied cells.
+    /// Computed via `libm::expf` in every build, so the post-transform
+    /// domain stays consistent across standard-library configurations.
     Exp,
 }
 
@@ -594,11 +590,7 @@ fn score_at(
 
 fn clamped_exp(x: f32) -> f32 {
     let x = x.clamp(-30.0, 30.0);
-    #[cfg(feature = "std")]
-    {
-        x.exp()
-    }
-    #[cfg(not(feature = "std"))]
+
     {
         // `core` has no `f32::exp`, but `libm` is an unconditional
         // dependency (it backs `ln` / `ln_1p` in `feature_transform`),

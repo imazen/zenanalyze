@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Workspace
+
+- Use explicit fused multiply-add in analyzer kernels, including WebAssembly.
+- Pin the unreleased archmage PR144 revision for an opt-in Full/HIGHP power trial;
+  publication requires replacing the patch with an upstream release.
+
+### zenpredict / zenpredict-bake
+
+- Add required input programs for products, monotone damage shapers and
+  nonnegative reference gates, with source-input prediction and typed JSON.
+  Required programs use ZNPR v4; ordinary bakes retain v3.
+- Add byte-preserving attachment of composition to existing bakes and typed
+  program inspection. Share transformed forwarding and output finalization.
+- Handle Drop-only preprocessing without parameter metadata and reserve raw-width
+  parameter scratch at predictor construction.
+- Reject unsupported visualizer traces and input-program ONNX exports explicitly.
+- Validate hidden-unit permutations and empty optimized requests before indexing;
+  remap max-pair declarations together with hidden-unit order.
+
+### Added
+
+- zenpredict: opt-in research ReLU max-pair operator (wire code 6), validated
+  pair metadata and `InvalidResearchMaxPair` errors. Existing bakes keep their
+  arithmetic; marked research bakes use direct maxima.
+
+- zenpredict / zenpredict-bake: native unit-temperature Softplus and ordinary
+  SiLU activation operators and JSON names. Existing wire codes retain their
+  arithmetic; older runtimes reject models using the new codes.
+
 ### Changed
 
 - Preserve the existing archmage minimums with caret-compatible requirements,
@@ -42,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
 ### QUEUED BREAKING CHANGES
+
+- zenpredict: `Predictor::new` returns `Result`; metadata entries are returned
+  by value. Producer wire types and input-program construction require `baking`.
+- zenpredict-bake: use root exports instead of implementation module paths.
+- zenpredict: fused no_std arithmetic and shared libm transforms deliberately
+  replace platform-dependent math. `generic-powf` is a distinct opt-in numeric
+  policy, not a byte-equivalent optimization.
 
 - zenpredict: gate controller policy behind `experimental` (also enabled by
   `advanced`), and add the hard constraint mask to `resolve_pre_argmin`. This

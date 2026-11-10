@@ -17,7 +17,7 @@ use zenpredict::{Model, Predictor};
 // Load a baked model (ZNPR v3). `from_bytes` copies into an owned,
 // internally-aligned buffer, so `include_bytes!` works as-is.
 let model = Model::from_bytes(include_bytes!("my_model.bin"))?;
-let mut predictor = Predictor::new(&model); // borrows the Model
+let mut predictor = Predictor::new(&model)?; // borrows the Model
 
 // RAW (un-normalized) features — the bake's embedded scaler standardizes
 // them. Length must equal `model.n_inputs()`. A scorer reads output [0]:
@@ -66,7 +66,7 @@ const MY_SCHEMA_HASH: u64 = 0x0123_4567_89ab_cdef;
 // `Model` must outlive the `Predictor` (here both are locals; for a process-
 // wide singleton put the `Model` in a `static OnceLock<Model>`).
 let model: Model = Model::from_bytes_with_schema(MODEL_BYTES, MY_SCHEMA_HASH)?;
-let mut predictor = Predictor::new(&model); // note: &model — `new` takes `&Model`
+let mut predictor = Predictor::new(&model)?; // note: &model — `new` takes `&Model`
 
 // RAW features — pass them un-normalized. The bake's embedded scaler
 // standardizes internally (`x' = (x - mean) / scale`) before the first layer.
@@ -121,7 +121,7 @@ use zenpredict::{Model, Predictor};
 // bake has a single output, so index `[0]`. `include_bytes!` is fine —
 // `from_bytes` copies into an internally-aligned buffer.
 let model = Model::from_bytes(include_bytes!("zensim_v018.bin"))?;
-let mut predictor = Predictor::new(&model); // &model — `new` borrows the Model
+let mut predictor = Predictor::new(&model)?; // &model — `new` borrows the Model
 let distance: f32 = predictor.predict(&features)?[0];
 ```
 
@@ -132,6 +132,16 @@ let distance: f32 = predictor.predict(&features)?[0];
 > free function returns the same `Option<usize>` (full-output-space index;
 > `None` when no cell is allowed). Same `ScoreTransform` / `ArgminOffsets`
 > semantics either way.
+
+### Product and shaped inputs
+
+For bakes with required input composition, use `predict_from_source` with
+`model.n_source_inputs()` columns. It composes products and shaping, applies
+feature transforms and the scaler, then runs the ordinary network. Such bakes
+use ZNPR v4 so v3-only readers reject them. See [input programs](docs/INPUT_PROGRAM.md)
+for JSON/Rust producer paths, exact attachment to existing bakes and input-domain
+contracts. Softplus is available as a native layer activation; temperature and
+anchoring remain explicit network operations.
 
 ### Input transforms and selection
 
@@ -158,14 +168,14 @@ Wire layout: [`src/model.rs`](https://github.com/imazen/zenanalyze/blob/main/zen
 
 ### Alignment & lifetime
 
-`Model::from_bytes` / `from_bytes_with_schema` **copy the input into an owned, heap-allocated `Box<[u8]>`** at construction (decompressing first for a compressed bake). Two consequences:
+`Model::from_bytes` / `from_bytes_with_schema` **copy the input into an owned, heap-allocated, 16-byte-aligned storage** at construction (decompressing first for a compressed bake). Two consequences:
 
 - **The input slice has no alignment requirement** — `include_bytes!(...)` can be passed straight to `from_bytes`. Misaligned input is *not* UB and does *not* panic; it's copied like any other. The `#[repr(C, align(16))]` wrapper used in some examples is therefore **optional** for the compile-in case.
 - **The input bytes do not need to outlive the `Model`.** The `Model` owns its copy; weight/scaler/metadata slices are zero-copy borrows into **`self.bytes`** (the owned buffer), not into the original input. You may drop the input immediately after `from_bytes` returns.
 
 The lifetime that *does* matter is the other one: **`Predictor<'a>` borrows `&'a Model`, so the `Model` must outlive the `Predictor`.** For a process-wide singleton, park the `Model` in a `static OnceLock<Model>` (it's `Send + Sync`) and give each thread its own `Predictor` over a `&'static Model` — no `Mutex` needed.
 
-One subtlety for the **runtime-file-load** path (`std::fs::read` → `Vec<u8>`): the owned buffer is cast in place to typed slices, and a `Vec<u8>` allocation isn't *guaranteed* to be 4/8-byte aligned. If the allocator ever hands back a misaligned buffer, the typed-slice cast fails cleanly with `PredictError::SectionMisaligned` (again, an error — never UB). In practice global allocators return ≥16-aligned blocks so this is rare, but if you hit it, re-align into a `u64`-backed buffer before parsing — see [`examples/load_baked_model.rs`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/examples/load_baked_model.rs) for the pattern.
+Allocation is fallible: model storage and predictor scratch use bytemuck zeroed allocations, and failures return `PredictError::AllocationFailed`. Input alignment never determines whether loading succeeds.
 
 Three weight dtypes:
 
@@ -173,7 +183,7 @@ Three weight dtypes:
 - **F16** — half the size at ~no accuracy cost. Conversion is built in (no `half` dep) — compact integer bit math, see [`f16_bits_to_f32`](https://github.com/imazen/zenanalyze/blob/main/zenpredict/src/inference.rs).
 - **I8** — `1/4` size with one f32 scale per output neuron. Per-output (column-wise) scaling — each output has its own dynamic range so one big-magnitude column doesn't waste i8 resolution on the small-magnitude ones.
 
-Four activations: `Identity`, `ReLU`, `LeakyReLU(α=0.01)`, and fixed `SmoothHinge` (τ=1/8).
+Activations include `Identity`, `ReLU`, `LeakyReLU(α=0.01)`, fixed `SmoothHinge` (τ=1/8), unit-temperature `Softplus`, `SiLU`, and research max pairs.
 
 ## Metadata
 
@@ -187,7 +197,7 @@ The `argmin` family is generic — it's "argmin over a slice with a boolean filt
 
 - **`AllowedMask::new(&[bool])`** — one flag per output cell; `true` = pickable. Must be ≥ the scored slice length (a short mask panics in debug *and* release).
 - **`argmin_masked(...) -> Option<usize>`** (free fn) / **`Predictor::argmin_masked(...) -> Result<Option<usize>, _>`** (method, which runs `predict` first). `Some(i)` is an index into the **full output/config space** (the same indexing as the mask and your config table); `None` means no allowed cell (or all allowed cells scored NaN — NaN is silently skipped). Ties break to the **lowest index**. Use `*_in_range` to argmin over a sub-slice of the outputs (hybrid-heads bakes that pack `[bytes.., scalar1.., …]`); for those the returned index is into the sub-range.
-- **`ScoreTransform`** (applied per score *before* offsets and argmin): `Identity` (default — outputs are already in argmin-target space, e.g. perceptual distances) or `Exp` (the model emits **log-domain** values, typically log-bytes; `exp` brings them into raw-byte space so a byte-space `ArgminOffsets` table mixes correctly). `Exp` clamps its input to `[-30, 30]` and computes a true `exp` in both builds (`std`'s `f32::exp`, or the `libm` crate without `std`); the two can differ in the last bit, which can only change a pick between near-tied cells.
+- **`ScoreTransform`** (applied per score *before* offsets and argmin): `Identity` (default — outputs are already in argmin-target space, e.g. perceptual distances) or `Exp` (the model emits **log-domain** values, typically log-bytes; `exp` brings them into raw-byte space so a byte-space `ArgminOffsets` table mixes correctly). `Exp` clamps its input to `[-30, 30]` and computes `libm::expf` in every build.
 - **`ArgminOffsets<'a>`** — additive cost adjustments in the post-transform score space, fields:
   - `uniform: f32` — added to every cell's score. Same for all cells, so on its own it never changes the pick (e.g. caller-side ICC/EXIF overhead).
   - `per_output: Option<&'a [f32]>` — per-cell additive (e.g. per-config container/ICC bytes). When `Some`, its length **must equal the argmin's working slice** (full `n_outputs` for `argmin_masked`, the sub-range length for `*_in_range`), else `PredictError::OffsetsLenMismatch`. This is the term that can actually shift the pick. Pass `None` (or `ArgminOffsets::uniform(x)` for uniform-only) when you have no per-cell table.
@@ -212,7 +222,12 @@ Behind the `advanced` feature (default-off): the closure-scorer hybrids `argmin_
 
 The default surface follows normal 0.x semver. The `advanced` surface is **not yet stabilized** — items behind it may change shape or be removed in a 0.2.x patch, so pin a version if you depend on them. (`advanced` gates extra API; it's a different axis from `zenanalyze`'s `experimental`, which gates unstable feature numerics.)
 
-`no_std + alloc` builds compute the same functions (nothing is missing or approximated) but not always the same bits as `std` builds: Dense layers accumulate with `a * b + c` (two roundings) instead of the fused `f32::mul_add`, and the feature transforms and `ScoreTransform::Exp` call the `libm` crate where `std` calls the platform's `f32::{exp, ln, ln_1p, powf, cbrt}`. Expect last-bit differences between a `std` and a `no_std` build.
+Dense layers use correctly rounded fused multiply-add in both `std` and `no_std + alloc`. Transcendental transforms and activations use libm in both configurations. The opt-in `generic-powf` experiment replaces every power transform with PR144 canonical Full/HIGHP arithmetic; it intentionally has its own numerical fingerprint. Bit reproducibility assumes round-to-nearest and gradual underflow.
+
+`Predictor::new(&model)?` now reports allocation failure. Producer wire structures and input-program construction require the `baking` feature; serving uses `Model::has_input_program()` and `Predictor::predict_from_source()`. Metadata entries are small borrowed views returned by value. See [migration notes](../MIGRATION.md#portable-prediction-and-fallible-allocation).
+
+Lifecycle allocation counts and exploratory timings are recorded in the
+[portable prediction measurements](../benchmarks/zenpredict_portable_2026-11-10.md).
 
 ## Compressed bakes
 
