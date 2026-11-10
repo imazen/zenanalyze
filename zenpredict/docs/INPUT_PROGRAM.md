@@ -145,3 +145,9 @@ allocation on the first prediction or falsely require Sinusoidal frequencies.
 
 Baker and optimizer dimension preflight is shared: empty/zero/excessive dimensions
 and overflowing weight counts return errors before indexing or allocation.
+
+The public CLI bake/inspect/repack path is covered through spawned processes.
+Baking validates the completed artifact before writing; metadata counts include
+required composition. Repacking probes the complete source-input path and parses
+the resulting model before writing its output. Its numeric probe remains a
+single diagnostic vector, not a quality or general parity gate.

@@ -286,7 +286,7 @@ analytic-activation-check:
 # Run under run-heavy on a build host. No datasets or holdout exposure required.
 predict-input-programs:
     cargo fmt -p zenpredict -p zenpredict-bake --check
-    cargo test --locked -p zenpredict -p zenpredict-bake --lib --test input_program
+    cargo test --locked -p zenpredict -p zenpredict-bake --lib --test input_program --test input_program_cli
     cargo test --locked -p zenpredict --no-default-features --lib
     cargo test --locked -p zenpredict-bake --test smooth_analytic --test research_max_pairs
     cargo clippy --locked -p zenpredict -p zenpredict-bake --all-targets -- -D warnings

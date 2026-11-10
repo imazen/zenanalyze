@@ -86,6 +86,13 @@ pub fn run_bake_cli(argv: &[String]) -> ExitCode {
         }
     };
 
+    let model = match Model::from_bytes(&bytes) {
+        Ok(model) => model,
+        Err(e) => {
+            eprintln!("zenpredict-bake: output validation failed: {e}");
+            return ExitCode::from(3);
+        }
+    };
     if let Err(e) = std::fs::write(&output, &bytes) {
         eprintln!("zenpredict-bake: failed to write {}: {e}", output.display());
         return ExitCode::from(1);
@@ -95,11 +102,11 @@ pub fn run_bake_cli(argv: &[String]) -> ExitCode {
         "zenpredict-bake: wrote {} ({} bytes) — n_inputs={} n_outputs={} n_layers={} schema_hash=0x{:016x} metadata_entries={}",
         output.display(),
         bytes.len(),
-        req.scaler_mean.len(),
-        req.layers.last().map(|l| l.out_dim).unwrap_or(0),
-        req.layers.len(),
-        req.schema_hash,
-        req.metadata.len(),
+        model.n_inputs(),
+        model.n_outputs(),
+        model.n_layers(),
+        model.schema_hash(),
+        model.metadata().iter().count(),
     );
     ExitCode::SUCCESS
 }
@@ -550,19 +557,8 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
         }
     };
 
-    if let Err(e) = std::fs::write(&out_path, &new_bytes) {
-        eprintln!("write {}: {}", out_path.display(), e);
-        return ExitCode::from(1);
-    }
-    eprintln!(
-        "wrote {}: {} bytes ({:.1}% of input)",
-        out_path.display(),
-        new_bytes.len(),
-        new_bytes.len() as f64 / input_bytes.len() as f64 * 100.0
-    );
-
     // Verify round-trip: load the new bake, run a quick predict on
-    // a uniform-0.5 input, compare to the original model's predict.
+    // a uniform-0.5 source input, including all baked preprocessing.
     let new_model = match Model::from_bytes(&new_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -572,9 +568,21 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
     };
     let mut p_old = zenpredict::Predictor::new(&model);
     let mut p_new = zenpredict::Predictor::new(&new_model);
-    let features = vec![0.5f32; n_inputs];
-    let out_old = p_old.predict(&features).unwrap();
-    let out_new = p_new.predict(&features).unwrap();
+    let features = vec![0.5f32; model.n_source_inputs()];
+    let out_old = match p_old.predict_from_source(&features) {
+        Ok(values) => values,
+        Err(e) => {
+            eprintln!("original source prediction: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let out_new = match p_new.predict_from_source(&features) {
+        Ok(values) => values,
+        Err(e) => {
+            eprintln!("repacked source prediction: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let max_diff = out_old
         .iter()
         .zip(out_new.iter())
@@ -590,6 +598,17 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             "WARNING: round-trip differs by > 1e-3 — likely I8 quantization noise from re-baking"
         );
     }
+    if let Err(e) = std::fs::write(&out_path, &new_bytes) {
+        eprintln!("write {}: {}", out_path.display(), e);
+        return ExitCode::from(1);
+    }
+    eprintln!(
+        "wrote {}: {} bytes ({:.1}% of input)",
+        out_path.display(),
+        new_bytes.len(),
+        new_bytes.len() as f64 / input_bytes.len() as f64 * 100.0
+    );
+
     ExitCode::SUCCESS
 }
 
