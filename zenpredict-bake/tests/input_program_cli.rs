@@ -68,8 +68,8 @@ fn source_model_bakes_inspects_and_repacks_through_public_cli() {
     let b = Model::from_bytes(&fs::read(&repacked).unwrap()).unwrap();
     assert_eq!(a.input_program(), b.input_program());
     assert_eq!(b.version(), 4);
-    let mut old = Predictor::new(&a);
-    let mut new = Predictor::new(&b);
+    let mut old = Predictor::new(&a).unwrap();
+    let mut new = Predictor::new(&b).unwrap();
     for x in [[0., 1.], [2., 3.], [0.5, 0.25]] {
         assert_eq!(
             old.predict_from_source(&x).unwrap(),

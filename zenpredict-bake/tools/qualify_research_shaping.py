@@ -57,7 +57,7 @@ fn main()->Result<(),Box<dyn Error>> {
  }
  let program=InputProgram::new(source_count,nodes,outputs)?;
  let attached=attach_input_program(&bytes,&program)?;let migrated=Model::from_bytes(&attached)?;
- let mut old_predictor=Predictor::new(&model);let mut new_predictor=Predictor::new(&migrated);
+ let mut old_predictor=Predictor::new(&model)?;let mut new_predictor=Predictor::new(&migrated)?;
  let mut scratch=vec![0.;program.scratch_len()];let mut compact=vec![0.;terms.len()];let mut cases=Vec::new();let mut state=0x12345678u32;
  for i in 0..64 {
   let source:Vec<f32>=(0..program.source_count()).map(|_|{state=state.wrapping_mul(1664525).wrapping_add(1013904223);match i {0=>0.,1=>1.,2=>0.5,_=>(state>>8) as f32/16777216.}}).collect();

@@ -282,19 +282,8 @@ pub fn f16_bits_to_f32(h: u16) -> f32 {
     f32::from_bits(sign | bits)
 }
 
-/// `a * b + c`. Uses `f32::mul_add` (single-rounding fma) when the
-/// `std` feature is on; falls back to `a * b + c` (two roundings)
-/// for `no_std + alloc` builds. The numerical difference is in the
-/// last bit and well below MLP training noise; the perf difference
-/// is one fused instruction vs two.
-///
-/// **Do not "optimize" the `std` arm to `a * b + c`.** Every shipped
-/// zensim score and every baked picker threshold was produced through
-/// the single-rounding path; two roundings would move results in the
-/// last bit across the whole corpus. The cost of `mul_add` on a CPU
-/// without `+fma` enabled is an out-of-line software `fmaf` call — the
-/// fix for that is the `simd` feature's `#[autoversion]` on the kernels
-/// above (same operation, one instruction), not a change of operation.
+/// Single-rounding multiply-add on every build. std permits hardware dispatch;
+/// no_std uses libm's correctly rounded fused fallback.
 #[inline(always)]
 fn fma(a: f32, b: f32, c: f32) -> f32 {
     #[cfg(feature = "std")]
@@ -303,23 +292,16 @@ fn fma(a: f32, b: f32, c: f32) -> f32 {
     }
     #[cfg(not(feature = "std"))]
     {
-        a * b + c
+        libm::fmaf(a, b, c)
     }
 }
 
-// Both exponential arguments are nonpositive, including at finite f32 extremes.
-// Use the existing std/libm policy; cross-build bit identity is not implied.
+// Both exponential arguments are nonpositive, including at finite extremes.
+// A single libm path gives std/no_std the same transcendental implementation.
 fn smooth_activation(x: f32, act: Activation) -> f32 {
-    #[cfg(feature = "std")]
-    let e = (-x.abs()).exp();
-    #[cfg(not(feature = "std"))]
     let e = libm::expf(-libm::fabsf(x));
     if act == Activation::Softplus {
-        #[cfg(feature = "std")]
-        let tail = e.ln_1p();
-        #[cfg(not(feature = "std"))]
         let tail = libm::log1pf(e);
-        // Explicit branch preserves NaN instead of max's NaN suppression.
         if x > 0.0 { x + tail } else { tail }
     } else if x >= 0.0 {
         x / (1.0 + e)
@@ -677,5 +659,40 @@ mod analytic_activation_tests {
         assert!(
             smooth_activation(-2.0, Activation::Silu) < smooth_activation(-3.0, Activation::Silu)
         );
+    }
+}
+
+#[cfg(test)]
+mod portable_fma_tests {
+    #[test]
+    fn portable_activation_and_output_transform_fingerprint() {
+        let mut hash = 0xcbf29ce484222325u64;
+        for i in -128..=128 {
+            let x = i as f32 / 8.;
+            let values = [
+                super::smooth_activation(x, crate::Activation::Softplus),
+                super::smooth_activation(x, crate::Activation::Silu),
+                crate::OutputTransform::Exp.apply(x, [0.; 2]),
+                crate::OutputTransform::Sigmoid.apply(x, [0.; 2]),
+                crate::OutputTransform::Round.apply(x, [0.; 2]),
+            ];
+            for value in values {
+                for byte in value.to_bits().to_le_bytes() {
+                    hash ^= u64::from(byte);
+                    hash = hash.wrapping_mul(0x100000001b3);
+                }
+            }
+        }
+        assert_eq!(
+            hash, 1052935026603482826u64,
+            "portable activation/output fingerprint"
+        );
+    }
+    #[test]
+    fn cancellation_retains_the_single_rounding_residual() {
+        let x = f32::from_bits(0x3f800001);
+        let rounded_product = f32::from_bits(0x3f800002);
+        assert_eq!(super::fma(x, x, -rounded_product).to_bits(), 0x28800000); // 2^-46
+        assert_eq!(super::fma(0., 1., -0.).to_bits(), 0f32.to_bits());
     }
 }

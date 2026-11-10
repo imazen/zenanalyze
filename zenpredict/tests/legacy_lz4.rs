@@ -22,7 +22,7 @@ const LEGACY_BAKE: &[u8] = &[
 #[test]
 fn lz4_011_bake_remains_loadable() {
     let model = Model::from_bytes(LEGACY_BAKE).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     assert_eq!(predictor.predict(&[3.0, 4.0]).unwrap(), &[2.5]);
     assert_eq!(predictor.predict(&[-2.0, 1.0]).unwrap(), &[-4.5]);
 }

@@ -363,7 +363,7 @@ pub fn forward_with_taps(bytes: &[u8], features: Vec<f32>) -> Result<JsValue, Js
 /// exactly what a codec hands to `Predictor::predict_transformed`.
 pub fn forward_with_taps_native(bytes: &[u8], features: &[f32]) -> Result<ForwardTaps, String> {
     let model = Model::from_bytes(bytes).map_err(|e| format!("{e}"))?;
-    if model.input_program().is_some() {
+    if model.has_input_program() {
         return Err("input-program tracing is not implemented; use zenpredict::Predictor::predict_from_source for scores".into());
     }
 

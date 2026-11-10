@@ -117,12 +117,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-11-arm, macos-latest]
-        # zenpredict has 3 valid feature combos (`advanced` requires `std`):
-        #   ""             — no_std + alloc, runtime only
-        #   "std"          — full runtime (lean: predict + argmin_masked)
-        #   "std,advanced" — full runtime + typed multi-output / safety /
-        #                    rescue / top-K / scorer-hybrid API
-        features: ["", "std", "std,advanced"]
+        # Portable scalar math, advanced consumers and both power providers.
+        features: ["", "std", "std,advanced", "generic-powf", "std,generic-powf"]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

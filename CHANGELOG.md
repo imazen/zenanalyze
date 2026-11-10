@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Workspace
 
-- Use magetypes 0.9.31's explicit `mul_add_relaxed` spelling for the
-  analyzer's existing native-tier operation; retain its rounding behavior and
-  compatible later 0.9.x versions.
+- Use explicit fused multiply-add in analyzer kernels, including WebAssembly.
+- Pin the unreleased archmage PR144 revision for an opt-in Full/HIGHP power trial;
+  publication requires replacing the patch with an upstream release.
 
 ### zenpredict / zenpredict-bake
 
@@ -71,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > `docs/RELEASE_0.2.0.md` is the checklist.
 
 ### QUEUED BREAKING CHANGES
+
+- zenpredict: `Predictor::new` returns `Result`; metadata entries are returned
+  by value. Producer wire types and input-program construction require `baking`.
+- zenpredict-bake: use root exports instead of implementation module paths.
+- zenpredict: fused no_std arithmetic and shared libm transforms deliberately
+  replace platform-dependent math. `generic-powf` is a distinct opt-in numeric
+  policy, not a byte-equivalent optimization.
 
 - zenpredict: gate controller policy behind `experimental` (also enabled by
   `advanced`), and add the hard constraint mask to `resolve_pre_argmin`. This

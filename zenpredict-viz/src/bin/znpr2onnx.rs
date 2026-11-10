@@ -160,7 +160,7 @@ fn collect_calibration_warnings(model: &Model) -> Vec<&'static str> {
 }
 
 fn build_onnx_model(model: &Model, name: &str) -> Result<ModelProto, String> {
-    if model.input_program().is_some() {
+    if model.has_input_program() {
         return Err("znpr2onnx: required input programs are not supported by this exporter".into());
     }
     let n_inputs = model.n_inputs();

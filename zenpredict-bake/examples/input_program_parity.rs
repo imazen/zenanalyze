@@ -27,8 +27,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let attached = attach_input_program(&original, &program)?;
     let baseline = Model::from_bytes(&original)?;
     let composed = Model::from_bytes(&attached)?;
-    let mut old = Predictor::new(&baseline);
-    let mut new = Predictor::new(&composed);
+    let mut old = Predictor::new(&baseline).unwrap();
+    let mut new = Predictor::new(&composed).unwrap();
     let mut scratch = vec![0.; program.scratch_len()];
     let mut compact = vec![0.; program.outputs().len()];
     for (i, case) in cases.iter().enumerate() {

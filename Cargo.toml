@@ -271,6 +271,11 @@ required-features = ["api"]
 
 # Unpublished sibling qualification: one pixel type identity across consumers.
 [patch.crates-io]
+# Temporary workspace-only qualification of PR144; replace after upstream release.
+archmage = { git = "https://github.com/imazen/archmage", rev = "458e09788f67e3a5d0344fb03dc95f8280df3429" }
+archmage-macros = { git = "https://github.com/imazen/archmage", rev = "458e09788f67e3a5d0344fb03dc95f8280df3429" }
+magetypes = { git = "https://github.com/imazen/archmage", rev = "458e09788f67e3a5d0344fb03dc95f8280df3429" }
+
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 

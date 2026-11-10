@@ -21,7 +21,7 @@ fn analytic_bake_matches_double_reference_including_extremes() {
         let bytes = bake_from_json_str(&json).unwrap();
         let model = Model::from_bytes(&bytes).unwrap();
         assert_eq!(model.layers().next().unwrap().activation, activation);
-        let mut predictor = Predictor::new(&model);
+        let mut predictor = Predictor::new(&model).unwrap();
         let inputs = [
             -f32::MAX,
             -100.0,
@@ -96,7 +96,7 @@ fn explicit_anchor_subtraction_preserves_identity_and_monotone_domain() {
                     .bake()
                     .unwrap();
                 let model = Model::from_bytes(&bytes).unwrap();
-                let mut predictor = Predictor::new(&model);
+                let mut predictor = Predictor::new(&model).unwrap();
                 assert_eq!(
                     predictor.predict(&[0.0]).unwrap()[0].to_bits(),
                     100.0f32.to_bits()

@@ -358,7 +358,7 @@ pub fn evaluate_picker_bake(
     }
     let model =
         zenpredict::Model::from_bytes(bake).map_err(|e| format!("Model::from_bytes: {e}"))?;
-    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut predictor = zenpredict::Predictor::new(&model).unwrap();
     let use_tf = model.has_nontrivial_feature_transforms();
     let n_cells = ds.n_cells;
     let n_in = ds.n_in;

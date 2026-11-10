@@ -62,8 +62,8 @@ fn public_source_path_preserves_composition_transform_scaler_softplus_and_select
             assert_eq!(model.n_source_inputs(), 3);
             assert_eq!(model.n_inputs(), 2);
             assert_eq!(model.input_program(), Some(&program()));
-            let mut predictor = Predictor::new(&model);
-            let mut prepared = Predictor::new(&model);
+            let mut predictor = Predictor::new(&model).unwrap();
+            let mut prepared = Predictor::new(&model).unwrap();
             for source in [
                 [2., 99., 0.25],
                 [0., -9., 0.],
@@ -103,7 +103,7 @@ fn public_source_path_preserves_composition_transform_scaler_softplus_and_select
             let changed = append_metadata_utf8(&bytes, "test.provenance", "roundtrip").unwrap();
             let reparsed = Model::from_bytes(&changed).unwrap();
             assert_eq!(reparsed.input_program(), model.input_program());
-            let mut other = Predictor::new(&reparsed);
+            let mut other = Predictor::new(&reparsed).unwrap();
             assert_eq!(
                 other.predict_from_source(&[2., 0., 0.25]).unwrap(),
                 predictor.predict_from_source(&[2., 0., 0.25]).unwrap()
@@ -136,7 +136,7 @@ fn v3_is_unchanged_and_required_programs_cannot_be_silently_ignored() {
     let old = Model::from_bytes(&plain).unwrap();
     assert_eq!(old.version(), 3);
     assert!(old.input_program().is_none());
-    let mut predictor = Predictor::new(&old);
+    let mut predictor = Predictor::new(&old).unwrap();
     assert_eq!(predictor.predict_from_source(&[2.]).unwrap(), &[5.]);
     let mut missing = plain.clone();
     missing[4..6].copy_from_slice(&4u16.to_le_bytes());
@@ -166,7 +166,7 @@ fn json_program_is_typed_validated_and_available_to_cli() {
     let valid = r#"{"schema_hash":0,"scaler_mean":[0],"scaler_scale":[1],"input_program":{"source_count":2,"nodes":[{"op":"source","index":0},{"op":"source","index":1},{"op":"product","left":0,"right":1}],"outputs":[2]},"layers":[{"in_dim":1,"out_dim":1,"activation":"softplus","dtype":"f32","weights":[1],"biases":[0]}]}"#;
     let bytes = bake_from_json_str(valid).unwrap();
     let model = Model::from_bytes(&bytes).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     assert!((p.predict_from_source(&[2., 3.]).unwrap()[0] - (1. + 6f32.exp()).ln()).abs() < 1e-6);
     for invalid in [
         valid.replace("\"left\":0", "\"left\":2"),
@@ -180,7 +180,7 @@ fn json_program_is_typed_validated_and_available_to_cli() {
 fn source_specs_and_overrides_use_the_same_forward_path() {
     let bytes = fixture(false, false);
     let model = Model::from_bytes(&bytes).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let expected = p.predict_from_source(&[2., 0., 0.25]).unwrap().to_vec();
     let specs = p.predict_with_specs_from_source(&[2., 0., 0.25]).unwrap();
     for (a, b) in specs.iter().zip(expected) {
@@ -218,8 +218,8 @@ fn attaching_program_preserves_existing_network_sections_and_scores() {
             }
             _ => panic!("dtype changed"),
         }
-        let mut left = Predictor::new(&old);
-        let mut right = Predictor::new(&new);
+        let mut left = Predictor::new(&old).unwrap();
+        let mut right = Predictor::new(&new).unwrap();
         for source in [[2., 0., 0.25], [0., 1., 1.], [0.25, 2., 0.5]] {
             let mut compact = [0.; 2];
             program()
@@ -265,7 +265,7 @@ fn hidden_permutations_preserve_semantic_max_pair_references() {
         req.hu_permutations = slots.as_ref().map(|p| p.as_slice());
         let bytes = bake_with_input_program(&req, &p).unwrap();
         let m = Model::from_bytes(&bytes).unwrap();
-        let mut f = Predictor::new(&m);
+        let mut f = Predictor::new(&m).unwrap();
         assert_eq!(f.predict_from_source(&[2.]).unwrap(), &[6.]);
     }
 }
@@ -308,7 +308,7 @@ fn source_program_composes_with_existing_expanders_and_real_output_overrides() {
     let json = r#"{"schema_hash":0,"scaler_mean":[0,0],"scaler_scale":[1,1],"input_program":{"source_count":2,"nodes":[{"op":"source","index":1}],"outputs":[0]},"metadata":[{"key":"zentrain.feature_transforms","type":"utf8","text":"sinusoidal"},{"key":"zentrain.feature_transform_params","type":"utf8","text":"1"}],"layers":[{"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f32","weights":[1,0],"biases":[0]}],"output_specs":[{"bounds":[-2,2],"transform":"round"}],"sparse_overrides":[{"idx":0,"value":7}]}"#;
     let bytes = bake_from_json_str(json).unwrap();
     let model = Model::from_bytes(&bytes).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     assert_eq!(model.n_source_inputs(), 2);
     assert_eq!(model.input_program().unwrap().outputs().len(), 1);
     for x in [0., 0.125, 0.25, 0.5] {
@@ -329,7 +329,7 @@ fn drop_only_pipelines_need_no_parameter_metadata() {
     let json = r#"{"schema_hash":0,"scaler_mean":[0],"scaler_scale":[1],"input_program":{"source_count":2,"nodes":[{"op":"source","index":0},{"op":"source","index":1}],"outputs":[0,1]},"metadata":[{"key":"zentrain.feature_transforms","type":"utf8","text":"drop\nidentity"}],"layers":[{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32","weights":[2],"biases":[1]}]}"#;
     let bytes = bake_from_json_str(json).unwrap();
     let model = Model::from_bytes(&bytes).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     for x in [0., 1., 2.] {
         assert_eq!(p.predict_from_source(&[999., x]).unwrap(), &[2. * x + 1.]);
         assert_eq!(p.predict_transformed(&[999., x]).unwrap(), &[2. * x + 1.]);

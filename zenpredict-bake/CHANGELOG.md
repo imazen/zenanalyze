@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES
+
+- Implementation modules are private; import their canonical root exports.
+  `OptimizeConfig` and `bake_optimized_with` are now available at the root.
+
+### Added
+
+- Typed input-program composition and exact attachment, CLI inspection,
+  native Softplus/SiLU baking and lifecycle/heaptrack qualification tools.
+- Opt-in `generic-powf` power-policy trial and scalar/array power benchmark.
+
 ### Fixed
 
 - clippy 1.98 `chunks_exact_to_as_chunks` in `json.rs::decode_hex`: now

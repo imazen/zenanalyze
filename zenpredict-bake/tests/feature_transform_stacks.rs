@@ -138,7 +138,7 @@ fn winsor_then_log_predicts_correct_value() {
     let bytes = make_identity_passthrough(&metadata).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let raw = [1000.0f32, 0.0, 0.0, 0.0];
     let out = predictor.predict_transformed(&raw).unwrap().to_vec();
     // ln(100) ≈ 4.605170
@@ -175,7 +175,7 @@ fn clip_then_log1p_then_winsor_predicts_correct_value() {
     let bytes = make_identity_passthrough(&metadata).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     // x=10: shifted=8, ln1p(8) ≈ 2.197 — within [0,3], unchanged.
     let raw = [10.0f32, 0.0, 0.0, 0.0];
     let out = predictor.predict_transformed(&raw).unwrap().to_vec();
@@ -407,7 +407,7 @@ fn signed_cbrt_then_winsor_applies_in_cbrt_space() {
     let bytes = make_identity_passthrough(&metadata).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let raw = [8.0f32, 0.0, 0.0, 0.0];
     let out = predictor.predict_transformed(&raw).unwrap().to_vec();
     assert!((out[0] - 1.5).abs() < 1e-5, "expected 1.5, got {}", out[0]);
@@ -429,7 +429,7 @@ fn stacks_without_params_blob_fall_back_gracefully() {
     let bytes = make_identity_passthrough(&metadata).expect("bake should accept");
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let raw = [10.0f32, 5.0, 1.0, 2.0];
     // Should not panic; just check the call succeeds.
     let out = predictor.predict_transformed(&raw).unwrap().to_vec();

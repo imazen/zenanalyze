@@ -25,7 +25,7 @@
 //! ```ignore
 //! let bytes: &'static [u8] = include_bytes!("zenjpeg_picker_v2.2.bin");
 //! let model = zenpredict::Model::from_bytes(bytes)?;
-//! let mut predictor = zenpredict::Predictor::new(&model);
+//! let mut predictor = zenpredict::Predictor::new(&model).unwrap();
 //!
 //! let features = my_codec::extract_features(&analysis, target_zq);
 //! let mask_data = my_codec::allowed_configs(&caller_constraints);
@@ -66,13 +66,9 @@
 //!     .bake()
 //!     .unwrap();
 //!
-//! // Load and predict. Real consumers wrap the bytes in
-//! // `#[repr(C, align(16))]` to guarantee zero-copy alignment;
-//! // the `bake` output is 16-aligned by virtue of being a
-//! // freshly-allocated `Vec` (heap allocations are at least
-//! // 8-aligned on every supported target — usually 16).
+//! // Loading accepts unaligned bytes and owns an aligned, fallibly allocated copy.
 //! let model = Model::from_bytes(&bytes).unwrap();
-//! let mut p = Predictor::new(&model);
+//! let mut p = Predictor::new(&model).unwrap();
 //! let out = p.predict(&[3.0, 4.0]).unwrap();
 //! assert_eq!(out, &[3.0, 4.0, 5.0]);
 //! ```
@@ -95,7 +91,7 @@
 //! ZNPR v3 — fixed `#[repr(C)]` header + offset table + zero-copy
 //! data sections + a TLV metadata blob + optional per-output
 //! [`OutputSpec`] / discrete-set / sparse-override sections. See
-//! [`Header`] and [`LayerEntry`] for the wire layout, and the source
+//! the header and layer records for the wire layout, and the source
 //! of `model.rs` for the documented byte offsets. Earlier formats
 //! (v1, v2) are not supported by this crate; older bakes need to be
 //! rebaked through the v3 baker.
@@ -107,15 +103,10 @@
 //!
 //! ## no_std
 //!
-//! `default-features = false` keeps the crate `no_std + alloc`. It
-//! computes the same functions — no transform is missing or approximated —
-//! but not always the same bits as a `std` build: Dense layers accumulate
-//! with `a * b + c` (two roundings) instead of the fused `f32::mul_add`
-//! (see `inference::fma`), and the feature transforms and
-//! [`ScoreTransform::Exp`] call the `libm` crate where `std` calls the
-//! platform's `f32::{exp, ln, ln_1p, powf, cbrt}`. Expect last-bit
-//! differences between the two builds; within one build, results are
-//! deterministic.
+//! `default-features = false` keeps the crate `no_std + alloc`.
+//! Dense layers use correctly rounded fused FMA, and transcendental functions
+//! use libm in every build. `generic-powf` opts into a distinct Full/HIGHP
+//! power policy. Reproducibility assumes round-to-nearest and gradual underflow.
 //!
 //! ## Crate boundary
 //!
@@ -139,9 +130,13 @@ mod error;
 mod feature_transform;
 mod inference;
 /// Required input composition for shaped and product-feature models.
+#[cfg(feature = "baking")]
 pub mod input_program;
+#[cfg(not(feature = "baking"))]
+mod input_program;
 mod knob_veto;
 pub mod limits;
+mod math;
 mod metadata;
 mod model;
 pub mod output_spec;
@@ -154,7 +149,10 @@ pub mod rescue;
 mod safety;
 #[cfg(any(feature = "experimental", test))]
 mod unachievable_zone;
+#[cfg(feature = "baking")]
 pub mod wire;
+#[cfg(not(feature = "baking"))]
+mod wire;
 
 // Default-surface picker selection kit: the masked argmin/top-K
 // ranking plus the runtime constraint masks (`mask_at_least` =
@@ -205,9 +203,10 @@ pub use directed_search::{QualityTarget, Trial, best_trial, next_trial};
 pub use encode_strategy::EncodeBudget;
 pub use encode_strategy::{EncodeMode, PickerStrategy};
 pub use model::{
-    Activation, FORMAT_VERSION, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView, Model, Section,
-    WeightDtype, WeightStorage,
+    Activation, FORMAT_VERSION, LEAKY_RELU_ALPHA, LayerView, Model, WeightDtype, WeightStorage,
 };
+#[cfg(any(feature = "baking", test))]
+pub use model::{Header, LayerEntry, Section};
 pub use output_spec::{OutputSpec, OutputTransform, SparseOverride};
 #[cfg(feature = "advanced")]
 pub use output_spec::{OutputValue, apply_spec};

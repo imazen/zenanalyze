@@ -315,3 +315,27 @@ no-extra-cost rename.
 The unpublished Rust shell at the previous `zenpicker/Cargo.toml` is
 deleted; nobody outside this repo can be affected. The swap is a
 one-PR-per-consumer affair (just `zenwebp` and `zensim`).
+
+
+## Portable prediction and fallible allocation
+
+Construct predictors with `let mut predictor = Predictor::new(&model)?;`.
+Both loading and construction return `PredictError::AllocationFailed` when
+reservation fails. Repeated prediction reuses its buffers. Model loading accepts
+unaligned input and owns a correctly aligned allocation.
+
+`Metadata::get` and `Metadata::iter` return `MetadataEntry` values borrowing the
+validated model bytes; remove assumptions about references to stored entries.
+The `Header`, `LayerEntry`, `Section`, `wire` and `input_program` producer APIs
+require `zenpredict/baking`. Serving can query `Model::has_input_program()`
+without exposing its representation. Baker users import canonical root exports
+(`bake`, `BakeRequest`, `OptimizeConfig`, `bake_optimized_with`, and JSON helpers)
+instead of `composer`, `json`, `append`, `optimize` or `zero_bias` modules.
+
+Transcendentals now use libm consistently; no_std dense layers use fused FMA.
+This intentionally changes historical platform-dependent last bits. The
+`generic-powf` feature is an experimental alternate numeric policy using
+[archmage PR144](https://github.com/imazen/archmage/pull/144) Full/HIGHP. Its full
+domain admits negative Yeo-Johnson exponents. It is not correctly rounded for
+every input and does not promise equivalence to libm. The workspace pins the
+reviewed revision; publishing awaits a released dependency.

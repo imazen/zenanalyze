@@ -23,8 +23,8 @@ fn main() {
         model_b.n_outputs(),
         "n_outputs mismatch"
     );
-    let mut p_a = Predictor::new(&model_a);
-    let mut p_b = Predictor::new(&model_b);
+    let mut p_a = Predictor::new(&model_a).unwrap();
+    let mut p_b = Predictor::new(&model_b).unwrap();
     // Try a small grid of inputs covering reasonable feature ranges.
     let mut max_abs_diff: f32 = 0.0;
     let mut sum_sq_diff: f32 = 0.0;

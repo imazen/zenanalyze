@@ -13,10 +13,10 @@ zenbench::main!(|suite| {
                 b.iter(|| black_box(Model::from_bytes(black_box(bytes)).unwrap()))
             });
             g.bench("construct", move |b| {
-                b.iter(|| black_box(Predictor::new(black_box(model))))
+                b.iter(|| black_box(Predictor::new(black_box(model)).unwrap()))
             });
             g.bench("predict", move |b| {
-                let mut predictor = Predictor::new(model);
+                let mut predictor = Predictor::new(model).unwrap();
                 b.iter(move || {
                     black_box(predictor.predict_from_source(black_box(source)).unwrap()[0])
                 })

@@ -28,6 +28,7 @@ impl DamageShape {
         Ok(Self(p))
     }
     /// `[k0, k1, s0, s1, s2]` in raw, pre-standardization coordinates.
+    #[cfg(feature = "baking")]
     pub fn parameters(self) -> [f32; 5] {
         self.0
     }
@@ -61,6 +62,7 @@ impl ReferenceGate {
         Ok(Self(values))
     }
     /// Values at 0, 0.5 and 1.
+    #[cfg(feature = "baking")]
     pub fn parameters(self) -> [f32; 3] {
         self.0
     }
@@ -145,6 +147,7 @@ impl InputProgram {
         self.source_count as usize
     }
     /// Ordered, validated operations.
+    #[cfg(feature = "baking")]
     pub fn nodes(&self) -> &[InputOp] {
         &self.nodes
     }
@@ -191,6 +194,7 @@ impl InputProgram {
         Ok(())
     }
     /// Canonical little-endian bytes, suitable for METADATA_KEY.
+    #[cfg(any(feature = "baking", test))]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(b"ZINP\x01\x00\x00\x00");

@@ -566,8 +566,20 @@ pub fn run_repack_cli(argv: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let mut p_old = zenpredict::Predictor::new(&model);
-    let mut p_new = zenpredict::Predictor::new(&new_model);
+    let mut p_old = match zenpredict::Predictor::new(&model) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("original predictor: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut p_new = match zenpredict::Predictor::new(&new_model) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("repacked predictor: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let features = vec![0.5f32; model.n_source_inputs()];
     let out_old = match p_old.predict_from_source(&features) {
         Ok(values) => values,

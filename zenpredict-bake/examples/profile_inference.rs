@@ -12,7 +12,7 @@ fn load_loop(bytes: &[u8], n: usize) {
 #[inline(never)]
 fn construct_loop(model: &Model, n: usize) {
     for _ in 0..n {
-        black_box(Predictor::new(black_box(model)));
+        black_box(Predictor::new(black_box(model)).unwrap());
     }
 }
 #[inline(never)]
@@ -31,7 +31,7 @@ fn main() {
     let f = common::fixture(&args[1]);
     let n = args[3].parse().unwrap();
     let model = Model::from_bytes(&f.bytes).unwrap();
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     match args[2].as_str() {
         "load" => load_loop(&f.bytes, n),
         "construct" => construct_loop(&model, n),

@@ -30,14 +30,9 @@ name = "zenpredict"
 
 [features]
 default = ["std", "simd"]
-# `std::error::Error` impls, plus the `std` float paths. `no_std + alloc`
-# computes the same functions (nothing is missing or approximated), but
-# not always the same bits: Dense layers accumulate with `a * b + c` (two
-# roundings) instead of the fused `f32::mul_add`, and the feature
-# transforms / `ScoreTransform::Exp` call the `libm` crate where `std`
-# calls the platform's `f32::{exp, ln, ln_1p, powf, cbrt}`. Expect
-# last-bit differences between a `std` and a `no_std` build.
-std = []
+# Standard-library integration; transcendental math stays on libm.
+# Dense arithmetic uses correctly rounded fused multiply-add in every build.
+std = ["magetypes?/std"]
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety
 # metadata reader (`safety::*`), the two-shot rescue framework
@@ -83,7 +78,14 @@ experimental = []
 # so it is unaffected either way.
 simd = ["std", "dep:archmage"]
 
+# Trial of imazen/archmage PR144 canonical Full/HIGHP power. Off by default.
+generic-powf = ["dep:magetypes"]
+# Binary writing and program representation; serving does not need these.
+baking = []
+
 [dependencies]
+magetypes = { version = "0.9.31", default-features = false, optional = true }
+
 # Safe SIMD capability tokens. Used ONLY by the `simd` feature, and only
 # for its `#[autoversion]` attribute, which re-emits the forward kernels
 # under `#[target_feature(enable = "avx2,fma")]` + a runtime dispatcher.
@@ -99,7 +101,7 @@ simd = ["std", "dep:archmage"]
 archmage = { version = "0.9.26", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
-bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
+bytemuck = { version = "1.25.2", default-features = false, features = ["derive", "extern_crate_alloc"] }
 # `f32::ln` / `f32::ln_1p` are not in `core`. `no_std` builds need
 # `libm`; `std` builds call `f32::ln`/`f32::ln_1p` directly via the
 # `cfg(feature = "std")` arm in `feature_transform::FeatureTransform::apply`.

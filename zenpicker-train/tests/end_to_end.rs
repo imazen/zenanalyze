@@ -176,7 +176,7 @@ fn train_bake_load_predict_finite_znpr_v3() {
     let zmodel = zenpredict::Model::from_bytes(bytes).expect("load bake via zenpredict");
     assert_eq!(zmodel.n_inputs(), data.n_features);
     assert_eq!(zmodel.n_outputs(), 1);
-    let mut predictor = zenpredict::Predictor::new(&zmodel);
+    let mut predictor = zenpredict::Predictor::new(&zmodel).unwrap();
 
     // Predict on every val row through the loaded runtime; compare to
     // the in-process model (they share the same scaler + weights, so

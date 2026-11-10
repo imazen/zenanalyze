@@ -153,7 +153,7 @@ fn weight_dead_prune_is_bit_identical() {
         &mean, &scale, &w0_full, &b0, &w1, &b1, &full_md,
     ));
     let full_model = Model::from_bytes(&full.0).expect("load full");
-    let mut full_pred = Predictor::new(&full_model);
+    let mut full_pred = Predictor::new(&full_model).unwrap();
 
     // Pruned: rows 0 and 2 of W0, scaler minus index 1, `drop` on 1.
     let w0_pruned = [1.0f32, -2.0, 0.5, 0.25];
@@ -168,7 +168,7 @@ fn weight_dead_prune_is_bit_identical() {
         &md,
     ));
     let pruned_model = Model::from_bytes(&pruned.0).expect("load pruned");
-    let mut pruned_pred = Predictor::new(&pruned_model);
+    let mut pruned_pred = Predictor::new(&pruned_model).unwrap();
 
     assert!(
         pruned.0.len() < full.0.len(),
@@ -210,7 +210,7 @@ fn transform_forced_constant_prune_folds_into_bias() {
         &mean, &scale, &w0_full, &b0, &w1, &b1, &full_md,
     ));
     let full_model = Model::from_bytes(&full.0).expect("load full");
-    let mut full_pred = Predictor::new(&full_model);
+    let mut full_pred = Predictor::new(&full_model).unwrap();
 
     // Fold: b0' = b0 + x̃₁ · W0[1,:] where x̃₁ = (C - mean1)/scale1.
     let xt = (C - mean[1]) / scale[1];
@@ -227,7 +227,7 @@ fn transform_forced_constant_prune_folds_into_bias() {
         &md,
     ));
     let pruned_model = Model::from_bytes(&pruned.0).expect("load pruned");
-    let mut pruned_pred = Predictor::new(&pruned_model);
+    let mut pruned_pred = Predictor::new(&pruned_model).unwrap();
 
     for probe in PROBES {
         let a = full_pred.predict_transformed(&probe).expect("full predict")[0];
@@ -263,7 +263,7 @@ fn pruned_bake_rejects_a_vector_sized_by_n_inputs() {
         &md,
     ));
     let model = Model::from_bytes(&bytes.0).expect("load");
-    let mut pred = Predictor::new(&model);
+    let mut pred = Predictor::new(&model).unwrap();
     assert_eq!(model.n_inputs(), 2);
     let err = pred.predict_transformed(&[1.0, 2.0]).unwrap_err();
     assert!(

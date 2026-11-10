@@ -65,7 +65,7 @@ fn stable_maximum_repairs_a_real_float32_order_reversal() {
     let low = [16.118246, 80.85465, 69.74723];
     let high = [16.118256, 80.85465, 69.74723];
     let legacy = Model::from_bytes(&fixture(None, true)).unwrap();
-    let mut old = Predictor::new(&legacy);
+    let mut old = Predictor::new(&legacy).unwrap();
     let a = old.predict(&low).unwrap()[0];
     let b = old.predict(&high).unwrap()[0];
     assert!(
@@ -73,7 +73,7 @@ fn stable_maximum_repairs_a_real_float32_order_reversal() {
         "fixture must expose the original rounded-dense reversal: {a}, {b}"
     );
     let stable = Model::from_bytes(&fixture(Some("relu-max-pairs-v1\n0 1\n"), true)).unwrap();
-    let mut new = Predictor::new(&stable);
+    let mut new = Predictor::new(&stable).unwrap();
     assert_eq!(new.predict(&[0.; 3]).unwrap()[0], 100.);
     let a = new.predict(&low).unwrap()[0];
     let b = new.predict(&high).unwrap()[0];

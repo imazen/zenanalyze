@@ -24,6 +24,6 @@ fuzz_target!(|bytes: &[u8]| {
         return;
     }
     let features = vec![0.0f32; n_in];
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let _ = predictor.predict(&features);
 });

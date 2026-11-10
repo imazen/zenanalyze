@@ -32,7 +32,7 @@ fn forward_taps_are_bit_identical_to_predict_for_every_dtype_and_activation() {
         for activation in all_activations() {
             let bytes = synth_bake(&synth, dtype, activation, false, false);
             let model = Model::from_bytes(&bytes).expect("parse");
-            let mut predictor = Predictor::new(&model);
+            let mut predictor = Predictor::new(&model).unwrap();
             for seed in [1u64, 2, 3] {
                 let features = probe_features(seed);
                 let reference = predictor.predict(&features).expect("predict").to_vec();
@@ -84,7 +84,7 @@ fn feature_transforms_stage_matches_predict_transformed() {
         let bytes = synth_bake(&synth, dtype, Activation::LeakyRelu, true, false);
         let model = Model::from_bytes(&bytes).expect("parse");
         assert!(model.has_nontrivial_feature_transforms());
-        let mut predictor = Predictor::new(&model);
+        let mut predictor = Predictor::new(&model).unwrap();
         let features = probe_features(7);
         let reference = predictor
             .predict_transformed(&features)
@@ -125,7 +125,7 @@ fn output_specs_stage_matches_predict_with_specs() {
     let bytes = synth_bake(&synth, WeightDtype::F32, Activation::Relu, false, true);
     let model = Model::from_bytes(&bytes).expect("parse");
     assert!(model.has_output_specs());
-    let mut predictor = Predictor::new(&model);
+    let mut predictor = Predictor::new(&model).unwrap();
     let features = probe_features(11);
     let reference: Vec<Option<f32>> = predictor
         .predict_with_specs(&features)
@@ -260,7 +260,7 @@ fn shipped_bakes_parity() {
             Ok(m) => m,
             Err(e) => panic!("{}: not a parseable ZNPR bake: {e}", path.display()),
         };
-        let mut predictor = Predictor::new(&model);
+        let mut predictor = Predictor::new(&model).unwrap();
         let width = model.caller_input_width();
         // Bounded positive probe — safe for log-family transforms.
         let features: Vec<f32> = (0..width)

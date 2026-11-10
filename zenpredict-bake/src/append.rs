@@ -761,7 +761,7 @@ mod tests {
 
     fn predict_all(bytes: &[u8]) -> Vec<Vec<u32>> {
         let model = Model::from_bytes(bytes).expect("model parses");
-        let mut p = Predictor::new(&model);
+        let mut p = Predictor::new(&model).unwrap();
         feature_vectors()
             .iter()
             .map(|v| p.predict(v).unwrap().iter().map(|f| f.to_bits()).collect())

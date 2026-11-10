@@ -276,14 +276,8 @@ fn clamp_inclusive(x: f32, lo: f32, hi: f32) -> f32 {
 #[inline]
 fn signed_cbrt(x: f32) -> f32 {
     let s = if x >= 0.0 { 1.0 } else { -1.0 };
-    #[cfg(feature = "std")]
-    {
-        s * x.abs().cbrt()
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        s * libm::cbrtf(libm::fabsf(x))
-    }
+
+    s * libm::cbrtf(libm::fabsf(x))
 }
 
 /// Signed power `sign(x)·|x|^p` — the smooth, odd, strictly-monotone power
@@ -299,10 +293,8 @@ fn signed_cbrt(x: f32) -> f32 {
 fn signed_pow(x: f32, p: f32) -> f32 {
     let e = if p > 0.0 { p } else { 1.0 };
     let sign = if x >= 0.0 { 1.0 } else { -1.0 };
-    #[cfg(feature = "std")]
-    let mag = x.abs().powf(e);
-    #[cfg(not(feature = "std"))]
-    let mag = libm::powf(libm::fabsf(x), e);
+
+    let mag = crate::math::powf(libm::fabsf(x), e);
     sign * mag
 }
 
@@ -317,9 +309,7 @@ fn signed_pow(x: f32, p: f32) -> f32 {
 /// zensim model needs. `scale ≤ 0` falls back to `scale = 1`.
 fn soft_sign(x: f32, scale: f32) -> f32 {
     let s = if scale > 0.0 { scale } else { 1.0 };
-    #[cfg(feature = "std")]
-    let ax = x.abs();
-    #[cfg(not(feature = "std"))]
+
     let ax = libm::fabsf(x);
     x / (s + ax)
 }
@@ -346,16 +336,11 @@ fn soft_clip(x: f32, knee: f32, soft: f32) -> f32 {
     let k = if knee > 0.0 { knee } else { 1.0 };
     let s = if soft > 0.0 { soft } else { 1.0 };
     let sign = if x >= 0.0 { 1.0 } else { -1.0 };
-    #[cfg(feature = "std")]
-    let ax = x.abs();
-    #[cfg(not(feature = "std"))]
+
     let ax = libm::fabsf(x);
     if ax <= k {
         x
     } else {
-        #[cfg(feature = "std")]
-        let tail = s * ((ax - k) / s).ln_1p();
-        #[cfg(not(feature = "std"))]
         let tail = s * libm::log1pf((ax - k) / s);
         sign * (k + tail)
     }
@@ -400,46 +385,22 @@ fn yeo_johnson_inner(x: f32, lambda: f32) -> f32 {
     if x >= 0.0 {
         if (lambda - 0.0).abs() < LAMBDA_EPS {
             // y = ln(x + 1)
-            #[cfg(feature = "std")]
-            {
-                (x + 1.0).ln()
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                libm::logf(x + 1.0)
-            }
+
+            libm::logf(x + 1.0)
         } else {
             // y = ((x + 1)^λ − 1) / λ
-            #[cfg(feature = "std")]
-            {
-                ((x + 1.0).powf(lambda) - 1.0) / lambda
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                (libm::powf(x + 1.0, lambda) - 1.0) / lambda
-            }
+
+            (crate::math::powf(x + 1.0, lambda) - 1.0) / lambda
         }
     } else if (lambda - 2.0).abs() < LAMBDA_EPS {
         // y = -ln(-x + 1)
-        #[cfg(feature = "std")]
-        {
-            -((-x) + 1.0).ln()
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            -libm::logf((-x) + 1.0)
-        }
+
+        -libm::logf((-x) + 1.0)
     } else {
         // y = -((-x + 1)^(2 − λ) − 1) / (2 − λ)
         let exp = 2.0 - lambda;
-        #[cfg(feature = "std")]
-        {
-            -((((-x) + 1.0).powf(exp)) - 1.0) / exp
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            -(libm::powf((-x) + 1.0, exp) - 1.0) / exp
-        }
+
+        -(crate::math::powf((-x) + 1.0, exp) - 1.0) / exp
     }
 }
 
@@ -449,43 +410,21 @@ impl FeatureTransform {
     pub fn apply(self, x: f32) -> f32 {
         match self {
             Self::Identity => x,
-            // `f32::ln` and `f32::ln_1p` are core fns in std builds.
-            // For `no_std` we go through `libm` to avoid pulling
-            // `intrinsics::logf` (not available without std).
-            #[cfg(feature = "std")]
-            Self::Log => x.ln(),
-            #[cfg(feature = "std")]
-            Self::Log1p => x.ln_1p(),
-            #[cfg(not(feature = "std"))]
+            // One libm implementation across std and no_std builds.
             Self::Log => libm::logf(x),
-            #[cfg(not(feature = "std"))]
+
             Self::Log1p => libm::log1pf(x),
-            #[cfg(feature = "std")]
-            Self::SignedLog1p => {
-                let s = if x >= 0.0 { 1.0 } else { -1.0 };
-                s * x.abs().ln_1p()
-            }
-            #[cfg(feature = "std")]
-            Self::SignedSqrt => {
-                let s = if x >= 0.0 { 1.0 } else { -1.0 };
-                s * x.abs().sqrt()
-            }
-            #[cfg(feature = "std")]
-            Self::SignedCbrt => {
-                let s = if x >= 0.0 { 1.0 } else { -1.0 };
-                s * x.abs().cbrt()
-            }
-            #[cfg(not(feature = "std"))]
+
             Self::SignedLog1p => {
                 let s = if x >= 0.0 { 1.0 } else { -1.0 };
                 s * libm::log1pf(libm::fabsf(x))
             }
-            #[cfg(not(feature = "std"))]
+
             Self::SignedSqrt => {
                 let s = if x >= 0.0 { 1.0 } else { -1.0 };
                 s * libm::sqrtf(libm::fabsf(x))
             }
-            #[cfg(not(feature = "std"))]
+
             Self::SignedCbrt => {
                 let s = if x >= 0.0 { 1.0 } else { -1.0 };
                 s * libm::cbrtf(libm::fabsf(x))
@@ -495,9 +434,6 @@ impl FeatureTransform {
             // `apply_with_params` instead. ClipThenLog1p with ε = 0
             // reduces to plain Log1p; WinsorP99 with no clamp range
             // and QuantileBins with no edges fall back to Identity.
-            #[cfg(feature = "std")]
-            Self::ClipThenLog1p => x.max(0.0).ln_1p(),
-            #[cfg(not(feature = "std"))]
             Self::ClipThenLog1p => {
                 let y = if x > 0.0 { x } else { 0.0 };
                 libm::log1pf(y)
@@ -510,39 +446,21 @@ impl FeatureTransform {
             // is strictly positive — `ln(0)` / `ln(-)` produce NaN /
             // -Inf which matches the Python `t_log` semantics (NaN
             // for non-positive inputs).
-            #[cfg(feature = "std")]
-            Self::WinsorThenLog => x.ln(),
-            #[cfg(not(feature = "std"))]
             Self::WinsorThenLog => libm::logf(x),
-            #[cfg(feature = "std")]
-            Self::WinsorThenLog1p => x.ln_1p(),
-            #[cfg(not(feature = "std"))]
+
             Self::WinsorThenLog1p => libm::log1pf(x),
-            #[cfg(feature = "std")]
-            Self::WinsorThenSignedCbrt => {
-                let s = if x >= 0.0 { 1.0 } else { -1.0 };
-                s * x.abs().cbrt()
-            }
-            #[cfg(not(feature = "std"))]
+
             Self::WinsorThenSignedCbrt => {
                 let s = if x >= 0.0 { 1.0 } else { -1.0 };
                 s * libm::cbrtf(libm::fabsf(x))
             }
-            #[cfg(feature = "std")]
-            Self::SignedCbrtThenWinsor => {
-                let s = if x >= 0.0 { 1.0 } else { -1.0 };
-                s * x.abs().cbrt()
-            }
-            #[cfg(not(feature = "std"))]
+
             Self::SignedCbrtThenWinsor => {
                 let s = if x >= 0.0 { 1.0 } else { -1.0 };
                 s * libm::cbrtf(libm::fabsf(x))
             }
             // `ClipThenLog1pThenWinsor` with no params: ε = 0, no
             // outer clamp → reduces to `log1p(max(0, x))`.
-            #[cfg(feature = "std")]
-            Self::ClipThenLog1pThenWinsor => x.max(0.0).ln_1p(),
-            #[cfg(not(feature = "std"))]
             Self::ClipThenLog1pThenWinsor => {
                 let y = if x > 0.0 { x } else { 0.0 };
                 libm::log1pf(y)
@@ -615,14 +533,8 @@ impl FeatureTransform {
                 let eps = params.first().copied().unwrap_or(0.0);
                 let y = x - eps;
                 let y_clip = if y > 0.0 { y } else { 0.0 };
-                #[cfg(feature = "std")]
-                {
-                    y_clip.ln_1p()
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    libm::log1pf(y_clip)
-                }
+
+                libm::log1pf(y_clip)
             }
             Self::WinsorP99 => {
                 let lo = params.first().copied().unwrap_or(f32::NEG_INFINITY);
@@ -658,14 +570,8 @@ impl FeatureTransform {
                 let lo = params[0];
                 let hi = params[1];
                 let y = clamp_inclusive(x, lo, hi);
-                #[cfg(feature = "std")]
-                {
-                    y.ln()
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    libm::logf(y)
-                }
+
+                libm::logf(y)
             }
             Self::WinsorThenLog1p => {
                 if params.len() < 2 {
@@ -674,14 +580,8 @@ impl FeatureTransform {
                 let lo = params[0];
                 let hi = params[1];
                 let y = clamp_inclusive(x, lo, hi);
-                #[cfg(feature = "std")]
-                {
-                    y.ln_1p()
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    libm::log1pf(y)
-                }
+
+                libm::log1pf(y)
             }
             Self::WinsorThenSignedCbrt => {
                 if params.len() < 2 {
@@ -710,9 +610,7 @@ impl FeatureTransform {
                 let q_hi = params[2];
                 let shifted = x - eps;
                 let clipped = if shifted > 0.0 { shifted } else { 0.0 };
-                #[cfg(feature = "std")]
-                let y = clipped.ln_1p();
-                #[cfg(not(feature = "std"))]
+
                 let y = libm::log1pf(clipped);
                 clamp_inclusive(y, q_lo, q_hi)
             }
@@ -832,12 +730,7 @@ impl FeatureTransform {
                         break;
                     }
                     let theta = TWO_PI * freq * x;
-                    #[cfg(feature = "std")]
-                    {
-                        dst[written] = theta.sin();
-                        dst[written + 1] = theta.cos();
-                    }
-                    #[cfg(not(feature = "std"))]
+
                     {
                         dst[written] = libm::sinf(theta);
                         dst[written + 1] = libm::cosf(theta);
@@ -955,7 +848,18 @@ pub(crate) fn parse_feature_transforms(
     // exactly. An empty trailing line (text ending with '\n') would
     // produce a stray empty entry; reject that as malformed rather
     // than silently dropping it.
+    let count = text.split('\n').count();
+    if count > crate::limits::MAX_DIM {
+        return Err(PredictError::DimensionOverflow {
+            what: "feature transform count",
+        });
+    }
     let mut transforms = alloc::vec::Vec::new();
+    transforms
+        .try_reserve_exact(count)
+        .map_err(|_| PredictError::AllocationFailed {
+            what: "feature transforms",
+        })?;
     for token in text.split('\n') {
         transforms.push(FeatureTransform::from_token(token)?);
     }
@@ -993,10 +897,25 @@ pub(crate) fn parse_feature_transform_params(
         core::str::from_utf8(entry.value).map_err(|_| PredictError::MetadataValueNotUtf8 {
             key_len: crate::keys::FEATURE_TRANSFORM_PARAMS.len(),
         })?;
+    let count = text.split('\n').count();
+    if count > crate::limits::MAX_DIM {
+        return Err(PredictError::DimensionOverflow {
+            what: "feature parameter rows",
+        });
+    }
     let mut params = alloc::vec::Vec::new();
+    params
+        .try_reserve_exact(count)
+        .map_err(|_| PredictError::AllocationFailed {
+            what: "feature parameter rows",
+        })?;
     for line in text.split('\n') {
         let mut row: alloc::vec::Vec<f32> = alloc::vec::Vec::new();
         if !line.is_empty() {
+            row.try_reserve_exact(line.split(',').count())
+                .map_err(|_| PredictError::AllocationFailed {
+                    what: "feature parameter values",
+                })?;
             for tok in line.split(',') {
                 let v: f32 =
                     tok.trim()
@@ -1054,6 +973,7 @@ pub fn apply_feature_transforms(
 /// Used by the bake-load path to allocate the expanded feature buffer
 /// and verify the model's `layers[0].in_dim` matches.
 #[inline]
+#[cfg(test)]
 pub fn total_output_arity(transforms: &[FeatureTransform], params: &[&[f32]]) -> usize {
     debug_assert_eq!(transforms.len(), params.len());
     let mut total = 0usize;
@@ -1093,13 +1013,44 @@ pub fn apply_feature_pipeline_expanding(
     src: &[f32],
     dst: &mut [f32],
 ) -> Result<usize, PredictError> {
-    if transforms.len() != src.len() || params.len() != src.len() {
+    if params.len() != src.len() {
+        return Err(PredictError::FeatureTransformsLenMismatch {
+            expected: src.len(),
+            got: params.len(),
+        });
+    }
+    expand_with(transforms, |i| params[i], src, dst)
+}
+pub(crate) fn expand_model_inputs(
+    transforms: &[FeatureTransform],
+    params: Option<&[alloc::vec::Vec<f32>]>,
+    src: &[f32],
+    dst: &mut [f32],
+) -> Result<usize, PredictError> {
+    expand_with(
+        transforms,
+        |i| params.map_or(&[][..], |p| p[i].as_slice()),
+        src,
+        dst,
+    )
+}
+fn expand_with<'p>(
+    transforms: &[FeatureTransform],
+    params: impl Fn(usize) -> &'p [f32],
+    src: &[f32],
+    dst: &mut [f32],
+) -> Result<usize, PredictError> {
+    if transforms.len() != src.len() {
         return Err(PredictError::FeatureTransformsLenMismatch {
             expected: src.len(),
             got: transforms.len(),
         });
     }
-    let expected_dst = total_output_arity(transforms, params);
+    let expected_dst: usize = transforms
+        .iter()
+        .enumerate()
+        .map(|(i, t)| t.output_arity(params(i)))
+        .sum();
     if dst.len() != expected_dst {
         return Err(PredictError::FeatureTransformsLenMismatch {
             expected: expected_dst,
@@ -1108,9 +1059,9 @@ pub fn apply_feature_pipeline_expanding(
     }
     let mut offset = 0usize;
     for i in 0..src.len() {
-        let arity = transforms[i].output_arity(params[i]);
+        let arity = transforms[i].output_arity(params(i));
         let written =
-            transforms[i].apply_expanding(src[i], params[i], &mut dst[offset..offset + arity]);
+            transforms[i].apply_expanding(src[i], params(i), &mut dst[offset..offset + arity]);
         debug_assert_eq!(written, arity);
         offset += arity;
     }
@@ -1602,6 +1553,37 @@ mod tests {
     /// Returns every FeatureTransform variant currently in the enum.
     /// Keep this in sync with the enum when adding new variants —
     /// the universal tests below iterate this list.
+    #[test]
+    fn portable_transform_fingerprint() {
+        let mut hash = 0xcbf29ce484222325u64;
+        for t in all_variants() {
+            let params = sample_params(t);
+            for x in finite_test_inputs() {
+                let mut output = alloc::vec![0.;t.output_arity(params)];
+                t.apply_expanding(x, params, &mut output);
+                for value in output {
+                    let bits = if value.is_nan() {
+                        0x7fc00000
+                    } else {
+                        value.to_bits()
+                    };
+                    for byte in bits.to_le_bytes() {
+                        hash ^= u64::from(byte);
+                        hash = hash.wrapping_mul(0x100000001b3);
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "generic-powf"))]
+        let expected = 14946609771900847174u64;
+        #[cfg(feature = "generic-powf")]
+        let expected = 15788879674275420661u64;
+        assert_eq!(
+            hash, expected,
+            "provider-specific portable transform fingerprint"
+        );
+    }
+
     fn all_variants() -> [FeatureTransform; 18] {
         [
             FeatureTransform::Identity,

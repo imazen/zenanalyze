@@ -30,7 +30,7 @@ fn smooth_hinge_packed_roundtrip_and_pin() {
             model.layers().next().unwrap().activation,
             Activation::SmoothHinge
         );
-        let mut predictor = Predictor::new(&model);
+        let mut predictor = Predictor::new(&model).unwrap();
         for (z, h) in [
             (-1., 0.),
             (0., 0.),

@@ -308,3 +308,10 @@ predict-lifecycle *args:
 predict-heaptrack case phase iterations output:
     cargo build --locked --release -p zenpredict-bake --example profile_inference
     heaptrack -o "{{output}}" "${CARGO_TARGET_DIR:-target}/release/examples/profile_inference" "{{case}}" "{{phase}}" "{{iterations}}"
+
+# Requires release profile_inference with symbols; invoke under run-heavy.
+predict-heaptrack-suite binary output revision:
+    python3 zenpredict-bake/tools/profile_lifecycle.py "{{binary}}" "{{output}}" --revision "{{revision}}"
+
+predict-power *args:
+    cargo bench --locked -p zenpredict-bake --features generic-powf --bench power -- {{args}}

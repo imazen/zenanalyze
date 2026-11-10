@@ -272,7 +272,7 @@ fn main() {
             );
             continue;
         }
-        let mut predictor = zenpredict::Predictor::new(&model);
+        let mut predictor = zenpredict::Predictor::new(&model).unwrap();
         println!(
             "\n=== diagnostic scoring on {} ({} bytes) ===",
             bake_name,

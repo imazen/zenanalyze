@@ -413,7 +413,7 @@ impl<'b> MetaPicker<'b> {
         Self {
             #[cfg(feature = "api")]
             wants: parse_wants(model),
-            predictor: Predictor::new(model),
+            predictor: Predictor::new(model).unwrap(),
             gate: None,
             lossless: None,
             #[cfg(feature = "api")]
@@ -430,8 +430,8 @@ impl<'b> MetaPicker<'b> {
     /// family routers score [`CodecFamily::COUNT`] outputs (validate each with
     /// [`validate_family_order`](Self::validate_family_order)); the gate scores 2.
     pub fn with_router(mut self, gate: &'b Model, lossless: &'b Model) -> Self {
-        self.gate = Some(Predictor::new(gate));
-        self.lossless = Some(Predictor::new(lossless));
+        self.gate = Some(Predictor::new(gate).unwrap());
+        self.lossless = Some(Predictor::new(lossless).unwrap());
         #[cfg(feature = "api")]
         {
             self.gate_wants = parse_wants(gate);
@@ -1314,7 +1314,7 @@ mod tests {
         let model = Model::from_bytes(ROUTER_LOSSY).expect("baked lossy router parses");
         assert_eq!(model.n_inputs(), 102, "lossy router n_inputs");
         assert_eq!(model.n_outputs(), 6, "lossy router n_outputs");
-        let mut pred = Predictor::new(&model);
+        let mut pred = Predictor::new(&model).unwrap();
         let out = pred.predict(&FIXTURE_INPUT).expect("predict");
         assert_eq!(out.len(), 6);
         for (i, (&got, &want)) in out.iter().zip(FIXTURE_MARGINS.iter()).enumerate() {

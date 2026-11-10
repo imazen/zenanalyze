@@ -5,6 +5,8 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredictError {
+    /// Storage could not be allocated.
+    AllocationFailed { what: &'static str },
     /// Invalid required input composition or an incompatible serving path.
     InvalidInputProgram { reason: &'static str },
     /// Opt-in research max-pair metadata or its input domain is invalid.
@@ -28,10 +30,8 @@ pub enum PredictError {
         len: u32,
         file_len: usize,
     },
-    /// A typed slice view requested alignment the input bytes
-    /// don't satisfy. Wrap `include_bytes!` in an `#[repr(C, align(16))]`
-    /// struct (see crate docs) to guarantee alignment for f32/u32/f64
-    /// payloads.
+    /// A wire section offset does not satisfy the typed payload alignment.
+    /// Caller input alignment is unrestricted; owned storage is aligned.
     SectionMisaligned {
         what: &'static str,
         offset: u32,
@@ -102,6 +102,9 @@ pub enum PredictError {
 impl fmt::Display for PredictError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            Self::AllocationFailed { what } => {
+                write!(f, "zenpredict: allocation failed for {what}")
+            }
             Self::InvalidInputProgram { reason } => {
                 write!(f, "zenpredict: input program: {reason}")
             }

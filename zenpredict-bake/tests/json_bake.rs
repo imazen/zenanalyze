@@ -31,7 +31,7 @@ fn json_round_trip_minimal() {
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     assert_eq!(model.schema_hash(), 12345);
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let out = p.predict(&[1.0, 1.0]).unwrap();
     assert_eq!(out, &[1.5, 2.0]);
 }
@@ -273,7 +273,7 @@ fn json_round_trip_with_output_specs() {
     assert!(model.has_output_specs());
     assert_eq!(model.output_specs().len(), 4);
     assert_eq!(model.discrete_sets().len(), 8);
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     // Use 0.4 so `f32::round` (round-half-away-from-zero in Rust)
     // floors it to 0 — proves the round → snap → sentinel chain.
     let r = p.predict_with_specs(&[3.0, 0.4]).unwrap();
@@ -317,7 +317,7 @@ fn json_round_trip_with_sparse_overrides() {
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
     assert_eq!(model.sparse_overrides().len(), 2);
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let r = p.predict_with_specs(&[3.0, 4.0]).unwrap();
     assert_eq!(r[0], OutputValue::Override(99.0));
     assert_eq!(r[1], OutputValue::Override(4.0));
@@ -349,7 +349,7 @@ fn json_sigmoid_scaled_transform() {
     let bytes = bake_from_json_str(json).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     // raw 0 → sigmoid 0.5 → scaled to 50
     let r = p.predict_with_specs(&[0.0]).unwrap();
     if let OutputValue::Override(v) = r[0] {
@@ -385,7 +385,7 @@ fn json_zerobias_tau_zeros_small_weights() {
     let bytes = bake_from_json_str(json).unwrap();
     let aligned = Aligned(bytes);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     // With biased weights [100, 0, 50, 0], predict([1, 1]) =
     //   [1*100 + 1*50, 1*0 + 1*0] = [150, 0].
     let out = p.predict(&[1.0, 1.0]).unwrap();
@@ -465,7 +465,7 @@ fn json_compressed_roundtrip() {
     // Round-trip the compressed bytes through the loader.
     let aligned = Aligned(compressed);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let mut x = vec![0.0_f32; 256];
     x[0] = 1.0;
     x[31] = 1.0;
@@ -511,7 +511,7 @@ fn json_optimize_roundtrip_smaller_or_equal() {
     // Round-trip the optimized bytes — predict output must be lossless.
     let aligned = Aligned(optimized);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let mut x = vec![0.0_f32; 64];
     x[0] = 1.0;
     let out = p.predict(&x).unwrap();
@@ -580,7 +580,7 @@ fn json_zerobias_compressed_optimize_composed() {
     // Load the all-knobs bake and confirm predict still works.
     let aligned = Aligned(all);
     let model = Model::from_bytes(&aligned.0).unwrap();
-    let mut p = Predictor::new(&model);
+    let mut p = Predictor::new(&model).unwrap();
     let mut x = vec![0.0_f32; 64];
     x[0] = 1.0;
     // Forward pass (post-zerobias, weights ≤ 1e-6 are 0):

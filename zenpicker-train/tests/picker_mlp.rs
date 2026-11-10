@@ -246,7 +246,7 @@ fn picker_no_q_leak_train_bake_load() {
     let zmodel = zenpredict::Model::from_bytes(bytes).expect("load bake");
     assert_eq!(zmodel.n_inputs(), ds.n_in);
     assert_eq!(zmodel.n_outputs(), ds.n_cells);
-    let mut predictor = zenpredict::Predictor::new(&zmodel);
+    let mut predictor = zenpredict::Predictor::new(&zmodel).unwrap();
 
     // zenpredict applies the folded scaler to RAW inputs; the in-proc
     // model takes already-standardized inputs. Feed the runtime the RAW
