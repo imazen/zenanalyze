@@ -51,18 +51,32 @@ pub(crate) fn parse(model: &Model) -> Result<Vec<[usize; 2]>, PredictError> {
         return Err(invalid("requires positive scale-only inputs"));
     }
     let mut pairs = Vec::new();
-    let mut used = alloc::vec![false;first.out_dim];
+    pairs
+        .try_reserve_exact(lines.clone().count().min(first.out_dim / 2))
+        .map_err(|_| PredictError::AllocationFailed {
+            what: "research pair index",
+        })?;
+    let mut used =
+        bytemuck::allocation::try_zeroed_slice_box::<bool>(first.out_dim).map_err(|_| {
+            PredictError::AllocationFailed {
+                what: "research pair validation",
+            }
+        })?;
     for line in lines {
-        let tokens = line.split_whitespace().collect::<Vec<_>>();
-        if tokens.len() != 2 {
+        let mut tokens = line.split_whitespace();
+        let u = tokens
+            .next()
+            .ok_or_else(|| invalid("pair requires two indices"))?
+            .parse::<usize>()
+            .map_err(|_| invalid("invalid index"))?;
+        let v = tokens
+            .next()
+            .ok_or_else(|| invalid("pair requires two indices"))?
+            .parse::<usize>()
+            .map_err(|_| invalid("invalid index"))?;
+        if tokens.next().is_some() {
             return Err(invalid("pair requires two indices"));
         }
-        let u = tokens[0]
-            .parse::<usize>()
-            .map_err(|_| invalid("invalid index"))?;
-        let v = tokens[1]
-            .parse::<usize>()
-            .map_err(|_| invalid("invalid index"))?;
         if u >= first.out_dim || v >= first.out_dim || u == v || used[u] || used[v] {
             return Err(invalid("overlapping or out-of-range pair"));
         }

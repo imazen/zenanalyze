@@ -254,10 +254,14 @@ impl InputProgram {
         let mut outputs = Vec::new();
         nodes
             .try_reserve_exact(n)
-            .map_err(|_| invalid("program allocation failed"))?;
+            .map_err(|_| PredictError::AllocationFailed {
+                what: "input program",
+            })?;
         outputs
             .try_reserve_exact(out)
-            .map_err(|_| invalid("program allocation failed"))?;
+            .map_err(|_| PredictError::AllocationFailed {
+                what: "input program",
+            })?;
         for _ in 0..n {
             let code = c.take(4)?;
             if code[1..] != [0, 0, 0] {

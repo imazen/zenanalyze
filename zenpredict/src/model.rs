@@ -1596,7 +1596,11 @@ fn read_permutation_indices(
             file_len: bytes.len(),
         });
     };
-    let mut out = alloc::vec::Vec::with_capacity(n);
+    let mut out = alloc::vec::Vec::new();
+    out.try_reserve_exact(n)
+        .map_err(|_| PredictError::AllocationFailed {
+            what: "permutation indices",
+        })?;
     match width {
         1 => {
             for &b in raw {
@@ -1625,7 +1629,11 @@ fn read_permutation_indices(
         }
     }
     // Validate: permutation (every index in 0..n appears exactly once).
-    let mut seen = alloc::vec![false; n];
+    let mut seen = bytemuck::allocation::try_zeroed_slice_box::<bool>(n).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation validation",
+        }
+    })?;
     for &idx in &out {
         let i = idx as usize;
         if seen[i] {
@@ -1746,7 +1754,11 @@ fn permute_pod_array_inverse(
         });
     }
     // Allocate scratch (one alloc per call; total ~few KB).
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for (bake_pos, &caller_u32) in perm.iter().enumerate() {
@@ -1790,7 +1802,11 @@ fn permute_rows_inverse(
             file_len: bytes.len(),
         });
     }
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for (bake_pos, &caller_u32) in perm.iter().enumerate() {
@@ -1827,7 +1843,11 @@ fn permute_cols_inverse(
         });
     }
     let row_stride = n_cols * elem_bytes;
-    let mut scratch: alloc::vec::Vec<u8> = alloc::vec![0u8; raw_len];
+    let mut scratch = bytemuck::allocation::try_zeroed_slice_box::<u8>(raw_len).map_err(|_| {
+        PredictError::AllocationFailed {
+            what: "permutation scratch",
+        }
+    })?;
     {
         let src = &bytes[raw_offset..raw_offset + raw_len];
         for r in 0..n_rows {

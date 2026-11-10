@@ -99,7 +99,7 @@ fn feature_transforms_stage_matches_predict_transformed() {
         assert_eq!(t.len(), N_IN);
         for i in 0..N_IN {
             let expect = if i % 2 == 0 {
-                features[i].ln_1p()
+                libm::log1pf(features[i])
             } else {
                 features[i]
             };
