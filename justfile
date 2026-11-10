@@ -315,3 +315,6 @@ predict-heaptrack-suite binary output revision:
 
 predict-power *args:
     cargo bench --locked -p zenpredict-bake --features generic-powf --bench power -- {{args}}
+
+predict-measurement-summary root:
+    python3 zenpredict-bake/tools/summarize_lifecycle.py "{{root}}"

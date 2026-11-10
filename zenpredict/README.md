@@ -226,6 +226,9 @@ Dense layers use correctly rounded fused multiply-add in both `std` and `no_std 
 
 `Predictor::new(&model)?` now reports allocation failure. Producer wire structures and input-program construction require the `baking` feature; serving uses `Model::has_input_program()` and `Predictor::predict_from_source()`. Metadata entries are small borrowed views returned by value. See [migration notes](../MIGRATION.md#portable-prediction-and-fallible-allocation).
 
+Lifecycle allocation counts and exploratory timings are recorded in the
+[portable prediction measurements](../benchmarks/zenpredict_portable_2026-11-10.md).
+
 ## Compressed bakes
 
 A bake's payload (everything after the 128-byte header) may be LZ4-block-compressed as a single envelope. There is **no feature flag** — the loader always includes the safe LZ4 block decoder (`lz4_flex` 0.14) and handles compression transparently:
