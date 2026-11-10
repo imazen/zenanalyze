@@ -238,6 +238,11 @@ jobs:
           CROSS_RUNTIME: "1"
         run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,advanced" --lib
 
+      - name: Test zenpredict canonical power (portable scalar and packed agreement)
+        env:
+          CROSS_RUNTIME: "1"
+        run: cross test -p zenpredict --target ${{ matrix.target }} --no-default-features --features "std,advanced,generic-powf" --lib
+
   zentrain-pytests:
     # The zentrain Python tooling tests — pure-logic unit tests for the picker /
     # predict / metapicker libs and the feature serialization-provenance plumbing

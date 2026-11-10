@@ -41,4 +41,57 @@ mod tests {
             0x792abd43
         );
     }
+    #[cfg(feature = "generic-powf")]
+    #[test]
+    fn full_highp_scalar_and_packed_agree_at_domain_boundaries() {
+        use magetypes::powf::{PowfOptions, try_powf_array_with};
+        const OPTIONS: u32 = PowfOptions::PORTABLE_HIGHP.bits();
+        for bases in [
+            [
+                f32::from_bits(1),
+                f32::MIN_POSITIVE,
+                0.25,
+                0.5,
+                1.,
+                2.,
+                65536.,
+                f32::MAX,
+            ],
+            [
+                -0.,
+                0.,
+                -1.,
+                -2.,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NAN,
+                -0.25,
+            ],
+        ] {
+            for exponent in [
+                -1.5,
+                0.,
+                0.37,
+                2.4,
+                3.,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NAN,
+            ] {
+                let packed = try_powf_array_with::<OPTIONS, 8>(bases, exponent).unwrap();
+                for (base, actual) in bases.into_iter().zip(packed) {
+                    let expected = super::powf(base, exponent);
+                    if expected.is_nan() {
+                        assert!(actual.is_nan());
+                    } else {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "base={base:?} exponent={exponent:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
