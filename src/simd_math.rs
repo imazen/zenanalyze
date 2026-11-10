@@ -83,7 +83,7 @@ pub(crate) trait TierMulAdd: Sized {
 }
 
 /// Tiers whose `mul_add` already rounds once (hardware FMA) or whose current
-/// rounding is kept (wasm128): plain `mul_add`. (32-bit x86 dispatches to the
+/// rounding is kept (wasm128): explicit `mul_add_relaxed`. (32-bit x86 dispatches to the
 /// scalar tier only, so it has no native impl.)
 #[cfg(any(
     target_arch = "x86_64",
@@ -95,7 +95,7 @@ macro_rules! tier_mul_add_native {
         impl TierMulAdd for magetypes::simd::generic::f32x8<$token> {
             #[inline(always)]
             fn tier_mul_add(self, a: Self, b: Self) -> Self {
-                self.mul_add(a, b)
+                self.mul_add_relaxed(a, b)
             }
         }
     )*};

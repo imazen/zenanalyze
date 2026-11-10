@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Workspace
+
+- Use magetypes 0.9.31's explicit `mul_add_relaxed` spelling for the
+  analyzer's existing native-tier operation; retain its rounding behavior and
+  compatible later 0.9.x versions.
+
 ### zenpredict / zenpredict-bake
 
 - Add required input programs for products, monotone damage shapers and

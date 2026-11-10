@@ -345,6 +345,11 @@ runtime branch).
 
 ## Known Bugs
 
+- **2026-11-10 — current magetypes compatibility:** native-tier analyzer and
+  representation example calls use `mul_add_relaxed` with minimum 0.9.31,
+  retaining the former `mul_add` behavior. Strict experimental/HDR all-target
+  clippy and the existing scalar FMA regression pass. No golden changed.
+
 - **2026-11-09 — input-program review:** required composition needs a v4
   envelope because v3 readers ignore unknown metadata/flags. Source and compact
   input domains can have equal widths; callers must select the explicit source
