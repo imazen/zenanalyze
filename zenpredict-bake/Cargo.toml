@@ -92,3 +92,7 @@ all = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+
+[[bench]]
+name = "lifecycle"
+harness = false

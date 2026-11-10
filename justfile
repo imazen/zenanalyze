@@ -300,3 +300,11 @@ predict-input-consumers:
 # No labels are read. Oracle is the caller-supplied canonical research shaping.rs.
 predict-research-shaping oracle output bakes:
     python3 zenpredict-bake/tools/qualify_research_shaping.py --oracle-shaping-rs "{{oracle}}" --output "{{output}}" {{bakes}}
+
+# Run under run-heavy. zenbench owns CPU placement and benchmark admission.
+predict-lifecycle *args:
+    cargo bench --locked -p zenpredict-bake --bench lifecycle -- {{args}}
+
+predict-heaptrack case phase iterations output:
+    cargo build --locked --release -p zenpredict-bake --example profile_inference
+    heaptrack -o "{{output}}" "${CARGO_TARGET_DIR:-target}/release/examples/profile_inference" "{{case}}" "{{phase}}" "{{iterations}}"
