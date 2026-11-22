@@ -721,8 +721,8 @@ pub fn evaluate_fixed_baselines(ds: &PickerDataset, val_rows: &[usize]) -> Vec<F
 
     // Candidate policies: one per cell, one per family, in that order.
     let mut policies: Vec<(String, Vec<usize>)> = Vec::new();
-    for c in 0..n_cells {
-        policies.push((format!("cell:{}", ds.cell_labels[c]), alloc_one(c)));
+    for (c, label) in ds.cell_labels.iter().enumerate().take(n_cells) {
+        policies.push((format!("cell:{label}"), alloc_one(c)));
     }
     for fam in &families {
         let cells: Vec<usize> = (0..n_cells).filter(|&c| family_of[c] == *fam).collect();
