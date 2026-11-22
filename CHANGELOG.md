@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Workspace
 
+- Upgrade `archmage` and `magetypes` to `0.9.33` and `magemath` to `0.1.1`.
 - Use explicit fused multiply-add in analyzer kernels, including WebAssembly.
 - Replace temporary PR144 `archmage`/`magetypes` git patches with released
   `archmage = "0.9.32"`, `magetypes = "0.9.32"`, and `magemath = "0.1.0"`.

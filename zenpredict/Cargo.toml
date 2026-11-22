@@ -84,7 +84,7 @@ generic-powf = ["dep:magemath"]
 baking = []
 
 [dependencies]
-magemath = { version = "0.1.0", default-features = false, optional = true }
+magemath = { version = "0.1.1", default-features = false, optional = true }
 
 # Safe SIMD capability tokens. Used ONLY by the `simd` feature, and only
 # for its `#[autoversion]` attribute, which re-emits the forward kernels
@@ -92,7 +92,7 @@ magemath = { version = "0.1.0", default-features = false, optional = true }
 # No intrinsics are written by hand and no kernel body changes, so
 # `#![forbid(unsafe_code)]` holds and the arithmetic is untouched.
 # Keep every compatible 0.9.x release eligible (no patch-level ceiling).
-archmage = { version = "0.9.32", optional = true }
+archmage = { version = "0.9.33", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.25.2", default-features = false, features = ["derive", "extern_crate_alloc"] }

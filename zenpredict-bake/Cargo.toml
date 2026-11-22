@@ -69,7 +69,7 @@ arrow = { version = "60.2.0", default-features = false, optional = true }
 
 [dev-dependencies]
 libm = { version = "0.2.16", default-features = false }
-magemath = { version = "0.1.0", default-features = false, features = ["std"] }
+magemath = { version = "0.1.1", default-features = false, features = ["std"] }
 rand = { version = "0.10.4", default-features = false, features = ["std", "std_rng"] }
 zenbench = "0.1.11"
 # Lifecycle / safety / output-specs integration tests cover the
