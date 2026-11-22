@@ -9,23 +9,20 @@
 
 ## summary
 #
-#   inherent methods                            9
+#   inherent methods                            6
 #   trait roster entries (type × trait)         5
 #
 # per-module pub lines:
-#   (root)                            9
+#   (root)                            6
 
-## items (9 lines)
+## items (6 lines)
 
 pub fn AllowedFamilies::assert_fields_are_eq(&self)
 pub fn CellContract::assert_fields_are_eq(&self)
-pub fn CellMode::assert_fields_are_eq(&self)
-pub fn CodecFamily::assert_fields_are_eq(&self)
 pub fn FallbackReason::assert_fields_are_eq(&self)
 pub fn FamilyModeCell::assert_fields_are_eq(&self)
 pub fn FeatureMismatch::assert_fields_are_eq(&self)
 pub fn RouteSource::assert_fields_are_eq(&self)
-pub fn RouterKind::assert_fields_are_eq(&self)
 
 ## trait impls (5 types)
 

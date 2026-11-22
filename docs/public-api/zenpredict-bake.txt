@@ -6,241 +6,56 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict-bake.txt 432 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,std) | zenpredict-bake.internal.txt 9 lines (9 hidden + 0 excluded-feature)
+# files: zenpredict-bake.txt 264 lines (supported surface) | zenpredict-bake.features.txt 0 added (features: fit-yj,generic-powf,std) | zenpredict-bake.internal.txt 12 lines (12 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 7
-#   pub types (struct/enum/trait/alias)        34
-#   free functions                             23
-#   inherent methods                           24
-#   struct fields                             242
-#   enum variants                             107
-#   trait roster entries (type × trait)        59
-#   auto-trait-complete types                  18
+#   pub modules                                 2
+#   pub types (struct/enum/trait/alias)        19
+#   free functions                             12
+#   inherent methods                           13
+#   struct fields                             137
+#   enum variants                              61
+#   trait roster entries (type × trait)        58
+#   auto-trait-complete types                  19
 #
 # per-module pub lines:
-#   (root)                          202
-#   append                           29
-#   cli                               3
-#   composer                        117
-#   json                             73
-#   optimize                          9
-#   zero_bias                         4
+#   (root)                          224
+#   input_program                    20
 
-## items (412 lines)
+## items (244 lines)
 
 pub mod zenpredict_bake
-pub mod append
-pub append::AppendError::BadMagic
-pub append::AppendError::BadMagic::found: [u8; 4]
-pub append::AppendError::DecompressFailed
-pub append::AppendError::InvalidMetadata(zenpredict::error::PredictError)
-pub append::AppendError::KeyEmpty
-pub append::AppendError::KeyTooLong
-pub append::AppendError::KeyTooLong::len: usize
-pub append::AppendError::Malformed
-pub append::AppendError::Malformed::what: &'static str
-pub append::AppendError::OutputValidation(zenpredict::error::PredictError)
-pub append::AppendError::SectionOutOfRange
-pub append::AppendError::SectionOutOfRange::what: &'static str
-pub append::AppendError::TooLarge
-pub append::AppendError::TooLarge::len: usize
-pub append::AppendError::Truncated
-pub append::AppendError::Truncated::have: usize
-pub append::AppendError::Truncated::want: usize
-pub append::AppendError::UnsupportedCompressionAlgo
-pub append::AppendError::UnsupportedCompressionAlgo::algo: u8
-pub append::AppendError::UnsupportedLayout
-pub append::AppendError::UnsupportedLayout::what: &'static str
-pub append::AppendError::UnsupportedMetadataKind
-pub append::AppendError::UnsupportedVersion
-pub append::AppendError::UnsupportedVersion::expected: u16
-pub append::AppendError::UnsupportedVersion::version: u16
-pub append::AppendError::ValueTooLong
-pub append::AppendError::ValueTooLong::len: usize
-pub mod cli
-pub fn cli::run_bake_cli(&[alloc::string::String]) -> std::process::ExitCode
-pub fn cli::run_inspect_cli(&[alloc::string::String]) -> std::process::ExitCode
-pub fn cli::run_repack_cli(&[alloc::string::String]) -> std::process::ExitCode
-pub mod composer
-pub composer::BakeError::BiasLengthMismatch
-pub composer::BakeError::BiasLengthMismatch::expected: usize
-pub composer::BakeError::BiasLengthMismatch::got: usize
-pub composer::BakeError::BiasLengthMismatch::layer: usize
-pub composer::BakeError::EmptyLayers
-pub composer::BakeError::FeatureBoundsLengthMismatch
-pub composer::BakeError::FeatureBoundsLengthMismatch::expected: usize
-pub composer::BakeError::FeatureBoundsLengthMismatch::got: usize
-pub composer::BakeError::FeatureOrderLengthMismatch
-pub composer::BakeError::FeatureOrderLengthMismatch::expected: usize
-pub composer::BakeError::FeatureOrderLengthMismatch::got: usize
-pub composer::BakeError::FeatureTransformParamArityMismatch
-pub composer::BakeError::FeatureTransformParamArityMismatch::expected: usize
-pub composer::BakeError::FeatureTransformParamArityMismatch::feature_index: usize
-pub composer::BakeError::FeatureTransformParamArityMismatch::got: usize
-pub composer::BakeError::FeatureTransformParamArityMismatch::transform: &'static str
-pub composer::BakeError::FeatureTransformParamInvalid
-pub composer::BakeError::FeatureTransformParamInvalid::feature_index: usize
-pub composer::BakeError::FeatureTransformParamInvalid::reason: &'static str
-pub composer::BakeError::FeatureTransformParamInvalid::transform: &'static str
-pub composer::BakeError::FeatureTransformsLenMismatch
-pub composer::BakeError::FeatureTransformsLenMismatch::expected: usize
-pub composer::BakeError::FeatureTransformsLenMismatch::got: usize
-pub composer::BakeError::InvalidPermutation
-pub composer::BakeError::InvalidPermutation::what: &'static str
-pub composer::BakeError::LayerDimMismatch
-pub composer::BakeError::LayerDimMismatch::expected_in: usize
-pub composer::BakeError::LayerDimMismatch::got_in: usize
-pub composer::BakeError::LayerDimMismatch::layer: usize
-pub composer::BakeError::MetadataKeyEmpty
-pub composer::BakeError::MetadataKeyTooLong
-pub composer::BakeError::MetadataKeyTooLong::len: usize
-pub composer::BakeError::OutputOrderLengthMismatch
-pub composer::BakeError::OutputOrderLengthMismatch::expected: usize
-pub composer::BakeError::OutputOrderLengthMismatch::got: usize
-pub composer::BakeError::OutputSpecDiscreteOutOfRange
-pub composer::BakeError::OutputSpecDiscreteOutOfRange::len: u32
-pub composer::BakeError::OutputSpecDiscreteOutOfRange::offset: u32
-pub composer::BakeError::OutputSpecDiscreteOutOfRange::output_index: usize
-pub composer::BakeError::OutputSpecDiscreteOutOfRange::pool_len: usize
-pub composer::BakeError::OutputSpecsLengthMismatch
-pub composer::BakeError::OutputSpecsLengthMismatch::expected: usize
-pub composer::BakeError::OutputSpecsLengthMismatch::got: usize
-pub composer::BakeError::ScalerLengthMismatch
-pub composer::BakeError::ScalerLengthMismatch::expected: usize
-pub composer::BakeError::ScalerLengthMismatch::got: usize
-pub composer::BakeError::ScalerLengthMismatch::what: &'static str
-pub composer::BakeError::ScalesLengthMismatch
-pub composer::BakeError::ScalesLengthMismatch::expected: usize
-pub composer::BakeError::ScalesLengthMismatch::got: usize
-pub composer::BakeError::ScalesLengthMismatch::layer: usize
-pub composer::BakeError::SparseOverrideIndexOutOfRange
-pub composer::BakeError::SparseOverrideIndexOutOfRange::idx: u32
-pub composer::BakeError::SparseOverrideIndexOutOfRange::n_outputs: usize
-pub composer::BakeError::UnknownFeatureTransformToken
-pub composer::BakeError::UnknownFeatureTransformToken::feature_index: usize
-pub composer::BakeError::UnknownOutputTransform
-pub composer::BakeError::UnknownOutputTransform::byte: u8
-pub composer::BakeError::UnknownOutputTransform::output_index: usize
-pub composer::BakeError::WeightLengthMismatch
-pub composer::BakeError::WeightLengthMismatch::expected: usize
-pub composer::BakeError::WeightLengthMismatch::got: usize
-pub composer::BakeError::WeightLengthMismatch::layer: usize
-pub composer::BakeLayer::activation: zenpredict::model::Activation
-pub composer::BakeLayer::biases: &'a [f32]
-pub composer::BakeLayer::dtype: zenpredict::model::WeightDtype
-pub composer::BakeLayer::in_dim: usize
-pub composer::BakeLayer::out_dim: usize
-pub composer::BakeLayer::weights: &'a [f32]
-pub composer::BakeMetadataEntry::key: &'a str
-pub composer::BakeMetadataEntry::kind: zenpredict::metadata::MetadataType
-pub composer::BakeMetadataEntry::value: &'a [u8]
-pub composer::BakeRequest::compressed: bool
-pub composer::BakeRequest::discrete_sets: &'a [f32]
-pub composer::BakeRequest::feature_bounds: &'a [zenpredict::bounds::FeatureBound]
-pub composer::BakeRequest::feature_order: core::option::Option<&'a [u32]>
-pub composer::BakeRequest::flags: u16
-pub composer::BakeRequest::hu_permutations: core::option::Option<&'a [&'a [u32]]>
-pub composer::BakeRequest::layers: &'a [composer::BakeLayer<'a>]
-pub composer::BakeRequest::metadata: &'a [composer::BakeMetadataEntry<'a>]
-pub composer::BakeRequest::output_order: core::option::Option<&'a [u32]>
-pub composer::BakeRequest::output_specs: &'a [zenpredict::output_spec::OutputSpec]
-pub composer::BakeRequest::scaler_mean: &'a [f32]
-pub composer::BakeRequest::scaler_scale: &'a [f32]
-pub composer::BakeRequest::schema_hash: u64
-pub composer::BakeRequest::sparse_overrides: &'a [zenpredict::output_spec::SparseOverride]
-pub fn composer::BakeRequest<'a>::builder(u64, u16, &'a [f32], &'a [f32], &'a [composer::BakeLayer<'a>]) -> composer::BakeRequestBuilder<'a>
-pub fn composer::BakeRequest<'a>::new(u64, u16, &'a [f32], &'a [f32], &'a [composer::BakeLayer<'a>]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::bake(self) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError>
-pub fn composer::BakeRequestBuilder<'a>::build(self) -> composer::BakeRequest<'a>
-pub fn composer::BakeRequestBuilder<'a>::compressed(self, bool) -> Self
-pub fn composer::BakeRequestBuilder<'a>::discrete_sets(self, &'a [f32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::feature_bounds(self, &'a [zenpredict::bounds::FeatureBound]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::feature_order(self, &'a [u32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::metadata(self, &'a [composer::BakeMetadataEntry<'a>]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::output_order(self, &'a [u32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
-pub fn composer::f32_to_f16_bits(f32) -> u16
-pub mod json
-pub json::ActivationJson::Identity
-pub json::ActivationJson::LeakyRelu
-pub json::ActivationJson::Relu
-pub json::ActivationJson::SmoothHinge
-pub json::BakeJsonError::BadHex(alloc::string::String)
-pub json::BakeJsonError::Bake(composer::BakeError)
-pub json::BakeJsonError::MetadataValueAmbiguous
-pub json::BakeJsonError::MetadataValueAmbiguous::key: alloc::string::String
-pub json::BakeJsonError::MetadataValueMissing
-pub json::BakeJsonError::MetadataValueMissing::key: alloc::string::String
-pub json::BakeJsonError::MetadataValueWrongType
-pub json::BakeJsonError::MetadataValueWrongType::key: alloc::string::String
-pub json::BakeJsonError::MetadataValueWrongType::repr: &'static str
-pub json::BakeJsonError::MetadataValueWrongType::wire: zenpredict::metadata::MetadataType
-pub json::DtypeJson::F16
-pub json::DtypeJson::F32
-pub json::DtypeJson::I8
-pub enum json::MetadataKindJson
-pub json::MetadataKindJson::Bytes
-pub json::MetadataKindJson::Numeric
-pub json::MetadataKindJson::Utf8
-pub json::OutputTransformJson::Exp
-pub json::OutputTransformJson::Identity
-pub json::OutputTransformJson::Round
-pub json::OutputTransformJson::Sigmoid
-pub json::OutputTransformJson::SigmoidScaled
-pub json::BakeLayerJson::activation: json::ActivationJson
-pub json::BakeLayerJson::biases: alloc::vec::Vec<f32>
-pub json::BakeLayerJson::dtype: json::DtypeJson
-pub json::BakeLayerJson::in_dim: usize
-pub json::BakeLayerJson::out_dim: usize
-pub json::BakeLayerJson::weights: alloc::vec::Vec<f32>
-pub json::BakeRequestJson::analyzer_version: core::option::Option<alloc::string::String>
-pub json::BakeRequestJson::compressed: bool
-pub json::BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJson>
-pub json::BakeRequestJson::feature_config_hash: core::option::Option<u64>
-pub json::BakeRequestJson::feature_defs_version: core::option::Option<u32>
-pub json::BakeRequestJson::flags: u16
-pub json::BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
-pub json::BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
-pub json::BakeRequestJson::optimize: bool
-pub json::BakeRequestJson::output_specs: alloc::vec::Vec<json::OutputSpecJson>
-pub json::BakeRequestJson::scaler_mean: alloc::vec::Vec<f32>
-pub json::BakeRequestJson::scaler_scale: alloc::vec::Vec<f32>
-pub json::BakeRequestJson::schema_hash: u64
-pub json::BakeRequestJson::sparse_overrides: alloc::vec::Vec<json::SparseOverrideJson>
-pub json::BakeRequestJson::zerobias_tau: f32
-pub json::FeatureBoundJson::high: f32
-pub json::FeatureBoundJson::low: f32
-pub json::MetadataEntryJson::f32_values: core::option::Option<alloc::vec::Vec<f32>>
-pub json::MetadataEntryJson::hex: core::option::Option<alloc::string::String>
-pub json::MetadataEntryJson::key: alloc::string::String
-pub json::MetadataEntryJson::kind: json::MetadataKindJson
-pub json::MetadataEntryJson::text: core::option::Option<alloc::string::String>
-pub json::OutputSpecJson::bounds: core::option::Option<[f32; 2]>
-pub json::OutputSpecJson::discrete_set: core::option::Option<alloc::vec::Vec<f32>>
-pub json::OutputSpecJson::params: core::option::Option<[f32; 2]>
-pub json::OutputSpecJson::sentinel: core::option::Option<f32>
-pub json::OutputSpecJson::transform: core::option::Option<json::OutputTransformJson>
-pub json::SparseOverrideJson::idx: u32
-pub json::SparseOverrideJson::value: core::option::Option<f32>
-pub mod optimize
-pub struct optimize::OptimizeConfig
-pub optimize::OptimizeConfig::explore_hu_order: bool
-pub optimize::OptimizeConfig::explore_input_order: bool
-pub optimize::OptimizeConfig::explore_output_order: bool
-pub optimize::OptimizeConfig::local_search_iters: usize
-pub optimize::OptimizeConfig::local_search_seed: u64
-pub optimize::OptimizeConfig::max_evaluations: usize
-pub fn optimize::bake_optimized_with(&composer::BakeRequest<'_>, &optimize::OptimizeConfig) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError>
-pub mod zero_bias
-pub enum ActivationJson [also: json]
+pub mod input_program
+#[non_exhaustive] pub enum input_program::InputOpJson
+pub input_program::InputOpJson::Gate
+pub input_program::InputOpJson::Gate::input: u32
+pub input_program::InputOpJson::Gate::values: [f32; 3]
+pub input_program::InputOpJson::Product
+pub input_program::InputOpJson::Product::left: u32
+pub input_program::InputOpJson::Product::right: u32
+pub input_program::InputOpJson::Shape
+pub input_program::InputOpJson::Shape::input: u32
+pub input_program::InputOpJson::Shape::knots: [f32; 2]
+pub input_program::InputOpJson::Shape::slopes: [f32; 3]
+pub input_program::InputOpJson::Source
+pub input_program::InputOpJson::Source::index: u32
+#[non_exhaustive] pub struct input_program::InputProgramJson
+pub input_program::InputProgramJson::nodes: alloc::vec::Vec<input_program::InputOpJson>
+pub input_program::InputProgramJson::outputs: alloc::vec::Vec<u32>
+pub input_program::InputProgramJson::source_count: u32
+pub fn input_program::InputProgramJson::build(&self) -> core::result::Result<zenpredict::input_program::InputProgram, zenpredict::error::PredictError>
+pub fn input_program::attach_input_program(&[u8], &zenpredict::input_program::InputProgram) -> core::result::Result<alloc::vec::Vec<u8>, AppendError>
+pub fn input_program::bake_with_input_program(&BakeRequest<'_>, &zenpredict::input_program::InputProgram) -> core::result::Result<alloc::vec::Vec<u8>, BakeError>
+pub enum ActivationJson
 pub ActivationJson::Identity
 pub ActivationJson::LeakyRelu
 pub ActivationJson::Relu
+pub ActivationJson::ResearchReluMaxPairs
+pub ActivationJson::Silu
 pub ActivationJson::SmoothHinge
-#[non_exhaustive] pub enum AppendError [also: append]
+pub ActivationJson::Softplus
+#[non_exhaustive] pub enum AppendError
 pub AppendError::BadMagic
 pub AppendError::BadMagic::found: [u8; 4]
 pub AppendError::DecompressFailed
@@ -268,7 +83,7 @@ pub AppendError::UnsupportedVersion::expected: u16
 pub AppendError::UnsupportedVersion::version: u16
 pub AppendError::ValueTooLong
 pub AppendError::ValueTooLong::len: usize
-#[non_exhaustive] pub enum BakeError [also: composer]
+#[non_exhaustive] pub enum BakeError
 pub BakeError::BiasLengthMismatch
 pub BakeError::BiasLengthMismatch::expected: usize
 pub BakeError::BiasLengthMismatch::got: usize
@@ -292,6 +107,9 @@ pub BakeError::FeatureTransformParamInvalid::transform: &'static str
 pub BakeError::FeatureTransformsLenMismatch
 pub BakeError::FeatureTransformsLenMismatch::expected: usize
 pub BakeError::FeatureTransformsLenMismatch::got: usize
+pub BakeError::InvalidDimension
+pub BakeError::InvalidDimension::what: &'static str
+pub BakeError::InvalidInputProgram(zenpredict::error::PredictError)
 pub BakeError::InvalidPermutation
 pub BakeError::InvalidPermutation::what: &'static str
 pub BakeError::LayerDimMismatch
@@ -332,9 +150,9 @@ pub BakeError::WeightLengthMismatch
 pub BakeError::WeightLengthMismatch::expected: usize
 pub BakeError::WeightLengthMismatch::got: usize
 pub BakeError::WeightLengthMismatch::layer: usize
-pub enum BakeJsonError [also: json]
+pub enum BakeJsonError
 pub BakeJsonError::BadHex(alloc::string::String)
-pub BakeJsonError::Bake(composer::BakeError)
+pub BakeJsonError::Bake(BakeError)
 pub BakeJsonError::MetadataValueAmbiguous
 pub BakeJsonError::MetadataValueAmbiguous::key: alloc::string::String
 pub BakeJsonError::MetadataValueMissing
@@ -343,128 +161,137 @@ pub BakeJsonError::MetadataValueWrongType
 pub BakeJsonError::MetadataValueWrongType::key: alloc::string::String
 pub BakeJsonError::MetadataValueWrongType::repr: &'static str
 pub BakeJsonError::MetadataValueWrongType::wire: zenpredict::metadata::MetadataType
-pub enum DtypeJson [also: json]
+pub enum DtypeJson
 pub DtypeJson::F16
 pub DtypeJson::F32
 pub DtypeJson::I8
-pub enum OutputTransformJson [also: json]
+pub enum OutputTransformJson
 pub OutputTransformJson::Exp
 pub OutputTransformJson::Identity
 pub OutputTransformJson::Round
 pub OutputTransformJson::Sigmoid
 pub OutputTransformJson::SigmoidScaled
-pub struct BakeLayer<'a> [also: composer]
+pub struct BakeLayer<'a>
 pub BakeLayer::activation: zenpredict::model::Activation
 pub BakeLayer::biases: &'a [f32]
 pub BakeLayer::dtype: zenpredict::model::WeightDtype
 pub BakeLayer::in_dim: usize
 pub BakeLayer::out_dim: usize
 pub BakeLayer::weights: &'a [f32]
-pub struct BakeLayerJson [also: json]
-pub BakeLayerJson::activation: json::ActivationJson
+pub struct BakeLayerJson
+pub BakeLayerJson::activation: ActivationJson
 pub BakeLayerJson::biases: alloc::vec::Vec<f32>
-pub BakeLayerJson::dtype: json::DtypeJson
+pub BakeLayerJson::dtype: DtypeJson
 pub BakeLayerJson::in_dim: usize
 pub BakeLayerJson::out_dim: usize
 pub BakeLayerJson::weights: alloc::vec::Vec<f32>
-pub struct BakeMetadataEntry<'a> [also: composer]
+pub struct BakeMetadataEntry<'a>
 pub BakeMetadataEntry::key: &'a str
 pub BakeMetadataEntry::kind: zenpredict::metadata::MetadataType
 pub BakeMetadataEntry::value: &'a [u8]
-pub struct BakeRequest<'a> [also: composer]
+pub struct BakeRequest<'a>
 pub BakeRequest::compressed: bool
 pub BakeRequest::discrete_sets: &'a [f32]
 pub BakeRequest::feature_bounds: &'a [zenpredict::bounds::FeatureBound]
 pub BakeRequest::feature_order: core::option::Option<&'a [u32]>
 pub BakeRequest::flags: u16
 pub BakeRequest::hu_permutations: core::option::Option<&'a [&'a [u32]]>
-pub BakeRequest::layers: &'a [composer::BakeLayer<'a>]
-pub BakeRequest::metadata: &'a [composer::BakeMetadataEntry<'a>]
+pub BakeRequest::layers: &'a [BakeLayer<'a>]
+pub BakeRequest::metadata: &'a [BakeMetadataEntry<'a>]
 pub BakeRequest::output_order: core::option::Option<&'a [u32]>
 pub BakeRequest::output_specs: &'a [zenpredict::output_spec::OutputSpec]
 pub BakeRequest::scaler_mean: &'a [f32]
 pub BakeRequest::scaler_scale: &'a [f32]
 pub BakeRequest::schema_hash: u64
 pub BakeRequest::sparse_overrides: &'a [zenpredict::output_spec::SparseOverride]
-pub fn composer::BakeRequest<'a>::builder(u64, u16, &'a [f32], &'a [f32], &'a [composer::BakeLayer<'a>]) -> composer::BakeRequestBuilder<'a>
-pub fn composer::BakeRequest<'a>::new(u64, u16, &'a [f32], &'a [f32], &'a [composer::BakeLayer<'a>]) -> Self
-pub struct BakeRequestBuilder<'a> [also: composer]
-pub fn composer::BakeRequestBuilder<'a>::bake(self) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError>
-pub fn composer::BakeRequestBuilder<'a>::build(self) -> composer::BakeRequest<'a>
-pub fn composer::BakeRequestBuilder<'a>::compressed(self, bool) -> Self
-pub fn composer::BakeRequestBuilder<'a>::discrete_sets(self, &'a [f32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::feature_bounds(self, &'a [zenpredict::bounds::FeatureBound]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::feature_order(self, &'a [u32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::metadata(self, &'a [composer::BakeMetadataEntry<'a>]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::output_order(self, &'a [u32]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self
-pub fn composer::BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
-#[non_exhaustive] pub struct BakeRequestJson [also: json]
+pub fn BakeRequest<'a>::builder(u64, u16, &'a [f32], &'a [f32], &'a [BakeLayer<'a>]) -> BakeRequestBuilder<'a>
+pub fn BakeRequest<'a>::new(u64, u16, &'a [f32], &'a [f32], &'a [BakeLayer<'a>]) -> Self
+pub struct BakeRequestBuilder<'a>
+pub fn BakeRequestBuilder<'a>::bake(self) -> core::result::Result<alloc::vec::Vec<u8>, BakeError>
+pub fn BakeRequestBuilder<'a>::build(self) -> BakeRequest<'a>
+pub fn BakeRequestBuilder<'a>::compressed(self, bool) -> Self
+pub fn BakeRequestBuilder<'a>::discrete_sets(self, &'a [f32]) -> Self
+pub fn BakeRequestBuilder<'a>::feature_bounds(self, &'a [zenpredict::bounds::FeatureBound]) -> Self
+pub fn BakeRequestBuilder<'a>::feature_order(self, &'a [u32]) -> Self
+pub fn BakeRequestBuilder<'a>::metadata(self, &'a [BakeMetadataEntry<'a>]) -> Self
+pub fn BakeRequestBuilder<'a>::output_order(self, &'a [u32]) -> Self
+pub fn BakeRequestBuilder<'a>::output_specs(self, &'a [zenpredict::output_spec::OutputSpec]) -> Self
+pub fn BakeRequestBuilder<'a>::sparse_overrides(self, &'a [zenpredict::output_spec::SparseOverride]) -> Self
+#[non_exhaustive] pub struct BakeRequestJson
 pub BakeRequestJson::analyzer_version: core::option::Option<alloc::string::String>
 pub BakeRequestJson::compressed: bool
-pub BakeRequestJson::feature_bounds: alloc::vec::Vec<json::FeatureBoundJson>
+pub BakeRequestJson::feature_bounds: alloc::vec::Vec<FeatureBoundJson>
 pub BakeRequestJson::feature_config_hash: core::option::Option<u64>
 pub BakeRequestJson::feature_defs_version: core::option::Option<u32>
 pub BakeRequestJson::flags: u16
-pub BakeRequestJson::layers: alloc::vec::Vec<json::BakeLayerJson>
-pub BakeRequestJson::metadata: alloc::vec::Vec<json::MetadataEntryJson>
+pub BakeRequestJson::input_program: core::option::Option<input_program::InputProgramJson>
+pub BakeRequestJson::layers: alloc::vec::Vec<BakeLayerJson>
+pub BakeRequestJson::metadata: alloc::vec::Vec<MetadataEntryJson>
 pub BakeRequestJson::optimize: bool
-pub BakeRequestJson::output_specs: alloc::vec::Vec<json::OutputSpecJson>
+pub BakeRequestJson::output_specs: alloc::vec::Vec<OutputSpecJson>
 pub BakeRequestJson::scaler_mean: alloc::vec::Vec<f32>
 pub BakeRequestJson::scaler_scale: alloc::vec::Vec<f32>
 pub BakeRequestJson::schema_hash: u64
-pub BakeRequestJson::sparse_overrides: alloc::vec::Vec<json::SparseOverrideJson>
+pub BakeRequestJson::sparse_overrides: alloc::vec::Vec<SparseOverrideJson>
 pub BakeRequestJson::zerobias_tau: f32
-pub struct FeatureBoundJson [also: json]
+pub struct FeatureBoundJson
 pub FeatureBoundJson::high: f32
 pub FeatureBoundJson::low: f32
-pub struct MetadataEntryJson [also: json]
+pub struct MetadataEntryJson
 pub MetadataEntryJson::f32_values: core::option::Option<alloc::vec::Vec<f32>>
 pub MetadataEntryJson::hex: core::option::Option<alloc::string::String>
 pub MetadataEntryJson::key: alloc::string::String
 pub MetadataEntryJson::kind: json::MetadataKindJson
 pub MetadataEntryJson::text: core::option::Option<alloc::string::String>
-pub struct OutputSpecJson [also: json]
+pub struct OptimizeConfig
+pub OptimizeConfig::explore_hu_order: bool
+pub OptimizeConfig::explore_input_order: bool
+pub OptimizeConfig::explore_output_order: bool
+pub OptimizeConfig::local_search_iters: usize
+pub OptimizeConfig::local_search_seed: u64
+pub OptimizeConfig::max_evaluations: usize
+pub struct OutputSpecJson
 pub OutputSpecJson::bounds: core::option::Option<[f32; 2]>
 pub OutputSpecJson::discrete_set: core::option::Option<alloc::vec::Vec<f32>>
 pub OutputSpecJson::params: core::option::Option<[f32; 2]>
 pub OutputSpecJson::sentinel: core::option::Option<f32>
-pub OutputSpecJson::transform: core::option::Option<json::OutputTransformJson>
-pub struct SparseOverrideJson [also: json]
+pub OutputSpecJson::transform: core::option::Option<OutputTransformJson>
+pub struct SparseOverrideJson
 pub SparseOverrideJson::idx: u32
 pub SparseOverrideJson::value: core::option::Option<f32>
-pub fn append_metadata_utf8(&[u8], &str, &str) -> core::result::Result<alloc::vec::Vec<u8>, append::AppendError> [also: append]
-pub fn apply_zero_bias(&[f32], usize, f32) -> alloc::vec::Vec<f32> [also: zero_bias]
-pub fn apply_zero_bias_in_place(&mut [f32], usize, f32) [also: zero_bias]
-pub fn apply_zero_bias_per_layer(&[f32], f32) -> alloc::vec::Vec<f32> [also: zero_bias]
-pub fn apply_zero_bias_per_layer_in_place(&mut [f32], f32) [also: zero_bias]
-pub fn bake(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: composer]
-pub fn bake_from_json(&json::BakeRequestJson) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
-pub fn bake_from_json_str(&str) -> core::result::Result<alloc::vec::Vec<u8>, json::BakeJsonError> [also: json]
-pub fn bake_optimized(&composer::BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, composer::BakeError> [also: optimize]
+pub fn append_metadata_utf8(&[u8], &str, &str) -> core::result::Result<alloc::vec::Vec<u8>, AppendError>
+pub fn apply_zero_bias(&[f32], usize, f32) -> alloc::vec::Vec<f32>
+pub fn apply_zero_bias_in_place(&mut [f32], usize, f32)
+pub fn apply_zero_bias_per_layer(&[f32], f32) -> alloc::vec::Vec<f32>
+pub fn apply_zero_bias_per_layer_in_place(&mut [f32], f32)
+pub fn bake(&BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, BakeError>
+pub fn bake_from_json(&BakeRequestJson) -> core::result::Result<alloc::vec::Vec<u8>, BakeJsonError>
+pub fn bake_from_json_str(&str) -> core::result::Result<alloc::vec::Vec<u8>, BakeJsonError>
+pub fn bake_optimized(&BakeRequest<'_>) -> core::result::Result<alloc::vec::Vec<u8>, BakeError>
+pub fn bake_optimized_with(&BakeRequest<'_>, &OptimizeConfig) -> core::result::Result<alloc::vec::Vec<u8>, BakeError>
 
 ## trait impls (19 types)
 
-append::AppendError: Clone, Debug, Display, Eq, Error, PartialEq
-composer::BakeError: Clone, Debug, Display, Eq, Error, PartialEq
-json::ActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
-json::BakeJsonError: Debug, Display, Error, From<composer::BakeError>
-json::BakeLayerJson: Debug, serde_core::de::Deserialize<'de>
-json::BakeRequestJson: Debug, serde_core::de::Deserialize<'de>
-json::DtypeJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
-json::FeatureBoundJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
-json::MetadataEntryJson: Debug, serde_core::de::Deserialize<'de>
-json::MetadataKindJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
-json::OutputSpecJson: Clone, Debug, serde_core::de::Deserialize<'de>
-json::OutputTransformJson: Clone, Copy, Debug, Default, serde_core::de::Deserialize<'de>
-json::SparseOverrideJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
-optimize::OptimizeConfig: Clone, Copy, Debug, Default
-zenpredict::bounds::FeatureBound: From<json::FeatureBoundJson>
-zenpredict::metadata::MetadataType: From<json::MetadataKindJson>
-zenpredict::model::Activation: From<json::ActivationJson>
-zenpredict::model::WeightDtype: From<json::DtypeJson>
-zenpredict::output_spec::OutputTransform: From<json::OutputTransformJson>
+ActivationJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
+AppendError: Clone, Debug, Display, Eq, Error, PartialEq
+BakeError: Clone, Debug, Display, Eq, Error, PartialEq
+BakeJsonError: Debug, Display, Error, From<BakeError>
+BakeLayerJson: Debug, serde_core::de::Deserialize<'de>
+BakeRequestJson: Debug, serde_core::de::Deserialize<'de>
+DtypeJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
+FeatureBoundJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
+MetadataEntryJson: Debug, serde_core::de::Deserialize<'de>
+OptimizeConfig: Clone, Copy, Debug, Default
+OutputSpecJson: Clone, Debug, serde_core::de::Deserialize<'de>
+OutputTransformJson: Clone, Copy, Debug, Default, serde_core::de::Deserialize<'de>
+SparseOverrideJson: Clone, Copy, Debug, serde_core::de::Deserialize<'de>
+input_program::InputOpJson: Debug, serde_core::de::Deserialize<'de>
+input_program::InputProgramJson: Debug, serde_core::de::Deserialize<'de>
+zenpredict::bounds::FeatureBound: From<FeatureBoundJson>
+zenpredict::model::Activation: From<ActivationJson>
+zenpredict::model::WeightDtype: From<DtypeJson>
+zenpredict::output_spec::OutputTransform: From<OutputTransformJson>
 
 ## auto traits
 
-18 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+19 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpicker.txt 131 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 14 lines (14 hidden + 0 excluded-feature)
+# files: zenpicker.txt 131 lines (supported surface) | zenpicker.features.txt 0 added (features: api,std) | zenpicker.internal.txt 11 lines (11 hidden + 0 excluded-feature)
 
 ## summary
 #

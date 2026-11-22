@@ -9,15 +9,14 @@
 
 ## summary
 #
-#   inherent methods                            3
+#   inherent methods                            2
 #   trait roster entries (type × trait)         9
 #
 # per-module pub lines:
-#   (root)                            3
+#   (root)                            2
 
-## items (3 lines)
+## items (2 lines)
 
-pub fn FormatError::assert_fields_are_eq(&self)
 pub fn NamedFeature<'a>::assert_fields_are_eq(&self)
 pub fn Provenance<'a>::assert_fields_are_eq(&self)
 

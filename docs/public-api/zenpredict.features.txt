@@ -1,5 +1,5 @@
 # zenpredict public API — additions from non-default features
-# features: advanced,experimental,simd,std
+# features: advanced,baking,experimental,generic-powf,simd,std
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -9,23 +9,57 @@
 
 ## summary
 #
-#   pub modules                                 1
-#   pub types (struct/enum/trait/alias)        19
-#   pub consts/statics                          4
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)        26
+#   pub consts/statics                         28
 #   free functions                             18
-#   inherent methods                           26
-#   struct fields                              39
-#   enum variants                              18
-#   trait roster entries (type × trait)        70
-#   auto-trait-complete types                  14
+#   inherent methods                           44
+#   struct fields                              55
+#   enum variants                              22
+#   trait roster entries (type × trait)       103
+#   auto-trait-complete types                  21
 #
 # per-module pub lines:
-#   (root)                          108
+#   (root)                          131
 #   argmin                            4
+#   input_program                    31
 #   rescue                           13
+#   wire                             17
 
-## items (117 lines)
+## items (188 lines)
 
+pub mod input_program
+#[non_exhaustive] pub enum input_program::InputOp
+pub input_program::InputOp::Gate
+pub input_program::InputOp::Gate::gate: input_program::ReferenceGate
+pub input_program::InputOp::Gate::input: u32
+pub input_program::InputOp::Product
+pub input_program::InputOp::Product::left: u32
+pub input_program::InputOp::Product::right: u32
+pub input_program::InputOp::Shape
+pub input_program::InputOp::Shape::input: u32
+pub input_program::InputOp::Shape::shape: input_program::DamageShape
+pub input_program::InputOp::Source
+pub input_program::InputOp::Source::index: u32
+pub struct input_program::DamageShape(_)
+pub fn input_program::DamageShape::apply(self, f32) -> f32
+pub fn input_program::DamageShape::new([f32; 2], [f32; 3]) -> core::result::Result<Self, PredictError>
+pub fn input_program::DamageShape::parameters(self) -> [f32; 5]
+pub struct input_program::InputProgram
+pub fn input_program::InputProgram::apply(&self, &[f32], &mut [f32], &mut [f32]) -> core::result::Result<(), PredictError>
+pub fn input_program::InputProgram::from_bytes(&[u8]) -> core::result::Result<Self, PredictError>
+pub fn input_program::InputProgram::new(u32, alloc::vec::Vec<input_program::InputOp>, alloc::vec::Vec<u32>) -> core::result::Result<Self, PredictError>
+pub fn input_program::InputProgram::nodes(&self) -> &[input_program::InputOp]
+pub fn input_program::InputProgram::outputs(&self) -> &[u32]
+pub fn input_program::InputProgram::scratch_len(&self) -> usize
+pub fn input_program::InputProgram::source_count(&self) -> usize
+pub fn input_program::InputProgram::to_bytes(&self) -> alloc::vec::Vec<u8>
+pub struct input_program::ReferenceGate(_)
+pub fn input_program::ReferenceGate::apply(self, f32) -> f32
+pub fn input_program::ReferenceGate::new([f32; 3]) -> core::result::Result<Self, PredictError>
+pub fn input_program::ReferenceGate::parameters(self) -> [f32; 3]
+pub const input_program::FORMAT_VERSION: u16
+pub const input_program::METADATA_KEY: &str
 pub mod rescue
 pub rescue::RescueDecision::Rescue
 pub rescue::RescueDecision::Ship
@@ -35,6 +69,24 @@ pub rescue::RescueStrategy::SecondBestPick
 pub rescue::RescuePolicy::rescue_threshold: f32
 pub rescue::RescuePolicy::strategy: rescue::RescueStrategy
 pub fn rescue::RescuePolicy::from_bake(&Model, bool) -> Self
+pub mod wire
+pub const wire::COMPRESSION_ALGO_LZ4: u8
+pub const wire::COMPRESSION_ALGO_NONE: u8
+pub const wire::FLAGS_COMPRESSION_ALGO_MASK: u16
+pub const wire::FLAG_COMPRESSED: u16
+pub const wire::HEADER_SIZE: usize
+pub const wire::LAYER_ENTRY_SIZE: usize
+pub const wire::OFF_DECOMPRESSED_PAYLOAD_LEN: usize
+pub const wire::SECTION_OFF_DISCRETE_SETS: usize
+pub const wire::SECTION_OFF_FEATURE_BOUNDS: usize
+pub const wire::SECTION_OFF_FEATURE_ORDER: usize
+pub const wire::SECTION_OFF_LAYER_TABLE: usize
+pub const wire::SECTION_OFF_METADATA: usize
+pub const wire::SECTION_OFF_OUTPUT_ORDER: usize
+pub const wire::SECTION_OFF_OUTPUT_SPECS: usize
+pub const wire::SECTION_OFF_SCALER_MEAN: usize
+pub const wire::SECTION_OFF_SCALER_SCALE: usize
+pub const wire::SECTION_OFF_SPARSE_OVERRIDES: usize
 #[non_exhaustive] pub enum OutputValue
 pub OutputValue::Default
 pub OutputValue::Override(f32)
@@ -80,7 +132,20 @@ pub FallbackEntry::flags: u8
 pub FallbackEntry::quality_bump_pp: i8
 pub FallbackEntry::zq_target: u8
 pub fn FallbackEntry::is_verified(&self) -> bool
+#[non_exhaustive] #[repr(C)] pub struct Header
+#[repr(C)] pub struct LayerEntry
+pub LayerEntry::activation: u8
+pub LayerEntry::biases: Section
+pub LayerEntry::flags: u16
+pub LayerEntry::in_dim: u32
+pub LayerEntry::out_dim: u32
+pub LayerEntry::reserved: [u32; 3]
+pub LayerEntry::scales: Section
+pub LayerEntry::weight_dtype: u8
+pub LayerEntry::weights: Section
 pub fn Model::cell_rescue_hints(&self) -> alloc::vec::Vec<CellHint>
+pub fn Model::header(&self) -> &Header
+pub fn Model::input_program(&self) -> core::option::Option<&input_program::InputProgram>
 pub fn Model::output_bounds(&self) -> alloc::vec::Vec<OutputBound>
 pub fn Model::safety_compact(&self) -> core::option::Option<SafetyCompact>
 pub fn Model::unachievable_zones(&self) -> core::result::Result<UnachievableZones, PredictError>
@@ -92,6 +157,7 @@ pub fn Predictor<'a>::argmin_masked_with_scorer_in_range<F>(&mut self, &[f32], (
 pub fn Predictor<'a>::pick_with_confidence(&mut self, &[f32], &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<core::option::Option<(usize, f32)>, PredictError>
 pub fn Predictor<'a>::pick_with_confidence_in_range(&mut self, &[f32], (usize, usize), &argmin::AllowedMask<'_>, argmin::ScoreTransform, core::option::Option<&argmin::ArgminOffsets<'_>>) -> core::result::Result<core::option::Option<(usize, f32)>, PredictError>
 pub fn Predictor<'a>::predict_with_specs(&mut self, &[f32]) -> core::result::Result<&[output_spec::OutputValue], PredictError>
+pub fn Predictor<'a>::predict_with_specs_from_source(&mut self, &[f32]) -> core::result::Result<&[output_spec::OutputValue], PredictError>
 pub fn Predictor<'a>::predict_with_specs_transformed(&mut self, &[f32]) -> core::result::Result<&[output_spec::OutputValue], PredictError>
 #[non_exhaustive] pub struct RescuePolicy [also: rescue]
 pub RescuePolicy::rescue_threshold: f32
@@ -111,6 +177,13 @@ pub SafetyCompact::threshold_set_version: u8
 pub SafetyCompact::version: u16
 pub fn SafetyCompact::profile(&self) -> core::option::Option<SafetyProfile>
 pub fn SafetyCompact::strict_certified(&self) -> bool
+#[repr(C)] pub struct Section
+pub const fn Section::empty() -> Self
+pub const fn Section::is_empty(self) -> bool
+pub const fn Section::len_bytes(self) -> u32
+pub const fn Section::new(u32, u32) -> Self
+pub const fn Section::offset(self) -> u32
+pub fn Section::slice<'a>(self, &'static str, &'a [u8]) -> core::result::Result<&'a [u8], PredictError>
 pub struct Trial
 pub Trial::achieved_zq: f32
 pub Trial::bytes: u64
@@ -144,23 +217,34 @@ pub fn should_rescue(f32, f32, &rescue::RescuePolicy) -> rescue::RescueDecision 
 pub fn unachievable_zones_from_metadata(&Metadata<'_>) -> core::result::Result<UnachievableZones, PredictError>
 pub type OutputBound = FeatureBound
 
-## trait impls (14 types)
+## trait impls (21 types)
 
 CellHint: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 EncodeBudget: Clone, Copy, Debug, Default, Eq, PartialEq
 FallbackEntry: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+Header: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
+LayerEntry: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 PreArgminDecision: Clone, Copy, Debug, PartialEq
 QualityTarget: Clone, Copy, Debug, PartialEq
 SafetyCompact: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 SafetyProfile: Clone, Copy, Debug, Eq, PartialEq
+Section: Clone, Copy, Debug, Default, Eq, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 Trial: Clone, Copy, Debug, PartialEq
 UnachievableZone: Clone, Copy, Debug, PartialEq
 UnachievableZones: Clone, Debug, Default, PartialEq
 ZoneFallback: Clone, Copy, Debug, PartialEq
+input_program::DamageShape: Clone, Copy, Debug, PartialEq
+input_program::InputOp: Clone, Copy, Debug, PartialEq
+input_program::InputProgram: Clone, Debug, PartialEq
+input_program::ReferenceGate: Clone, Copy, Debug, PartialEq
 rescue::RescueDecision: Clone, Copy, Debug, Eq, PartialEq
 rescue::RescuePolicy: Clone, Copy, Debug, Default
 rescue::RescueStrategy: Clone, Copy, Debug, Eq, PartialEq
 
 ## auto traits
 
-14 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+
+## removed by features (1 lines)
+
+pub fn Model::header(&self) -> &model::Header

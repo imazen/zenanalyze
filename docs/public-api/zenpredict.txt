@@ -6,29 +6,28 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenpredict.txt 376 lines (supported surface) | zenpredict.features.txt 132 added (features: advanced,experimental,simd,std) | zenpredict.internal.txt 48 lines (48 hidden + 0 excluded-feature)
+# files: zenpredict.txt 349 lines (supported surface) | zenpredict.features.txt 210 added (features: advanced,baking,experimental,generic-powf,simd,std) | zenpredict.internal.txt 40 lines (40 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        32
-#   pub consts/statics                         50
+#   pub modules                                 5
+#   pub types (struct/enum/trait/alias)        29
+#   pub consts/statics                         28
 #   free functions                             19
-#   inherent methods                           90
-#   struct fields                              86
-#   enum variants                              80
-#   trait roster entries (type × trait)       115
-#   auto-trait-complete types                  26
+#   inherent methods                           92
+#   struct fields                              80
+#   enum variants                              86
+#   trait roster entries (type × trait)        97
+#   auto-trait-complete types                  23
 #
 # per-module pub lines:
-#   (root)                          265
+#   (root)                          258
 #   argmin                           26
 #   keys                             19
 #   limits                            3
 #   output_spec                      33
-#   wire                             17
 
-## items (350 lines)
+## items (326 lines)
 
 pub mod zenpredict
 pub mod argmin
@@ -94,29 +93,14 @@ pub output_spec::SparseOverride::idx: u32
 pub output_spec::SparseOverride::value: f32
 pub const fn output_spec::SparseOverride::new(u32, f32) -> Self [also: (root)]
 pub fn output_spec::apply_spec(&output_spec::OutputSpec, f32, &[f32]) -> output_spec::OutputValue
-pub mod wire
-pub const wire::COMPRESSION_ALGO_LZ4: u8
-pub const wire::COMPRESSION_ALGO_NONE: u8
-pub const wire::FLAGS_COMPRESSION_ALGO_MASK: u16
-pub const wire::FLAG_COMPRESSED: u16
-pub const wire::HEADER_SIZE: usize
-pub const wire::LAYER_ENTRY_SIZE: usize
-pub const wire::OFF_DECOMPRESSED_PAYLOAD_LEN: usize
-pub const wire::SECTION_OFF_DISCRETE_SETS: usize
-pub const wire::SECTION_OFF_FEATURE_BOUNDS: usize
-pub const wire::SECTION_OFF_FEATURE_ORDER: usize
-pub const wire::SECTION_OFF_LAYER_TABLE: usize
-pub const wire::SECTION_OFF_METADATA: usize
-pub const wire::SECTION_OFF_OUTPUT_ORDER: usize
-pub const wire::SECTION_OFF_OUTPUT_SPECS: usize
-pub const wire::SECTION_OFF_SCALER_MEAN: usize
-pub const wire::SECTION_OFF_SCALER_SCALE: usize
-pub const wire::SECTION_OFF_SPARSE_OVERRIDES: usize
 #[non_exhaustive] pub enum Activation
 pub Activation::Identity = 0
 pub Activation::LeakyRelu = 2
 pub Activation::Relu = 1
+pub Activation::ResearchReluMaxPairs = 6
+pub Activation::Silu = 5
 pub Activation::SmoothHinge = 3
+pub Activation::Softplus = 4
 pub enum EncodeMode
 pub EncodeMode::QueuedAggressive
 pub EncodeMode::QueuedBalanced
@@ -171,6 +155,8 @@ pub PickerStrategy::Auto
 pub PickerStrategy::MultiShot
 pub PickerStrategy::OneShot
 #[non_exhaustive] pub enum PredictError
+pub PredictError::AllocationFailed
+pub PredictError::AllocationFailed::what: &'static str
 pub PredictError::BadMagic
 pub PredictError::BadMagic::found: [u8; 4]
 pub PredictError::DimensionOverflow
@@ -181,6 +167,10 @@ pub PredictError::FeatureLenMismatch::got: usize
 pub PredictError::FeatureTransformsLenMismatch
 pub PredictError::FeatureTransformsLenMismatch::expected: usize
 pub PredictError::FeatureTransformsLenMismatch::got: usize
+pub PredictError::InvalidInputProgram
+pub PredictError::InvalidInputProgram::reason: &'static str
+pub PredictError::InvalidResearchMaxPair
+pub PredictError::InvalidResearchMaxPair::reason: &'static str
 pub PredictError::LayerDimMismatch
 pub PredictError::LayerDimMismatch::expected_in: usize
 pub PredictError::LayerDimMismatch::got_in: usize
@@ -262,22 +252,11 @@ pub FeatureBound::high: f32
 pub FeatureBound::low: f32
 pub fn FeatureBound::contains(&self, f32) -> bool
 pub const fn FeatureBound::new(f32, f32) -> Self
-#[non_exhaustive] #[repr(C)] pub struct Header
 pub struct KnobVeto<'a>
 pub KnobVeto::cells: &'a [u8]
 pub KnobVeto::feat_idx: u16
 pub KnobVeto::op: VetoOp
 pub KnobVeto::threshold: f32
-#[repr(C)] pub struct LayerEntry
-pub LayerEntry::activation: u8
-pub LayerEntry::biases: Section
-pub LayerEntry::flags: u16
-pub LayerEntry::in_dim: u32
-pub LayerEntry::out_dim: u32
-pub LayerEntry::reserved: [u32; 3]
-pub LayerEntry::scales: Section
-pub LayerEntry::weight_dtype: u8
-pub LayerEntry::weights: Section
 pub struct LayerView<'a>
 pub LayerView::activation: Activation
 pub LayerView::biases: &'a [f32]
@@ -285,13 +264,13 @@ pub LayerView::in_dim: usize
 pub LayerView::out_dim: usize
 pub LayerView::weights: WeightStorage<'a>
 pub struct Metadata<'a>
-pub fn Metadata<'a>::get(&self, &str) -> core::option::Option<&MetadataEntry<'a>>
+pub fn Metadata<'a>::get(&self, &str) -> core::option::Option<MetadataEntry<'a>>
 pub fn Metadata<'a>::get_bytes(&self, &str) -> core::result::Result<&'a [u8], PredictError>
 pub fn Metadata<'a>::get_numeric(&self, &str) -> core::result::Result<&'a [u8], PredictError>
 pub fn Metadata<'a>::get_pod<T: bytemuck::pod::Pod>(&self, &str) -> core::option::Option<T>
 pub fn Metadata<'a>::get_utf8(&self, &str) -> core::result::Result<&'a str, PredictError>
 pub fn Metadata<'a>::is_empty(&self) -> bool
-pub fn Metadata<'a>::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = &MetadataEntry<'a>>
+pub fn Metadata<'a>::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = MetadataEntry<'a>>
 pub fn Metadata<'a>::len(&self) -> usize
 pub fn Metadata<'a>::parse(&'a [u8]) -> core::result::Result<Self, PredictError>
 pub struct MetadataEntry<'a>
@@ -313,9 +292,10 @@ pub fn Model::flags(&self) -> u16
 pub fn Model::from_bytes(&[u8]) -> core::result::Result<Self, PredictError>
 pub fn Model::from_bytes_with_schema(&[u8], u64) -> core::result::Result<Self, PredictError>
 pub fn Model::has_expander_feature_transforms(&self) -> bool
+pub fn Model::has_input_program(&self) -> bool
 pub fn Model::has_nontrivial_feature_transforms(&self) -> bool
 pub fn Model::has_output_specs(&self) -> bool
-pub fn Model::header(&self) -> &Header
+pub fn Model::header(&self) -> &model::Header
 pub fn Model::knob_vetoes(&self) -> core::result::Result<alloc::vec::Vec<KnobVeto<'_>>, PredictError>
 pub fn Model::layer(&self, usize) -> LayerView<'_>
 pub fn Model::layers(&self) -> model::LayerIter<'_>
@@ -323,6 +303,7 @@ pub fn Model::metadata(&self) -> Metadata<'_>
 pub fn Model::n_inputs(&self) -> usize
 pub fn Model::n_layers(&self) -> usize
 pub fn Model::n_outputs(&self) -> usize
+pub fn Model::n_source_inputs(&self) -> usize
 pub fn Model::output_specs(&self) -> &[output_spec::OutputSpec]
 pub fn Model::raw_bytes(&self) -> &[u8]
 pub fn Model::scaler_mean(&self) -> &[f32]
@@ -351,17 +332,11 @@ pub fn Predictor<'a>::feature_transforms(&self) -> core::option::Option<&[Featur
 pub fn Predictor<'a>::model(&self) -> &Model
 pub fn Predictor<'a>::n_inputs(&self) -> usize
 pub fn Predictor<'a>::n_outputs(&self) -> usize
-pub fn Predictor<'a>::new(&'a Model) -> Self
+pub fn Predictor<'a>::new(&'a Model) -> core::result::Result<Self, PredictError>
 pub fn Predictor<'a>::predict(&mut self, &[f32]) -> core::result::Result<&[f32], PredictError>
+pub fn Predictor<'a>::predict_from_source(&mut self, &[f32]) -> core::result::Result<&[f32], PredictError>
 pub fn Predictor<'a>::predict_transformed(&mut self, &[f32]) -> core::result::Result<&[f32], PredictError>
 pub fn Predictor<'a>::schema_hash(&self) -> u64
-#[repr(C)] pub struct Section
-pub const fn Section::empty() -> Self
-pub const fn Section::is_empty(self) -> bool
-pub const fn Section::len_bytes(self) -> u32
-pub const fn Section::new(u32, u32) -> Self
-pub const fn Section::offset(self) -> u32
-pub fn Section::slice<'a>(self, &'static str, &'a [u8]) -> core::result::Result<&'a [u8], PredictError>
 #[repr(C)] pub struct SparseOverride [also: output_spec]
 pub SparseOverride::idx: u32
 pub SparseOverride::value: f32
@@ -381,15 +356,13 @@ pub fn mask_at_least(&[f32], f32, &mut [bool]) [also: argmin]
 pub fn mask_at_most(&[f32], f32, &mut [bool]) [also: argmin]
 pub fn parse_knob_vetoes(&[u8]) -> core::result::Result<alloc::vec::Vec<KnobVeto<'_>>, PredictError>
 
-## trait impls (25 types)
+## trait impls (22 types)
 
 Activation: Clone, Copy, Debug, Eq, PartialEq
 EncodeMode: Clone, Copy, Debug, Eq, PartialEq
 FeatureBound: Clone, Copy, Debug, Default, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 FeatureTransform: Clone, Copy, Debug, Default, Eq, PartialEq
-Header: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 KnobVeto<'a>: Clone, Copy, Debug, PartialEq
-LayerEntry: Clone, Copy, Debug, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 LayerView<'a>: Debug
 Metadata<'a>: Clone, Debug, Default
 MetadataEntry<'a>: Clone, Copy, Debug
@@ -397,7 +370,6 @@ MetadataType: Clone, Copy, Debug, Eq, PartialEq
 Model: Debug
 PickerStrategy: Clone, Copy, Debug, Eq, PartialEq
 PredictError: Clone, Debug, Display, Eq, Error, PartialEq
-Section: Clone, Copy, Debug, Default, Eq, PartialEq, bytemuck::pod::Pod, bytemuck::zeroable::Zeroable
 VetoOp: Clone, Copy, Debug, Eq, PartialEq
 WeightDtype: Clone, Copy, Debug, Eq, PartialEq
 WeightStorage<'a>: Debug
@@ -411,4 +383,4 @@ output_spec::SparseOverride: Clone, Copy, Debug, Default, bytemuck::pod::Pod, by
 
 ## auto traits
 
-26 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+23 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

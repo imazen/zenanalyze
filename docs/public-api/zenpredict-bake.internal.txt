@@ -9,24 +9,29 @@
 
 ## summary
 #
+#   pub modules                                 1
+#   free functions                              3
 #   inherent methods                            2
-#   trait roster entries (type × trait)         7
+#   trait roster entries (type × trait)         6
 #
 # per-module pub lines:
-#   append                            1
-#   composer                          1
+#   (root)                            3
+#   cli                               3
 
-## items (2 lines)
+## items (6 lines)
 
-pub fn append::AppendError::assert_fields_are_eq(&self)
-pub fn composer::BakeError::assert_fields_are_eq(&self)
+pub fn AppendError::assert_fields_are_eq(&self)
+pub fn BakeError::assert_fields_are_eq(&self)
+pub fn cli::run_bake_cli(&[alloc::string::String]) -> std::process::ExitCode
+pub fn cli::run_inspect_cli(&[alloc::string::String]) -> std::process::ExitCode
+pub fn cli::run_repack_cli(&[alloc::string::String]) -> std::process::ExitCode
+pub mod cli
 
-## trait impls (7 types)
+## trait impls (6 types)
 
-json::ActivationJson: TrivialClone
-json::DtypeJson: TrivialClone
-json::FeatureBoundJson: TrivialClone
-json::MetadataKindJson: TrivialClone
-json::OutputTransformJson: TrivialClone
-json::SparseOverrideJson: TrivialClone
-optimize::OptimizeConfig: TrivialClone
+ActivationJson: TrivialClone
+DtypeJson: TrivialClone
+FeatureBoundJson: TrivialClone
+OptimizeConfig: TrivialClone
+OutputTransformJson: TrivialClone
+SparseOverrideJson: TrivialClone

@@ -9,34 +9,20 @@
 
 ## summary
 #
-#   inherent methods                           15
-#   trait roster entries (type × trait)        33
+#   inherent methods                            4
+#   trait roster entries (type × trait)        36
 #
 # per-module pub lines:
-#   (root)                           11
-#   argmin                            1
-#   output_spec                       1
-#   rescue                            2
+#   (root)                            4
 
-## items (15 lines)
+## items (4 lines)
 
-pub fn Activation::assert_fields_are_eq(&self)
 pub fn EncodeBudget::assert_fields_are_eq(&self)
-pub fn EncodeMode::assert_fields_are_eq(&self)
-pub fn FeatureTransform::assert_fields_are_eq(&self)
 pub fn MetadataType::assert_fields_are_eq(&self)
-pub fn PickerStrategy::assert_fields_are_eq(&self)
 pub fn PredictError::assert_fields_are_eq(&self)
-pub fn SafetyProfile::assert_fields_are_eq(&self)
 pub fn Section::assert_fields_are_eq(&self)
-pub fn VetoOp::assert_fields_are_eq(&self)
-pub fn WeightDtype::assert_fields_are_eq(&self)
-pub fn argmin::ScoreTransform::assert_fields_are_eq(&self)
-pub fn output_spec::OutputTransform::assert_fields_are_eq(&self)
-pub fn rescue::RescueDecision::assert_fields_are_eq(&self)
-pub fn rescue::RescueStrategy::assert_fields_are_eq(&self)
 
-## trait impls (33 types)
+## trait impls (36 types)
 
 Activation: TrivialClone
 CellHint: TrivialClone
@@ -64,6 +50,9 @@ ZoneFallback: TrivialClone
 argmin::AllowedMask<'a>: TrivialClone
 argmin::ArgminOffsets<'a>: TrivialClone
 argmin::ScoreTransform: TrivialClone
+input_program::DamageShape: TrivialClone
+input_program::InputOp: TrivialClone
+input_program::ReferenceGate: TrivialClone
 output_spec::OutputSpec: TrivialClone
 output_spec::OutputTransform: TrivialClone
 output_spec::OutputValue: TrivialClone
