@@ -107,3 +107,12 @@ Remaining: reconcile the SDR imazen-26 parquets to the final qualified names (va
 unchanged — re-header or re-extract); perf-validate the SDR u8 path (zenbench, no
 `target-cpu=native`); publish 0.2.0 (gated: README + CI-green-all-platforms + GitHub
 release); migrate sibling repos.
+
+## Shared gamut API, November 22
+
+The ZenPixels 0.3.1 review revision `fde59b96` exposes the scalar matrix
+through `GamutMatrix::between` and `GamutMatrix::apply`. The analysis adapters
+share the existing row loop and retain its scalar multiply/add order and
+BT.709 shortcut. The HDR versioning replay on i270 passes its committed
+numeric golden and feature hashes. Command
+`cargo test -p zenanalyze --features hdr --lib versioning:: -- --test-threads=1`.

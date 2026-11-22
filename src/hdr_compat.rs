@@ -7,6 +7,13 @@
 use zenpixels::{ChannelLayout, ChannelType, ColorPrimaries, PixelDescriptor, TransferFunction};
 use zenpixels_convert::{ConvertPlan, RowConverter, gamut};
 
+fn to_linear_srgb(primaries: ColorPrimaries) -> Option<gamut::GamutMatrix> {
+    if primaries == ColorPrimaries::Bt709 {
+        return None;
+    }
+    gamut::GamutMatrix::between(primaries, ColorPrimaries::Bt709)
+}
+
 pub(crate) struct HdrAnalysisConverter {
     first: RowConverter,
     colors: Option<StoredColors>,
@@ -18,10 +25,10 @@ pub(crate) struct HdrAnalysisConverter {
 impl HdrAnalysisConverter {
     pub(crate) fn new(from: PixelDescriptor, width: u32) -> Result<Self, String> {
         let linear = PixelDescriptor::RGBF32_LINEAR;
-        let matrix = gamut::conversion_matrix(from.primaries, ColorPrimaries::Bt709);
+        let matrix = to_linear_srgb(from.primaries);
         // Decode in the source primaries. Applying the matrix separately below
         // preserves the historical non-FMA sum order, still available through
-        // gamut::apply_matrix_f32. New rendering plans use SIMD FMA here.
+        // GamutMatrix::apply. New rendering plans use SIMD FMA here.
         let source_linear = if matrix.is_some() {
             linear.with_primaries(from.primaries)
         } else {
@@ -116,17 +123,7 @@ impl HdrAnalysisConverter {
         if let Some(second) = &mut self.second {
             self.first.convert_row(from, &mut self.scratch, width);
             if let Some(matrix) = &self.matrix {
-                for bytes in self.scratch.as_chunks_mut::<12>().0 {
-                    let mut rgb = [
-                        f32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
-                        f32::from_ne_bytes(bytes[4..8].try_into().unwrap()),
-                        f32::from_ne_bytes(bytes[8..12].try_into().unwrap()),
-                    ];
-                    gamut::apply_matrix_f32(&mut rgb, matrix);
-                    for (channel, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(rgb) {
-                        channel.copy_from_slice(&value.to_ne_bytes());
-                    }
-                }
+                legacy_matrix_row(&mut self.scratch, matrix);
             }
             second.convert_row(&self.scratch, to, width);
         } else {
@@ -227,7 +224,7 @@ impl LinearAnalysisConverter {
         .with_primaries(from.primaries)
         .with_signal_range(from.signal_range);
         let linear = PixelDescriptor::RGBF32_LINEAR;
-        let matrix = gamut::conversion_matrix(from.primaries, ColorPrimaries::Bt709);
+        let matrix = to_linear_srgb(from.primaries);
         // The old planner inserts its matrix after integer widening. U16
         // PQ/HLG widen and decode in one step; those matrices follow the EOTF.
         let encoded_matrix = matrix.is_some()
@@ -315,13 +312,17 @@ impl LinearAnalysisConverter {
 
 fn legacy_matrix_row(row: &mut [u8], matrix: &gamut::GamutMatrix) {
     for bytes in row.as_chunks_mut::<12>().0 {
-        let mut rgb = [
+        let rgb = [
             f32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
             f32::from_ne_bytes(bytes[4..8].try_into().unwrap()),
             f32::from_ne_bytes(bytes[8..12].try_into().unwrap()),
         ];
-        gamut::apply_matrix_f32(&mut rgb, matrix);
-        for (channel, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(rgb) {
+        for (channel, value) in bytes
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(matrix.apply(rgb))
+        {
             channel.copy_from_slice(&value.to_ne_bytes());
         }
     }
