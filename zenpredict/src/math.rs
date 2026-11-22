@@ -8,13 +8,16 @@ pub(crate) fn powf(x: f32, exponent: f32) -> f32 {
 #[cfg(feature = "generic-powf")]
 #[cfg_attr(feature = "simd", archmage::autoversion(v3))]
 pub(crate) fn powf(x: f32, exponent: f32) -> f32 {
-    use magetypes::powf::{PowfExecution, PowfOptions, try_powf_with};
-    const OPTIONS: u32 = PowfOptions::PORTABLE_HIGHP
-        .with_execution(PowfExecution::Caller)
+    use magemath::powf::{Powf, PowfOptions};
+    const OPTIONS: u128 = PowfOptions::new()
+        .full_domain()
+        .highp()
+        .bit_exact()
+        .caller()
         .bits();
     // The fixed Full/HIGHP scalar configuration admits every pair of f32
     // operands. An error here is a dependency/programming contract failure.
-    try_powf_with::<OPTIONS>(x, exponent).expect("Full/HIGHP scalar policy admits all f32 operands")
+    Powf::<OPTIONS>::scalar(x, exponent).expect("Full/HIGHP scalar policy admits all f32 operands")
 }
 #[cfg(test)]
 mod tests {
@@ -44,8 +47,8 @@ mod tests {
     #[cfg(feature = "generic-powf")]
     #[test]
     fn full_highp_scalar_and_packed_agree_at_domain_boundaries() {
-        use magetypes::powf::{PowfOptions, try_powf_array_with};
-        const OPTIONS: u32 = PowfOptions::PORTABLE_HIGHP.bits();
+        use magemath::powf::{Powf, PowfOptions};
+        const OPTIONS: u128 = PowfOptions::new().full_domain().highp().bit_exact().bits();
         for bases in [
             [
                 f32::from_bits(1),
@@ -78,7 +81,7 @@ mod tests {
                 f32::NEG_INFINITY,
                 f32::NAN,
             ] {
-                let packed = try_powf_array_with::<OPTIONS, 8>(bases, exponent).unwrap();
+                let packed = Powf::<OPTIONS>::array::<8>(bases, exponent).unwrap();
                 for (base, actual) in bases.into_iter().zip(packed) {
                     let expected = super::powf(base, exponent);
                     if expected.is_nan() {

@@ -10,8 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Workspace
 
 - Use explicit fused multiply-add in analyzer kernels, including WebAssembly.
-- Pin the unreleased archmage PR144 revision for an opt-in Full/HIGHP power trial;
-  publication requires replacing the patch with an upstream release.
+- Replace temporary PR144 `archmage`/`magetypes` git patches with released
+  `archmage = "0.9.32"`, `magetypes = "0.9.32"`, and `magemath = "0.1.0"`.
+- Bump compatible dependencies (`lz4_flex` 0.14.2, `arrow`/`parquet` 60.2.0,
+  `rand` 0.10.4), add `CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined`
+  to CI `cross` jobs, fix `clippy::needless_range_loop` in `zenpicker-train`,
+  and refresh `docs/public-api/` snapshots.
 
 ### zenpredict / zenpredict-bake
 

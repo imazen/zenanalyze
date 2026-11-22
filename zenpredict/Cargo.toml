@@ -32,7 +32,7 @@ name = "zenpredict"
 default = ["std", "simd"]
 # Standard-library integration; transcendental math stays on libm.
 # Dense arithmetic uses correctly rounded fused multiply-add in every build.
-std = ["magetypes?/std"]
+std = ["magemath?/std"]
 # Advanced runtime extras for picker pipelines: typed multi-output
 # API (`output_spec::*`, `predict_with_specs*`), bake-time safety
 # metadata reader (`safety::*`), the two-shot rescue framework
@@ -78,27 +78,21 @@ experimental = []
 # so it is unaffected either way.
 simd = ["std", "dep:archmage"]
 
-# Trial of imazen/archmage PR144 canonical Full/HIGHP power. Off by default.
-generic-powf = ["dep:magetypes"]
+# Canonical Full/HIGHP power trial (`magemath`). Off by default.
+generic-powf = ["dep:magemath"]
 # Binary writing and program representation; serving does not need these.
 baking = []
 
 [dependencies]
-magetypes = { version = "0.9.31", default-features = false, optional = true }
+magemath = { version = "0.1.0", default-features = false, optional = true }
 
 # Safe SIMD capability tokens. Used ONLY by the `simd` feature, and only
 # for its `#[autoversion]` attribute, which re-emits the forward kernels
 # under `#[target_feature(enable = "avx2,fma")]` + a runtime dispatcher.
 # No intrinsics are written by hand and no kernel body changes, so
 # `#![forbid(unsafe_code)]` holds and the arithmetic is untouched.
-# 0.9.26 is the floor deliberately, not the latest (0.9.28): it is the
-# version already locked by the biggest consumer (zensim), so adding this
-# dependency forces no archmage bump anywhere and cannot perturb a
-# consumer's own SIMD codegen. `^0.9.26` still lets consumers resolve
-# newer 0.9.x. Both ends are gated — the `simd_parity_tests` bit-identity
-# suite is run against 0.9.26 and 0.9.28 (2026-08-04).
 # Keep every compatible 0.9.x release eligible (no patch-level ceiling).
-archmage = { version = "0.9.26", optional = true }
+archmage = { version = "0.9.32", optional = true }
 # Zero-copy byte → typed slice reinterpret without `unsafe` in our
 # tree. Tiny, no_std, well-audited.
 bytemuck = { version = "1.25.2", default-features = false, features = ["derive", "extern_crate_alloc"] }
@@ -117,11 +111,11 @@ libm = { version = "0.2.16", default-features = false }
 # Disabling defaults avoids std/frame/alloc. Keep safe, checked decoding
 # without allocating inside LZ4. The bake-side crate enables `alloc` and
 # `safe-encode` for its Vec-returning encoder.
-lz4_flex = { version = "0.14.0", default-features = false, features = ["safe-decode", "checked-decode"] }
+lz4_flex = { version = "0.14.2", default-features = false, features = ["safe-decode", "checked-decode"] }
 
 
 [dev-dependencies]
-rand = { version = "0.10.3", default-features = false, features = ["std", "std_rng"] }
+rand = { version = "0.10.4", default-features = false, features = ["std", "std_rng"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -23,7 +23,7 @@
 - Explicit source-input programs, Softplus, SiLU and research max pairs.
 - Aligned model storage and consolidated predictor scratch use bytemuck fast
   fallible zeroed allocations. F32/I8 models omit the unused F16 cache index.
-- Opt-in `generic-powf` trial uses archmage PR144 Full/HIGHP for every power
+- Opt-in `generic-powf` trial uses `magemath` 0.1.0 Full/HIGHP for every power
   transform. Default math stays libm; this feature is a distinct numeric policy.
 
 ## [0.2.0] - 2026-11-06

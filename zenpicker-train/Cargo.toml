@@ -51,9 +51,9 @@ zenpredict-bake = { path = "../zenpredict-bake", default-features = false, featu
 # path dep drags in no GPU infrastructure.
 zenstats = { package = "zenmetrics-stats", path = "../../zenmetrics/crates/zenmetrics-stats", default-features = false }
 # Columnar input. Same major as zenpredict-bake's `fit-yj` feature
-# (parquet 60.1.0) to keep the lockfile single-version.
-parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
-arrow = { version = "60.1.0", default-features = false }
+# (parquet 60.2.0) to keep the lockfile single-version.
+parquet = { version = "60.2.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "60.2.0", default-features = false }
 # Manifest serialization (reproduce-this recipe, mirrors §3).
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -84,8 +84,8 @@ tree-ab = ["dep:gbdt", "dep:smartcore"]
 
 [dev-dependencies]
 # Mint a tiny synthetic parquet in the end-to-end test.
-parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
-arrow = { version = "60.1.0", default-features = false }
+parquet = { version = "60.2.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "60.2.0", default-features = false }
 # Confirm the bake loads through the consumer that will use per-codec
 # picker bakes (the meta-picker wraps the same zenpredict::Predictor).
 zenpicker = { path = "../zenpicker", default-features = false, features = ["std"] }
