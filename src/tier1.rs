@@ -1303,6 +1303,354 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
     kg: f32,
     kb: f32,
 ) -> PixelStats {
+    // Native candidates regressed throughput. Restrict sharing to Wasm,
+    // retaining the qualified fused body for every native tier and Scalar.
+    #[cfg(target_arch = "wasm32")]
+    if core::any::TypeId::of::<Token>() != core::any::TypeId::of::<archmage::ScalarToken>() {
+        return {
+            // Const-fold luma weights for the BT.601 baseline (sRGB / BT.709 /
+            // Unknown sources, the orchestrator hot path). When BT601 is true,
+            // the `if` collapses at compile time and `kr/kg/kb` become
+            // immediate operands of `vfmadd*` everywhere they appear in this
+            // body — no register-loaded splats, three fewer YMM lanes live
+            // through the chunk loop. When BT601 is false (BT.2020, P3,
+            // AdobeRGB), the runtime values pass through unchanged.
+            let (kr, kg, kb) = if BT601 {
+                (0.299_f32, 0.587_f32, 0.114_f32)
+            } else {
+                (kr, kg, kb)
+            };
+            // Outer f64 accumulators — only touched during the periodic flush.
+            let mut luma_sum: f64 = 0.0;
+            let mut luma_sq_sum: f64 = 0.0;
+            let mut cb_sum: f64 = 0.0;
+            let mut cb_sq_sum: f64 = 0.0;
+            let mut cr_sum: f64 = 0.0;
+            let mut cr_sq_sum: f64 = 0.0;
+            let mut rg_sum: f64 = 0.0;
+            let mut rg_sq_sum: f64 = 0.0;
+            let mut yb_sum: f64 = 0.0;
+            let mut yb_sq_sum: f64 = 0.0;
+            // HVS chroma-luma covariance accumulators (FULL-gated; ride the
+            // same flush as `luma_sum`). Cross-products `Σ Y·Cb` and
+            // `Σ Y·Cr` over stripe samples; combined with luma + cb/cr sums
+            // and sums-of-squares to form Pearson at row close.
+            let mut y_cb_sum: f64 = 0.0;
+            let mut y_cr_sum: f64 = 0.0;
+            let mut cov_cb_sum: f64 = 0.0;
+            let mut cov_cb_sq_sum: f64 = 0.0;
+            let mut cov_cr_sum: f64 = 0.0;
+            let mut cov_cr_sq_sum: f64 = 0.0;
+
+            let row = &rgb[row_off..row_off + width * 3];
+
+            // Skin tone shares luma and loads with the statistics pass.
+            let mut skin_count: u64 = 0;
+
+            // ---- f32x8 stats pass: 8 pixels (24 bytes) per chunk ----
+            let kr_v = f32x8::splat_t(token, kr);
+            let kg_v = f32x8::splat_t(token, kg);
+            let kb_v = f32x8::splat_t(token, kb);
+            let inv_255_v = f32x8::splat_t(token, 1.0 / 255.0);
+            let half_v = f32x8::splat_t(token, 0.5);
+
+            // BT.601 chroma encoding constants. These are FIXED (independent
+            // of source primaries) — they define the encoder's YCbCr space,
+            // which is what the Chai-Ngan skin-tone classifier was calibrated
+            // against. The per-primaries `kr/kg/kb` only affect luma.
+            let cb_kr_v = f32x8::splat_t(token, -0.168736);
+            let cb_kg_v = f32x8::splat_t(token, -0.331264);
+            let cb_kb_v = f32x8::splat_t(token, 0.500000);
+            let cr_kr_v = f32x8::splat_t(token, 0.500000);
+            let cr_kg_v = f32x8::splat_t(token, -0.418688);
+            let cr_kb_v = f32x8::splat_t(token, -0.081312);
+            let off_128_v = f32x8::splat_t(token, 128.0);
+            // Chai-Ngan (1999) gates: Y in [40, 240], Cb in [77, 127],
+            // Cr in [133, 173]. All compared in float-domain u8 space —
+            // the gate margins (≥ 5 units) absorb any 1-LSB rounding drift
+            // between the float SIMD path and the integer scalar tail.
+            let y_lo_v = f32x8::splat_t(token, 40.0);
+            let y_hi_v = f32x8::splat_t(token, 240.0);
+            let cb_lo_v = f32x8::splat_t(token, 77.0);
+            let cb_hi_v = f32x8::splat_t(token, 127.0);
+            let cr_lo_v = f32x8::splat_t(token, 133.0);
+            let cr_hi_v = f32x8::splat_t(token, 173.0);
+            let one_v = f32x8::splat_t(token, 1.0);
+            let zero_v = f32x8::zero_t(token);
+
+            let mut luma_sum_v = f32x8::zero_t(token);
+            let mut luma_sq_v = f32x8::zero_t(token);
+            let mut cb_sum_v = f32x8::zero_t(token);
+            let mut cb_sq_v = f32x8::zero_t(token);
+            let mut cr_sum_v = f32x8::zero_t(token);
+            let mut cr_sq_v = f32x8::zero_t(token);
+            let mut rg_sum_v = f32x8::zero_t(token);
+            let mut rg_sq_v = f32x8::zero_t(token);
+            let mut yb_sum_v = f32x8::zero_t(token);
+            let mut yb_sq_v = f32x8::zero_t(token);
+            let mut skin_count_v = f32x8::zero_t(token);
+            // HVS cross-product lane accumulators (FULL-gated): `Σ l·cb` /
+            // `Σ l·cr` per chunk. One FMA each per 8-pixel chunk on top of
+            // the FULL kernel.
+            let mut y_cb_sum_v = f32x8::zero_t(token);
+            let mut y_cr_sum_v = f32x8::zero_t(token);
+            let mut cov_cb_sum_v = f32x8::zero_t(token);
+            let mut cov_cb_sq_v = f32x8::zero_t(token);
+            let mut cov_cr_sum_v = f32x8::zero_t(token);
+            let mut cov_cr_sq_v = f32x8::zero_t(token);
+
+            const FLUSH: usize = 32;
+            let mut iters_since_flush = 0usize;
+
+            let chunks = row.chunks_exact(24);
+            let remainder = chunks.remainder();
+            for chunk in chunks {
+                let c: &[R; 24] = chunk.try_into().unwrap();
+                // Deinterleave via ChunkInput (u8 → garb's tier-specialized vpshufb
+                // primitive, the SDR fast path; f32 → gather of an already-linear row).
+                let (r_arr, g_arr, b_arr) = R::load_chunk8(c, token);
+                let r = f32x8::load_t(token, &r_arr);
+                let g = f32x8::load_t(token, &g_arr);
+                let b = f32x8::load_t(token, &b_arr);
+
+                // BT.601 luma: l = 0.299·r + 0.587·g + 0.114·b
+                let l = r.tier_mul_add(kr_v, g.tier_mul_add(kg_v, b * kb_v));
+                // Chroma stats (simplified): cb_stat = (b − l) / 255;
+                // cr_stat = (r − l) / 255. Always-on (drives chroma_complexity
+                // and Cb/Cr sharpness shape signals).
+                let cb = (b - l) * inv_255_v;
+                let cr = (r - l) * inv_255_v;
+
+                cb_sum_v += cb;
+                cb_sq_v = cb.tier_mul_add(cb, cb_sq_v);
+                cr_sum_v += cr;
+                cr_sq_v = cr.tier_mul_add(cr, cr_sq_v);
+
+                // FULL-only accumulators: luma stats (Variance), Hasler M3
+                // (Colourfulness). Const-folds away on `!FULL`.
+                if FULL {
+                    // Hasler M3: rg = r − g; yb = 0.5·(r + g) − b
+                    let rg = r - g;
+                    let yb = (r + g).tier_mul_add(half_v, -b);
+                    luma_sum_v += l;
+                    luma_sq_v = l.tier_mul_add(l, luma_sq_v);
+                    rg_sum_v += rg;
+                    rg_sq_v = rg.tier_mul_add(rg, rg_sq_v);
+                    yb_sum_v += yb;
+                    yb_sq_v = yb.tier_mul_add(yb, yb_sq_v);
+                    // HVS chroma-luma covariance on gray-exact chroma (see
+                    // `PixelStats::y_cb_sum`): from channel differences, so
+                    // r = g = b gives exactly 0.0 instead of the `b − l`
+                    // rounding residue.
+                    let cov_cb = (b - r).tier_mul_add(kr_v, (b - g) * kg_v) * inv_255_v;
+                    let cov_cr = (r - g).tier_mul_add(kg_v, (r - b) * kb_v) * inv_255_v;
+                    cov_cb_sum_v += cov_cb;
+                    cov_cb_sq_v = cov_cb.tier_mul_add(cov_cb, cov_cb_sq_v);
+                    cov_cr_sum_v += cov_cr;
+                    cov_cr_sq_v = cov_cr.tier_mul_add(cov_cr, cov_cr_sq_v);
+                    y_cb_sum_v = l.tier_mul_add(cov_cb, y_cb_sum_v);
+                    y_cr_sum_v = l.tier_mul_add(cov_cr, y_cr_sum_v);
+                }
+                // SKIN-only accumulators: BT.601 chroma matrix in [0, 255]
+                // for the Chai-Ngan skin-tone gate. Const-folds away on
+                // `!SKIN`. Independent of FULL — `cargo asm` showed the
+                // joint kernel spilled 12 vmovups + rebroadcast 13 constants
+                // because all accumulators were live; peeling SKIN off FULL
+                // shrinks the AVX2 register pressure for both halves.
+                if SKIN {
+                    let cb_u8 = r.tier_mul_add(
+                        cb_kr_v,
+                        g.tier_mul_add(cb_kg_v, b.tier_mul_add(cb_kb_v, off_128_v)),
+                    );
+                    let cr_u8 = r.tier_mul_add(
+                        cr_kr_v,
+                        g.tier_mul_add(cr_kg_v, b.tier_mul_add(cr_kb_v, off_128_v)),
+                    );
+                    let m_y_lo = l.simd_ge(y_lo_v);
+                    let m_y_hi = l.simd_le(y_hi_v);
+                    let m_cb_lo = cb_u8.simd_ge(cb_lo_v);
+                    let m_cb_hi = cb_u8.simd_le(cb_hi_v);
+                    let m_cr_lo = cr_u8.simd_ge(cr_lo_v);
+                    let m_cr_hi = cr_u8.simd_le(cr_hi_v);
+                    let skin = m_y_lo & m_y_hi & m_cb_lo & m_cb_hi & m_cr_lo & m_cr_hi;
+                    skin_count_v += f32x8::blend(skin, one_v, zero_v);
+                }
+
+                iters_since_flush += 1;
+                if iters_since_flush >= FLUSH {
+                    cb_sum += fixed_reduce8(cb_sum_v.to_array());
+                    cb_sq_sum += fixed_reduce8(cb_sq_v.to_array());
+                    cr_sum += fixed_reduce8(cr_sum_v.to_array());
+                    cr_sq_sum += fixed_reduce8(cr_sq_v.to_array());
+                    cb_sum_v = f32x8::zero_t(token);
+                    cb_sq_v = f32x8::zero_t(token);
+                    cr_sum_v = f32x8::zero_t(token);
+                    cr_sq_v = f32x8::zero_t(token);
+                    if FULL {
+                        luma_sum += fixed_reduce8(luma_sum_v.to_array());
+                        luma_sq_sum += fixed_reduce8(luma_sq_v.to_array());
+                        rg_sum += fixed_reduce8(rg_sum_v.to_array());
+                        rg_sq_sum += fixed_reduce8(rg_sq_v.to_array());
+                        yb_sum += fixed_reduce8(yb_sum_v.to_array());
+                        yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
+                        y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
+                        y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
+                        cov_cb_sum += fixed_reduce8(cov_cb_sum_v.to_array());
+                        cov_cb_sq_sum += fixed_reduce8(cov_cb_sq_v.to_array());
+                        cov_cr_sum += fixed_reduce8(cov_cr_sum_v.to_array());
+                        cov_cr_sq_sum += fixed_reduce8(cov_cr_sq_v.to_array());
+                        luma_sum_v = f32x8::zero_t(token);
+                        luma_sq_v = f32x8::zero_t(token);
+                        rg_sum_v = f32x8::zero_t(token);
+                        rg_sq_v = f32x8::zero_t(token);
+                        yb_sum_v = f32x8::zero_t(token);
+                        yb_sq_v = f32x8::zero_t(token);
+                        y_cb_sum_v = f32x8::zero_t(token);
+                        y_cr_sum_v = f32x8::zero_t(token);
+                        cov_cb_sum_v = f32x8::zero_t(token);
+                        cov_cb_sq_v = f32x8::zero_t(token);
+                        cov_cr_sum_v = f32x8::zero_t(token);
+                        cov_cr_sq_v = f32x8::zero_t(token);
+                    }
+                    if SKIN {
+                        skin_count += skin_count_v.reduce_add() as u64;
+                        skin_count_v = f32x8::zero_t(token);
+                    }
+                    iters_since_flush = 0;
+                }
+            }
+            // Final flush of SIMD partials. Fixed-order f64 reduction (see fixed_reduce8)
+            // so the cancellation-prone variance / Pearson-covariance finals are
+            // bit-identical across SIMD tiers, not just within one.
+            cb_sum += fixed_reduce8(cb_sum_v.to_array());
+            cb_sq_sum += fixed_reduce8(cb_sq_v.to_array());
+            cr_sum += fixed_reduce8(cr_sum_v.to_array());
+            cr_sq_sum += fixed_reduce8(cr_sq_v.to_array());
+            if FULL {
+                luma_sum += fixed_reduce8(luma_sum_v.to_array());
+                luma_sq_sum += fixed_reduce8(luma_sq_v.to_array());
+                rg_sum += fixed_reduce8(rg_sum_v.to_array());
+                rg_sq_sum += fixed_reduce8(rg_sq_v.to_array());
+                yb_sum += fixed_reduce8(yb_sum_v.to_array());
+                yb_sq_sum += fixed_reduce8(yb_sq_v.to_array());
+                y_cb_sum += fixed_reduce8(y_cb_sum_v.to_array());
+                y_cr_sum += fixed_reduce8(y_cr_sum_v.to_array());
+                cov_cb_sum += fixed_reduce8(cov_cb_sum_v.to_array());
+                cov_cb_sq_sum += fixed_reduce8(cov_cb_sq_v.to_array());
+                cov_cr_sum += fixed_reduce8(cov_cr_sum_v.to_array());
+                cov_cr_sq_sum += fixed_reduce8(cov_cr_sq_v.to_array());
+            }
+            if SKIN {
+                skin_count += skin_count_v.reduce_add() as u64;
+            }
+
+            // Scalar tail for ≤7 leftover pixels — same float-domain math as
+            // the SIMD lanes for bit-equal cross-tail consistency on the
+            // skin-tone gate. FULL-only accumulators are gated identically.
+            for px in remainder.chunks_exact(3) {
+                let r = px[0].to_f32();
+                let g = px[1].to_f32();
+                let b = px[2].to_f32();
+                let l = kr * r + kg * g + kb * b;
+                let cb = (b - l) * (1.0 / 255.0);
+                let cr = (r - l) * (1.0 / 255.0);
+                cb_sum += cb as f64;
+                cb_sq_sum += (cb * cb) as f64;
+                cr_sum += cr as f64;
+                cr_sq_sum += (cr * cr) as f64;
+                if FULL {
+                    luma_sum += l as f64;
+                    luma_sq_sum += (l * l) as f64;
+                    let rg = r - g;
+                    let yb = 0.5 * (r + g) - b;
+                    rg_sum += rg as f64;
+                    rg_sq_sum += (rg * rg) as f64;
+                    yb_sum += yb as f64;
+                    yb_sq_sum += (yb * yb) as f64;
+                    let cov_cb = (kr * (b - r) + kg * (b - g)) * (1.0 / 255.0);
+                    let cov_cr = (kg * (r - g) + kb * (r - b)) * (1.0 / 255.0);
+                    cov_cb_sum += cov_cb as f64;
+                    cov_cb_sq_sum += (cov_cb * cov_cb) as f64;
+                    cov_cr_sum += cov_cr as f64;
+                    cov_cr_sq_sum += (cov_cr * cov_cr) as f64;
+                    y_cb_sum += (l * cov_cb) as f64;
+                    y_cr_sum += (l * cov_cr) as f64;
+                }
+                if SKIN {
+                    // BT.601 chroma in u8 representation for the skin gate.
+                    let cb_u8 = -0.168736 * r - 0.331264 * g + 0.500 * b + 128.0;
+                    let cr_u8 = 0.500 * r - 0.418688 * g - 0.081312 * b + 128.0;
+                    let in_skin = (40.0..=240.0).contains(&l)
+                        && (77.0..=127.0).contains(&cb_u8)
+                        && (133.0..=173.0).contains(&cr_u8);
+                    skin_count += in_skin as u64;
+                }
+            }
+
+            let (
+                edge_count,
+                cb_grad_sum,
+                cr_grad_sum,
+                chroma_grad_count,
+                edge_grad_sum,
+                edge_grad_sq_sum,
+                edge_grad_count,
+                orient_sum_0,
+                orient_sum_45,
+                orient_sum_90,
+                orient_sum_135,
+                orient_count,
+            ) = incant!(wasm_row_edges::accumulate_edges_simd::<BT601, FULL, R>(
+                rgb,
+                row_off,
+                next_row_off,
+                width,
+                kr,
+                kg,
+                kb
+            ));
+
+            PixelStats {
+                luma_sum,
+                luma_sq_sum,
+                cb_sum,
+                cb_sq_sum,
+                cr_sum,
+                cr_sq_sum,
+                edge_count,
+                cb_grad_sum,
+                cr_grad_sum,
+                chroma_grad_count,
+                skin_count,
+                edge_grad_sum,
+                edge_grad_sq_sum,
+                edge_grad_count,
+                rg_sum,
+                rg_sq_sum,
+                yb_sum,
+                yb_sq_sum,
+                y_cb_sum,
+                y_cr_sum,
+                cov_cb_sum,
+                cov_cb_sq_sum,
+                cov_cr_sum,
+                cov_cr_sq_sum,
+                orient_sum_0,
+                orient_sum_45,
+                orient_sum_90,
+                orient_sum_135,
+                orient_count,
+                // Laplacian fields are populated by `accumulate_laplacian_row`
+                // below — accumulate_row only sees a 2-row window so it can't
+                // compute a 4-neighbour Laplacian.
+                laplacian_sum: 0.0,
+                laplacian_sq_sum: 0.0,
+                laplacian_count: 0,
+                laplacian_histogram: [0u32; 256],
+            }
+        };
+    }
+
     // Const-fold luma weights for the BT.601 baseline (sRGB / BT.709 /
     // Unknown sources, the orchestrator hot path). When BT601 is true,
     // the `if` collapses at compile time and `kr/kg/kb` become
@@ -1812,6 +2160,258 @@ fn accumulate_row_simd<const BT601: bool, const FULL: bool, const SKIN: bool, R:
         laplacian_sq_sum: 0.0,
         laplacian_count: 0,
         laplacian_histogram: [0u32; 256],
+    }
+}
+
+// Wasm-only code-size sharing; the native kernels above remain fused.
+#[cfg(target_arch = "wasm32")]
+macro_rules! row_edges {
+    ($f32x8:ident, $R:ident, $token:ident, $rgb:ident, $row_off:ident, $next_row_off:ident, $width:ident, $kr:ident, $kg:ident, $kb:ident, $FULL:ident) => {{
+        let row = &$rgb[$row_off..$row_off + $width * 3];
+        let next_row = $next_row_off.map(|nr| &$rgb[nr..nr + $width * 3]);
+        let mut edge_count = 0u64;
+        let mut edge_grad_sum = 0.0;
+        let mut edge_grad_sq_sum = 0.0;
+        let mut edge_grad_count = 0u64;
+        // ---- Edges + chroma gradients: 8-pixel chunks with right & down neighbors ----
+        let has_next = next_row.is_some();
+        let nr = next_row.unwrap_or(row);
+
+        let mut cb_grad_sum: f64 = 0.0;
+        let mut cr_grad_sum: f64 = 0.0;
+        let mut chroma_grad_count: u64 = 0;
+        // HVS orientation-energy accumulators ($FULL-gated). Per pixel:
+        //   Gx = L_right − L_cur, Gy = L_down − L_cur
+        //   |G_0|   = |Gx|
+        //   |G_45|  = |Gx + Gy| · (1 / √2)
+        //   |G_90|  = |Gy|
+        //   |G_135| = |Gx − Gy| · (1 / √2)
+        // These are the steerable-basis projections of the discrete
+        // gradient on the four cardinal+diagonal orientations. Sum is
+        // taken over edge-loop interior pixels (each row has W−1 such
+        // pixels). The ratio `max(sum_θ) / mean(sum_θ)` is the published
+        // anisotropy metric.
+        let mut orient_sum_0: f64 = 0.0;
+        let mut orient_sum_45: f64 = 0.0;
+        let mut orient_sum_90: f64 = 0.0;
+        let mut orient_sum_135: f64 = 0.0;
+        let mut orient_count: u64 = 0;
+        const INV_SQRT2: f32 = 0.707_106_77_f32;
+
+        if $width > 1 {
+            let edge_end = ($width - 1) * 3;
+            let edge_row = &row[..edge_end];
+            let right_row = &row[3..];
+            let edge_chunks = edge_row.chunks_exact(24);
+            let _edge_rem = edge_chunks.remainder();
+            let mut right_iter = right_row.chunks_exact(24);
+            let mut nr_iter = nr.chunks_exact(24);
+
+            for chunk in edge_chunks {
+                let c: &[$R; 24] = chunk.try_into().unwrap();
+                let r_chunk: &[$R; 24] = right_iter.next().unwrap().try_into().unwrap();
+                let d_chunk: &[$R; 24] = nr_iter.next().unwrap().try_into().unwrap();
+                // Stage gradient and mask values across the 8 lanes so the
+                // sqrt + mask-multiply that produces `edge_grad_sum` /
+                // `edge_grad_sq_sum` can run as ONE $f32x8 sqrt + 2
+                // `reduce_add`s instead of 8 sequential scalar sqrts. The
+                // scalar inner pass still runs (chroma gradients + branch-
+                // free counter increments) — only the per-pixel sqrt is
+                // hoisted out of the loop body.
+                let mut grad_sq_arr = [0.0f32; 8];
+                let mut mask_arr = [0.0f32; 8];
+                for i in 0..8 {
+                    let cr_ = c[i * 3].to_f32();
+                    let cg_ = c[i * 3 + 1].to_f32();
+                    let cb_ = c[i * 3 + 2].to_f32();
+                    let l = $kr * cr_ + $kg * cg_ + $kb * cb_;
+                    let rr_ = r_chunk[i * 3].to_f32();
+                    let rg_ = r_chunk[i * 3 + 1].to_f32();
+                    let rb_ = r_chunk[i * 3 + 2].to_f32();
+                    let lr = $kr * rr_ + $kg * rg_ + $kb * rb_;
+                    let gx = lr - l;
+                    let mut grad_sq = gx * gx;
+
+                    let cb_cur = (cb_ - l) / 255.0;
+                    let cb_right = (rb_ - lr) / 255.0;
+                    let cr_cur = (cr_ - l) / 255.0;
+                    let cr_right = (rr_ - lr) / 255.0;
+                    let cb_g = (cb_right - cb_cur).abs() as f64;
+                    let cr_g = (cr_right - cr_cur).abs() as f64;
+                    cb_grad_sum += cb_g;
+                    cr_grad_sum += cr_g;
+                    chroma_grad_count += 1;
+
+                    let mut gy: f32 = 0.0;
+                    if has_next {
+                        let ld = $kr * d_chunk[i * 3].to_f32()
+                            + $kg * d_chunk[i * 3 + 1].to_f32()
+                            + $kb * d_chunk[i * 3 + 2].to_f32();
+                        gy = ld - l;
+                        grad_sq += gy * gy;
+                    }
+                    let crossed = grad_sq > EDGE_THRESH_SQ;
+                    edge_count += crossed as u64;
+                    if $FULL {
+                        edge_grad_count += crossed as u64;
+                        grad_sq_arr[i] = grad_sq;
+                        mask_arr[i] = crossed as u32 as f32;
+                        // HVS orientation kernels: steerable projections
+                        // of `Gx = gx` (= `lr - l`) and `Gy = gy`
+                        // (= `ld - l`, 0 when no `has_next`). Only count
+                        // pixels where both neighbours existed so
+                        // `mean(Σ_θ)` isn't biased by the bottom row
+                        // contributing 0 to two of four sums.
+                        if has_next {
+                            orient_sum_0 += gx.abs() as f64;
+                            orient_sum_90 += gy.abs() as f64;
+                            orient_sum_45 += ((gx + gy).abs() * INV_SQRT2) as f64;
+                            orient_sum_135 += ((gx - gy).abs() * INV_SQRT2) as f64;
+                            orient_count += 1;
+                        }
+                    }
+                }
+                if $FULL {
+                    // Gradient magnitude `√x = x · rsqrt(x)` for all 8 lanes via the
+                    // DETERMINISTIC `rsqrt_stable!` (software seed + Newton, pure
+                    // mul/sub). The hardware `rsqrt_approx()` / Newton-refined `rsqrt()`
+                    // lower to a different-precision instruction per backend (x86
+                    // ~12-bit / AVX-512 ~14-bit / NEON ~8-bit seed) and made
+                    // `edge_slope_stdev` diverge ~6% across arches; this is bit-identical
+                    // everywhere and matches the scalar tail's `rsqrt_stable_scalar`, so
+                    // there is no SIMD-vs-tail seam. (A `.rsqrt()` swap was tried for
+                    // speed and reverted: its measured gain was ~0.02 ns/px — below the
+                    // per-tier noise floor — not worth losing cross-arch determinism.)
+                    // Clamp to [1.0, ∞) so non-edge lanes (mask=0) stay finite.
+                    let grad_sq_v = $f32x8::load_t($token, &grad_sq_arr);
+                    let mask_v = $f32x8::load_t($token, &mask_arr);
+                    let one_v = $f32x8::splat_t($token, 1.0);
+                    let safe_grad_sq = grad_sq_v.max(one_v);
+                    let inv_sqrt = rsqrt_stable!($f32x8, $token, safe_grad_sq);
+                    let g_mag_v = grad_sq_v * inv_sqrt * mask_v;
+                    let g_sq_masked_v = grad_sq_v * mask_v;
+                    edge_grad_sum += g_mag_v.reduce_add() as f64;
+                    edge_grad_sq_sum += g_sq_masked_v.reduce_add() as f64;
+                }
+            }
+
+            // Scalar tail for the remaining 0..7 edge pixels.
+            //
+            // Accumulates the **same** four reductions as the SIMD edge
+            // loop above (luma edge_count + cb/cr gradient sums + count).
+            // Earlier revisions only updated `edge_count` here, silently
+            // dropping the rightmost 1–7 column positions per row from
+            // the chroma sharpness signal — a measurable undercount on
+            // small or non-multiple-of-8 widths.
+            let processed = ($width - 1) / 8 * 8;
+            for x in processed..$width - 1 {
+                let off = $row_off + x * 3;
+                let cr_ = $rgb[off].to_f32();
+                let cg_ = $rgb[off + 1].to_f32();
+                let cb_ = $rgb[off + 2].to_f32();
+                let l = $kr * cr_ + $kg * cg_ + $kb * cb_;
+                let roff = $row_off + (x + 1) * 3;
+                let rr_ = $rgb[roff].to_f32();
+                let rg_ = $rgb[roff + 1].to_f32();
+                let rb_ = $rgb[roff + 2].to_f32();
+                let lr = $kr * rr_ + $kg * rg_ + $kb * rb_;
+                let gx = lr - l;
+                let mut grad_sq = gx * gx;
+                // Chroma gradients (matched against the SIMD edge loop's
+                // same definitions: Cb = (B−Y)/255, Cr = ($R−Y)/255).
+                let cb_cur = (cb_ - l) / 255.0;
+                let cb_right = (rb_ - lr) / 255.0;
+                let cr_cur = (cr_ - l) / 255.0;
+                let cr_right = (rr_ - lr) / 255.0;
+                let cb_g = (cb_right - cb_cur).abs() as f64;
+                let cr_g = (cr_right - cr_cur).abs() as f64;
+                cb_grad_sum += cb_g;
+                cr_grad_sum += cr_g;
+                chroma_grad_count += 1;
+                let mut gy: f32 = 0.0;
+                if has_next {
+                    let doff = $next_row_off.unwrap() + x * 3;
+                    let ld = $kr * $rgb[doff].to_f32()
+                        + $kg * $rgb[doff + 1].to_f32()
+                        + $kb * $rgb[doff + 2].to_f32();
+                    gy = ld - l;
+                    grad_sq += gy * gy;
+                }
+                let crossed = grad_sq > EDGE_THRESH_SQ;
+                edge_count += crossed as u64;
+                if $FULL {
+                    let mask = crossed as u32 as f32;
+                    edge_grad_count += crossed as u64;
+                    // `rsqrt_stable_scalar` (not exact `sqrt`) so the tail's edge
+                    // pixels match the SIMD body's magnitude bit-for-bit — no
+                    // SIMD-vs-tail seam.
+                    let g_mag = grad_sq * rsqrt_stable_scalar(grad_sq);
+                    edge_grad_sum += (g_mag * mask) as f64;
+                    edge_grad_sq_sum += (grad_sq * mask) as f64;
+                    if has_next {
+                        orient_sum_0 += gx.abs() as f64;
+                        orient_sum_90 += gy.abs() as f64;
+                        orient_sum_45 += ((gx + gy).abs() * INV_SQRT2) as f64;
+                        orient_sum_135 += ((gx - gy).abs() * INV_SQRT2) as f64;
+                        orient_count += 1;
+                    }
+                }
+            }
+        }
+
+        (
+            edge_count,
+            cb_grad_sum,
+            cr_grad_sum,
+            chroma_grad_count,
+            edge_grad_sum,
+            edge_grad_sq_sum,
+            edge_grad_count,
+            orient_sum_0,
+            orient_sum_45,
+            orient_sum_90,
+            orient_sum_135,
+            orient_count,
+        )
+    }};
+}
+
+#[cfg(target_arch = "wasm32")]
+mod wasm_row_edges {
+    use super::*;
+    type RowEdges = (u64, f64, f64, u64, f64, f64, u64, f64, f64, f64, f64, u64);
+    /// Shared SIMD edge kernel: no SKIN specialization. `incant!` in the token
+    /// body selects the matching tier; scalar keeps the inlined row_edges! path.
+    #[allow(clippy::too_many_arguments)]
+    #[magetypes(define(f32x8), wasm128, scalar)]
+    pub(super) fn accumulate_edges_simd<const BT601: bool, const FULL: bool, R: ChunkInput>(
+        token: Token,
+        rgb: &[R],
+        row_off: usize,
+        next_row_off: Option<usize>,
+        width: usize,
+        kr: f32,
+        kg: f32,
+        kb: f32,
+    ) -> RowEdges {
+        let (kr, kg, kb) = if BT601 {
+            (0.299_f32, 0.587_f32, 0.114_f32)
+        } else {
+            (kr, kg, kb)
+        };
+        row_edges!(
+            f32x8,
+            R,
+            token,
+            rgb,
+            row_off,
+            next_row_off,
+            width,
+            kr,
+            kg,
+            kb,
+            FULL
+        )
     }
 }
 
